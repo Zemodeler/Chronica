@@ -11,6 +11,39 @@ import { CharacterMindSchema, NEUTRAL_MIND } from "./mind";
 import { LessonSchema, MAX_LESSONS } from "./mind-drift";
 import { WatchPredicateSchema } from "../world/watch";
 
+/**
+ * What a soldier has done and where he stands. Kept by the engine
+ * (`sim/ranks.ts`); nobody writes it by order.
+ */
+export const ServiceRecordSchema = z
+  .object({
+    forceId: EntityIdSchema.nullable(),
+    formationId: EntityIdSchema.nullable(),
+    unitIndex: z.number().int().nonnegative().max(500).nullable(),
+    /** A rank in his power's establishment; the ranks' own when he holds none. */
+    rankId: EntityIdSchema,
+    enlistedAtStep: ElapsedStepSchema,
+    /** Campaigns served: one for each year his army kept the field at war. */
+    campaigns: z.number().int().nonnegative().max(60).default(0),
+    /** Credited before the world began: a man of forty at Rome had served. */
+    priorCampaigns: z.number().int().nonnegative().max(60).default(0),
+    /** The last day a campaign was counted, so a year is counted once. */
+    lastCampaignAtStep: ElapsedStepSchema.optional(),
+    battles: z.number().int().nonnegative().max(500).default(0),
+    wounds: z.number().int().nonnegative().max(100).default(0),
+    decorations: z.array(z.object({ label: z.string().trim().min(1).max(80), atStep: ElapsedStepSchema, reason: z.string().trim().min(1).max(200) }).strict()).max(20).default([]),
+    punishments: z.array(z.object({ label: z.string().trim().min(1).max(80), atStep: ElapsedStepSchema, reason: z.string().trim().min(1).max(200) }).strict()).max(20).default([]),
+    /** How he means to bear himself in the next battle: in his place, after glory, or keeping his head down. */
+    conduct: z.enum(["steady", "glory", "cautious"]).default("steady"),
+    /** Who promoted him last, and to what: an officer remembers the men he raised. */
+    promotedAtStep: ElapsedStepSchema.optional(),
+    dischargedAtStep: ElapsedStepSchema.optional(),
+    /** What his discharge left owing him: land, money, nothing. */
+    dischargeClaim: z.enum(["none", "cash", "land"]).optional(),
+  })
+  .strict();
+export type ServiceRecord = z.infer<typeof ServiceRecordSchema>;
+
 // Characters (docs/08).
 //
 // You play a person, not a nation. That decision propagates into what you can
@@ -120,6 +153,9 @@ export const PlanStepSchema = z
     settledOnDay: z.number().int().nonnegative().nullable().default(null),
     /** Times the engine has moved its day on for its owner, unasked: once, and then he is asked (`settleOverdueSteps`). */
     slips: z.number().int().min(0).max(3).optional(),
+    /** Time for the act after its reply arrives; waiting is not overdue work. */
+    afterConditionDays: z.number().int().positive().max(730).optional(),
+    waitingReviewOnDay: z.number().int().nonnegative().nullable().optional(),
   })
   .strict();
 export type PlanStep = z.infer<typeof PlanStepSchema>;
@@ -294,12 +330,25 @@ export const CharacterSchema = z
      */
     legalStatus: z.enum(["free", "freed", "enslaved"]).default("free"),
     gender: z.enum(["male", "female"]).default("male"),
+    /**
+     * The order he was born to, where his country has orders: at Rome a
+     * patrician or a plebeian, which decided whether he could be tribune of the
+     * plebs, and which consulship he stood for. Unsaid where it means nothing.
+     */
+    ordo: z.enum(["patrician", "plebeian"]).optional(),
     /** A slave's owner, or a freedman's patron. */
     ownerCharacterId: EntityIdSchema.nullable().default(null),
     /** A slave allowed a purse of his own to spend: the peculium his owner grants, and can take back. */
     peculium: z.boolean().default(false),
     /** Requirements a law or a dictator set aside for this person, for one office, until a day. */
     eligibilityWaivers: z.array(z.object({ officeId: EntityIdSchema, untilStep: ElapsedStepSchema }).strict()).default([]),
+    /**
+     * A soldier's record (docs/plans/armies-in-detail.md): where he serves,
+     * what rank, the campaigns and battles behind him, what he was decorated
+     * and punished for, and when he is owed his discharge. Absent for anyone
+     * who has never served in an army that keeps one.
+     */
+    service: ServiceRecordSchema.optional(),
   })
   .strict()
   .superRefine((character, context) => {
@@ -377,6 +426,16 @@ export const OfficeSchema = z
     vetoes: z.boolean().optional(),
     /** A council every former magistrate of its power takes a seat in when his term ends. */
     enrolsFormerMagistrates: z.boolean().optional(),
+    /** The lowest rung whose former holders it takes in: the censors enrolled the curule men, and a quaestorship carried no seat until Sulla. */
+    enrolsFromRank: z.number().int().min(0).max(20).optional(),
+    /**
+     * A tribune's office: its holder may intercede against a magistrate's act
+     * within the city, and his person is sacrosanct. Neither reached past the
+     * first milestone, nor against a dictator (`sim/apply/whose-to-give.ts`).
+     */
+    tribunician: z.boolean().optional(),
+    /** Places that must go to men of an order: a plebeian consul every year since 342, a plebeian censor since 339. */
+    ordoSeats: z.object({ patrician: z.number().int().min(1).max(100).optional(), plebeian: z.number().int().min(1).max(100).optional() }).strict().optional(),
   })
   .strict();
 export type Office = z.infer<typeof OfficeSchema>;
@@ -391,6 +450,13 @@ export const SuccessionRuleSchema = z
     kind: z.enum(["primogeniture", "elective", "appointment", "seniority"]),
     /** Elective rules name the institution that chooses. */
     institutionId: EntityIdSchema.nullable(),
+    /**
+     * An appointment's appointers: the offices whose holders fill the seat --
+     * the censors enrolling the Senate, a consul naming a dictator. Where it is
+     * said, no other office's power to appoint reaches the seat. Unsaid, the
+     * government's appointing power does, as it always has.
+     */
+    appointerOfficeIds: z.array(EntityIdSchema).max(8).optional(),
   })
   .strict();
 export type SuccessionRule = z.infer<typeof SuccessionRuleSchema>;

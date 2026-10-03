@@ -57,7 +57,7 @@ describe("conversations as history", () => {
           actionKind: "payment",
           promisedResult: "two hundred talents toward the new legions",
           conditions: "",
-          rationale: "",
+          when: null,
           promisorCharacterId: "quintus-fabius",
           beneficiaryCharacterId: "marcus-atilius",
           requiredOfficeId: null,

@@ -1,7 +1,7 @@
 import "server-only";
 
 import { WorldRevisionConflictError, commitBurst, failBurst, findRunningBurst, getWorldView, instantSortKeyOf, startBurst } from "@chronica/db";
-import type { WorldDelta } from "@chronica/shared";
+import { isNavalForce, type WorldDelta } from "@chronica/shared";
 import { applyDeltas, createIdFactory } from "@chronica/sim";
 import { standardsForPolity } from "./army-standards";
 import { livenessAt } from "./burst-status";
@@ -25,6 +25,8 @@ import { resolveContext } from "./simulation-service";
 export interface ForceRevision {
   readonly name?: string | undefined;
   readonly standardId?: string | undefined;
+  /** Set the men to drill, or stand them down from it (`ranks.ts`). */
+  readonly drilling?: boolean | undefined;
 }
 
 export type ForceRevisionOutcome =
@@ -55,26 +57,30 @@ export async function reviseForce(gameId: string, forceId: string, revision: For
     if (name !== undefined && (name.length === 0 || name.length > 120)) return refuse(400, "A name must be between 1 and 120 characters.");
     const standard = revision.standardId === undefined
       ? undefined
-      : standardsForPolity(force.polityId).find((candidate) => candidate.id === revision.standardId);
+      : standardsForPolity(force.polityId, isNavalForce(force, view.scenarioWarfare) ? "navy" : "army").find((candidate) => candidate.id === revision.standardId);
     if (revision.standardId !== undefined && standard === undefined) return refuse(400, `That standard is not one ${force.name} may carry.`);
 
     const renamed = name !== undefined && name !== force.name;
     const reflagged = standard !== undefined && standard.id !== force.standardId;
-    if (!renamed && !reflagged) return { status: "revised", name: force.name, standardId: force.standardId ?? null };
+    const drill = revision.drilling !== undefined && revision.drilling !== (force.drilling === true) ? revision.drilling : undefined;
+    if (!renamed && !reflagged && drill === undefined) return { status: "revised", name: force.name, standardId: force.standardId ?? null };
     if (running !== undefined) return refuse(409, "The world is moving on an earlier order. Wait for it to settle.");
 
+    // Drill said on its own: an order to the men that needs no model either.
+    const drillWords = drill === undefined ? null : drill ? `${force.name} is set to drill in camp` : `${force.name} stands down from its drill`;
     const delta: WorldDelta = {
       op: "force_modify",
       forceRef: force.id,
       ...(renamed ? { name } : {}),
       ...(reflagged ? { standardId: standard.id } : {}),
+      ...(drill === undefined ? {} : { drilling: drill }),
       reason: renamed && reflagged
         ? `Renamed ${name} and given the ${standard.name} by its commander.`
-        : renamed ? `Renamed ${name} by its commander.` : `Given the ${standard!.name} by its commander.`,
+        : renamed ? `Renamed ${name} by its commander.` : reflagged ? `Given the ${standard!.name} by its commander.` : `${drillWords} by its commander's order.`,
     };
     const orderText = renamed && reflagged
       ? `Rename ${force.name} to ${name} and give it the ${standard.name}`
-      : renamed ? `Rename ${force.name} to ${name}` : `Give ${force.name} the ${standard!.name}`;
+      : renamed ? `Rename ${force.name} to ${name}` : reflagged ? `Give ${force.name} the ${standard!.name}` : drill ? `Set ${force.name} to drill` : `Stand ${force.name} down from drill`;
 
     const burstId = await startBurst(db, { gameId, playerUserId: userId, orderText });
     if (burstId === null) return refuse(409, "The world is moving on an earlier order. Wait for it to settle.");
@@ -97,12 +103,16 @@ export async function reviseForce(gameId: string, forceId: string, revision: For
       const at = instantSortKeyOf(result.world);
       const title = renamed && reflagged
         ? `${force.name} becomes ${name}, under the ${standard.name}`
-        : renamed ? `${force.name} is renamed ${name}` : `${force.name} takes up the ${standard!.name}`;
+        : renamed ? `${force.name} is renamed ${name}` : reflagged ? `${force.name} takes up the ${standard!.name}` : drillWords!;
       const body = renamed && reflagged
         ? `By its commander's order, ${force.name} is to be called ${name} from now on, and marches under the ${standard.name}.`
         : renamed
           ? `By its commander's order, ${force.name} is to be called ${name} from now on.`
-          : `By its commander's order, ${force.name} marches from now on under the ${standard!.name}: ${standard!.description.charAt(0).toLowerCase()}${standard!.description.slice(1)}.`;
+          : reflagged
+            ? `By its commander's order, ${force.name} marches from now on under the ${standard!.name}: ${standard!.description.charAt(0).toLowerCase()}${standard!.description.slice(1)}.`
+            : drill
+              ? `By its commander's order, ${force.name} drills in camp: while it is paid and fed and not on the march, the men grow better at their work each day.`
+              : `By its commander's order, ${force.name} stands down from its drill.`;
       await commitBurst(db, {
         gameId,
         expectedRevision: view.revision,

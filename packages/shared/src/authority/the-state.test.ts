@@ -49,6 +49,32 @@ describe("the state a person serves, as they could know it", () => {
     const theirs = readTheState(state, foreigner.id, offices, clock);
     const romanOffices = new Set(state.material.officeSeats.filter((seat) => seat.holderCharacterId === holder.id).map((seat) => seat.officeId));
     expect(theirs.offices.some((office) => romanOffices.has(office.key))).toBe(false);
+    expect(theirs.institutions.every((institution) => state.material.institutions.find((entry) => entry.id === institution.key)?.polityId === foreigner.polityId)).toBe(true);
+  });
+
+  it("links the consulship to its real electing assembly and exposes public blocs only", () => {
+    const state = world();
+    const reading = readTheState(state, "gaius-genucius", offices, clock, definition.government.successionRules);
+    const consul = reading.offices.find((office) => office.key === "roman-consul")!;
+    expect(consul.kind).toBe("magistracy");
+    expect(consul.fillingInstitutionId).toBe("roman-comitia-centuriata");
+    const assembly = reading.institutions.find((institution) => institution.key === consul.fillingInstitutionId)!;
+    expect(assembly.fillsOfficeIds).toContain(consul.key);
+    expect(assembly.franchise).toBe("citizens");
+    expect(assembly.votingBlocs.map((bloc) => bloc.weight)).toEqual([98, 95]);
+    expect(assembly.votingBlocs.every((bloc) => !('baseSupport' in bloc) && !('causes' in bloc))).toBe(true);
+  });
+
+  it("distinguishes named vacancies from the unmodelled members of a college", () => {
+    const state = world();
+    const withVacancy = { ...state, material: { ...state.material, officeSeats: state.material.officeSeats.map((seat) => seat.officeId === "roman-consul" ? { ...seat, status: "vacant" as const, holderCharacterId: null } : seat) } };
+    const reading = readTheState(withVacancy, "gaius-genucius", offices, clock, definition.government.successionRules);
+    expect(reading.offices.find((office) => office.key === "roman-consul")?.recordedVacancies).toBe(2);
+    const senate = reading.offices.find((office) => office.key === "roman-senator")!;
+    expect(senate.kind).toBe("membership");
+    expect(senate.seats).toBe(300);
+    expect(senate.holders.length).toBeLessThan(senate.seats);
+    expect(senate.recordedVacancies).toBe(0);
   });
 
   it("keeps a treaty made in private from those who do not govern", () => {

@@ -121,7 +121,9 @@ describe("an ultimatum whose threat is for going on attacking", () => {
     ...ULTIMATUM,
     subject: "Cease hostilities at Messana",
     terms: "Cease hostilities against Messana, which is under Rome's protection, or invite open war.",
-  };
+    // What it threatens is written, not guessed from its words (E08).
+    onRefusal: "war_if_attacked",
+  } as WorldDelta;
 
   it("makes no war when only its words are refused, and says the threat stands", () => {
     const sent = applyDeltas(world(), [CEASE, WAR], context());

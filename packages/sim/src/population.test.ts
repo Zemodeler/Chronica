@@ -52,7 +52,7 @@ describe("countries the world owes people", () => {
   });
 
   it("says why, in words a prompt can use", () => {
-    expect(gaps([factAbout("boii")])[0]!.why).toContain("dealing with them now");
+    expect(gaps([factAbout("boii")])[0]!.why).toContain("recent events name them");
   });
 
   it("asks for both a leader and forces when a country has neither", () => {

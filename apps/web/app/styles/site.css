@@ -212,6 +212,12 @@
   .begin__more summary { width: max-content; color: var(--bronze-high); cursor: pointer; }
   .begin__more p { max-width: 40rem; margin-top: .5rem; color: var(--dust); line-height: 1.55; text-wrap: pretty; }
   .begin > .btn { justify-self: start; }
+  .begin__difficulty { border: 0; padding: 0; margin: 0; gap: .6rem; }
+  .begin__difficulty legend { padding: 0; margin-bottom: .45rem; }
+  .begin__choice { display: grid; grid-template-columns: auto 1fr; column-gap: .65rem; row-gap: .1rem; align-items: baseline; max-width: 40rem; cursor: pointer; }
+  .begin__choice input { grid-row: span 2; max-width: none; accent-color: var(--bronze-high); }
+  .begin__choice-name { color: var(--parchment, inherit); }
+  .begin__choice .field-help { margin-top: 0; }
 
   /* ─── Worlds ───────────────────────────────────────────────────────── */
   .worlds-page { padding-block: 3.5rem 4rem; }

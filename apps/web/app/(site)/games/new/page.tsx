@@ -7,6 +7,14 @@ import { Era } from "../../../components/ui/era";
 
 export const metadata: Metadata = { title: "Begin a world" };
 
+/** The four difficulties (`world/pushback.ts`), in the words the page uses. */
+const DIFFICULTIES = [
+  { value: "gentle", label: "Gentle", help: "A fuller purse, a little more standing, and neighbours slow to take fright." },
+  { value: "normal", label: "As history was", help: "The world fears what grows fast and leagues against it, as it did." },
+  { value: "hard", label: "Hard", help: "A leaner purse, quicker fear, and neighbours readier to strike while your armies are away." },
+  { value: "merciless", label: "Merciless", help: "Little to start with, and a world that combines against you at the first sign of strength." },
+] as const;
+
 export default async function NewGamePage({ searchParams }: Readonly<{ searchParams: Promise<{ scenario?: string; status?: string }> }>) {
   const { scenario: scenarioId, status } = await searchParams;
   if (scenarioId === undefined) redirect("/worlds");
@@ -39,6 +47,16 @@ export default async function NewGamePage({ searchParams }: Readonly<{ searchPar
             <p>Every order is paid for by how much the world&rsquo;s people have to think about it, so no two cost the same; the desk tells you what each one came to. When this save has spent its cap it asks nothing more of your wallet. The cap is fixed once the save begins.</p>
           </details>
         </div>
+        <fieldset className="begin__field begin__difficulty">
+          <legend>How hard the world pushes back</legend>
+          {DIFFICULTIES.map((option) => (
+            <label key={option.value} className="begin__choice">
+              <input type="radio" name="difficulty" value={option.value} defaultChecked={option.value === "normal"} />
+              <span className="begin__choice-name">{option.label}</span>
+              <span className="field-help">{option.help}</span>
+            </label>
+          ))}
+        </fieldset>
         <button type="submit" className="btn btn--primary btn--large">Choose who you will be</button>
       </form>
     </main>

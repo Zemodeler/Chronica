@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { UnderWayItem } from "@chronica/shared";
+import type { StandingOrders, UnderWayItem } from "@chronica/shared";
 import { Sheet } from "../../../components/ui/sheet";
+import { useWindowState } from "../../../components/ui/window-workspace";
 import { Era } from "../../../components/ui/era";
+import { Tip, TipCard } from "../../../components/ui/tip";
+import { Fact, Facts, Registry, RegistryRow } from "./registry";
 import { TIME_SPANS, coinDifference, latestReport, purseIsSpent, type GameViewController, type Purse } from "./use-game-view";
 
 /**
@@ -31,11 +34,17 @@ export function CouncilPanel({
   onClose,
   onOpenChronicle,
   underWay = [],
+  standingOrders = null,
+  focusKey,
 }: {
   readonly gameId: string;
   readonly controller: GameViewController;
   /** What his orders are doing, from the room (`ordersUnderWay`). */
   readonly underWay?: readonly UnderWayItem[];
+  /** His conditional orders, from the room (`readStandingOrders`). */
+  readonly standingOrders?: StandingOrders | null;
+  /** A standing order to open on arrival, when the agenda sent him to it. */
+  readonly focusKey?: string | undefined;
   /** Words another sheet has begun for the order box. */
   readonly draft?: string | null;
   readonly onDraftTaken?: () => void;
@@ -43,10 +52,11 @@ export function CouncilPanel({
   readonly onOpenChronicle: () => void;
 }) {
   const { view, busy, error, progress } = controller;
-  const [order, setOrder] = useState(draft ?? "");
+  const [order, setOrder] = useWindowState("desk:draft", "");
   // Taken once, with the caret after it, so the player writes straight on.
   useEffect(() => {
     if (draft === null) return;
+    setOrder((current) => current.trim() === "" ? draft : current.endsWith(draft) ? current : `${current}\n\n${draft}`);
     onDraftTaken?.();
     requestAnimationFrame(() => {
       const box = document.getElementById("sim-order") as HTMLTextAreaElement | null;
@@ -55,18 +65,19 @@ export function CouncilPanel({
     // Only on arrival: the draft is what the desk was opened with.
   }, []);
   // Empty means "as far as the order takes it", which the engine judges.
-  const [span, setSpan] = useState<number | "">("");
+  const [span, setSpan] = useWindowState<number | "">("desk:span", "");
   const latest = latestReport(view.chronicle, view.latestBurstId);
   const spanDays = span === "" ? undefined : span;
-  const { elapsed, stamps } = useMovingClock(busy, progress.length);
+  const { elapsed, stamps: receivedStamps } = useMovingClock(busy, progress.length);
+  const stamps = controller.progressSeconds ?? receivedStamps;
   // Nothing can be sent from an empty purse; say so before the click, not after.
   const spentOut = purseIsSpent(view.coins);
 
   const send = async () => {
     const text = order.trim();
     if (text.length === 0 || busy || spentOut) return;
-    await controller.send(text, { spanDays });
-    setOrder("");
+    const sent = await controller.send(text, { spanDays });
+    if (sent) setOrder((current) => current.trim() === text ? "" : current);
   };
 
   // Time let pass with no order at all. It still moves the world and its
@@ -113,28 +124,6 @@ export function CouncilPanel({
           </section>
         )}
 
-        {!busy && (
-          <section className="desk__report">
-            {latest.length === 0 ? (
-              <p className="quiet">Nothing has been recorded yet. Give an order and the world will answer.</p>
-            ) : (
-              <>
-                <h3>Since your last order</h3>
-                <ul className="desk__headlines">
-                  {latest.map((entry) => (
-                    <li key={entry.id}>
-                      {entry.date !== null && <span className="desk__date"><Era text={entry.date} /></span>}
-                      <button type="button" className="word-button" onClick={onOpenChronicle}>{entry.title}</button>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-          </section>
-        )}
-
-        {!busy && <UnderWay items={underWay} />}
-
         {view.decision === null && (
           <form className="tablet" onSubmit={(event) => { event.preventDefault(); void send(); }}>
             <label htmlFor="sim-order">Your order</label>
@@ -165,6 +154,7 @@ export function CouncilPanel({
               </select>
               <span>pass.</span>
             </div>
+            {order.length > 0 && <p className="quiet desk__draft" role="status">Draft saved. You can put this down and consult another document.</p>}
             <div className="tablet__actions">
               <button type="button" className="btn btn--quiet" disabled={busy || spentOut} onClick={() => void wait()}>
                 Let {TIME_SPANS.find((choice) => choice.days === (spanDays ?? 30))?.label ?? "a month"} pass
@@ -175,6 +165,39 @@ export function CouncilPanel({
             </div>
             <Reckoning purse={view.coins} lastTurnCost={controller.lastTurnCost} />
           </form>
+        )}
+
+        {!busy && (
+          <section className="desk__report">
+            {latest.length === 0 ? (
+              <p className="quiet">Nothing has been recorded yet. Give an order and the world will answer.</p>
+            ) : (
+              <p className="desk__latest">
+                <span className="desk__kicker">Since your last order</span>{" "}
+                {latest[0]!.date !== null && <span className="desk__date"><Era text={latest[0]!.date} /> </span>}
+                <button type="button" className="word-button" onClick={onOpenChronicle}>{latest[0]!.title}</button>
+                {latest.length > 1 && <> · <button type="button" className="word-button desk__more" onClick={onOpenChronicle}>{latest.length - 1} more</button></>}
+              </p>
+            )}
+          </section>
+        )}
+
+        {!busy && <UnderWay items={underWay} />}
+
+        {!busy && standingOrders !== null && standingOrders.rows.length > 0 && (
+          <StandingOrdersRegister
+            orders={standingOrders}
+            focusKey={focusKey}
+            canWrite={view.decision === null && !spentOut}
+            onDraft={(words) => {
+              setOrder(words);
+              requestAnimationFrame(() => {
+                const box = document.getElementById("sim-order") as HTMLTextAreaElement | null;
+                box?.focus();
+                box?.setSelectionRange(box.value.length, box.value.length);
+              });
+            }}
+          />
         )}
 
         {error !== null && <p className="desk__error" role="alert">{error}</p>}
@@ -196,12 +219,14 @@ function Reckoning({ purse, lastTurnCost }: { readonly purse: Purse | undefined;
   if (purse.spent !== null && purse.cap !== null && coinDifference(purse.cap, purse.spent) === "0") {
     return <p className="tablet__purse is-empty" role="status">This save has spent all {purse.cap} of the coins it was allowed, so nothing more can be sent.</p>;
   }
+  const spentLine = purse.spent !== null && purse.cap !== null
+    ? `This save has spent ${purse.spent} of its ${purse.cap} coins; you have ${purse.available} in your wallet.`
+    : `You have ${purse.available} coins in your wallet.`;
   return (
     <p className="tablet__purse">
-      {lastTurnCost !== null && <>Your last order cost {lastTurnCost} {lastTurnCost === "1" ? "coin" : "coins"}. </>}
-      {purse.spent !== null && purse.cap !== null
-        ? <>This save has spent {purse.spent} of its {purse.cap} coins; you have {purse.available} in your wallet.</>
-        : <>You have {purse.available} coins in your wallet.</>}
+      <Tip label="What the coins stand at" note={() => <TipCard title="The coins">{spentLine}</TipCard>}>
+        {lastTurnCost !== null ? <>Your last order cost {lastTurnCost} {lastTurnCost === "1" ? "coin" : "coins"}.</> : "Your coins"}
+      </Tip>
     </p>
   );
 }
@@ -212,17 +237,78 @@ function Reckoning({ purse, lastTurnCost }: { readonly purse: Purse | undefined;
  */
 function UnderWay({ items }: { readonly items: readonly UnderWayItem[] }) {
   if (items.length === 0) return null;
+  const stalled = items.filter((item) => item.stalled).length;
   return (
-    <section className="under-way" aria-labelledby="under-way-heading">
-      <h3 id="under-way-heading">Under way</h3>
-      <ul>
-        {items.map((item) => (
-          <li key={item.key} className={item.stalled ? "is-stalled" : undefined}>
-            <strong>{item.stalled && <span className="seal-dot"><span className="visually-hidden">Stalled: </span></span>}{item.label}</strong>
-            <span>{item.detail}{item.secret === true && " Known only to you."}</span>
-          </li>
+    <p className="under-way">
+      <Tip
+        label="Orders under way"
+        note={() => (
+          <TipCard kicker="Your orders" title="Under way">
+            <ul className="under-way__list">
+              {items.map((item) => (
+                <li key={item.key} className={item.stalled ? "is-stalled" : undefined}>
+                  <strong>{item.stalled && <span className="seal-dot"><span className="visually-hidden">Stalled: </span></span>}{item.label}</strong>
+                  <span>{item.detail}{item.secret === true && " Known only to you."}</span>
+                </li>
+              ))}
+            </ul>
+          </TipCard>
+        )}
+      >
+        {items.length === 1 ? "One order under way" : `${items.length} orders under way`}
+        {stalled > 0 && <> · {stalled} stalled <span className="seal-dot"><span className="visually-hidden">stalled</span></span></>}
+      </Tip>
+    </p>
+  );
+}
+
+/**
+ * The register of conditional orders: "If the enemy reaches the crossing,
+ * withdraw the garrison."
+ *
+ * One line each, with its status; opened, its trigger, its instructions, who
+ * answers for it and where it stands. A change is an order like any other: the
+ * buttons only begin the words at the order box ("Call off my standing order
+ * ..."), and sending them is what changes anything, through the same reader
+ * and the same rules as everything else the player says.
+ */
+const STATUS_WORD = { waiting: "Waiting", triggered: "Triggered", completed: "Completed", cancelled: "Cancelled" } as const;
+
+function StandingOrdersRegister({ orders, focusKey, canWrite, onDraft }: {
+  readonly orders: StandingOrders;
+  readonly focusKey: string | undefined;
+  readonly canWrite: boolean;
+  readonly onDraft: (words: string) => void;
+}) {
+  return (
+    <section className="standing-orders" aria-labelledby="standing-orders-heading">
+      <h3 id="standing-orders-heading">Standing orders{orders.waiting > 0 && <small>{orders.waiting} waiting</small>}</h3>
+      <Registry label="Standing orders">
+        {orders.rows.map((row) => (
+          <RegistryRow
+            key={row.key}
+            id={row.key}
+            title={row.summary}
+            meta={STATUS_WORD[row.status]}
+            marked={row.status === "triggered"}
+            openOnArrival={row.key === focusKey}
+          >
+            <Facts>
+              <Fact term="Trigger">{row.detail.trigger}</Fact>
+              <Fact term="Instructions">{row.detail.instructions}</Fact>
+              <Fact term="Answers for it">{row.detail.responsible}</Fact>
+              <Fact term="Status">{STATUS_WORD[row.status]}. {row.detail.statusNote}</Fact>
+              {row.detail.layer.length > 0 && <Fact term="Also">{row.detail.layer.map((line) => <span key={line} className="registry__line">{line}</span>)}</Fact>}
+            </Facts>
+            {row.detail.changeable && (
+              <div className="registry__actions">
+                <button type="button" className="btn btn--quiet" disabled={!canWrite} onClick={() => onDraft(`Amend my standing order "${row.label}": `)}>Amend</button>
+                <button type="button" className="btn btn--quiet" disabled={!canWrite} onClick={() => onDraft(`Call off my standing order "${row.label}".`)}>Call off</button>
+              </div>
+            )}
+          </RegistryRow>
         ))}
-      </ul>
+      </Registry>
     </section>
   );
 }

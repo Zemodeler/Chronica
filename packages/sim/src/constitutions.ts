@@ -1,6 +1,10 @@
 import {
   ALL_CHAMBER_POWERS,
+  COMMAND_TENURE_IN_WORDS,
   GOVERNMENT_FORM_IN_WORDS,
+  defaultCommandTenure,
+  type CommandTenure,
+  MAJOR_NATIONS,
   allOffices,
   allSuccessionRules,
   boundedId,
@@ -11,6 +15,8 @@ import {
   isMagistracy,
   seatCharacterInOffice,
   stableHash,
+  staffOffices,
+  CharacterSchema,
   vacateOfficeOf,
   type BlocInterest,
   type ChamberPower,
@@ -57,7 +63,7 @@ import type { IdFactory } from "./ports";
 const CIVIL = ["social_events", "belief_set", "character_intent_set", "political_procedure_open", "political_support_set"];
 const MAGISTRATE = [...CIVIL, "project_create", "project_milestone_update", "generic_entity_create", "generic_entity_update", "province_material_shift", "legitimacy_shift"];
 const IMPERIUM = [...MAGISTRATE, "force_create", "force_modify", "force_engage", "political_procedure_resolve", "authority_grant_upsert", "character_create", "polity_stance_shift"];
-const RULER = [...IMPERIUM];
+const RULER = [...IMPERIUM, "capital_set"];
 const GRADES = { civil: CIVIL, magistrate: MAGISTRATE, imperium: IMPERIUM, ruler: RULER } as const;
 
 /** Legitimacy a chamber starts with: earned, not given. One set up by force starts lower still. */
@@ -503,6 +509,21 @@ function withOpeningSeats(world: WorldState, offices: readonly Office[], rules: 
   return seats.length === world.material.officeSeats.length ? world : { ...world, material: { ...world.material, officeSeats: seats } };
 }
 
+/** The officers, councillors and priests of a major power, named, beside the ruler it opened with (`characters/staffing.ts`). */
+function staffed(world: WorldState, polityId: string, offices: readonly Office[], atStep: number): WorldState {
+  const added = staffOffices(world, polityId, offices, atStep);
+  if (added.seats.length === 0) return world;
+  return {
+    ...world,
+    characters: [...world.characters, ...added.characters.map((character) => CharacterSchema.parse(character))],
+    material: {
+      ...world.material,
+      accounts: [...world.material.accounts, ...(added.accounts as unknown as WorldState["material"]["accounts"])],
+      officeSeats: [...world.material.officeSeats, ...(added.seats as unknown as WorldState["material"]["officeSeats"])],
+    },
+  };
+}
+
 export interface EnsureConstitutionsInput {
   readonly world: WorldState;
   readonly government: GovernmentRules;
@@ -530,7 +551,8 @@ export function ensureConstitutions(input: EnsureConstitutionsInput): WorldState
       // opens: Rome's consuls, not a dictatorship nobody has been named to.
       const heldIds = new Set(world.material.officeSeats.filter((seat) => seat.status === "held").map((seat) => seat.officeId));
       const heads = allOffices(world, input.government.offices).filter((office) => office.polityId === polity.id && isMagistracy(office) && office.successionRuleId !== "abolished");
-      const ruler = [...heads].filter((office) => heldIds.has(office.id)).sort((a, b) => (b.rank ?? 0) - (a.rank ?? 0) || a.id.localeCompare(b.id))[0]
+      const stated = polity.headOfficeId == null ? undefined : heads.find((office) => office.id === polity.headOfficeId);
+      const ruler = stated ?? [...heads].filter((office) => heldIds.has(office.id)).sort((a, b) => (b.rank ?? 0) - (a.rank ?? 0) || a.id.localeCompare(b.id))[0]
         ?? rulerOfficeOf(world, polity.id, input.government);
       world = {
         ...world,
@@ -542,7 +564,8 @@ export function ensureConstitutions(input: EnsureConstitutionsInput): WorldState
       continue;
     }
     const form = polity.governmentForm ?? formFromOffices(world, polity.id, input.government) ?? inferredGovernmentForm(polity);
-    world = install(world, polity, form, input.government, input.toDay, "generated", null, NEW_CHAMBER_LEGITIMACY_BPS.lawful + 2_000).world;
+    const installed = install(world, polity, form, input.government, input.toDay, "generated", null, NEW_CHAMBER_LEGITIMACY_BPS.lawful + 2_000);
+    world = MAJOR_NATIONS.has(polity.id) ? staffed(installed.world, polity.id, installed.built.offices, input.toDay) : installed.world;
   }
   return world;
 }
@@ -732,6 +755,16 @@ export interface RecastInput {
   readonly government: GovernmentRules;
   readonly atStep: number;
   readonly summary: string;
+  /** How it was carried, for the history (`ConstitutionChange`). */
+  readonly via?: ChangeVia | undefined;
+  readonly route?: "coup" | "revolution" | "imposition" | "restoration" | undefined;
+}
+
+/** What the history keeps of a measure that changed the constitution. */
+export interface ChangeVia {
+  readonly procedureId: string;
+  readonly bodyName: string | null;
+  readonly vote: { readonly yes: number; readonly no: number } | null;
 }
 
 /**
@@ -794,7 +827,11 @@ export function recast(input: RecastInput): { world: WorldState; facts: FactProp
     }
   }
 
-  const change = { atStep: input.atStep, origin: input.origin, fromForm, toForm: input.toForm, summary: input.summary.slice(0, 400), byCharacterId: input.byCharacterId };
+  const change = {
+    atStep: input.atStep, origin: input.origin, fromForm, toForm: input.toForm, summary: input.summary.slice(0, 400), byCharacterId: input.byCharacterId,
+    ...(input.via === undefined ? {} : { procedureId: input.via.procedureId, bodyName: input.via.bodyName, vote: input.via.vote }),
+    ...(input.route === undefined ? {} : { route: input.route }),
+  };
   world = {
     ...world,
     constitutions: world.constitutions.map((entry) => (entry.polityId === polity.id
@@ -838,9 +875,10 @@ export function amend(
   ids: IdFactory,
   title: string,
   byCharacterId: string | null,
+  via?: ChangeVia,
 ): { world: WorldState; facts: FactProposalDraft[]; said: string[] } {
   if (amendment.form != null) {
-    const done = recast({ world, polityId, toForm: amendment.form, origin: "reform", byCharacterId, seatRuler: null, government, atStep, summary: `${title} was carried.` });
+    const done = recast({ world, polityId, toForm: amendment.form, origin: "reform", byCharacterId, seatRuler: null, government, atStep, summary: `${title} was carried.`, via });
     return { world: done.world, facts: done.facts, said: [`the constitution is recast as ${GOVERNMENT_FORM_IN_WORDS[amendment.form]}`] };
   }
   let next = world;
@@ -909,8 +947,25 @@ export function amend(
       said.push(`the office of ${office.label} is now ${label.toLowerCase()}`);
     }
   }
-  if (said.length > 0) next = rereadForm(next, polityId, government, atStep, "reform", `${title}: ${said.join("; ")}.`, byCharacterId);
+  const tenure = amendment.commandTenure ?? null;
+  if (tenure !== null && next.constitutions.some((record) => record.polityId === polityId)) {
+    next = { ...next, constitutions: next.constitutions.map((record) => (record.polityId === polityId ? { ...record, commandTenure: tenure } : record)) };
+    said.push(COMMAND_TENURE_IN_WORDS[tenure]);
+  }
+  if (said.length > 0) next = rereadForm(next, polityId, government, atStep, "reform", `${title}: ${said.join("; ")}.`, byCharacterId, via);
   return { world: next, facts: [], said };
+}
+
+/**
+ * How long this power's commanders hold their armies: what its constitution
+ * says, else what its scenario seeded, else its form's default.
+ */
+export function commandTenureOf(world: WorldState, polityId: string): CommandTenure {
+  const record = constitutionOf(world, polityId);
+  if (record?.commandTenure !== undefined) return record.commandTenure;
+  const polity = world.map.polities.find((candidate) => candidate.id === polityId);
+  if (polity?.commandTenure != null) return polity.commandTenure;
+  return defaultCommandTenure(record?.form ?? polity?.governmentForm ?? "monarchy");
 }
 
 const FRANCHISE_IN_WORDS: Record<Franchise, string> = {
@@ -918,11 +973,14 @@ const FRANCHISE_IN_WORDS: Record<Franchise, string> = {
 };
 
 /** The record brought back in step with the parts after a change: every change goes into its history, whether or not the form it reads as moved. */
-function rereadForm(world: WorldState, polityId: string, government: GovernmentRules, atStep: number, origin: ConstitutionOrigin, summary: string, byCharacterId: string | null): WorldState {
+function rereadForm(world: WorldState, polityId: string, government: GovernmentRules, atStep: number, origin: ConstitutionOrigin, summary: string, byCharacterId: string | null, via?: ChangeVia): WorldState {
   const before = constitutionOf(world, polityId);
   const form = readForm(world, polityId, government);
   const sovereignInstitutionId = sovereignChamberOf(world, polityId)?.id ?? null;
-  const history = before === undefined ? [] : [...before.history, { atStep, origin, fromForm: before.form, toForm: form, summary: summary.slice(0, 400), byCharacterId }].slice(-24);
+  const history = before === undefined ? [] : [...before.history, {
+    atStep, origin, fromForm: before.form, toForm: form, summary: summary.slice(0, 400), byCharacterId,
+    ...(via === undefined ? {} : { procedureId: via.procedureId, bodyName: via.bodyName, vote: via.vote }),
+  }].slice(-24);
   const entry: Constitution = before === undefined
     ? { polityId, form, origin, adoptedAtStep: atStep, rulerOfficeId: rulerOfficeOf(world, polityId, government)?.id ?? null, sovereignInstitutionId, history: [] }
     : { ...before, form, sovereignInstitutionId, history };

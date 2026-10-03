@@ -1,4 +1,5 @@
 import {
+  isOwedATurn,
   breakCommitment,
   cancelCommitment,
   checkCommitmentAuthority,
@@ -28,7 +29,7 @@ import { kinOf, remember, teach, type Grievance } from "./grievances";
  * - kept, the moment the deed is on the record -- the money paid, the vote
  *   cast, the army standing by him, the office given, the letter written --
  *   or when the promisor himself says in his answer that he has kept it
- *   (`claimPromisesKept`, from the same "stepsTaken" a plan step goes in);
+ *   (`claimPromisesKept`, from the same "serves" a plan step goes in);
  * - on its day, a man with a promised payment in hand simply pays it;
  * - otherwise it is given one grace of `GRACE_DAYS`, while he still can, and
  *   then it is broken: the promisor's standing suffers (`breakCommitment`),
@@ -56,6 +57,10 @@ export function keptOnTheRecord(world: WorldState, commitment: Commitment): stri
   if (promisor === undefined || beneficiary === undefined) return null;
   const since = commitment.createdAtStep;
 
+  if (putsItHimself(commitment)) {
+    const put = world.material.politicalProcedures.find((procedure) => procedure.sponsorCharacterId === promisor.id && procedure.openedAtStep >= since);
+    if (put !== undefined) return `${promisor.name} put "${put.label}" to the vote`;
+  }
   switch (commitment.actionKind) {
     case "payment": {
       const his = new Set(world.material.accounts.filter((account) => account.owner.kind === "character" && account.owner.id === promisor.id).map((account) => account.id));
@@ -85,46 +90,80 @@ export function keptOnTheRecord(world: WorldState, commitment: Commitment): stri
         && seat.termStartedAtStep !== null && seat.termStartedAtStep >= since);
       return given ? `${beneficiary.name} was given office` : null;
     }
-    case "information_sharing":
-    case "other": {
+    // Word promised goes by letter, so a letter is the record of it. Anything
+    // else is not kept by writing: a greeting kept "I will see to your
+    // brother's release" (E08). It is kept by the man saying which act of his
+    // was for it (`claimPromisesKept`), or not on the record at all.
+    case "information_sharing": {
       const wrote = world.diplomacy.some((message) => message.fromCharacterId === promisor.id && message.toCharacterId === beneficiary.id && message.sentAtStep >= since);
       return wrote ? `${promisor.name} wrote to ${beneficiary.name}` : null;
     }
+    case "other":
+      return null;
   }
 }
 
 /**
- * Whether what a conditional promise waited on has happened since it was made:
- * for support in a house, a question the beneficiary put there; for men or
- * protection, a war of the beneficiary's power; for anything else, a letter
- * from the beneficiary asking for it. What cannot be told is taken as come,
- * so a promise is never excused by the engine's not knowing.
+ * Whether what a conditional promise waited on has happened since it was
+ * made. Its trigger, where it has one: an attack by that power or man, a war
+ * with it, a question he put, a letter he wrote. Without one, by its kind:
+ * support in a house waits on a question the beneficiary put there; men or
+ * protection, on a war of the beneficiary's power. Anything else cannot be
+ * told, and what cannot be told is not taken as having come: a promise is
+ * never broken on the engine's guess (E08). It lapses instead.
  */
-function occasionCame(world: WorldState, commitment: Commitment): boolean {
+/**
+ * A promise to bring a question before a house himself -- "I will put it
+ * before the Senate" -- is a thing he has to do, not support waiting on
+ * somebody else's question. Read as the latter, Blasio's three promises to
+ * the consul lapsed in six days as occasions that never came.
+ */
+export function putsItHimself(commitment: Pick<Commitment, "description">): boolean {
+  return /\b(i|he)(\s+(will|shall)|'ll|’ll)\s+(\w+\s+){0,3}(put|take|carry|bring|lay|move|propose|raise)\b.{0,80}\b(senate|assembly|council|people|elders|vote|decree)\b/i.test(commitment.description);
+}
+
+export function occasionCame(world: WorldState, commitment: Commitment): "came" | "not_yet" | "unknown" {
   const since = commitment.createdAtStep;
   const beneficiary = world.characters.find((character) => character.id === commitment.beneficiaryCharacterId);
+  const trigger = commitment.trigger ?? null;
+  const came = (yes: boolean): "came" | "not_yet" => (yes ? "came" : "not_yet");
+  if (trigger !== null) {
+    const polityOf = (id: string): string | null => world.map.polities.some((polity) => polity.id === id) ? id : world.characters.find((character) => character.id === id)?.polityId ?? null;
+    const theirs = polityOf(trigger.of);
+    switch (trigger.kind) {
+      case "attack_by": {
+        const forces = new Set(world.material.forces.filter((force) => force.polityId === theirs || force.commanderCharacterId === trigger.of).map((force) => force.id));
+        return came(world.engagements.some((engagement) => engagement.openedAtStep >= since && forces.has(engagement.openedByForceId)));
+      }
+      case "war_with":
+        return came(beneficiary?.polityId != null && theirs !== null && world.polityAgreements.some((agreement) => agreement.kind === "war" && agreement.status === "active" && agreement.sinceStep >= since
+          && ((agreement.polityId === beneficiary.polityId && agreement.otherPolityId === theirs) || (agreement.otherPolityId === beneficiary.polityId && agreement.polityId === theirs))));
+      case "question_put":
+        return came(world.material.politicalProcedures.some((procedure) => procedure.sponsorCharacterId === trigger.of && procedure.openedAtStep >= since));
+      case "letter_from":
+        return came(world.diplomacy.some((message) => message.fromCharacterId === trigger.of && message.toCharacterId === commitment.promisorCharacterId && message.sentAtStep >= since));
+    }
+  }
   switch (commitment.actionKind) {
     case "political_support":
-      return world.material.politicalProcedures.some((procedure) => procedure.sponsorCharacterId === commitment.beneficiaryCharacterId && procedure.openedAtStep >= since);
+      return came(world.material.politicalProcedures.some((procedure) => procedure.sponsorCharacterId === commitment.beneficiaryCharacterId && procedure.openedAtStep >= since));
     case "military_support":
     case "protection":
-      return beneficiary?.polityId != null && world.polityAgreements.some((agreement) => agreement.kind === "war" && agreement.status === "active"
-        && (agreement.polityId === beneficiary.polityId || agreement.otherPolityId === beneficiary.polityId) && agreement.sinceStep >= since);
-    case "information_sharing":
-    case "other":
-      return world.diplomacy.some((message) => message.fromCharacterId === commitment.beneficiaryCharacterId && message.toCharacterId === commitment.promisorCharacterId && message.sentAtStep >= since);
+      return came(beneficiary?.polityId != null && world.polityAgreements.some((agreement) => agreement.kind === "war" && agreement.status === "active"
+        && (agreement.polityId === beneficiary.polityId || agreement.otherPolityId === beneficiary.polityId) && agreement.sinceStep >= since));
     default:
-      return true;
+      return "unknown";
   }
 }
 
 /**
- * A man asked in the burst said he kept these (their ids, in "stepsTaken"):
- * held as done, to be settled as kept on the next tick. Only his own, and only
- * when his answer changed the world -- a sentence is not a deed.
+ * A man asked in the burst said acts that changed the world were written to
+ * keep these (their ids, in "serves"): held as done, to be settled as kept on
+ * the next tick. Only his own. A sentence is not a deed, and neither is some
+ * other deed done the same day.
  */
-export function claimPromisesKept(world: WorldState, promisorId: string, ids: readonly string[], leftAMark: boolean): WorldState {
-  if (!leftAMark || ids.length === 0) return world;
+export function claimPromisesKept(world: WorldState, promisorId: string, ids: readonly string[]): WorldState {
+  if (ids.length === 0) return world;
   const claimed = new Set(ids);
   let changed = false;
   const commitments = world.commitments.map((commitment) => {
@@ -213,7 +252,7 @@ export function keepPromises(input: PromiseInput): { world: WorldState; facts: F
     // A promise that waits on an occasion is judged on the occasion. If it
     // never came, nobody broke anything: it lapses, and nobody is wronged.
     // Support in a house is support for a question, and waits on one being put.
-    if ((isConditionalPromise(commitment) || commitment.actionKind === "political_support") && !occasionCame(world, commitment)) {
+    if (!putsItHimself(commitment) && (isConditionalPromise(commitment) || commitment.trigger != null || commitment.actionKind === "political_support") && occasionCame(world, commitment) !== "came") {
       world = settled(world, cancelCommitment(world, commitment.id, input.toDay, "The occasion it waited on never came."));
       continue;
     }
@@ -226,6 +265,12 @@ export function keepPromises(input: PromiseInput): { world: WorldState; facts: F
       continue;
     }
 
+    // A man the world never got round to asking has not let anything pass:
+    // his turn is owed him (`WorldState.owed`), and the promise waits for it.
+    if (able && isOwedATurn(world, promisor)) {
+      world = settled(world, deferCommitment(world, commitment.id, input.toDay, "He has not yet had the chance to keep it.", GRACE_DAYS));
+      continue;
+    }
     world = settled(world, breakCommitment(world, commitment.id, input.toDay, able ? "He let its day pass twice." : "He no longer holds what he promised."));
     const wronged: Grievance[] = [
       { subjectCharacterId: beneficiary, targetCharacterId: promisor, label: `Broke his word: ${commitment.description}`, score: -14, dimensions: { trust: -20, reputation: -8 } },

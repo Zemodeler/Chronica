@@ -506,10 +506,14 @@ describe("a question put to a body", () => {
   });
 
   it("refuses a vote where there is no body to hold one", () => {
-    const state = world();
+    // A vote that names no body goes before its sponsor's own chamber
+    // (Blasio's punitive-service question); where his power keeps none at
+    // all, there is nobody to hold it.
+    const full = world();
+    const state = { ...full, material: { ...full.material, institutions: full.material.institutions.map((house) => ({ ...house, advisory: true })) } };
     const result = applyDeltas(
       state,
-      [{ ...open(state), institutionRef: null } as WorldDelta],
+      [{ ...open(full), institutionRef: null } as WorldDelta],
       context(),
     );
     expect(result.rejected[0]!.reason).toContain("can only be put to a vote");
@@ -1376,10 +1380,13 @@ describe("ground changing hands", () => {
     return null;
   }
 
-  it("lets a power take ground next to ground it already holds", () => {
-    const before = world();
-    const border = frontier(before);
+  it("lets a power take ground next to ground it already holds, with an army next door", () => {
+    const start = world();
+    const border = frontier(start);
     if (border === null) return;
+    const army = start.material.forces.find((force) => force.polityId === border.holder && force.personnel.some((group) => group.fit > 0));
+    if (army === undefined) return;
+    const before = { ...start, material: { ...start.material, forces: start.material.forces.map((force) => (force.id === army.id ? { ...force, locationId: border.held } : force)) } };
     const result = applyDeltas(
       before,
       [{ op: "province_control_set", provinceId: border.next, toPolityRef: border.holder, firmnessBps: 2_000, reason: "Taken in the campaign." }],
@@ -1769,7 +1776,7 @@ describe("answering an order", () => {
         recipientDecisionReason: null,
         issuedAtStep: 0,
         decidedAtStep: null,
-        consequenceFactRefs: [],
+        consequenceFactRefs: [], servesRef: null,
       }],
     };
   }
@@ -2217,8 +2224,10 @@ describe("the rest of what can be said about an army", () => {
     );
 
     expect(result.rejected).toHaveLength(0);
-    expect(legion(result.world).fatigueBps).toBe(3_000);
-    expect(legion(result.world).cohesionBps).toBe(5_500);
+    // Read by its size, not its figure (`bandedShift`): a great rest (2 000)
+    // and a marked steadying (1 200).
+    expect(legion(result.world).fatigueBps).toBe(6_000 - 2_000);
+    expect(legion(result.world).cohesionBps).toBe(4_000 + 1_200);
   });
 
   it("victuals them for a stated span rather than an absolute day", () => {
@@ -2232,16 +2241,20 @@ describe("the rest of what can be said about an army", () => {
     expect(legion(result.world).provisionedThroughStep).toBe(world().elapsedStep + 90);
   });
 
-  it("keeps every band inside its bounds however large the order", () => {
+  it("reads however large an order as the greatest change there is, and never past what drill allows", () => {
+    const before = legion(world());
     const result = applyDeltas(
       world(),
       [{ op: "force_modify", forceRef: "legio-i", fatigueBpsDelta: -10_000, cohesionBpsDelta: 10_000, moraleBpsDelta: 10_000, reason: "A triumph." }],
       context(),
     );
 
-    expect(legion(result.world).fatigueBps).toBe(0);
-    expect(legion(result.world).cohesionBps).toBe(10_000);
-    expect(legion(result.world).moraleBps).toBe(10_000);
+    // A model that writes 10 000 has written "a great deal", which is 2 000.
+    expect(legion(result.world).fatigueBps).toBe(Math.max(0, before.fatigueBps - 2_000));
+    expect(legion(result.world).moraleBps).toBe(Math.min(10_000, before.moraleBps + 2_000));
+    // And an order does not make raw men steadier than drill would: 7 000 at
+    // rest, and a thousand more for being told.
+    expect(legion(result.world).cohesionBps).toBe(Math.min(Math.max(before.cohesionBps, 8_000), before.cohesionBps + 2_000));
   });
 
   it("hands an army to another power, and its old wages lapse with its old allegiance", () => {
@@ -2343,7 +2356,8 @@ describe("an unexpected fault costs only the delta that carried it", () => {
     // The orders either side of it stood.
     const legion = result.world.material.forces.find((force) => force.id === "legio-i")!;
     expect(legion.name).toBe("Legio I");
-    expect(legion.moraleBps).toBe(before.material.forces.find((f) => f.id === "legio-i")!.moraleBps + 100);
+    // A small encouragement, which the engine says is 500.
+    expect(legion.moraleBps).toBe(Math.min(10_000, before.material.forces.find((f) => f.id === "legio-i")!.moraleBps + 500));
   });
 });
 

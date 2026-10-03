@@ -155,7 +155,9 @@ export function diffWorlds(before: WorldState, after: WorldState, offices: reado
         kind: "force",
         id: force.id,
         label: force.name,
-        detail: `raised under ${polityName(force.polityId)} at ${provinceName(force.locationId)}, ${round(strengthOf(force))} men`,
+        // The men still mustering are part of what was raised: "2k men" for a
+        // legion of 5,000 read as an order cut down to a third.
+        detail: `raised under ${polityName(force.polityId)} at ${provinceName(force.locationId)}, ${round(strengthOf(force))} men${force.authorizedStrength > strengthOf(force) ? `, mustering to ${round(force.authorizedStrength)}` : ""}`,
       });
       continue;
     }

@@ -165,7 +165,8 @@ export const MoneyReservationSchema = z
     currencyId: EntityIdSchema,
     reservedAmount: MoneyAmountSchema.positive(),
     remainingAmount: MoneyAmountSchema,
-    purposeKind: z.literal("project"),
+    /** A project's own money, or what an order allowed one of its parts to spend (`SpendEnvelope`). */
+    purposeKind: z.enum(["project", "order_part"]),
     purposeId: EntityIdSchema,
     status: z.enum(["active", "released", "spent", "cancelled"]),
     createdAtStep: ElapsedStepSchema,
@@ -189,6 +190,7 @@ export type MoneyReservation = z.infer<typeof MoneyReservationSchema>;
 export const MoneyTransactionSchema = z
   .object({
     id: EntityIdSchema,
+    sourceActionId: EntityIdSchema.nullable().optional(),
     atStep: ElapsedStepSchema,
     kind: z.enum([
       "income",
@@ -402,6 +404,13 @@ export const GovernmentInstitutionSchema = z
      * beside the chamber's own standing blocs.
      */
     blocSource: z.enum(["authored", "world"]).optional(),
+    /**
+     * The offices whose holders may put a question to it. A Roman senator
+     * spoke when the consul asked him, and moved nothing himself: only a
+     * magistrate who could convene the house could lay a matter before it.
+     * Absent is anybody, as every chamber was before.
+     */
+    convenedByOfficeIds: z.array(EntityIdSchema).max(12).optional(),
     /** Where a question it rejects goes next, when a magistrate raised it: Carthage's council sent a split to the people. */
     refersFailuresTo: EntityIdSchema.nullable().optional(),
   })
@@ -522,6 +531,10 @@ export const EligibilityRequirementKindSchema = z.enum([
   "legal_status",
   /** `params.gender`: a magistracy for men, the Vestals for women. */
   "gender",
+  /** `params.ordo`: the order a man was born to -- a tribune of the plebs was a plebeian. */
+  "ordo",
+  /** `params.campaigns`: has served so many campaigns -- Rome asked ten before any office. */
+  "min_campaigns",
 ]);
 export type EligibilityRequirementKind = z.infer<typeof EligibilityRequirementKindSchema>;
 
@@ -650,6 +663,12 @@ export const OfficeSeatSchema = z
     appointmentProcedureId: EntityIdSchema.nullable(),
     removalProcedureId: EntityIdSchema.nullable(),
     eligibilityRequirementIds: z.array(EntityIdSchema).default([]),
+    /**
+     * Elected for the next term and waiting for this one to end: the consul
+     * designate. Rome elected its consuls before the year ran out; elected only
+     * after, it went two months without any in the middle of a war.
+     */
+    designateCharacterId: EntityIdSchema.nullable().optional(),
   })
   .strict()
   .superRefine((seat, context) => {
@@ -866,7 +885,68 @@ export const ForcePersonnelCategorySchema = z.object({
   label: z.string().trim().min(1).max(80),
   fit: z.number().int().nonnegative(),
   unavailable: z.array(UnavailablePersonnelGroupSchema),
+  /**
+   * The formation these men are (docs/plans/armies-in-detail.md): a row *is* a
+   * formation's men, so every reader of `personnel` goes on counting heads as
+   * it always has. Absent on an army its power has no establishment for, and
+   * on men not yet formed -- the engine forms them (`warfare/formation.ts`).
+   */
+  formationId: EntityIdSchema.optional(),
 });
+
+/**
+ * Where in a battle line a formation stands. The engine reads it for who
+ * takes the blows: the screen at contact, the first line in the clash, the
+ * reserve lines only when it goes badly, the wings in the pursuit.
+ */
+export const FormationLineSchema = z.enum(["screen", "first", "second", "third", "wing", "reserve", "afloat"]).meta({ id: "Line" });
+export type FormationLine = z.infer<typeof FormationLineSchema>;
+
+/**
+ * A unit somebody has had reason to remember: a named man serves in it, or it
+ * has taken losses of its own. Every other unit is worked out from the
+ * template and the formation's strength (`unitsOf`), and always adds up.
+ */
+export const SavedUnitSchema = z.object({
+  index: z.number().int().nonnegative().max(500),
+  fit: z.number().int().nonnegative(),
+  /** What it has come to be called, where it has earned a name. */
+  name: z.string().trim().min(1).max(80).optional(),
+}).strict();
+export type SavedUnit = z.infer<typeof SavedUnitSchema>;
+
+export const ForceFormationSchema = z.object({
+  id: EntityIdSchema,
+  /** The body it belongs to, numbered within its power: `rome-legion-2`, called "Legio II". */
+  bodyId: EntityIdSchema,
+  bodyLabel: z.string().trim().min(1).max(80),
+  /** Its template in the power's establishment; an irregular formation's is `irregular:<category>`. */
+  templateId: EntityIdSchema,
+  line: FormationLineSchema,
+  /** Drill: how well the men do what they are told, together. Rises with drilling, fades without it. */
+  trainingBps: BasisPointsSchema.default(0),
+  /** What the men have lived through: battles and seasons. Diluted by recruits, lost to discharge. */
+  experienceBps: BasisPointsSchema.default(0),
+  /** Doctrines this army practises of its own accord, beside its power's. */
+  doctrineIds: z.array(EntityIdSchema).max(8).default([]),
+  units: z.array(SavedUnitSchema).max(40).default([]),
+  raisedAtStep: ElapsedStepSchema,
+  /** Being refitted after a reform, until this day: drilling the new way and not yet fit to fight it. */
+  refitUntilStep: ElapsedStepSchema.optional(),
+  /** Drilled on its own officer's order, whatever the rest of the army does. */
+  drilling: z.boolean().optional(),
+}).strict();
+export type ForceFormation = z.infer<typeof ForceFormationSchema>;
+
+/** A post in an army held by somebody named: a centurion, a tribune, a decurion. */
+export const ForcePostSchema = z.object({
+  formationId: EntityIdSchema,
+  /** Which unit of the formation; null for a post over the whole formation or body. */
+  unitIndex: z.number().int().nonnegative().max(500).nullable().default(null),
+  rankId: EntityIdSchema,
+  characterId: EntityIdSchema,
+}).strict();
+export type ForcePost = z.infer<typeof ForcePostSchema>;
 export type ForcePersonnelCategory = z.infer<typeof ForcePersonnelCategorySchema>;
 
 export const ForcePersonnelEventSchema = z.object({
@@ -927,6 +1007,17 @@ export const ForceSchema = z.object({
    * fate in battle. Members share the force's losses, each by his own roll.
    */
   memberCharacterIds: z.array(EntityIdSchema).max(40).default([]),
+  /**
+   * What it is made of beyond headcounts: its legions and alae, its phalanx
+   * and its horse, each with its drill and its experience
+   * (docs/plans/armies-in-detail.md). Empty for an army its power keeps no
+   * establishment for, which fights as it always did.
+   */
+  formations: z.array(ForceFormationSchema).max(40).optional(),
+  /** Posts held by named people. Most posts are nobody in particular, and stay that way. */
+  posts: z.array(ForcePostSchema).max(80).optional(),
+  /** A standing order to drill: in camp, paid and fed, the men get better at it every day. Lifted by an order or a march. */
+  drilling: z.boolean().optional(),
   /**
    * The standard it marches under: an id in the web client's catalogue of
    * banners. Absent, it carries its power's first. Only a name the client
@@ -1081,6 +1172,7 @@ export const ServiceContractSchema = z
     label: z.string().trim().min(1).max(160),
     employerAccountId: EntityIdSchema,
     employeeCharacterId: EntityIdSchema,
+    journey: z.object({ fromProvinceId: EntityIdSchema, toProvinceId: EntityIdSchema, arrivesAtStep: ElapsedStepSchema, arrivedAtStep: ElapsedStepSchema.nullable() }).strict().nullable().optional(),
     /** The monthly pay, or for a tax farmer his rent to the treasury. Null when nothing is paid by the month. */
     obligationId: EntityIdSchema.nullable(),
     /** What the tax farmer takes from the province, while the farm runs. */

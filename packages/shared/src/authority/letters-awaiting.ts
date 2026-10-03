@@ -3,7 +3,7 @@ import type { Office } from "../characters/character";
 import type { WorldState } from "../world/world-state";
 import { formatWorldDate, type ScenarioClock } from "../world/clock";
 import { AGREEMENT_KIND_IN_WORDS, type PolityAgreementKind } from "../world/agreements";
-import { isDelivered, offeredAgreementKinds, type DiplomaticMessageKind } from "../world/diplomacy";
+import { isDelivered, offeredAgreementKinds, peaceOfferMetadata, previousPeaceRejection, type DiplomaticMessageKind } from "../world/diplomacy";
 
 /**
  * Letters from other powers waiting on the player's answer.
@@ -32,17 +32,20 @@ export interface AwaitingLetter {
    * not only for an answer. A letter that only says something is written back to.
    */
   readonly asksYesOrNo: boolean;
+  /** An actual refusal preceding this renewed peace offer, with the terms it refused. */
+  readonly previousRejection?: { readonly terms: string; readonly reason: string; readonly subject: string } | null;
 }
 
 /** Kinds that ask for something, and are accepted or refused rather than only answered. */
 const ASKS: ReadonlySet<DiplomaticMessageKind> = new Set([
-  "alliance_offer", "peace_offer", "trade_offer", "marriage_offer", "military_aid_request", "tribute_demand", "ultimatum",
+  "alliance_offer", "peace_offer", "trade_offer", "marriage_offer", "military_aid_request", "tribute_demand", "ultimatum", "peace_talks",
 ]);
 
 const KIND_WORDS: Readonly<Record<DiplomaticMessageKind, string>> = {
   letter: "A letter",
   alliance_offer: "An offer of alliance",
   peace_offer: "An offer of peace",
+  peace_talks: "A proposal to discuss peace",
   trade_offer: "An offer of trade",
   marriage_offer: "An offer of marriage",
   military_aid_request: "A request for troops",
@@ -75,8 +78,10 @@ export function lettersAwaitingYou(
     .filter((message) => message.toCharacterId === characterId || (governs && message.toCharacterId === null && message.toPolityId === station.polityId))
     // The soonest answer due first; an open-ended one last.
     .sort((a, b) => (a.replyDueByStep ?? Number.MAX_SAFE_INTEGER) - (b.replyDueByStep ?? Number.MAX_SAFE_INTEGER))
-    .map((message) => {
+    .map((storedMessage) => {
+      const message = { ...storedMessage, ...peaceOfferMetadata(storedMessage) };
       const sender = world.characters.find((character) => character.id === message.fromCharacterId)?.name;
+      const rejected = previousPeaceRejection(world.diplomacy, message);
       return {
         id: message.id,
         kindLabel: letterKindLabel(message.kind),
@@ -85,6 +90,7 @@ export function lettersAwaitingYou(
         fromCharacterId: message.fromCharacterId,
         subject: message.subject,
         terms: message.terms,
+        previousRejection: rejected === undefined ? null : { terms: rejected.terms, reason: rejected.answerText ?? "They refused these terms.", subject: rejected.subject },
         replyByLabel: message.replyDueByStep === null ? null : clock === undefined ? `day ${message.replyDueByStep}` : formatWorldDate({ day: message.replyDueByStep, minute: 0 }, clock),
         toYou: message.toCharacterId === characterId,
         offers: offeredAgreementKinds(message).map((kind) => ({ kind, label: AGREEMENT_KIND_IN_WORDS[kind] })),

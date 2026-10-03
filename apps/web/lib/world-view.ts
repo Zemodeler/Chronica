@@ -1,11 +1,13 @@
 import "server-only";
 
 import {
+  isOccupied,
   armiesInSight,
   buildStation,
   DynamicMapOverlaySchema,
   factsKnownToStation,
   formatWorldDate,
+  isNavalForce,
   type DynamicMapOverlay,
   type Fact,
   type Office,
@@ -115,6 +117,7 @@ function projectOverlay(world: WorldState, viewerCharacterId: string | null, off
     provinces: world.map.provinces.map((province) => ({
       provinceId: province.id,
       controllerPolityId: province.controllerPolityId,
+      ...(isOccupied(province) ? { ownerPolityId: province.ownerPolityId } : {}),
       controlFirmnessBps: province.controlFirmnessBps,
       terrainId: province.terrainId,
     })),
@@ -142,6 +145,7 @@ function projectOverlay(world: WorldState, viewerCharacterId: string | null, off
       name: force.name,
       commanderLabel: characterNames.get(force.commanderCharacterId) ?? null,
       strengthLabel: army.strengthLabel,
+      naval: isNavalForce(force, warfare),
       relation: "neutral",
       ...(force.standardId === undefined ? {} : { flagAssetId: force.standardId }),
       commandable: viewerCharacterId !== null && (force.commanderCharacterId === viewerCharacterId || force.controllerCharacterId === viewerCharacterId),
@@ -164,9 +168,12 @@ export function projectWorldView(world: WorldState, meta: WorldViewMeta, viewerC
     if (names) names.push(force.name); else forcesByProvince.set(force.provinceId, [force.name]);
   }
   const provinces: ProvinceView[] = world.map.provinces.map((province) => {
-    const controllerLabel = province.controllerPolityId === null
+    const holderName = province.controllerPolityId === null ? null : polityNames.get(province.controllerPolityId) ?? province.controllerPolityId;
+    const controllerLabel = holderName === null
       ? "Uncontrolled"
-      : polityNames.get(province.controllerPolityId) ?? province.controllerPolityId;
+      : isOccupied(province)
+        ? `${polityNames.get(province.ownerPolityId!) ?? province.ownerPolityId}, occupied by ${holderName}`
+        : holderName;
     const stationed = forcesByProvince.get(province.id) ?? [];
     return {
       id: province.id,

@@ -18,7 +18,7 @@ function withOrderTo(world: WorldState, recipientId: string, status: "issued" | 
     instruction: "Find the money for two new legions",
     standing: "binding" as const,
       status, recipientDecisionReason: null, issuedAtStep: 0,
-      decidedAtStep: status === "carried_out" ? 1 : null, consequenceFactRefs: [],
+      decidedAtStep: status === "carried_out" ? 1 : null, consequenceFactRefs: [], servesRef: null,
     }],
   };
 }
@@ -83,7 +83,7 @@ describe("who seeks the ruler out", () => {
     instruction: "See to it",
     standing: "binding" as const,
         status: "issued" as const, recipientDecisionReason: null, issuedAtStep: 0,
-        decidedAtStep: null, consequenceFactRefs: [],
+        decidedAtStep: null, consequenceFactRefs: [], servesRef: null,
       })),
     };
     expect(seekers(many).length).toBeLessThanOrEqual(2);

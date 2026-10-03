@@ -71,7 +71,7 @@ const port: SimModelPort = {
   },
 };
 
-interface Scored { readonly order: CorpusOrder; readonly outcome: OrderOutcome | null; readonly entries: readonly { title: string; body: string }[]; readonly error: string | null; readonly seconds: number; readonly audit: readonly AuditEntry[]; readonly skipped: readonly { stage: string; reason: string }[] }
+interface Scored { readonly order: CorpusOrder; readonly outcome: OrderOutcome | null; readonly oracle?: string | null; readonly entries: readonly { title: string; body: string }[]; readonly error: string | null; readonly seconds: number; readonly audit: readonly AuditEntry[]; readonly skipped: readonly { stage: string; reason: string }[] }
 const scored = new Map<string, Scored>();
 
 /** One chain, in order: each order is given the world the one before it left. */
@@ -96,16 +96,18 @@ async function runChain(chain: readonly CorpusOrder[]): Promise<void> {
         budget: { ...DEFAULT_BUDGET, maxMechanicCalls: mechanicCalls },
       });
       const chronicle = await writer.finish();
+      const stateBefore = state;
       state = { world: result.world, facts: [...state.facts, ...result.newFacts] };
       // The world each chain leaves, for `let-time-pass.mts` to run on.
       mkdirSync(outDir, { recursive: true });
       writeFileSync(join(outDir, `world-${order.chain}.json`), JSON.stringify(result.world));
-      row = { order, outcome: outcomeOfOrder(result, chronicle.entries), entries: chronicle.entries.map(({ title, body }) => ({ title, body })), error: null, seconds: (performance.now() - started) / 1000, audit: result.audit, skipped: result.skipped };
+      const before = stateBefore.world;
+      row = { order, outcome: outcomeOfOrder(result, chronicle.entries), oracle: order.expect === undefined ? null : order.expect(before, result.world, order.actor), entries: chronicle.entries.map(({ title, body }) => ({ title, body })), error: null, seconds: (performance.now() - started) / 1000, audit: result.audit, skipped: result.skipped };
     } catch (error) {
       row = { order, outcome: null, entries: [], error: error instanceof Error ? error.message : String(error), seconds: (performance.now() - started) / 1000, audit: [], skipped: [] };
     }
     scored.set(order.id, row);
-    console.log(`${order.id}: ${row.error ?? verdict(row.outcome!)} (${row.seconds.toFixed(0)}s)`);
+    console.log(`${order.id}: ${row.error ?? verdict(row.outcome!)}${row.oracle == null ? "" : ` -- WORLD: ${row.oracle}`} (${row.seconds.toFixed(0)}s)`);
     // A turn that could not run leaves nothing for the next one to stand on.
     if (row.error !== null) break;
   }

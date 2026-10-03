@@ -2,6 +2,8 @@ import {
   PEACE_AT,
   TRUCE_AT,
   atWar,
+  diplomaticSituationKey,
+  newsDaysBetween,
   readDepartments,
   warStanding,
   warWeariness,
@@ -45,6 +47,12 @@ export function sueForPeace(world: WorldState, toDay: number, ids: IdFactory): {
       const weariness = warWeariness(world, polity.id, enemyId);
       if (weariness.score < TRUCE_AT) continue;
 
+      // Both exhausted powers need a negotiation, not two simultaneous
+      // opening offers. The second side answers the first side's terms.
+      const pendingAcross = [...world.diplomacy, ...letters].some((message) => message.status === "awaiting_reply"
+        && ((message.fromPolityId === polity.id && message.toPolityId === enemyId) || (message.fromPolityId === enemyId && message.toPolityId === polity.id))
+        && (message.kind === "peace_offer" || (message.proposes ?? []).some((kind) => kind === "peace" || kind === "truce")));
+      if (pendingAcross) continue;
       const ours = world.diplomacy.filter((message) => message.fromPolityId === polity.id && message.toPolityId === enemyId
         && (message.kind === "peace_offer" || (message.proposes ?? []).includes("truce")));
       if (ours.some((message) => message.status === "awaiting_reply" || toDay - message.sentAtStep < ASKS_EVERY_DAYS)) continue;
@@ -65,8 +73,10 @@ export function sueForPeace(world: WorldState, toDay: number, ids: IdFactory): {
           : standing <= 10
             ? `Peace between ${us} and ${them}, each keeping the ground it holds today${more}.`
             : `Peace between ${us} and ${them}, if ${them} gives up what it has taken in the war${more}.`;
+      const travel = writer.locationProvinceId === null || reader_?.locationProvinceId == null ? 0 : newsDaysBetween(world, writer.locationProvinceId, reader_.locationProvinceId);
+      const messageId = ids.next("message");
       const letter: DiplomaticMessage = {
-        id: ids.next("message"),
+        id: messageId,
         kind: peace ? "peace_offer" : "letter",
         fromPolityId: polity.id,
         fromCharacterId: writer.id,
@@ -75,7 +85,12 @@ export function sueForPeace(world: WorldState, toDay: number, ids: IdFactory): {
         subject: (peace ? `${us} asks for peace` : `${us} asks for a truce`).slice(0, 240),
         terms: terms.slice(0, 1_200),
         sentAtStep: toDay,
-        replyDueByStep: toDay + 30,
+        deliveredOnDay: toDay + travel,
+        replyDueByStep: toDay + travel + 30,
+        negotiationId: ours[0]?.negotiationId ?? ours[0]?.id ?? messageId,
+        negotiationOwnerCharacterId: ours[0]?.negotiationOwnerCharacterId ?? writer.id,
+        situationKey: diplomaticSituationKey(world, polity.id, enemyId),
+        negotiation: { issueKey: peace ? "peace" : "truce", objective: `End the war with ${them}`, question: peace ? "On what terms will the war end?" : "Will the fighting pause for six months?", positions: [{ issue: peace ? "peace terms" : "truce duration", value: peace ? terms.slice(0, 240) : String(TRUCE_DAYS) }], ...(ours.length === 0 ? {} : { reopening: { kind: "reminder" as const, reason: "War exhaustion persists after the previous offer." } }) },
         status: "awaiting_reply",
         answer: null,
         answerText: null,

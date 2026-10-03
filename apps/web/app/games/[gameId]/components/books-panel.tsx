@@ -1,11 +1,13 @@
 "use client";
 
-import type { Books } from "@chronica/shared";
+import type { Administration, Books } from "@chronica/shared";
 import { Sheet, type SheetSide } from "../../../components/ui/sheet";
 import { Tabs, type TabSection } from "../../../components/ui/tabs";
 import { Tip, TipCard } from "../../../components/ui/tip";
 import { spanInWords } from "@chronica/shared";
 import { Why } from "./notes";
+import { FinancialExposure } from "./office-insights";
+import { AdministrationSheet } from "./administration-sheet";
 
 /**
  * The treasury, laid out the way VISION §7 lays it out.
@@ -29,16 +31,29 @@ import { Why } from "./notes";
 export type BooksView = Books & { readonly currencyName: string };
 
 /** `books` is null until the room has been read; the stand and the strongbox are not drawn before then. */
-export function BooksPanel({ which, books, onClose, side }: { readonly which: "own" | "kept"; readonly books: BooksView | null; readonly onClose: () => void; readonly side: SheetSide }) {
+export function BooksPanel({ which, books, administration = null, focus, onClose, side }: {
+  readonly which: "own" | "kept";
+  readonly books: BooksView | null;
+  /** The departments of the state he keeps books for. Only the ledger stand has them. */
+  readonly administration?: Administration | null;
+  readonly focus?: { readonly tab: string; readonly key?: string | undefined } | undefined;
+  readonly onClose: () => void;
+  readonly side: SheetSide;
+}) {
+  const departments = which === "kept" && administration !== null && administration.departments.length > 0;
   const sections: TabSection[] = books === null ? [] : [
-    { id: "accounts", title: "Accounts", marked: books.surplus < 0 || books.pressure?.hard === true, content: <Accounts books={books} /> },
+    { id: "accounts", title: "Accounts", marked: books.surplus < 0 || books.pressure?.hard === true, content: <><Accounts books={books} /><FinancialExposure which={which} /></> },
     ...(books.debts.length > 0 || books.behind.length > 0
       ? [{ id: "debts", title: "Debts", marked: books.behind.length > 0 || books.debts.some((debt) => debt.defaulted), content: <Debts books={books} /> }]
       : []),
     ...((books.lands?.length ?? 0) > 0 || books.stopped.length > 0
       ? [{ id: "lands", title: "Lands", marked: (books.lands ?? []).some((land) => land.strained), content: <Lands books={books} /> }]
       : []),
+    ...(departments && administration !== null
+      ? [{ id: "administration", title: "Administration", marked: administration.wanting > 0, content: <AdministrationSheet administration={administration} focusKey={focus?.tab === "administration" ? focus.key : undefined} /> }]
+      : []),
   ];
+  const wanted = focus !== undefined && sections.some((section) => section.id === focus.tab) ? focus.tab : undefined;
 
   return (
     <Sheet
@@ -50,7 +65,7 @@ export function BooksPanel({ which, books, onClose, side }: { readonly which: "o
       className="books-panel"
     >
       {books === null && <p className="quiet">{which === "own" ? "Opening the strongbox…" : "Sending for the quaestor…"}</p>}
-      {books !== null && <Tabs label={which === "own" ? "Your own books" : "The books you keep"} sections={sections} />}
+      {books !== null && <Tabs label={which === "own" ? "Your own books" : "The books you keep"} sections={sections} initial={wanted} />}
     </Sheet>
   );
 }
@@ -89,7 +104,7 @@ function Accounts({ books }: { readonly books: BooksView }) {
             ))}
             <tr className="books__total ledger__total"><th scope="row">Expenditure</th><td>−{money(books.totalExpenditure)}</td></tr>
             <tr className={`ledger__foot ${books.surplus >= 0 ? "books__surplus" : "books__deficit is-short"}`}>
-              <th scope="row">{books.surplus >= 0 ? "Surplus" : "Shortfall"}</th>
+              <th scope="row"><SurplusMark books={books} /></th>
               <td>{books.surplus >= 0 ? "+" : "−"}{money(Math.abs(books.surplus))}</td>
             </tr>
           </tbody>
@@ -99,19 +114,25 @@ function Accounts({ books }: { readonly books: BooksView }) {
             The taxes are <Why word={books.pressure.inWords} why={books.pressure.why} kicker="Why the taxes are" />.
           </p>
         )}
-        {books.runsOutInDays !== null && (
-          <p className="books__projection">
-            If nothing changes, what is in hand {books.runsOutInDays <= 0 ? "is already spent" : `runs out in ${books.runsOutInDays < 14 ? "days" : `about ${spanInWords(books.runsOutInDays)}`}`}.
-          </p>
-        )}
-        {books.arrears > 0 && <p className="books__arrears">
-          {money(books.arrears)} is owed and has not been paid. A surplus with arrears under it is not a surplus.
-        </p>}
-        {books.income.length === 0 && books.expenditure.length === 0 && (
-          <p className="quiet">Nothing comes in and nothing goes out that you can see.</p>
-        )}
       </section>
     </div>
+  );
+}
+
+/** The foot of the month: Surplus or Shortfall, marked where money runs out or arrears lie under it, with the sentence in a note. */
+function SurplusMark({ books }: { readonly books: BooksView }) {
+  const word = books.surplus >= 0 ? "Surplus" : "Shortfall";
+  const spent = books.runsOutInDays !== null;
+  if (!spent && books.arrears <= 0) return <>{word}</>;
+  return (
+    <Tip label={word} note={() => (
+      <TipCard kicker="Why it is marked" title={word}>
+        {spent && (
+          <p>If nothing changes, what is in hand {books.runsOutInDays! <= 0 ? "is already spent" : `runs out in ${books.runsOutInDays! < 14 ? "days" : `about ${spanInWords(books.runsOutInDays!)}`}`}.</p>
+        )}
+        {books.arrears > 0 && <p>{money(books.arrears)} is owed and has not been paid. A surplus with arrears under it is not a surplus.</p>}
+      </TipCard>
+    )}>{word}<span className="seal-dot"><span className="visually-hidden"> (marked)</span></span></Tip>
   );
 }
 
@@ -153,12 +174,15 @@ function Debts({ books }: { readonly books: BooksView }) {
           <ul className="ruled books__list">
             {books.debts.map((debt) => (
               <li key={debt.id}>
-                <strong>{debt.lenderLabel}: {money(debt.outstanding)}</strong>
-                <span>
-                  {debt.interestLabel}{debt.monthly === null ? "" : `, ${money(debt.monthly)} a month`}.
+                <strong>
+                  <Tip label={debt.lenderLabel} note={() => (
+                    <TipCard kicker="The terms" title={debt.lenderLabel}>
+                      <p>{debt.interestLabel}{debt.monthly === null ? "" : `, ${money(debt.monthly)} a month`}.</p>
+                      <p>{debt.terms}</p>
+                    </TipCard>
+                  )}>{debt.lenderLabel}</Tip>: {money(debt.outstanding)}
                   {debt.defaulted && <span className="is-short"> Defaulted.</span>}
-                </span>
-                <em>{debt.terms}</em>
+                </strong>
               </li>
             ))}
           </ul>
@@ -177,9 +201,16 @@ function Lands({ books }: { readonly books: BooksView }) {
           <ul className="ruled books__list">
             {(books.lands ?? []).map((land) => (
               <li key={land.id} className={land.strained ? "is-strained" : undefined}>
-                <strong>{land.name}</strong>
+                <strong>
+                  {land.taxable === null ? land.name : (
+                    <Tip label={land.name} note={() => (
+                      <TipCard kicker="In tax" title={land.name}>
+                        <p>Could bear {money(land.taxable!)} a month in tax.</p>
+                      </TipCard>
+                    )}>{land.name}</Tip>
+                  )}
+                </strong>
                 <span>{[capitalise(land.order), land.food, land.damage].filter(Boolean).join(", ")}.</span>
-                {land.taxable !== null && <em>Could bear {money(land.taxable)} a month in tax.</em>}
               </li>
             ))}
           </ul>

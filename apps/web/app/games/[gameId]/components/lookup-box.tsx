@@ -138,7 +138,7 @@ function Hit({ hit }: { readonly hit: LookupCandidate }) {
       return entry === null ? null : <TipCard kicker="What the word means" title={entry.title}><p>{entry.text}</p></TipCard>;
     }
     const entityNote = glossary[hit.id as keyof typeof glossary];
-    return entityNote === undefined ? null : <NoteCard note={entityNote} />;
+    return entityNote === undefined ? null : <NoteCard note={entityNote} entityKey={hit.id} />;
   };
   return <Tip label={hit.label} className="lookup__hit" beside note={note}>{face}</Tip>;
 }

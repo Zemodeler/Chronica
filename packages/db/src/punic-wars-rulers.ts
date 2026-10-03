@@ -51,8 +51,19 @@ const KNOWN: Readonly<Record<string, { readonly name: string; readonly age: numb
   pontus: { name: "Mithridates I Ktistes", age: 55, martial: 60 },
 };
 
+/**
+ * The id `foundingPeople` gives a ruler history names, for whatever else the
+ * scenario hands him on the first day: the field armies of the Hellenistic
+ * kings (scenario v42) are commanded by the kings themselves.
+ */
+export function knownRulerId(polityId: string): string {
+  const known = KNOWN[polityId];
+  if (known === undefined) throw new Error(`No ruler of ${polityId} is named by history here.`);
+  return `${polityId}-ruler-${stableHash([polityId, "ruler", known.name]).toString(36).slice(0, 6)}`;
+}
+
 /** The faith each culture's people keep, where the scenario has one for them. */
-const FAITH: Partial<Record<Culture, string>> = { italic: "faith-italic", etruscan: "faith-italic", greek: "faith-greek", libyan: "faith-punic" };
+const FAITH: Partial<Record<Culture, string>> = { roman: "faith-roman", punic: "faith-punic", italic: "faith-italic", etruscan: "faith-italic", greek: "faith-greek", libyan: "faith-punic" };
 
 /** The office a power's head sits in, by the constitution it grows (`sim/constitutions.ts`). */
 function headOffice(form: GovernmentForm): string {

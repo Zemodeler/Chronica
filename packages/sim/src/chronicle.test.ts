@@ -1186,4 +1186,56 @@ describe("the audit of a Roman consul's spring", () => {
     expect(labels).toContain("Rome");
     expect(labels.filter((label) => label === "Boii")).toHaveLength(1);
   });
+
+  it("tells a diplomatic act touching the reader's campaign, though the same people were told of before", async () => {
+    const port = capturingPort();
+    const word = fact({
+      kind: "diplomatic_dispatch",
+      summary: "Hanno urges Syracuse to restrain its advance and negotiate over Messana.",
+      affectedEntities: [{ kind: "character", id: "hanno" }, { kind: "polity", id: "carthage" }],
+      visibility: "public",
+    });
+    const result = await composeChronicle({
+      port,
+      clock,
+      observer: { kind: "character", id: "clepsina" },
+      observerPolityId: "rome",
+      facts: [word],
+      from: { day: 50, minute: 0 },
+      to: { day: 64, minute: 0 },
+      significanceByFactId: new Map([[word.id, 12]]),
+      campaignIds: new Set(["carthage"]),
+      ownEntityIds: new Set(["rome"]),
+      recentSubjects: [["character:hanno", "polity:carthage"]],
+      narrative: [],
+      frictions: [],
+    });
+    expect(port.lastUserMessage).toContain("restrain its advance");
+    expect(result.entries).toHaveLength(1);
+  });
+
+  it("still holds a repeat that touches no campaign and moved nothing", async () => {
+    const port = capturingPort();
+    const word = fact({
+      kind: "event",
+      summary: "The siege goes on.",
+      affectedEntities: [{ kind: "character", id: "hanno" }, { kind: "polity", id: "carthage" }],
+    });
+    const result = await composeChronicle({
+      port,
+      clock,
+      observer: { kind: "character", id: "clepsina" },
+      observerPolityId: "rome",
+      facts: [word],
+      from: { day: 50, minute: 0 },
+      to: { day: 64, minute: 0 },
+      significanceByFactId: new Map([[word.id, 90]]),
+      recentSubjects: [["character:hanno", "polity:carthage"]],
+      narrative: [],
+      frictions: [],
+      ownEntityIds: new Set(["rome"]),
+      fallback: false,
+    });
+    expect(result.entries).toHaveLength(0);
+  });
 });

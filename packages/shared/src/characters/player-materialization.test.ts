@@ -84,7 +84,8 @@ describe("findOfficeSeatForRole", () => {
   it("does not hand a consulship to a senator who never claimed one", () => {
     // A senator is seated in the Senate, which is an office of its own now -- never the consulship.
     expect(findOfficeSeatForRole(world(), government, "rome", "Roman senator without current military command")?.office.id).toBe("roman-senator");
-    expect(findOfficeSeatForRole(world(), government, "rome", "Military tribune serving with the Roman field army")).toBeUndefined();
+    // A military tribune is an officer Rome elects, and nothing grander.
+    expect(findOfficeSeatForRole(world(), government, "rome", "Military tribune serving with the Roman field army")?.office.id).toBe("roman-military-tribune");
   });
 
   it("does not seat a foreigner in another polity's office", () => {
@@ -184,16 +185,19 @@ describe("a player who asked only for a station", () => {
 describe("a declared soldier", () => {
   const LEGATE_ROLE = "Legate of the Sicilian legions, commanding Roman troops in the field";
 
-  it("is given men to command, because command authority comes from a force and never from a title", () => {
-    // `findOfficeSeatForRole` was the only path from a declared character to
-    // real power, and it only ever found an office -- so a player who declared
-    // himself a legate got nothing at all, and the world was never told he was
-    // a soldier.
+  it("serves in his power's army, because a legate's command is whatever his general gives him", () => {
+    // He was handed four hundred retainers of his own, which no legate of the
+    // Republic ever had -- enough, standing in Rome, to seat a consul by force.
     const after = materializePlayerCharacter(world(), PLAYER, knowledgebase({ role: LEGATE_ROLE }), government);
-    const commanded = after.material.forces.filter(
-      (force) => force.commanderCharacterId === PLAYER || force.controllerCharacterId === PLAYER,
-    );
-    expect(commanded.length).toBeGreaterThan(0);
+    expect(after.material.forces.some((force) => force.commanderCharacterId === PLAYER || force.controllerCharacterId === PLAYER)).toBe(false);
+    expect(after.material.forces.some((force) => force.polityId === "rome" && force.memberCharacterIds.includes(PLAYER))).toBe(true);
+  });
+
+  it("takes command of an army of his power that has lost its general", () => {
+    const base = world();
+    const orphaned = { ...base, material: { ...base.material, forces: base.material.forces.map((force) => (force.id === "roman-field-army" ? { ...force, commanderCharacterId: "nobody-alive", controllerCharacterId: "nobody-alive" } : force)) } };
+    const after = materializePlayerCharacter(orphaned, PLAYER, knowledgebase({ role: LEGATE_ROLE }), government);
+    expect(after.material.forces.find((force) => force.id === "roman-field-army")?.commanderCharacterId).toBe(PLAYER);
   });
 
   it("leaves a man who commands nothing commanding nothing", () => {
@@ -238,8 +242,9 @@ describe("whose man the player actually is", () => {
 });
 
 describe("findCommandForRole and the tribunes", () => {
-  it("gives a military tribune a command and a tribune of the plebs none", () => {
-    expect(findCommandForRole(world(), "rome", "Military tribune of the second legion", LATIUM)).toBeDefined();
+  it("gives a military tribune no men of his own while Rome has a legion to put him in, and a tribune of the plebs none", () => {
+    expect(findCommandForRole(world(), "rome", "Military tribune of the second legion", LATIUM)).toBeUndefined();
+    expect(findCommandForRole(world(), "rome", "Captain of a band of his own clients", LATIUM)).toEqual({ kind: "new" });
     expect(findCommandForRole(world(), "rome", "Tribune of the plebs, defender of the people", LATIUM)).toBeUndefined();
   });
 });

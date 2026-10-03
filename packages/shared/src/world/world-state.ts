@@ -1,5 +1,9 @@
 import { FaithAdherenceSchema, FaithSchema } from "./faith";
 import { z } from "zod";
+import { StatecraftLedgerSchema } from "./statecraft";
+import { CastSchema } from "./cast";
+import { AlarmSchema, DifficultySchema, HoldingsSchema } from "./pushback";
+import { PeaceTableSchema } from "./peace-table";
 import { ElapsedStepSchema, MaterialWorldStateSchema } from "../material-state";
 import { CharacterSchema, OfficeSchema } from "../characters/character";
 import { CharacterContinuitySchema, EncounterMemorySchema } from "../continuity/continuity";
@@ -13,11 +17,12 @@ import { GenericEntitySchema } from "./generic-entity";
 import { PolityOutlookSchema } from "./outlook";
 import { ProvinceGraphSchema } from "./map";
 import { TroopCategoryDefinitionSchema } from "../warfare/battle";
+import { DoctrineSchema, EstablishmentSchema } from "../warfare/establishment";
 import { ContingencySchema } from "./contingency";
 import { SiegeSchema } from "./siege";
 import { EnactmentSchema } from "./enactment";
 import { CovertPlotSchema } from "./covert-plot";
-import { OrderRecordSchema } from "./orders";
+import { OrderRecordSchema, OwedTurnSchema } from "./orders";
 import { MapConflictsOverlaySchema } from "./map-presentation";
 import { NemesisSchema } from "./nemesis";
 import { WorldStorylineSchema } from "./storylines";
@@ -33,6 +38,7 @@ import { FieldPerilSchema } from "./field-peril";
 import { PolityAgreementSchema } from "./agreements";
 import { DiplomaticMessageSchema, PolityStanceSchema } from "./diplomacy";
 import { ConstitutionSchema, EMPTY_SOCIETY_MEMORY, SocietyMemorySchema } from "./constitution";
+import { AnswerableSchema, CommandHoldSchema } from "./command";
 import { SuccessionRuleSchema } from "../characters/character";
 import { AuditSchema, DepartmentSchema, DiversionSchema } from "./departments";
 import { BlockadeSchema, ConvoySchema, EngagementSchema } from "./engagement";
@@ -198,6 +204,14 @@ export const WorldStateSchema = z
      * parses -- and its armies stay the armies they were.
      */
     troopCategories: z.array(TroopCategoryDefinitionSchema).default([]),
+    /**
+     * How each power builds its armies, and the ways of war it and its armies
+     * practise (docs/plans/armies-in-detail.md, `warfare/establishment.ts`).
+     * A power with no establishment keeps flat armies, which fight as they
+     * always did. Defaulted, so every snapshot from before still parses.
+     */
+    establishments: z.array(EstablishmentSchema).default([]),
+    doctrines: z.array(DoctrineSchema).max(400).default([]),
     /** Current authoritative combat, siege, and war state for map projection. */
     conflicts: MapConflictsOverlaySchema.default({ battles: [], sieges: [], wars: [] }),
     material: MaterialWorldStateSchema,
@@ -296,6 +310,14 @@ export const WorldStateSchema = z
      */
     orders: z.array(OrderRecordSchema).default([]),
     /**
+     * People the world owed a turn and could not give one: the budget ran out
+     * before they were asked (E06). They are asked first in the next burst,
+     * and until then what they did not do is not held against them -- a man
+     * never asked has not refused. Two bursts at most, so the world is never
+     * held up waiting for anybody.
+     */
+    owed: z.array(OwedTurnSchema).max(40).default([]),
+    /**
      * Plans laid against days that have not come -- see `world/contingency.ts`.
      *
      * "When the Carthaginians are through the first wall, fire it and bar the
@@ -319,6 +341,24 @@ export const WorldStateSchema = z
      * could do anything still parses.
      */
     enactments: z.array(EnactmentSchema).default([]),
+    /** Commands held past the office that gave them, or under another's (`world/command.ts`). */
+    commandHolds: z.array(CommandHoldSchema).max(200).default([]),
+    /** What men will answer for when their office no longer protects them. */
+    answerable: z.array(AnswerableSchema).max(400).default([]),
+    /**
+     * What the powers decided by rule, and why (`world/statecraft.ts`).
+     * Defaulted, so every snapshot written before the world AI still parses.
+     */
+    statecraft: StatecraftLedgerSchema.default({ lastRunDay: null, log: [] }),
+    /** The people played by the model now (`world/cast.ts`). Defaulted, so older snapshots parse. */
+    cast: CastSchema.default({ members: [], lastReviewStep: null }),
+    /** One power's fear of another (`world/pushback.ts`), and the land it is read from. */
+    alarm: z.array(AlarmSchema).max(2_000).default([]),
+    holdings: z.array(HoldingsSchema).max(4_000).default([]),
+    /** Chosen when the game was made: it scales the pushback and the player's advantages. */
+    difficulty: DifficultySchema.default("normal"),
+    /** Peace talks under way and done (`world/peace-table.ts`). */
+    peaceTables: z.array(PeaceTableSchema).max(40).default([]),
   })
   .strict()
   .superRefine((world, context) => {

@@ -38,11 +38,12 @@ import { EffectBandSchema, StandingEffectSchema } from "../world/standing-effect
 import { StandardLeverSchema } from "../world/departments";
 import { StructureKindSchema } from "../world/structure";
 import { PositionTypeSchema } from "../world/map";
-import { DiplomaticAnswerSchema, DiplomaticMessageKindSchema } from "../world/diplomacy";
+import { DoctrineProposalSchema, MilitaryReformSchema } from "../warfare/establishment";
+import { DiplomaticAnswerSchema, DiplomaticMessageKindSchema, NegotiationProposalSchema } from "../world/diplomacy";
 import { OrderPartyRefSchema } from "../world/party-ref";
 import { StorylinePhaseSchema } from "../world/storylines";
 import { LocalIdSchema, MaybeRefSchema, RefSchema } from "./refs";
-import { ChamberPowerSchema, FranchiseSchema, GovernmentFormSchema, QuestionConcernSchema } from "../political-parts";
+import { ChamberPowerSchema, CommandTenureSchema, FranchiseSchema, GovernmentFormSchema, QuestionConcernSchema } from "../political-parts";
 
 /**
  * Every way the model is allowed to change the world.
@@ -83,6 +84,12 @@ const LabelSchema = z.string().trim().min(1).max(200).meta({ id: "Label" });
 const SignedBpsSchema = z.number().int().min(-10_000).max(10_000).meta({ id: "SignedBps" });
 
 const DayOffsetSchema = z.number().int().min(0).max(36_600).meta({ id: "DayOffset" });
+/** Days from now, or never. Named once: it was written out at every field that can be left open. */
+const MaybeDayOffsetSchema = DayOffsetSchema.nullable().default(null).meta({ id: "MaybeDayOffset" });
+/** A length of time, or none. */
+const MaybeDaysSchema = DaysSchema.nullable().default(null).meta({ id: "MaybeDays" });
+/** What a made thing goes on doing: up to six effects. */
+const StandingEffectsSchema = z.array(StandingEffectSchema).max(6).meta({ id: "StandingEffects" });
 
 /**
  * Who pays to keep a made thing going, and roughly how much. The engine sizes
@@ -180,10 +187,10 @@ const ProjectOutcomeSchema = z
     agreementKind: PolityAgreementKindSchema.nullable().default(null),
     withPolityId: MaybeIdSchema.default(null),
     beneficiaryAccountRef: MaybeRefSchema.default(null),
-    cadenceDays: DaysSchema.nullable().default(null),
+    cadenceDays: MaybeDaysSchema,
     /** For "structure": what kind of building, what it goes on doing, and who pays its keep. */
     structureKind: StructureKindSchema.optional(),
-    effects: z.array(StandingEffectSchema).max(6).optional(),
+    effects: StandingEffectsSchema.optional(),
     upkeep: UpkeepRefSchema.nullable().optional(),
   })
   .strict()
@@ -392,6 +399,17 @@ const ForceModifySchema = z.object({
   standardId: EntityIdSchema.optional(),
   /** Hold: start no battle, and in one begun only defend. False lifts it. */
   hold: z.boolean().optional(),
+  /** Drill: in camp, paid and fed, the men get better at it each day. False stops it. */
+  drilling: z.boolean().optional(),
+  /**
+   * One formation of it -- an officer's own. With this, "drilling" is that
+   * formation's alone, and an officer holding a post in it may order it.
+   */
+  formationRef: RefSchema.optional(),
+  /** A way of fighting this army takes up of its commander's accord, without a law. */
+  doctrine: DoctrineProposalSchema.optional(),
+  /** One it gives up. */
+  dropDoctrineRef: RefSchema.optional(),
   locationId: EntityIdSchema.optional(),
   /** Over water: the fleets to carry it. */
   fleetRefs: z.array(RefSchema).max(4).optional(),
@@ -688,7 +706,7 @@ const GenericEntityCreateSchema = z.object({
   /** Where it stands, if anywhere: a church's seat, a school's town. */
   provinceId: MaybeIdSchema.optional(),
   /** What it goes on doing, every month, while it is paid for (see `world/standing-effects.ts`). */
-  effects: z.array(StandingEffectSchema).max(6).optional(),
+  effects: StandingEffectsSchema.optional(),
   upkeep: UpkeepRefSchema.nullable().optional(),
   reason: ReasonSchema,
 }).strict();
@@ -709,7 +727,7 @@ const GenericEntityUpdateSchema = z.object({
   /** Repealed, dissolved, wound up. The record stays; it simply no longer applies. */
   retire: z.boolean().default(false),
   /** What it does now, replacing what it did. */
-  effects: z.array(StandingEffectSchema).max(6).optional(),
+  effects: StandingEffectsSchema.optional(),
   upkeep: UpkeepRefSchema.nullable().optional(),
   reason: ReasonSchema,
 }).strict();
@@ -724,7 +742,7 @@ const AuthorityGrantUpsertSchema = z.object({
   scope: AuthorityScopeSchema,
   powers: z.array(AuthorityPowerSchema).min(1),
   standing: AuthorityStandingSchema,
-  expiresInDays: DayOffsetSchema.nullable().default(null),
+  expiresInDays: MaybeDayOffsetSchema,
   reason: ReasonSchema,
 }).strict();
 
@@ -814,7 +832,7 @@ const ProvinceMaterialShiftSchema = z.object({
  */
 const EnactmentProposalSchema = z
   .object({
-    effects: z.array(StandingEffectSchema).max(6).optional(),
+    effects: StandingEffectsSchema.optional(),
     upkeep: UpkeepRefSchema.nullable().optional(),
     office: z
       .object({
@@ -858,6 +876,7 @@ const EnactmentProposalSchema = z
      * it passes. The Senate voted a fleet 119 to 0 and not a keel was laid,
      * because carrying it changed nothing.
      */
+    budget: z.object({ accountRef: RefSchema, amount: z.number().int().positive().nullable().default(null), purpose: TitleSchema }).strict().optional(),
     project: z.object({
       kind: z.string().trim().min(1).max(80),
       label: TitleSchema,
@@ -867,6 +886,8 @@ const EnactmentProposalSchema = z
     }).strict().optional(),
     /** One man excused the ladder -- age, the rung below, the gap -- for one office, for a year. */
     waiver: z.object({ characterRef: RefSchema, officeId: EntityIdSchema }).strict().optional(),
+    /** Its armies remade: doctrines, recruitment, terms of service, a body redrawn. */
+    military: MilitaryReformSchema.optional(),
     /**
      * The constitution changed: the whole form recast ("form"), one chamber
      * founded, reformed or abolished, or how one office is filled. Only the
@@ -876,6 +897,8 @@ const EnactmentProposalSchema = z
     constitution: z
       .object({
         form: GovernmentFormSchema.optional(),
+        /** How long its commanders hold their armies. */
+        commandTenure: CommandTenureSchema.optional(),
         chamber: z
           .object({
             /** Absent founds a new chamber. */
@@ -921,7 +944,7 @@ const PoliticalProcedureOpenSchema = z.object({
   subjectRef: MaybeRefSchema,
   label: LabelSchema,
   resolutionMechanism: PoliticalResolutionMechanismSchema,
-  deadlineInDays: DayOffsetSchema.nullable().default(null),
+  deadlineInDays: MaybeDayOffsetSchema,
   visibility: VisibilitySchema.default("polity"),
   /**
    * What it does if it passes: a law, a reform, a new body. Null for a question
@@ -1249,7 +1272,7 @@ const OfficeSeatSetSchema = z.object({
   /** Why it fell vacant, when it did. */
   cause: OfficeSeatVacancyCauseSchema.default("none"),
   /** How long they hold it, in days. Null for a term that ends when somebody ends it. */
-  termDays: DaysSchema.nullable().default(null),
+  termDays: MaybeDaysSchema,
   reason: ReasonSchema,
 }).strict();
 
@@ -1284,6 +1307,14 @@ const SettlementControlSetSchema = z.object({
   toPolityRef: MaybeRefSchema,
   /** Whether the taking was a storm rather than a surrender. A stormed city is plundered. */
   sacked: z.boolean().default(false),
+  reason: ReasonSchema,
+}).strict();
+
+/** Explicitly designate or restore a capital outside automatic wartime succession. */
+const CapitalSetSchema = z.object({
+  op: z.literal("capital_set"),
+  polityRef: RefSchema,
+  settlementId: EntityIdSchema,
   reason: ReasonSchema,
 }).strict();
 
@@ -1485,7 +1516,7 @@ const ServiceContractOpenSchema = z.object({
   employeeRef: RefSchema,
   advance: MoneySchema.default(0),
   monthlyPay: MoneySchema.default(0),
-  termDays: DayOffsetSchema.nullable().default(null),
+  termDays: MaybeDayOffsetSchema,
   duties: z.string().trim().min(1).max(400),
   forceRef: MaybeRefSchema.default(null),
   /**
@@ -1576,7 +1607,10 @@ const ForceMembershipSetSchema = z.object({
   op: z.literal("force_membership_set"),
   characterRef: RefSchema,
   forceRef: RefSchema,
-  change: z.enum(["enlist", "discharge", "desert"]),
+  /** "conduct": how he means to bear himself in the next battle, in "conduct". */
+  change: z.enum(["enlist", "discharge", "desert", "conduct"]),
+  /** In his place, after glory, or keeping his head down: the bold are decorated and die, the timid live and are sometimes punished. */
+  conduct: z.enum(["steady", "glory", "cautious"]).optional(),
   reason: ReasonSchema,
 }).strict();
 
@@ -1602,12 +1636,27 @@ const TreatyClauseSchema = z.discriminatedUnion("kind", [
       }).strict(),
       z.object({ kind: z.literal("cession"), provinceId: EntityIdSchema, toPolityId: RefSchema }).strict(),
       z.object({ kind: z.literal("hostage"), characterRef: RefSchema, heldByPolityId: RefSchema }).strict(),
+      /** An army of one party passes into the other's service (the Campanians' punitive legion). */
+      z.object({ kind: z.literal("force_transfer"), forceRef: RefSchema, toPolityId: RefSchema }).strict(),
       /**
        * Surrender (deditio): the power gives itself up to the other party. Its
        * ground, people and money become the victor's, its army is disbanded,
        * and it is no more -- though its people remember (`sim/polity-end.ts`).
        */
       z.object({ kind: z.literal("submission"), polityId: RefSchema, toPolityId: RefSchema }).strict(),
+      /**
+       * Anything else one side takes on: men sent, grain delivered, a port
+       * opened. It becomes its ruler's promise to the other's, judged like any
+       * promise by what the world shows (`sim/promises.ts`) -- "accept our
+       * protection and send two thousand men" once bound only the protection.
+       */
+      z.object({
+        kind: z.literal("undertaking"),
+        byPolityId: RefSchema,
+        duty: z.enum(["payment", "military_support", "protection", "other"]),
+        what: LabelSchema,
+        withinDays: DaysSchema,
+      }).strict(),
     ]).meta({ id: "TreatyClause" });
 
 /**
@@ -1636,6 +1685,7 @@ const DiplomaticMessageSendSchema = z.object({
   subject: z.string().trim().min(1).max(240),
   /** What is actually being proposed, demanded or asked. */
   terms: z.string().trim().min(1).max(1_200),
+  negotiation: NegotiationProposalSchema.optional(),
   /** How long the sender is willing to wait. Null when they set no term. */
   replyWithinDays: z.number().int().positive().max(3_660).nullable().default(null),
   /** Set when this is itself the answer to an earlier letter. */
@@ -1653,7 +1703,8 @@ const DiplomaticMessageSendSchema = z.object({
    * The terms of the peace or treaty it offers, carried out if it is accepted:
    * provinces ceded, an indemnity, hostages, a surrender.
    */
-  clauses: z.array(TreatyClauseSchema).max(6).optional(),
+  // Twenty-four: a war's end cedes a country, not six of its provinces.
+  clauses: z.array(TreatyClauseSchema).max(24).optional(),
   /**
    * What the sender does if it is refused, or no answer comes by
    * "replyWithinDays": "war"; "war_if_attacked" when the threat is war only
@@ -1699,10 +1750,10 @@ const AgreementOpenSchema = z.object({
    */
   clauses: z
     .array(TreatyClauseSchema)
-    .max(6)
+    .max(24)
     .optional(),
   /** A truce with a term ends by itself. Null runs until somebody ends it. */
-  forDays: DaysSchema.nullable().default(null),
+  forDays: MaybeDaysSchema,
   /** The letter that produced it, where one did. */
   sourceMessageRef: MaybeRefSchema.default(null),
   visibility: VisibilitySchema.default("public"),
@@ -1796,7 +1847,7 @@ const ContingencyArmSchema = z.object({
   /** Who falls on them once it springs, where anybody does. An ordinary battle follows. */
   ambushForceRef: MaybeRefSchema.default(null),
   /** How long it keeps. Null for a plan that waits as long as it must. */
-  expiresInDays: DayOffsetSchema.nullable().default(null),
+  expiresInDays: MaybeDayOffsetSchema,
   /** For "stand_to": what the order said to do then, in its own words. */
   standingOrder: z.string().trim().min(1).max(400).nullable().optional(),
   reason: ReasonSchema,
@@ -1816,6 +1867,8 @@ const SiegeLaySchema = z.object({
   settlementId: MaybeIdSchema.default(null),
   /** Siege works to build, now or for a siege already laid. */
   works: z.array(z.enum(["rams", "towers", "mine", "lines"])).max(4).optional(),
+  /** Storm the walls now rather than wait for hunger or a breach: dearer before the walls are breached. */
+  assault: z.boolean().optional(),
   reason: ReasonSchema,
 }).strict();
 
@@ -1883,6 +1936,8 @@ const DiplomaticMessageAnswerSchema = z.object({
   boundPolityId: MaybeRefSchema.optional(),
   /** Accepting with terms the letter did not offer: sent back as a counter-offer. */
   addedTerms: z.string().trim().min(1).max(600).nullable().optional(),
+  /** Accepting all but some of its clauses, by their place: the rest go back as a counter-offer. */
+  refusedClauses: z.array(z.number().int().min(0).max(5)).max(6).optional(),
   reason: ReasonSchema,
 }).strict();
 
@@ -1931,6 +1986,7 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   AgreementCloseSchema,
   ProvinceControlSetSchema,
   SettlementControlSetSchema,
+  CapitalSetSchema,
   PolityCreateSchema,
   OfficeSeatSetSchema,
   CovertPlotOpenSchema,
@@ -1995,6 +2051,7 @@ export const WORLD_DELTA_OPS = [
   "agreement_close",
   "province_control_set",
   "settlement_control_set",
+  "capital_set",
   "polity_create",
   "office_seat_set",
   "covert_plot_open",
@@ -2065,6 +2122,7 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   // Taking ground is a military act; founding a power is not anyone's office.
   province_control_set: "military",
   settlement_control_set: "military",
+  capital_set: "civil",
   polity_create: "civil",
   // Putting a man in office, or out of it, is the civil power at its plainest.
   office_seat_set: "civil",

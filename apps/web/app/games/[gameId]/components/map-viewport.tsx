@@ -219,7 +219,10 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
     useEffect(() => () => {
       if (commitTimerRef.current) clearTimeout(commitTimerRef.current);
       if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
-      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      // Cleared as well as cancelled: an effect cleanup that runs while the
+      // component lives on (Strict Mode, Fast Refresh) would otherwise leave a
+      // frame marked pending that will never fire, and the map never repaints.
+      if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
     }, []);
 
     const zoomAroundPoint = useCallback(
@@ -428,7 +431,11 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
             never gets compositor-rasterised; we redraw it manually each frame */}
         <canvas
           ref={canvasRef}
-          style={{ position: "absolute", inset: 0, pointerEvents: "none", display: "block" }}
+          // The backing store is container size x devicePixelRatio; without an
+          // explicit CSS size an absolutely placed canvas shows at that size,
+          // so on a 2x screen the map was drawn twice as large as the
+          // coordinates the hit tests work in.
+          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", display: "block" }}
         />
         <div
           ref={wrapperRef}

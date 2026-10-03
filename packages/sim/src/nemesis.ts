@@ -134,6 +134,10 @@ function scoreOf(character: Character, world: WorldState, player: Character | un
   const ambitions = character.ambitions.filter((ambition) => ambition.status === "active");
   if (ambitions.length > 0) { score += 1; reasons.push(`wants ${ambitions[0]!.label}`); }
   if (character.mind.drives.status >= 65) { score += 2; reasons.push("is driven by standing"); }
+  // A real vice makes a real antagonist: the honourable rival was the only
+  // kind the world had (docs/plans/a-living-world.md §6).
+  const vices = character.traits.filter((trait) => ["cruel", "treacherous", "deceitful", "vengeful", "envious", "wrathful", "paranoid"].includes(trait));
+  if (vices.length > 0) { score += 2 + vices.length; reasons.push(`is ${vices.join(" and ")}`); }
   if (character.mind.riskTolerance >= 60) { score += 1; reasons.push("will take a risk"); }
   // Deliberately no bonus for dishonesty. It used to be worth a point, which
   // quietly made deceit a qualification for the job and filled the role with

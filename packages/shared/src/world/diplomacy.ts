@@ -30,11 +30,29 @@ export const DiplomaticMessageKindSchema = z.enum([
   "warning",
   "protest",
   "congratulation",
+  /** "Let us discuss peace": accepted, it seats both sides at the peace table (`world/peace-table.ts`). */
+  "peace_talks",
 ]);
 export type DiplomaticMessageKind = z.infer<typeof DiplomaticMessageKindSchema>;
 
 export const DiplomaticAnswerSchema = z.enum(["accepted", "refused", "countered", "ignored"]);
 export type DiplomaticAnswer = z.infer<typeof DiplomaticAnswerSchema>;
+
+/** The question being negotiated, independent of the wording of a letter. */
+export const NegotiationProposalSchema = z.object({
+  issueKey: z.string().trim().min(1).max(100),
+  objective: z.string().trim().min(1).max(240),
+  question: z.string().trim().min(1).max(240),
+  positions: z.array(z.object({
+    issue: z.string().trim().min(1).max(100),
+    value: z.string().trim().min(1).max(240),
+  }).strict()).min(1).max(6),
+  reopening: z.object({
+    kind: z.enum(["new_event", "reminder", "rival_intervention"]),
+    reason: z.string().trim().min(1).max(240),
+  }).strict().optional(),
+}).strict();
+export type NegotiationProposal = z.infer<typeof NegotiationProposalSchema>;
 
 export const DiplomaticMessageSchema = z
   .object({
@@ -60,6 +78,11 @@ export const DiplomaticMessageSchema = z
     answeredAtStep: ElapsedStepSchema.nullable().default(null),
     /** Set when this message is itself a counter-offer to an earlier one. */
     inReplyToMessageId: EntityIdSchema.nullable().default(null),
+    negotiation: NegotiationProposalSchema.optional(),
+    /** Stable business and its original owner, kept across counteroffers. */
+    negotiationId: EntityIdSchema.optional(),
+    negotiationOwnerCharacterId: EntityIdSchema.optional(),
+    situationKey: z.string().max(120).optional(),
     visibility: VisibilitySchema.default("polity"),
     /**
      * What accepting it would make: the agreements it offers (`offeredAgreementKinds`).
@@ -76,7 +99,7 @@ export const DiplomaticMessageSchema = z
      * The terms it offers, as treaty clauses (`agreement_open`'s): checked
      * and carried out when it is accepted, not when it is written.
      */
-    clauses: z.array(z.record(z.string(), z.unknown())).max(6).optional(),
+    clauses: z.array(z.record(z.string(), z.unknown())).max(24).optional(),
     /**
      * What its sender does if it is refused or goes unanswered: an ultimatum's
      * threat. Rome sent Syracuse "if you are not with us you are against us"
@@ -107,6 +130,20 @@ export const DiplomaticMessageSchema = z
      * travelled, which were delivered the day they were sent.
      */
     deliveredOnDay: ElapsedStepSchema.nullable().optional(),
+    /**
+     * Written over the government's name by a man whose office does not make
+     * treaties. Accepted, it binds nothing until the chamber that makes them
+     * ratifies it -- as Rome's people threw out Catulus's first terms with
+     * Carthage in 241 and sent ten commissioners to write better ones.
+     */
+    withoutAuthority: z.boolean().optional(),
+    /** The ratification its acceptance waits on, and how it was accepted. */
+    ratification: z.object({
+      procedureId: EntityIdSchema,
+      agreementKind: PolityAgreementKindSchema,
+      boundPolityId: EntityIdSchema.nullable(),
+      status: z.enum(["waiting", "ratified", "refused"]),
+    }).strict().nullable().optional(),
   })
   .strict()
   .superRefine((message, context) => {
@@ -133,6 +170,33 @@ const MEANT_BY_KIND: Partial<Record<DiplomaticMessageKind, PolityAgreementKind>>
 export function offeredAgreementKinds(message: Pick<DiplomaticMessage, "kind" | "proposes">): readonly PolityAgreementKind[] {
   const meant = MEANT_BY_KIND[message.kind];
   return [...new Set([...(message.proposes ?? []), ...(meant === undefined ? [] : [meant])])];
+}
+
+/** Plain correspondence must not lose an explicit offer merely because it came from the tray. */
+export function peaceOfferMetadata(message: Pick<DiplomaticMessage, "kind" | "proposes" | "terms">): {
+  kind: DiplomaticMessageKind; proposes: PolityAgreementKind[];
+} {
+  const proposes = [...new Set(message.proposes ?? [])];
+  const terms = message.terms.replace(/\b(?:not|never|cannot|can't|won't|refuse to)\s+(?:\w+\s+){0,2}(?:offer|propose|seek|ask for|negotiate|discuss|surrender)\b/gi, "decline");
+  const offersPeace = message.kind === "peace_offer" || proposes.includes("peace")
+    || (message.kind === "letter" && (
+      /\b(?:offer|propose|seek|ask for|negotiate|discuss)\s+(?:(?:you|a|the)\s+)*peace\b/i.test(terms)
+      || /\b(?:peace|peace treaty)\s+(?:if|provided|in exchange|on condition)\b/i.test(terms)
+      || /\b(?:will|shall|offer to|offer(?: you)?(?: the)?)\s+surrender\b[\s\S]*\b(?:if|provided|in exchange|on condition)\b/i.test(terms)
+    ));
+  if (!offersPeace) return { kind: message.kind, proposes };
+  return { kind: message.kind === "letter" ? "peace_offer" : message.kind, proposes: [...new Set([...proposes, "peace" as const])] };
+}
+
+/** The last recorded rejection known through a renewed offer; never treat a pending counteroffer as rejected. */
+export function previousPeaceRejection(messages: readonly DiplomaticMessage[], offer: DiplomaticMessage): DiplomaticMessage | undefined {
+  if (!offeredAgreementKinds(peaceOfferMetadata(offer)).includes("peace")) return undefined;
+  return messages.filter((previous) => previous.fromPolityId === offer.toPolityId && previous.toPolityId === offer.fromPolityId
+    && (offer.toCharacterId === null || previous.fromCharacterId === offer.toCharacterId)
+    && previous.id !== offer.id && previous.answer === "refused" && previous.answeredAtStep !== null
+    && previous.answeredAtStep <= offer.sentAtStep
+    && offeredAgreementKinds(peaceOfferMetadata(previous)).includes("peace"))
+    .sort((a, b) => b.answeredAtStep! - a.answeredAtStep!)[0];
 }
 
 /** Whether the letter is in its reader's hands by that day, rather than still on the road. */
@@ -335,10 +399,11 @@ export function applyDiplomaticAnswerToStance(
  * was refused, when what it threatened war for was continued attack (R15).
  * Read from its words where the sender did not say.
  */
-export function threatWaitsOnAttack(message: Pick<DiplomaticMessage, "onRefusal" | "terms" | "subject">): boolean {
-  if (message.onRefusal === "war_if_attacked") return true;
-  if (message.onRefusal !== "war") return false;
-  return /\b(cease|stop|halt|end)\b[^.]{0,40}\b(hostilit|attack|fighting|raids?|war)|\bif (you|they|he|syracuse|carthage|[a-z]+) (continue|keep|attack|march|move|strike|resume)|\b(continue|continued|renewed|further) (hostilit|attacks?|aggression)/i.test(`${message.subject} ${message.terms}`);
+export function threatWaitsOnAttack(message: Pick<DiplomaticMessage, "onRefusal">): boolean {
+  // Read from what the letter threatens, never from its words: "cease or
+  // face war" written as "war" opened the war on the refusal, and guessed
+  // from the prose it waited on an attack nobody had named (E08).
+  return message.onRefusal === "war_if_attacked";
 }
 
 /**

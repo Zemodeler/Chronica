@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ElapsedStepSchema, EntityIdSchema } from "../material-state";
-import { GovernmentFormSchema, type GovernmentForm } from "../political-parts";
+import { CommandTenureSchema, GovernmentFormSchema, type GovernmentForm } from "../political-parts";
 
 /**
  * How a constitution came to be what it is.
@@ -27,6 +27,18 @@ export const ConstitutionChangeSchema = z
     summary: z.string().trim().min(1).max(400),
     /** Whoever brought it about, where somebody did. */
     byCharacterId: EntityIdSchema.nullable().default(null),
+    /**
+     * How it was done, kept so the record can say long after the question has
+     * closed. All absent on a change recorded before these were kept, which
+     * the reader says plainly rather than guessing at.
+     */
+    procedureId: EntityIdSchema.nullable().optional(),
+    /** The body that carried it, as it was called then: a chamber may since have been abolished. */
+    bodyName: z.string().trim().min(1).max(120).nullable().optional(),
+    /** How the vote stood, in voting weight. Absent where nobody voted: a decree, a seizure. */
+    vote: z.object({ yes: z.number().int().nonnegative(), no: z.number().int().nonnegative() }).strict().nullable().optional(),
+    /** Which way force was used, where it was. */
+    route: z.enum(["coup", "revolution", "imposition", "restoration"]).nullable().optional(),
   })
   .strict();
 export type ConstitutionChange = z.infer<typeof ConstitutionChangeSchema>;
@@ -51,6 +63,8 @@ export const ConstitutionSchema = z
     rulerOfficeId: EntityIdSchema.nullable(),
     /** The chamber that may change all this, where one may. Null: the ruler decrees it. */
     sovereignInstitutionId: EntityIdSchema.nullable(),
+    /** How long its commanders hold their armies (`CommandTenure`). Absent reads the form's default. */
+    commandTenure: CommandTenureSchema.optional(),
     history: z.array(ConstitutionChangeSchema).max(24).default([]),
   })
   .strict();

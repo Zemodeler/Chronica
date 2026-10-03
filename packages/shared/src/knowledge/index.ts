@@ -8,3 +8,4 @@ export * from "./explanations";
 export * from "./lookup";
 export * from "./war";
 export * from "./sight";
+export * from "./office-powers-text";

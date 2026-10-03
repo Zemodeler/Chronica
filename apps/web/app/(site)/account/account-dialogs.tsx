@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useFormStatus } from "react-dom";
 import Image from "next/image";
 import type { AccountDashboardViewModel } from "@chronica/shared";
-import type { LocalAiProviderConfiguration } from "@chronica/ai";
+import type { LocalAiProvider, LocalAiProviderConfiguration } from "@chronica/ai";
 import {
   attachEmail,
   createDeveloperGift,
@@ -130,6 +131,7 @@ export function AccountDashboard({
       {params.aiProvider === "updated" && <p id="ai-provider-status" className="notice acct-status">Local AI provider changed.</p>}
       {(params.aiProvider === "invalid" || params.aiProvider === "unavailable") && <p id="ai-provider-status" className="error acct-status">That local AI provider is not available.</p>}
       {params.aiProvider === "unauthorized" && <p id="ai-provider-status" className="error acct-status">Request a fresh sign-in link before changing the local AI provider.</p>}
+      {params.aiProvider === "connection_failed" && <p id="ai-provider-status" className="error acct-status">Could not connect to Codex. Check the sign-in window or server terminal, then try again.</p>}
       {params.email === "sent" && <p className="notice acct-status">Check your inbox for a verification link.</p>}
       {params.email === "invalid" && <p className="error acct-status">We could not send that verification email.</p>}
       {params.status === "deleted" && <p className="notice acct-status">The save and all of its game data were permanently deleted.</p>}
@@ -171,7 +173,7 @@ export function AccountDashboard({
         {canManageGifts && localAiProviderConfiguration?.available && (
           <div className="acct-ledger__dev">
             <dt>Local AI provider</dt>
-            <dd>{localAiProviderConfiguration.activeProvider === "openai" ? "OpenAI" : "Anthropic"}</dd>
+            <dd>{localAiProviderConfiguration.activeProvider === "codex" ? "Codex allowance" : localAiProviderConfiguration.activeProvider === "openai" ? "OpenAI API" : "Anthropic API"}</dd>
             <dd><button type="button" className="word-button" onClick={() => setOpenDialog("ai_provider")}>Switch</button></dd>
           </div>
         )}
@@ -468,11 +470,12 @@ function DeveloperDialog({ gifts, onClose }: { gifts: SerializedGift[]; onClose:
 
 function LocalAiProviderDialog({ configuration, onClose }: { configuration: LocalAiProviderConfiguration; onClose: () => void }) {
   const [provider, setProvider] = useState(configuration.activeProvider);
-  const models = provider === "openai" ? configuration.openAiModels : configuration.anthropicModels;
+  const providerModels = (value: LocalAiProvider) => value === "codex" ? configuration.codexModels : value === "openai" ? configuration.openAiModels : configuration.anthropicModels;
+  const models = providerModels(provider);
   const [model, setModel] = useState(configuration.activeModel);
 
-  const changeProvider = (nextProvider: "openai" | "anthropic") => {
-    const nextModels = nextProvider === "openai" ? configuration.openAiModels : configuration.anthropicModels;
+  const changeProvider = (nextProvider: LocalAiProvider) => {
+    const nextModels = providerModels(nextProvider);
     setProvider(nextProvider);
     setModel(nextModels[0] ?? "");
   };
@@ -482,29 +485,43 @@ function LocalAiProviderDialog({ configuration, onClose }: { configuration: Loca
       <DialogHeader title="Local AI provider" onClose={onClose} />
       <div className="dialog-body">
         <p className="dialog-lede">
-          Choose the AI provider used by this local development server. API keys stay in your local environment file and are never shown here.
+          Choose the AI used by every game on this local development server. Codex uses your ChatGPT allowance. API keys stay in your local environment file.
         </p>
         <form action={selectLocalAiProvider}>
           <fieldset>
-            <legend>Configured provider</legend>
+            <legend>Provider</legend>
+            <label>
+              <input type="radio" name="provider" value="codex" checked={provider === "codex"} onChange={() => changeProvider("codex")} />
+              Codex allowance
+            </label>
             <label>
               <input type="radio" name="provider" value="openai" checked={provider === "openai"} onChange={() => changeProvider("openai")} disabled={!configuration.openAiConfigured} />
-              OpenAI <code>OPENAI_API_KEY</code>{!configuration.openAiConfigured && " (not configured)"}
+              OpenAI API{!configuration.openAiConfigured && " (key not configured)"}
             </label>
             <label>
               <input type="radio" name="provider" value="anthropic" checked={provider === "anthropic"} onChange={() => changeProvider("anthropic")} disabled={!configuration.anthropicConfigured} />
-              Anthropic <code>ANTHROPIC_API_KEY</code>{!configuration.anthropicConfigured && " (not configured)"}
+              Anthropic API{!configuration.anthropicConfigured && " (key not configured)"}
             </label>
           </fieldset>
+          {provider === "codex" && <p>Codex installs automatically. Your existing CLI sign-in is reused, or a ChatGPT sign-in window opens. No API key is needed.</p>}
           <label htmlFor="local-ai-model">Model</label>
           <select id="local-ai-model" name="model" value={models.includes(model) ? model : models[0] ?? ""} onChange={(event) => setModel(event.target.value)}>
             {models.map((availableModel) => <option key={availableModel} value={availableModel}>{availableModel}</option>)}
           </select>
-          <button type="submit">Use selected provider</button>
+          <AiProviderSubmit />
         </form>
       </div>
     </>
   );
+}
+
+function AiProviderSubmit() {
+  const { pending, data } = useFormStatus();
+  const connecting = pending && data?.get("provider") === "codex";
+  return <>
+    <button type="submit" disabled={pending}>{connecting ? "Connecting to Codex…" : pending ? "Saving…" : "Use selected provider"}</button>
+    {connecting && <p role="status">Preparing Codex. Complete ChatGPT sign-in if a window opens; this page will update when ready.</p>}
+  </>;
 }
 
 type InventedWorkflowRow = {

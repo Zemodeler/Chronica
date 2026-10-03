@@ -95,6 +95,7 @@ export async function createGame(formData: FormData): Promise<never> {
       extraPrincipalsPerPlayer: 0,
     },
     coinCap: textValue(formData, "coinCap"),
+    difficulty: textValue(formData, "difficulty") || "normal",
   });
   if (!parsed.success) redirect("/games/new?status=invalid#status");
   let gameId: string;
@@ -190,7 +191,7 @@ export async function revokeDeveloperGift(formData: FormData): Promise<never> {
 
 export async function selectLocalAiProvider(formData: FormData): Promise<never> {
   const value = textValue(formData, "provider");
-  if (value !== "openai" && value !== "anthropic") redirect("/account?aiProvider=invalid#ai-provider-status");
+  if (value !== "openai" && value !== "anthropic" && value !== "codex") redirect("/account?aiProvider=invalid#ai-provider-status");
   const result = await selectDeveloperLocalAiConfiguration(await headers(), value, textValue(formData, "model"));
   redirect(`/account?aiProvider=${result}#ai-provider-status`);
 }

@@ -34,22 +34,12 @@ those. So:
   "local:<localId>". To refer to something that already exists, use the id shown in
   the world slice, exactly as written.
 - Never state an absolute date. Express time as a whole number of days from now.
-- Never compute running totals or balances. State the change; the engine applies it.
+- Never compute totals or balances: state the change.
 - Keep every amount in the same scale as the money already in the world. TREASURY
   shows what this world's sums actually look like; a measure worth eighty times
   the whole treasury is a misread of the units, not an ambitious policy.
-- Do not bank what has not been granted. Revenue from a measure still before a
-  council begins when the council carries it, not when it is proposed.
-- Every amount is a positive number. Direction is carried by the fields, not the
-  sign: money_transfer moves "amount" from "fromAccountRef" to "toAccountRef",
-  and a payment out of the world uses a null "toAccountRef".
-- Name every existing entity by the id shown in square brackets in the slice --
-  "marcus-purse", not "Marcus Atilius's purse".
-- A person who is not listed under PEOPLE does not exist yet, whatever you wish
-  to call them. To involve someone new, create them with "character_create" in
-  this same answer and refer to them everywhere else as "local:<their localId>".
-  Never invent a plausible-looking id such as "publius_scutarius" and then act
-  as though that person were already in the world.
+- Every amount is positive: direction is in the fields, and money leaving the
+  world has a null "toAccountRef".
 - Say what sort of person they are in "standing" -- "a merchant of Ostia", "a
   common soldier", "senatorial" -- and what they are worth in "wealth". The
   first bounds the second: a ranker does not have a senator's fortune, and a
@@ -67,8 +57,22 @@ principle it falls under.
    specific one does not. An order that cannot be met in full is attempted,
    with what it cost or lacked in "frictions". An order to keep going with
    something ACTIVE PROJECTS already lists is answered around it, not by
-   starting it again. List each thing the order asked in "intent.parts", with
-   the localIds of the facts that show it done, or "whyNot".
+   starting it again. List each thing the order asked in "intent.parts": its
+   acts by their place in "deltas", what it is for where no act of yours shows
+   it ("goals"), what it may spend, the
+   facts that show it done, or "whyNot". A spending vote must name an
+   "enacts.budget" with the public account, authorised amount and purpose; a
+   construction vote must name "enacts.project". Reuse an existing question
+   about the same work instead of starting a parallel deliberation. Preserve the FINAL destination and
+   quantities in goals; a staging shore does not replace the ordered arrival.
+   Conditional work uses "afterParts" (indices of prerequisite parts; where one is a letter, "whenAnswered" says how it must be answered -- "refused" for an "otherwise"), or
+   "whenForceExists" (a future force name), with its actions in "deferredActs"
+   instead of immediate "deltas". Routine officers handle it when ready.
+   A hiring contract and its company are one operation: "service_contract_open"
+   with "company" creates the hired ships and their pay. Never separately levy
+   ships as men, and never use the employer as his own hired captain.
+   Routine chamber positions need no individual speeches: use the existing
+   voting blocs; only pivotal leaders, opposition or vetoes need a voice.
 
 2. Every order is answered. Where an order achieves nothing -- a request
    refused, a journey that finds nobody, a bid that fails -- say so in a fact
@@ -79,7 +83,7 @@ principle it falls under.
    a treasury or a province that is somebody else's is carried out only if the
    one it depends on would do it anyway -- kin, a friend, a man who wanted it
    already -- and the engine decides that; otherwise it is refused in front of
-   everybody. An instruction to a person is a "delegation":
+   everybody. An instruction to a person is a "delegation", naming its "part":
    they answer in their own turn, and you never write their compliance. A
    person's own words, letters, opinions and what he pays for himself are his
    own business; a seat is taken only by whoever may fill it, or
@@ -125,8 +129,7 @@ principle it falls under.
    next step stays private with the same knownToRefs. News that travels is
    "delayed" or "rumoured" with "knowableInDays". Something already on record
    that somebody learns is a "discoveries" entry; something nobody wrote down
-   that somebody now believes -- or is deceived into believing -- is
-   "belief_set". A mission reports what it found, or has not finished.
+   that somebody now believes, true or not, is "belief_set". A mission reports what it found, or has not finished.
    "significance" runs from a routine payment near 0 to a battle or death 90+.
 
 8. Everything costs. POLITICAL STANDING, THE COUNCIL and THE COUNTRY are real
@@ -149,7 +152,8 @@ principle it falls under.
    count decides on its day: a man stands by a "nomination" naming the office.
    A measure says what it "enacts" (a work it pays for is its "project"),
    and does it only if carried; a treaty's
-   "clauses" are what it makes happen. One power speaks to another by
+   "clauses" are what it makes happen and all it binds -- a promise left in
+   a letter's prose binds nobody. One power speaks to another by
    letter, and the answer belongs to the power it was put to; a letter that
    offers an agreement names it in "proposes", and accepting it makes it; a
    war ends by terms offered ("peace_offer", "clauses") and accepted. An
@@ -177,16 +181,13 @@ principle it falls under.
    and what the plan rests on; casualties, rout, capture and ground are the
    engine's, and the fight goes on daily until a side is beaten ("hold" on
    "force_modify" stops an army attacking; a "manoeuvre" forces the issue;
-   "force_provision" feeds an army its country will not). An army's "battlePlan" is how it fights whoever attacks it, and
-   armies of one power fight each other only under different men. A plot against a person ("covert_plot_open") says who, whose hand,
+   "force_provision" feeds an army its country will not). An army's "battlePlan" is how it fights whoever attacks it. A plot against a person ("covert_plot_open") says who, whose hand,
    what is paid and the cover story -- never whether it works; a spy is its
    "espionage", and what he learns is the engine's report. A conditional
    plan is "contingency_arm", paid for, because the engine sizes a trap from
    what was spent; a condition whose consequence is a judgment is "stand_to".
-   A death somebody brings about is "character_death" -- the engine checks the
-   condemned is held, decides a duel, and allows a suicide only of the man
-   himself or one already undone; "character_state_set" can bring a man to
-   the edge and no further. Plunder comes from taking ground, beating armies and
+   A death somebody brings about is "character_death", and the engine decides
+   whether it can be. Plunder comes from taking ground, beating armies and
    raiding ("force_raid", from inside the province, never your own); never
    write it as a "money_transfer". Ground is taken ("province_control_set")
    where a power has an army or borders what it holds, and held loosely at
@@ -199,13 +200,18 @@ principle it falls under.
    have no recipient account -- they go to people -- and no account is ever on
    both sides of anything. An army paid from what it takes draws on its own war
    chest. Ordinary changes to an army -- name, commander, controller,
-   allegiance, drill, rations -- are "force_modify"; men joining are
-   "force_reinforce", keeping their own kind; "authorizedStrengthDelta" is
-   paper and puts no men anywhere. A city is not its province: it can be taken
+   allegiance, rations, "drilling" -- are "force_modify"; men joining are
+   "force_reinforce", keeping their own kind, and the engine draws them up in
+   their power's legions, alae or phalanx; "authorizedStrengthDelta" is
+   paper and puts no men anywhere. A new way of fighting is a "doctrine": one
+   army's on its commander's word ("force_modify"), a power's by law
+   ("enacts.military": recruits, kit, service, discharge, a body redrawn);
+   its effects are levers in bands, and the engine prices every gain. An
+   officer orders only his own formation ("formationRef"); a soldier's bearing
+   in the next battle is "force_membership_set" "conduct". A city is not its province: it can be taken
    or held under siege on its own, and is "sacked" only if stormed. A man hired
    -- a captain and his "company", a physician, an envoy, a tax farmer -- is
-   "service_contract_open": the engine pays him, and a man cured is treated by
-   someone named in "physicianRef". Pirates and brigands answer to no power:
+   "service_contract_open": the engine pays him. Pirates and brigands answer to no power:
    "outlaw", paid from a private purse.
 
 12. The world moves on its own. THE WORLD STIRS is the world acting beside

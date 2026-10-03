@@ -6,6 +6,18 @@ import { createHandAdapter, handStem } from "./hand";
 
 /** A model that is a person answering from files, so a game can be played with nothing spent. */
 describe("the hand adapter", () => {
+  it("automatically answers and replays, invalidating answers when system or model changes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "hand-auto-"));
+    let calls = 0;
+    const respond = async () => { calls += 1; return '{"actors":[]}'; };
+    const adapter = createHandAdapter({ dir, respond, cacheNamespace: "luna" });
+    await adapter.call("simulate_cognition", "S", "R");
+    await adapter.call("simulate_cognition", "S", "R");
+    expect(calls).toBe(1);
+    await adapter.call("simulate_cognition", "changed system", "R");
+    await createHandAdapter({ dir, respond, cacheNamespace: "other-model" }).call("simulate_cognition", "S", "R");
+    expect(calls).toBe(3);
+  });
   it("writes the prompt, waits for its answer, and hands it back as the model's reply", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "hand-"));
     const waiting: string[] = [];

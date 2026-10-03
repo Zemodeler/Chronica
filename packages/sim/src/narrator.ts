@@ -1,3 +1,4 @@
+import { readService, type ServiceReading } from "@chronica/shared";
 import {
   LOOSE_COHESION_BPS,
   adjacentTo,
@@ -255,6 +256,11 @@ const ARCHETYPES: readonly Archetype[] = [
     brief: (t, s) => `${person(t)} is suddenly placed to gain something: ${magnitude(s, "a small advantage", "an office, a command or a fortune within reach", "a chance at real power")}. ${PERSON_PROBLEM_TAIL}` },
   { kind: "person_problem", name: "illness", weight: 5, oneShot: true, secretTwelfths: 0,
     brief: (t, s) => `${person(t)} has fallen ill: ${magnitude(s, "a fever that will pass", "a sickness that keeps them from their duties", "an illness they may not survive")}. ${PERSON_PROBLEM_TAIL}` },
+  // Only for a man serving in an army's ranks, and only as one of his own
+  // troubles (`personalSeeds`): the life of the camp. Its brief is written
+  // there, where his officer's and his comrades' names are known.
+  { kind: "person_problem", name: "camp_incident", weight: 0, oneShot: true, secretTwelfths: 0,
+    brief: (t, s) => `In camp, ${person(t)} ${magnitude(s, "is caught up in a quarrel in his tent", "has drawn his centurion's eye, for good or ill", "is accused before the tribunes of sleeping on watch")}. ${PERSON_PROBLEM_TAIL}` },
   { kind: "person_problem", name: "family_obligation", weight: 5, oneShot: true, secretTwelfths: 0,
     brief: (t, s) => `A family matter has landed on ${person(t)}: ${magnitude(s, "a marriage to arrange", "a kinsman in disgrace or in debt", "a death that leaves them head of the house")}. ${PERSON_PROBLEM_TAIL}` },
 
@@ -302,7 +308,15 @@ const ARCHETYPES: readonly Archetype[] = [
         : `Create their captain with "character_create" and their ships with "force_create" under ${power(t)} -- raiders who hold no ground are not a country.`
     } Record their arrival as a public fact, and give them a "character_intent_set". Their arrival is news; their existence is not, and gets no fact of its own.` },
   { kind: "new_actor", name: "pretender", weight: 6, oneShot: false, secretTwelfths: 7, rival: true,
-    brief: (t, s) => `A claimant has appeared in ${place(t)}: ${magnitude(s, "an exile with a grievance and a few followers", "a pretender with money behind him", "a rival for the rule of the whole power")}. Create them with "character_create" under ${power(t)} -- a claimant wants the power that exists, not a new one, so do not found a country for them -- record their appearance as a fact, and plant what they mean to do with "character_intent_set". Their arrival is news; their existence is not.` },
+    brief: (t, s) => `A claimant has appeared in ${place(t)}: ${magnitude(s, "an exile with a grievance and a few followers", "a pretender with money behind him", "a rival for the rule of the whole power")}. Create them with "character_create" under ${power(t)} -- a claimant wants the power that exists, not a new one, so do not found a country for them -- with the traits of a man who would do it ("ambitious" and one of "treacherous", "cruel" or "deceitful"), record their appearance as a fact, and plant what they mean to do with "character_intent_set". Their arrival is news; their existence is not.` },
+  // Villains the age made (docs/plans/a-living-world.md §6): men of real vice,
+  // made with it, so the rules and the model alike play them as they are.
+  { kind: "new_actor", name: "warlord", weight: 6, oneShot: false, secretTwelfths: 0, rival: true,
+    brief: (t, s) => `A warlord has risen in ${place(t)}: ${magnitude(s, "a captain whose men follow him and not their government", "a commander with an army of his own who takes what he wants from the country", "a general strong enough to make himself master of the whole power")}. Create him with "character_create" under ${power(t)}, traits "ambitious" and "cruel", give him his men with "force_create", record what he has done as a public fact, and plant what he means to do next with "character_intent_set".` },
+  { kind: "person_problem", name: "corrupt_governor", weight: 6, oneShot: false, secretTwelfths: 6,
+    brief: (t, s) => `In ${place(t)} the man who governs or taxes for ${power(t)} is ${magnitude(s, "skimming what passes through his hands", "stripping the province and buying silence", "selling justice and the grain supply both")}. Create him with "character_create" if there is nobody fit, traits "greedy" and "deceitful"; move what he steals with "money_transfer" into his own purse, worsen the province with "province_material_shift", and record what the province knows as a fact. Whoever finds him out is not yours to decide.` },
+  { kind: "new_actor", name: "turncoat", weight: 5, oneShot: false, secretTwelfths: 8, needsAdversary: true,
+    brief: (t) => `A man of ${power(t)} in ${place(t)} is ready to sell it to ${other(t)}: a gate, a pass, a plan, a fleet's sailing day. Create him with "character_create" under ${power(t)}, traits "treacherous" and "greedy", plant his bargain with "character_intent_set" naming whom he will betray it to, and keep it secret: record it as a private fact known to him alone.` },
   // Nothing in this table has ever started a war, and it showed: a world ran
   // for years with exactly one war in it, between two British tribes, because
   // the only way one could open was a rebellion seceding. Conquest, battles and
@@ -358,28 +372,35 @@ function standingIn(world: WorldState, polityIds: readonly string[], provinceId:
  */
 export function livePressures(world: WorldState, pressures: readonly ScenarioHistoricalPressure[]): ScenarioHistoricalPressure[] {
   const spent = new Set(world.narrator.spentPressureIds);
+  return pressures.filter((pressure) => !spent.has(pressure.id) && pressureHolds(world, pressure, spent));
+}
+
+/**
+ * Whether the world still looks the way a pressure needs, whether or not the
+ * narrator has offered it yet: what the world AI reads as the age's lean on
+ * two powers (`statecraft.ts`), which does not stop pulling because a brief
+ * about it was once written and not taken up.
+ */
+export function pressureHolds(world: WorldState, pressure: ScenarioHistoricalPressure, spent: ReadonlySet<string> = new Set(world.narrator.spentPressureIds)): boolean {
   const exists = (polityId: string): boolean => world.map.polities.some((polity) => polity.id === polityId);
   const atWar = (a: string, b: string): boolean =>
     agreementsBetween(world.polityAgreements, a, b).some((agreement) => agreement.kind === "war" && agreement.status === "active");
 
-  return pressures.filter((pressure) => {
-    if (spent.has(pressure.id)) return false;
-    const when = pressure.when;
-    // A pressure that follows another waits for it. This is what makes a
-    // crisis a sequence: Messana asks for a protector, and only once it has
-    // asked is "and the other great power will not have it" a thing the age
-    // can reach for.
-    if (!when.afterPressureIds.every((id) => spent.has(id))) return false;
-    if (world.instant.day < when.notBeforeDay) return false;
-    if (when.notAfterDay !== null && world.instant.day > when.notAfterDay) return false;
-    if (!when.politiesExist.every(exists)) return false;
-    if (!when.atWar.every((pair) => atWar(pair.polityId, pair.otherPolityId))) return false;
-    if (when.atPeace.some((pair) => atWar(pair.polityId, pair.otherPolityId))) return false;
-    if (!when.forcesPresent.every((presence) => standingIn(world, presence.polityIds, presence.provinceId).length > 0)) return false;
-    return when.polityHolds.every((claim) =>
-      claim.provinceIds.every((provinceId) =>
-        world.map.provinces.some((province) => province.id === provinceId && province.controllerPolityId === claim.polityId)));
-  });
+  const when = pressure.when;
+  // A pressure that follows another waits for it. This is what makes a
+  // crisis a sequence: Messana asks for a protector, and only once it has
+  // asked is "and the other great power will not have it" a thing the age
+  // can reach for.
+  if (!when.afterPressureIds.every((id) => spent.has(id))) return false;
+  if (world.instant.day < when.notBeforeDay) return false;
+  if (when.notAfterDay !== null && world.instant.day > when.notAfterDay) return false;
+  if (!when.politiesExist.every(exists)) return false;
+  if (!when.atWar.every((pair) => atWar(pair.polityId, pair.otherPolityId))) return false;
+  if (when.atPeace.some((pair) => atWar(pair.polityId, pair.otherPolityId))) return false;
+  if (!when.forcesPresent.every((presence) => standingIn(world, presence.polityIds, presence.provinceId).length > 0)) return false;
+  return when.polityHolds.every((claim) =>
+    claim.provinceIds.every((provinceId) =>
+      world.map.provinces.some((province) => province.id === provinceId && province.controllerPolityId === claim.polityId)));
 }
 
 // ── The decision ─────────────────────────────────────────────────────────────
@@ -406,11 +427,16 @@ function chooseSeverity(comfort: number, gameId: string, seedCount: number): See
 }
 
 function chooseArchetype(input: NarratorInput, tension: TensionReading, seedCount: number): Archetype | null {
-  const atWar = input.ownPolityId !== null && input.world.conflicts.wars.some((war) => war.polityAId === input.ownPolityId || war.polityBId === input.ownPolityId);
+  // The ruler's own war damps new enemies at home, and only there. Read for
+  // the whole world, Rome's war with Rhegium halved every war seed from Iberia
+  // to Bactria for a year: a power abroad is weighed where the seed lands,
+  // by `chooseAdversary`, which never offers an enemy it is already fighting.
+  const home = landsAtHome(tension.comfort, input.gameId, seedCount);
+  const atWar = home && input.ownPolityId !== null && input.world.conflicts.wars.some((war) => war.polityAId === input.ownPolityId || war.polityBId === input.ownPolityId);
   // Past half the ceiling only incidents that run their course; past the
   // ceiling itself, still those. A world following twelve threads is a busy
   // world, not a world where the harvest stops coming in.
-  const eligible = ARCHETYPES.filter((archetype) => tension.openThreads < THREAD_CEILING / 2 || archetype.oneShot);
+  const eligible = ARCHETYPES.filter((archetype) => archetype.name !== "camp_incident" && (tension.openThreads < THREAD_CEILING / 2 || archetype.oneShot));
   if (eligible.length === 0) return null;
   const weighted = eligible.map((archetype) => {
     let weight = archetype.weight;
@@ -656,7 +682,14 @@ export function decideNarratorSeeds(input: NarratorInput): NarratorSeed[] {
   // The player's own troubles, beside the country's: measured on him, and
   // landing on him and the people around him. Taken out of the same count, so
   // a season is no busier than it was.
-  const personal = input.playerCharacterId === null ? [] : personalSeeds(input, ledger.seedCount + wanted, Math.max(1, Math.round(wanted / 3)));
+  //
+  // A third of the count, not at least one: two seeds a month with one
+  // always his made half of everything that stirred a grain merchant's
+  // private trouble, and the world he lived in got the other half. The
+  // fraction is a roll, so a quiet season still sometimes brings him one.
+  const share = wanted / 3;
+  const personalCount = Math.floor(share) + (stableChoice([input.gameId, "narrator", "personal-count", ledger.seedCount], 12) < Math.round((share % 1) * 12) ? 1 : 0);
+  const personal = input.playerCharacterId === null || personalCount === 0 ? [] : personalSeeds(input, ledger.seedCount + wanted, personalCount);
   for (let index = 0; index < wanted - personal.length; index += 1) {
     // Only the first carries the repeat: a batch of six re-offered whole
     // because one of them went unread would be the same month twice.
@@ -738,6 +771,25 @@ const PERSONAL_ARCHETYPES = new Set(["debt", "rivalry", "opportunity", "illness"
 /** And what can befall the ground he lives off. */
 const ESTATE_ARCHETYPES = new Set(["fire", "market"]);
 
+/**
+ * What befalls a man in camp, with the names of the men it befalls him among:
+ * his officer, his tentmates. The worst of it is the charge Polybius says a
+ * sentry most feared -- asleep on watch -- whose punishment could be death.
+ */
+function campBrief(player: { readonly name: string }, playerId: string, serving: ServiceReading, severity: SeedSeverity): string {
+  const who = `${player.name} [${playerId}]`;
+  const officer = serving.officers[0];
+  const comrade = serving.comrades[0];
+  const officerName = officer === undefined ? "his centurion" : `${officer.name} [${officer.id}], his ${officer.rank}`;
+  const comradeName = comrade === undefined ? "a man of his tent" : `${comrade.name} [${comrade.id}], who shares his tent`;
+  const what = severity === "minor"
+    ? `${who} is caught up in a quarrel with ${comradeName} -- over a debt at dice, a share of the rations, a slight -- in ${serving.unitLabel ?? "his unit"} of ${serving.bodyLabel}.`
+    : severity === "serious"
+      ? `${who} has drawn the eye of ${officerName}: picked for a hard duty -- a foraging party into enemy country, the night watch on the rampart, the first rank of a working party -- or singled out for favour or for a grudge.`
+      : `${who} is accused before the tribunes of ${serving.bodyLabel} of sleeping on watch. The army punishes it with the fustuarium, the beating by his own comrades that few survive. Whether he is guilty, who speaks for him and how it ends is yours to decide; ${officerName} and ${comradeName} are there.`;
+  return `${what} Use "social_events" between the men named, "character_pressure_set" on him, and record what has happened as a fact naming them. Do not decide what he does about it.`;
+}
+
 function personalSeeds(input: NarratorInput, firstOrdinal: number, count: number): NarratorSeed[] {
   const { world } = input;
   const playerId = input.playerCharacterId!;
@@ -751,7 +803,11 @@ function personalSeeds(input: NarratorInput, firstOrdinal: number, count: number
   ])].filter((id) => world.map.provinces.some((province) => province.id === id));
   const provinceName = (id: string | null): string | null => (id === null ? null : world.map.provinces.find((province) => province.id === id)?.name ?? id);
   const polityName = (id: string | null): string | null => (id === null ? null : world.map.polities.find((polity) => polity.id === id)?.name ?? id);
-  const archetypes = ARCHETYPES.filter((archetype) => PERSONAL_ARCHETYPES.has(archetype.name) || ESTATE_ARCHETYPES.has(archetype.name));
+  // A man in the ranks lives in a camp, and most of what befalls him befalls him there.
+  const serving = readService(world, playerId);
+  const archetypes = ARCHETYPES
+    .filter((archetype) => PERSONAL_ARCHETYPES.has(archetype.name) || ESTATE_ARCHETYPES.has(archetype.name) || (serving !== null && archetype.name === "camp_incident"))
+    .map((archetype) => (archetype.name === "camp_incident" ? { ...archetype, weight: 14 } : archetype));
   const total = archetypes.reduce((sum, archetype) => sum + archetype.weight, 0);
 
   const seeds: NarratorSeed[] = [];
@@ -796,9 +852,14 @@ function personalSeeds(input: NarratorInput, firstOrdinal: number, count: number
       target = { ...target, provinceId: plotter.locationProvinceId, provinceName: provinceName(plotter.locationProvinceId), polityId: plotter.polityId, polityName: polityName(plotter.polityId), characterId: plotter.id, characterName: plotter.name };
     }
     // A conspiracy in his circle is aimed at him, not at the government.
+    if (archetype.name === "camp_incident" && serving !== null) {
+      target = { ...target, characterId: playerId, characterName: player.name, provinceId: player.locationProvinceId, provinceName: provinceName(player.locationProvinceId), forceId: serving.forceId, forceName: serving.forceName };
+    }
     const brief = archetype.name === "conspiracy" && target.characterId !== playerId
       ? `${target.characterName} [${target.characterId}] has begun something against ${player.name} [${playerId}], and means to keep it hidden. Decide what. Plant what drives them with "character_intent_set" (private), a "character_pressure_set" or a "belief_set", and record what they have already done as a private fact known to them alone. Do not carry out their acts for them.`
-      : archetype.brief(target, severity);
+      : archetype.name === "camp_incident" && serving !== null
+        ? campBrief(player, playerId, serving, severity)
+        : archetype.brief(target, severity);
     seeds.push({
       key: `seed-p-${stableHash([input.gameId, "narrator", "personal", ordinal]).toString(36)}`,
       kind: archetype.kind,
@@ -937,7 +998,9 @@ function seedAt(input: NarratorInput, tension: TensionReading, seedCount: number
     target,
     inPlayerRealm,
     repeated,
-    why: `The world has been quiet ${inPlayerRealm ? "at home" : "there"} for a while: ${tension.summary}.`,
+    // Read for the power it lands on: "the treasury is full, there is a war
+    // on" was Rome's condition, told of an omen on the Caspian steppe.
+    why: `The world has been quiet ${inPlayerRealm ? "at home" : "there"} for a while: ${inPlayerRealm || target.polityId === null ? tension.summary : readTension(world, target.polityId).summary}.`,
     brief: archetype.brief(target, severity),
     pressureId: null,
   };

@@ -82,16 +82,17 @@
   .desk__date { color: var(--dust); font-size: var(--step--1); }
 
   /* What the orders are doing: a ruled list, a stalled one set off in the seal. */
-  .under-way { display: grid; gap: .5rem; }
-  .under-way h3 { color: var(--dust); font-size: var(--step-0); font-style: italic; font-weight: 400; }
-  .under-way ul { display: grid; margin: 0; padding: 0; list-style: none; }
-  .under-way li { display: grid; gap: .1rem; padding: .55rem 0; border-bottom: 1px solid var(--rule); }
-  .under-way li:first-child { padding-top: 0; }
-  .under-way li:last-child { border-bottom: 0; }
-  .under-way strong { display: flex; align-items: baseline; gap: .45rem; color: var(--vellum); font: 500 var(--step-1)/1.3 var(--font-serif); }
-  .under-way strong .seal-dot { align-self: center; flex: none; }
-  .under-way span { color: var(--dust); }
-  .under-way li.is-stalled > span { color: var(--vellum); }
+  .desk__latest { margin: 0; color: var(--dust); }
+  .desk__kicker { font-style: italic; }
+  .desk__latest .word-button { font: 500 var(--step-0)/1.3 var(--font-serif); }
+  .under-way { margin: 0; color: var(--dust); }
+  .under-way__list { display: grid; margin: 0; padding: 0; list-style: none; }
+  .under-way__list li { display: grid; gap: .1rem; padding: .4rem 0; border-bottom: 1px solid var(--rule); }
+  .under-way__list li:last-child { border-bottom: 0; }
+  .under-way__list strong { display: flex; align-items: baseline; gap: .45rem; font-weight: 600; }
+  .under-way__list strong .seal-dot { align-self: center; flex: none; }
+  .under-way__list li > span { color: var(--fg-muted); font-size: var(--step--1); }
+  .under-way .seal-dot { vertical-align: .1em; }
 
   /* The order: writing on a wax tablet in a bronze frame. */
   .tablet {
@@ -271,10 +272,8 @@
   .books__side h3 { color: var(--ink-faded); font: italic 400 var(--step-0) var(--font-serif); }
   .books__side h3 em { font-style: normal; }
   .books__out td { color: var(--ink-faded); }
-  .books__arrears { padding-left: .9rem; border-left: 2px solid var(--seal); font: italic 400 var(--step-0) var(--font-serif); }
   .books__pressure { color: var(--ink-faded); font: italic 400 var(--step-0) var(--font-serif); }
   .books__pressure.is-hard { padding-left: .9rem; border-left: 2px solid var(--seal); color: var(--ink); }
-  .books__projection { color: var(--ink-faded); font: italic 400 var(--step-0) var(--font-serif); }
   .books__list li { display: grid; gap: .1rem; }
   .books__list strong { font: 500 var(--step-1)/1.3 var(--font-serif); }
   .books__list s { text-decoration-color: var(--seal); text-decoration-thickness: 1.5px; }
@@ -306,7 +305,6 @@
   .muster__summary { justify-self: start; color: var(--ink-faded); font-variant-numeric: lining-nums tabular-nums; }
   .muster__name:hover .muster__title { text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: .2em; }
   .muster__name:focus-visible { outline: 2px solid var(--lamp); outline-offset: 2px; }
-  .muster__force.is-open .muster__summary { display: none; }
   .muster__details { display: grid; gap: .25rem; padding-top: .25rem; }
   .muster__commander { color: var(--ink-faded); font-style: italic; font-family: var(--font-serif); }
   .muster__strength { font-size: var(--step-1); font-variant-numeric: lining-nums tabular-nums; }
@@ -315,6 +313,26 @@
   .muster__change { color: var(--ink-faded); font: italic 400 var(--step-0) var(--font-serif); }
   .muster__change.is-new { color: var(--ink); }
   .muster__change.is-new::before { content: ""; display: inline-block; width: .5rem; height: .5rem; margin-right: .5rem; border-radius: 50%; background: var(--lamp); box-shadow: 0 0 0 1px var(--bronze-deep); vertical-align: .1em; }
+
+  /* An army's make: its formations, its doctrines, the order to drill. */
+  .muster__make { display: grid; gap: .4rem; padding: .35rem 0 .2rem; }
+  .muster__bodies { font: 400 var(--step-0)/1.45 var(--font-serif); }
+  .muster__formations { display: grid; gap: .35rem; margin: 0; padding: 0; list-style: none; }
+  .muster__formations li { display: grid; gap: .05rem; padding-left: .75rem; border-left: 1px solid var(--rule); }
+  .muster__formations strong { font: 500 var(--step-0) var(--font-serif); }
+  .muster__formations span { color: var(--ink-faded); font-variant-numeric: lining-nums tabular-nums; }
+  .muster__formations em { color: var(--ink-faded); font: italic 400 var(--step--1) var(--font-serif); }
+  .muster__doctrines { font: 400 var(--step-0)/1.45 var(--font-serif); }
+  .muster__drill { font-size: var(--step--1); }
+
+  /* ─── A man's place in the ranks ───────────────────────────────────── */
+  .service { display: grid; gap: .9rem; }
+  .service__place { font: 400 var(--step-1)/1.45 var(--font-serif); }
+  .service__place strong { font-weight: 500; }
+  .service section { display: grid; gap: .3rem; }
+  .service h3 { font: 500 var(--step-0) var(--font-serif); color: var(--ink-faded); letter-spacing: .02em; }
+  .service__people ul { display: grid; gap: .2rem; margin: 0; padding: 0; list-style: none; font-family: var(--font-serif); }
+  .service__record p { font-variant-numeric: lining-nums tabular-nums; }
 
   /* ─── The seal case ────────────────────────────────────────────────── */
   .standing__section ul { display: grid; gap: .7rem; margin: 0; padding: 0; list-style: none; }
@@ -338,12 +356,14 @@
     background: var(--seal);
     vertical-align: .12em;
   }
-  .standing__offices li { display: grid; grid-template-columns: 10rem 1fr minmax(9rem, 16rem); align-items: baseline; gap: 1rem; padding: .3rem 0; border-bottom: 1px solid var(--rule); }
-  .standing__offices li.is-yours strong { color: var(--seal); }
-  .standing__offices li:last-child { border-bottom: 0; }
-  .standing__offices span { color: var(--ink-faded); font-family: var(--font-serif); font-style: italic; }
-  .standing__offices strong { font: 500 var(--step-0) var(--font-serif); }
-  .standing__offices em { color: var(--ink-faded); font-size: var(--step--1); font-style: normal; text-align: right; }
+  .office-ledger { display: grid; gap: 1.4rem; max-width: 40rem; }
+  .office-ledger__group h3 { margin-bottom: .6rem; font: 400 var(--step-1)/1.25 var(--font-serif); }
+  .office-ledger__group ul { list-style: none; margin: 0; padding: 0; }
+  .office-ledger__group li { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; padding: .55rem .35rem; border-top: 1px solid var(--rule); }
+  .office-ledger__name { font: 500 var(--step-0)/1.3 var(--font-serif); }
+  .is-yours > .office-ledger__name { color: var(--seal); }
+  .office-ledger__name small { margin-left: .6rem; color: var(--seal); font: 500 var(--step--1) var(--font-sans); }
+  .office-ledger__meta { color: var(--ink-faded); font: 400 var(--step--1)/1.4 var(--font-sans); text-align: right; }
 
   /* ─── Treaties: the powers on the left, one power's dossier on the right ─ */
   .treaties { display: grid; grid-template-columns: minmax(14rem, 17rem) minmax(0, 1fr); gap: 1.6rem; align-items: start; }
@@ -353,10 +373,6 @@
   .treaties__group--war h3 { color: var(--seal); }
   .treaties__count { color: var(--ink-faded); }
   .treaties__group ul { display: grid; margin: 0; padding: 0; list-style: none; }
-  details.treaties__group > summary { list-style: none; cursor: pointer; }
-  details.treaties__group > summary::-webkit-details-marker { display: none; }
-  details.treaties__group > summary h3::after { content: " ▸"; }
-  details.treaties__group[open] > summary h3::after { content: " ▾"; }
 
   /* A power: its name, the government's word for it, the kinds between you. */
   .treaty-card {
@@ -389,8 +405,8 @@
   .treaty-card__name:hover { text-decoration: underline; text-decoration-color: var(--bronze-deep); text-underline-offset: .2em; }
   .treaty-card__name:focus-visible { outline: 1px solid var(--edge); outline-offset: 2px; }
   .treaty-card__regard { align-self: baseline; color: var(--ink-faded); font: italic 400 var(--step--1) var(--font-serif); }
-  .treaty-card__kinds { grid-column: 1 / -1; color: var(--ink-faded); font: 400 var(--step--1)/1.4 var(--font-sans); }
-  .treaty-card__soon { color: var(--seal); font-style: normal; }
+  .treaties__more { display: flex; flex-wrap: wrap; gap: .3rem 1rem; margin: 0; color: var(--ink-faded); font: 400 var(--step--1) var(--font-caps); text-transform: lowercase; letter-spacing: .05em; }
+  .treaties__list { display: grid; gap: .25rem; margin: 0; padding: 0; list-style: none; }
 
   .treaties__between { gap: .3rem; }
   .treaties__between li { display: grid; gap: 0; padding: .3rem 0 .3rem .7rem; border-left: 2px solid transparent; font-size: var(--step--1); }
@@ -421,7 +437,6 @@
   .treaty-line__head > .tip-term:first-child { color: var(--ink); font: 500 var(--step-1) var(--font-serif); }
   .treaty-line.is-war .treaty-line__head > .tip-term:first-child { color: var(--seal); }
   .treaty-line__summary { font: 500 var(--step-0) var(--font-serif); }
-  .treaty-line__terms { margin: 0; padding-left: .9rem; border-left: 2px solid var(--papyrus-shade); font: italic 400 1.05rem/1.5 var(--font-serif); }
   .treaty-line__sides, .treaty-line__source { color: var(--ink-faded); font: 400 var(--step-0)/1.45 var(--font-serif); }
 
   /* ─── The mirror ───────────────────────────────────────────────────── */
@@ -465,56 +480,10 @@
   .mirror__story .word-button { justify-self: start; text-align: left; }
   .mirror__facts { display: grid; grid-template-columns: auto 1fr; gap: .35rem 1.25rem; }
   .mirror__facts dt { color: var(--ink-faded); font-style: italic; font-family: var(--font-serif); }
+  .mirror__list li.is-dead strong { color: var(--ink-faded); font-style: italic; }
 
-  .money-graph { display: grid; gap: .25rem; color: var(--bronze-deep); }
-  .money-graph canvas { display: block; width: 100%; height: 84px; }
-  .money-graph span { color: var(--ink-faded); font-size: var(--step--1); }
 
-  .mirror__tabs { display: flex; gap: 1.25rem; border-bottom: 1px solid var(--rule); }
-  .mirror__tabs button {
-    min-height: 0;
-    padding: .4rem 0;
-    border: 0;
-    border-bottom: 1.5px solid transparent;
-    border-radius: 0;
-    background: none;
-    box-shadow: none;
-    color: var(--ink-faded);
-    font: 400 var(--step-0) var(--font-sans);
-  }
-  .mirror__tabs button[aria-selected="true"], .mirror__tabs button[aria-pressed="true"] { border-bottom-color: var(--bronze-deep); color: var(--ink); }
-  .mirror__toggle { display: flex; justify-content: flex-end; gap: 1rem; }
-  .mirror__toggle button { min-height: 0; padding: 0; border: 0; background: none; box-shadow: none; color: var(--ink-faded); font-size: var(--step--1); text-decoration: underline; text-decoration-color: transparent; text-underline-offset: .2em; }
-  .mirror__toggle button[aria-pressed="true"] { color: var(--ink); text-decoration-color: var(--bronze-deep); }
 
-  /* The family tree, drawn in ink. */
-  .family-tree-diagram { display: grid; min-width: max-content; padding: .5rem .2rem; overflow-x: auto; }
-  .family-tree-generation { position: relative; display: flex; justify-content: center; gap: .7rem; padding: 1rem .35rem; }
-  .family-tree-generation--parents::after, .family-tree-generation--focus::after { content: ""; position: absolute; bottom: 0; left: 50%; width: 1px; height: 1rem; background: var(--ink-faded); }
-  .family-tree-generation--focus::before { content: ""; position: absolute; top: 0; left: 18%; right: 18%; height: 1px; background: var(--ink-faded); }
-  .family-tree-generation--focus > .family-tree-node::before { content: ""; position: absolute; top: -1rem; left: 50%; width: 1px; height: 1rem; background: var(--ink-faded); }
-  .family-tree-generation--children::before { content: ""; position: absolute; top: 0; left: 50%; width: 1px; height: 1rem; background: var(--ink-faded); }
-  .family-tree-generation--children > .family-tree-node::before { content: ""; position: absolute; top: 0; left: 50%; width: 1px; height: .85rem; background: var(--ink-faded); }
-  .family-tree-node {
-    position: relative;
-    display: grid;
-    gap: .1rem;
-    min-width: 7.4rem;
-    max-width: 9rem;
-    padding: .5rem .6rem;
-    border: 1px solid var(--rule);
-    background: rgb(255 255 255 / 26%);
-    text-align: center;
-  }
-  .family-tree-node strong { overflow: hidden; font: 500 var(--step-0) var(--font-serif); text-overflow: ellipsis; white-space: nowrap; }
-  .family-tree-node span { color: var(--ink-faded); font-size: var(--step--1); line-height: 1.25; }
-  .family-tree-node--self { border-color: var(--bronze-deep); box-shadow: inset 0 0 0 1px var(--bronze-deep); }
-  /* The dead stay in the family, set back a little rather than struck out. */
-  .family-tree-node.is-dead { border-style: dashed; background: transparent; }
-  .family-tree-node.is-dead strong, .mirror__list li.is-dead strong { color: var(--ink-faded); font-style: italic; }
-  .family-tree-relatives { margin-top: .7rem; padding-top: .75rem; border-top: 1px dashed var(--rule); }
-  .family-tree-relatives > p { margin-bottom: .45rem; color: var(--ink-faded); font: italic 400 var(--step-0) var(--font-serif); text-align: center; }
-  .family-tree-relatives > div { display: flex; flex-wrap: wrap; justify-content: center; gap: .6rem; }
 
   /* ─── Letters ──────────────────────────────────────────────────────── */
   .sheet--wide { --sheet-width: 58rem; }
@@ -615,4 +584,109 @@
   /* Ask after: names with notes behind them, and what each is. */
   .letters__asked { display: flex; justify-content: space-between; gap: .8rem; padding: .3rem .1rem; }
   .letters__asked > span { color: var(--ink-faded); font-style: italic; font-size: var(--step--1); }
+}
+
+@layer surfaces {
+  .office-insights { font-variant-numeric: tabular-nums; }
+  .office-insights__lines { display: grid; gap: .9rem; padding-inline-start: 1.25rem; }
+  .office-insights__lines li > p { margin-block: .3rem 0; }
+  .office-insights__detail { font-size: var(--step-0); line-height: 1.5; }
+  .office-insights__reports { display: grid; gap: 1.2rem; }
+  .office-insights h4 { margin-block: .2rem .4rem; }
+  .office-insights__departure + .office-insights__departure { margin-top: .8rem; }
+  .office-insights__reports section + section { margin-top: 1.5rem; }
+  .tip .office-insights h3 { font-size: var(--step-0); margin-block: .5rem; }
+  .tip:has(.office-insights) { max-height: calc(100dvh - 2rem); overflow-y: auto; scrollbar-color: var(--bronze) var(--umber); }
+
+  /* A register: a list of things, one line each until opened (registry.tsx). */
+  .registry { display: grid; margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--rule); }
+  .registry__row { border-bottom: 1px solid var(--rule); }
+  .registry__head { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 1rem; row-gap: .15rem; justify-items: stretch; width: 100%; min-height: 0; padding: .75rem .35rem; border: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--fg); text-align: left; }
+  .registry__head:hover { background: var(--papyrus-shade); }
+  .registry__head:focus-visible { outline: 2px solid var(--seal); outline-offset: -2px; }
+  .registry__title { display: flex; align-items: baseline; gap: .5rem; min-width: 0; font: 500 var(--step-0)/1.35 var(--font-serif); }
+  .registry__title .seal-dot { align-self: center; flex: none; }
+  .registry__meta { align-self: baseline; color: var(--fg-muted); font: 400 var(--step--1)/1.35 var(--font-sans); text-align: right; font-variant-numeric: oldstyle-nums; }
+  .registry__sentence { grid-column: 1 / -1; color: var(--fg-muted); font: 400 var(--step--1)/1.45 var(--font-sans); }
+  .registry__row.is-marked > .registry__head { box-shadow: inset 2px 0 0 var(--seal); }
+  .registry__row.is-yours .registry__title { color: var(--seal); }
+  .registry__detail { display: grid; gap: .7rem; padding: .2rem .35rem 1rem; }
+  .registry__facts { display: grid; gap: .55rem; margin: 0; }
+  .registry__fact { display: grid; grid-template-columns: minmax(7rem, 9rem) minmax(0, 1fr); gap: .15rem 1rem; }
+  .registry__fact dt { color: var(--fg-muted); font: 400 var(--step--1)/1.5 var(--font-sans); }
+  .registry__fact dd { margin: 0; overflow-wrap: anywhere; }
+  .registry__line { display: block; }
+  .registry__line + .registry__line { margin-top: .25rem; }
+  .registry__post.is-vacant strong { color: var(--seal); }
+  .registry__post.is-vacant strong::after { content: " — vacant"; font-weight: 400; }
+  .registry__post.is-unnamed { font-style: italic; }
+  .registry__finding.is-found { padding-left: .6rem; border-left: 2px solid var(--seal); }
+  .registry__finding.is-rumour { font-style: italic; color: var(--fg-muted); }
+  .registry__line.is-stalled { padding-left: .6rem; border-left: 2px solid var(--seal); }
+  .registry__unknown { display: grid; gap: .3rem; margin: 0; padding: 0; list-style: none; color: var(--fg-muted); font: italic 400 var(--step--1)/1.45 var(--font-serif); }
+  .registry__beyond { margin-top: .9rem; color: var(--fg-muted); font: italic 400 var(--step-0)/1.5 var(--font-serif); }
+  .registry__actions { display: flex; flex-wrap: wrap; gap: .6rem; }
+  .registry__link { justify-self: start; padding: 0; min-height: 0; border: 0; border-radius: 0; background: none; box-shadow: none; color: var(--seal); font: inherit; text-decoration: underline; text-underline-offset: .2em; }
+  .registry__switch { display: inline-flex; gap: .4rem; margin-bottom: 1rem; }
+  .registry__switch button { display: inline-flex; align-items: baseline; gap: .45rem; min-height: 0; padding: .35rem .8rem; border: 1px solid var(--rule); border-radius: 999px; background: transparent; box-shadow: none; color: var(--fg); font: 400 var(--step--1)/1.3 var(--font-sans); }
+  .registry__switch button[aria-pressed="true"] { border-color: var(--seal); color: var(--seal); }
+  .registry__switch small { color: var(--fg-muted); }
+  .standing-orders { display: grid; gap: .5rem; margin-top: 1.1rem; }
+  .standing-orders h3 { color: var(--dust); font-size: var(--step-0); font-style: italic; font-weight: 400; }
+  .standing-orders h3 small { margin-left: .6rem; font: 400 var(--step--1) var(--font-sans); font-style: normal; }
+  .standing-orders .registry__head:hover { background: rgb(230 217 190 / 8%); }
+  .administration .registry { margin-bottom: 1.2rem; }
+}
+
+@layer surfaces {
+  .orders-register__row { padding-block: 1.1rem; border-bottom: 1px solid var(--rule); }
+  .orders-register__row:first-child { padding-top: .3rem; }
+  .orders-register__row:last-child { border-bottom: 0; }
+  .orders-register__head { display: flex; align-items: baseline; gap: 1.5rem; justify-content: space-between; margin-bottom: .6rem; }
+  .orders-register__head h3 { font: 500 var(--step-1) var(--font-serif); }
+  .orders-register__status { flex: none; color: var(--fg-muted); font-size: var(--step--1); }
+  .orders-register__status.is-stalled { color: var(--seal); }
+  .orders-register__row p { margin: .4rem 0 .65rem; }
+  .orders-register__detail { display: grid; justify-items: start; gap: .5rem; margin-top: .9rem; }
+  .agenda-panel .tip__kicker, .agenda-panel > .tip__title { display: none; }
+  .agenda-panel .tip__card > .tip__title { display: none; }
+  .agenda-panel .matters { max-height: none; overflow: visible; }
+  .desk__draft { margin-block: .5rem; font-size: var(--step--1); }
+  .office-room-status { position: absolute; z-index: 4; bottom: 1.4rem; left: 1.5rem; display: grid; gap: .4rem; padding: .6rem .9rem; background: var(--umber); color: var(--vellum); border: 1px solid var(--bronze); }
+  .office-room-status p { margin: 0; font-size: var(--step--1); }
+}
+
+/* ─── The peace table (peace-table-sheet.tsx) ─────────────────────────── */
+@layer surfaces {
+  .peace-table { display: grid; gap: 1.25rem; }
+  .peace-table__table { display: grid; gap: .9rem; padding-bottom: 1rem; border-bottom: 1px solid var(--rule); }
+  .peace-table__table:last-of-type { border-bottom: 0; }
+  .peace-table__watching { font-style: italic; }
+  .peace-table__said { padding: .45rem .7rem; border-left: 3px solid var(--bronze-deep); background: color-mix(in srgb, var(--papyrus-shade) 70%, transparent); font-family: var(--font-serif); color: var(--ink); }
+  .peace-table__said.is-error { border-left-color: var(--seal); }
+  .peace-table__standing { display: flex; align-items: center; gap: .75rem; color: var(--ink-faded); font-family: var(--font-serif); }
+  .peace-table__budget { color: var(--ink-faded); font-family: var(--font-serif); }
+  .peace-table__budget strong, .peace-table__total strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .peace-scale { position: relative; display: inline-block; flex: 0 0 9rem; width: 9rem; height: .5rem; border: 1px solid var(--rule); border-radius: 999px; background: color-mix(in srgb, var(--papyrus-shade) 60%, transparent); overflow: hidden; }
+  .peace-scale__fill { position: absolute; top: 0; bottom: 0; }
+  .peace-scale__fill.is-ours { background: var(--bronze-deep); }
+  .peace-scale__fill.is-theirs { background: var(--seal); }
+  .peace-scale__mid { position: absolute; top: -1px; bottom: -1px; left: 50%; width: 1px; background: var(--ink-faded); }
+  .peace-table__demand ul, .peace-table__bribes, .peace-table__sessions { margin: .25rem 0 .6rem; padding-left: 1.1rem; font-family: var(--font-serif); color: var(--ink); }
+  .peace-table__group { border: 0; padding: 0; margin: 0 0 .65rem; }
+  .peace-table__group legend { font-family: var(--font-caps); font-size: .78rem; letter-spacing: .06em; color: var(--ink-faded); margin-bottom: .25rem; }
+  .peace-term { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .55rem; align-items: baseline; padding: .18rem 0; cursor: pointer; font-family: var(--font-serif); color: var(--ink); }
+  .peace-term input { accent-color: var(--bronze-deep); }
+  .peace-term__price { font-variant-numeric: tabular-nums; color: var(--ink-faded); }
+  .peace-table__total { font-family: var(--font-serif); color: var(--ink-faded); margin: .3rem 0 .6rem; }
+  .peace-table__total.is-over { color: var(--seal); }
+  .peace-table__bribe-row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+  .peace-table__bribe-row select { min-width: 14rem; }
+  .peace-table__bribe-row input { width: 6rem; font-variant-numeric: tabular-nums; }
+  .peace-table__sessions li { margin-bottom: .45rem; }
+  .peace-table__sessions li.is-theirs { color: var(--umber); }
+  .peace-table__answer { color: var(--ink-faded); font-style: italic; }
+  .peace-table__wars { list-style: none; padding: 0; margin: .25rem 0; display: grid; gap: .4rem; }
+  .peace-table__wars li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: .75rem; align-items: center; font-family: var(--font-serif); color: var(--ink); }
+  .peace-table__leave { justify-self: start; color: var(--seal); }
 }

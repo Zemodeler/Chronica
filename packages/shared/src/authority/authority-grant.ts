@@ -133,6 +133,7 @@ export const DOMAIN_POWER_BY_ACTION: Readonly<Record<string, AuthorityPower>> = 
   // highest power there is, and an office that has not been given it breaches.
   province_control_set: "command",
   settlement_control_set: "command",
+  capital_set: "override",
   polity_create: "override",
   // Nobody's office grants taking the state; the attempt is judged as the override it is.
   regime_change: "override",

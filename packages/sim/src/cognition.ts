@@ -1,6 +1,8 @@
 import { z } from "zod";
 import {
   CognitionOutputSchema,
+  ORDER_PART_STATUS_LABEL,
+  orderPartStatus,
   LEVERS,
   STANDARD_LEVERS,
   readDepartments,
@@ -43,6 +45,8 @@ import { kindsIn, readLeniently } from "./bare-refs";
 import type { SimModelPort } from "./ports";
 import { ruleInWords } from "./mechanics/mechanic-words";
 import { describePlans } from "./plans";
+import { describeDiplomaticBusiness } from "./negotiation-business";
+import { describeNeighbourhood } from "./board";
 
 /**
  * NPC cognition (VISION §28).
@@ -75,6 +79,9 @@ function shownSchema(): string {
   if (proposal?.properties !== undefined) delete proposal.properties.narrativeSummary;
   if (proposal?.required !== undefined) proposal.required = proposal.required.filter((key) => key !== "narrativeSummary");
   if (actor?.required !== undefined) actor.required = actor.required.filter((key) => key !== "reasoning");
+  // A person hands on no part of an order: parts are the orchestrator's.
+  const delegation = (proposal?.properties?.delegations as { items?: { properties?: Record<string, unknown> } } | undefined)?.items;
+  if (delegation?.properties !== undefined) delete delegation.properties.part;
   return JSON.stringify(schema);
 }
 
@@ -150,7 +157,7 @@ export function foldStrayProposalKeys(value: unknown): unknown {
     drain(actor, proposal);
     // A plan is the person's, not an act of the proposal, and the proposal is
     // strict: written one level down it would cost the whole answer.
-    for (const key of ["plan", "stepsTaken"] as const) {
+    for (const key of ["plan", "serves"] as const) {
       if (proposal[key] !== undefined && actor[key] === undefined) actor[key] = proposal[key];
       delete proposal[key];
     }
@@ -202,28 +209,36 @@ export const COGNITION_SYSTEM_PROMPT = `You are several people in a historical w
 
 You will be given one section per person. Each section contains only what that
 person currently knows. Treat it as the whole of their knowledge: if something is
-not in their section, they have not heard it, and they must not act on it. Two
-people in this batch may hold contradictory beliefs, and both are right to act on
-their own.
+not in their section, they have not heard it, and they must not act on it.
 
-For each person, decide what they actually do now — if anything. Most people, most
-of the time, do nothing of consequence, and "nothing" is a real answer: leave them
-out of "actors" altogether. An entry saying nobody did anything costs as much to
-write as one that did something, and changes nothing.
+For each person, decide what they actually do now. Nobody is here by accident, and
+"nothing" is an answer only when it is a choice: leave them out of "actors" when
+their business truly waits. Where a section says what lies open to them, take one,
+do better, or decline it knowing what they decline. Play people as they are: the
+ambitious reach, the cruel are cruel, the faithless break faith when it pays.
 
-That is the answer for someone reacting to news. It is rarely the answer for
+That is also an answer for someone whose business is waiting on a real dependency.
+Do not invent activity to fill a round. It is otherwise rarely the answer for
 someone whose section says nobody has brought them news: they are in the batch
 because they have a war to press, a promise to keep, a city to hold or a rival to
 manage, and a month of their own is not nothing. Move their business on by a step
 they could actually take from where they stand -- an act the world takes: an
 army moved or engaged, a letter sent, money spent, a man hired, a question put
 to a chamber -- with the fact that says it happened beside it. Reviewing,
-maintaining, reaffirming and waiting for reports change nothing; an answer of
-only those is "nothing", and a step is not done by it. They are not waiting for the ruler; they do not know
+maintaining and reaffirming change nothing; an answer of
+only those is "nothing", and a step is not done by it. Waiting on a courier,
+reply or vote is legitimate: leave the actor out until it arrives or its deadline
+expires, and make the plan depend on that exact letter ("letter_answered", with
+"messageId") or question, with "afterConditionDays" for the time to act after
+the reply arrives. Never count another version of an outstanding request
+as progress. Each actor carries their own responsibility forward: a negotiator
+settles terms, a commander prepares or moves troops, a treasury officer funds the
+work. Shared government aims do not require everyone to negotiate them. They are not waiting for the ruler; they do not know
 what the ruler is doing. Business that will take months is a plan: give it in
 "plan" as up to four steps in order, each an act of that kind, with the days
-by which it should be done and, if it must wait for something, "when". A step
-they carry out in this answer goes in "stepsTaken" by its id, and so does a promise they keep; one shown as
+by which it should be done and, if it must wait for something, "when". What an act
+is for goes in "serves": the step's, order's or promise's id, and the act's place in "deltas"; only
+an act that changes the world counts. A step shown as
 missed means the plan has fallen behind, and they carry on late, lay it again,
 or give it up. What their government means to do is somebody's to carry out,
 and if it is theirs -- their office, their army -- it is their plan.
@@ -254,9 +269,7 @@ The same engine rules apply as elsewhere:
 - A fact is something that happened, never a condition that obtains and never
   something expected. "Holding the province rather than advancing" is a posture,
   "is expected to answer" is a diary entry: neither happened. If nothing
-  happened, write no fact. Say what was done, never what was not: "without
-  conceding allegiance", "made no pledge", "ordered no attack" are not things
-  anybody did.
+  happened, write no fact. Say what was done, never what was not ("made no pledge").
 - Someone who sets out to find something out, and succeeds, records it in
   "discoveries" -- the fact already existed; what changed is that they now know
   it. Someone who sets out to deceive uses "belief_set" on the person they are
@@ -264,23 +277,35 @@ The same engine rules apply as elsewhere:
 - An army can only fight what it is standing next to. To attack, step it into
   the enemy's province with "force_modify" and engage in the same answer; if
   the enemy is further off, send it there with "force_modify" anyway -- it sets
-  out, and arrives when the road has been walked. An engagement between two
-  provinces is refused, and the attack simply does not happen.
+  out, and arrives when the road has been walked.
 - Two powers at peace do not fight. Declaring the war is a decision somebody
   takes, with "agreement_open"; an engagement without it is refused. A war
   ends by terms one side offers ("peace_offer", its "clauses") and the other
   accepts; the side the war has gone for may dictate them.
+  For diplomatic business, include "negotiation": its stable "issueKey",
+  "objective", the unresolved "question", and "positions" as issue/value pairs.
+  Reuse the issueKey already shown for this business. Positions are actual terms
+  (payment, territory, notice period, guarantees), not paraphrases of the title.
+  Read the diplomatic history: do not re-offer agreed terms or resend pending
+  offers. Changed terms may reopen bargaining. An unchanged position needs
+  "reopening": "new_event" with a concrete changed circumstance, "reminder" after
+  the reply deadline and at least 30 days, or "rival_intervention" when a different
+  person deliberately challenges the existing negotiator. Link it with
+  "inReplyToRef". If there is no next decision, wait or pursue other duties.
+  Peace negotiations always use "diplomatic_message_send" with kind
+  "peace_offer", proposes ["peace"], and structured treaty "clauses" for
+  surrender, cession, payments or undertakings; terms left in prose bind nobody. A peace counteroffer replaces
+  the proposed terms; do not copy clauses the other side rejected. If you reject
+  an offer and send another, explicitly say which terms you rejected and why,
+  and link the new offer to it with "inReplyToRef". Sending an offer ends no war.
 - Ground taken is said with "province_control_set", and only for a province you
   have an army standing in or one next to ground your power already holds. A
   walled city is besieged with "siege_lay" by an army standing in its province;
-  the engine starves it and says when it falls.
+  the engine starves it and says when it falls, or "assault" storms it now.
 - Someone who raises a province against its ruler and holds it has founded a
   country: "polity_create", taking the ground from the power it breaks from.
-  Riots are not a country, and neither is a claimant who wants the throne that
-  already exists.
 - Water is crossed in ships. An army at a strait needs a fleet of its own power
-  standing with it, and the fleet crosses with it. Ships and armies do not give
-  battle to each other.
+  standing with it, and the fleet crosses with it.
 - You do not decide who wins. Propose the engagement; the casualties, the rout
   and the ground are the engine's, and final.
 - At a death, a victory, an oath, a refusal somebody will remember, a speech
@@ -637,7 +662,7 @@ function describeWars(character: Character, world: WorldState): string[] {
  */
 function describeGround(character: Character, world: WorldState): string[] {
   if (character.polityId === null) return [];
-  const held = world.map.provinces.filter((province) => province.controllerPolityId === character.polityId);
+  const held = world.map.provinces.filter((province) => province.controllerPolityId === character.polityId || province.settlements.some((city) => city.controllerPolityId === character.polityId));
   if (held.length === 0) return ["Their power holds no ground at all: its cities and country are in other hands."];
   if (held.length > 4) return [];
   return [`Their power holds only ${held.map((province) => placeOf(world, province.id)).join(", ")}.`];
@@ -778,11 +803,17 @@ export function renderCharacterPortrait(
         ...outlook.intentions.map((intention) => `  - it means to ${intention}`),
       );
     }
+    // A ruler sees his neighbourhood: who is across his borders, how strong,
+    // where their armies stand and what lies between them. Ptolemy was asked
+    // three times in a year and shown none of it, and sensibly did nothing.
+    if (character.polityId !== null && readDepartments(world).rulers(character.polityId).some((ruler) => ruler.id === characterId)) {
+      lines.push(...describeNeighbourhood(world, character.polityId));
+    }
   }
   if (options.impetus !== undefined) {
     lines.push(
       options.impetus.ownBusiness
-        ? `Nobody has brought them news. They are here because of their own affairs: ${options.impetus.why}. What do they do about them now?`
+        ? `They are here because of their own affairs: ${options.impetus.why}. What do they do about them now?`
         : `Why they are paying attention: ${options.impetus.why}.`,
     );
   }
@@ -835,9 +866,13 @@ export function renderCharacterPortrait(
   const taken = world.orderAttempts.filter((attempt) => attempt.recipientRef.id === characterId && attempt.status === "accepted");
   if (taken.length > 0) {
     lines.push("Orders they have taken on and not finished (do the work: it is theirs now):", ...taken.map((attempt) => {
-      const work = world.orders.flatMap((order) => order.parts).find((part) => part.workRefs.some((ref) => ref.kind === "order_attempt" && ref.id === attempt.id));
-      const done = work === undefined ? 0 : work.workRefs.filter((ref) => ref.kind !== "order_attempt").length;
-      return `  - [${attempt.id}] "${attempt.instruction}"${done === 0 ? " -- nothing done about it yet" : ` -- ${done} piece(s) of work set going`}`;
+      // Where the part it serves stands, read from the world: "allowed, not
+      // yet carried out" is what the legate who accepted the transport and
+      // got the Senate's money needed to hear, and never did.
+      const part = world.orders.flatMap((order) => order.parts).find((candidate) => candidate.workRefs.some((ref) => ref.kind === "order_attempt" && ref.id === attempt.id));
+      const done = part === undefined ? 0 : part.workRefs.filter((ref) => ref.kind !== "order_attempt").length;
+      const stands = part === undefined || done === 0 ? "nothing done about it yet" : ORDER_PART_STATUS_LABEL[orderPartStatus(world, part, { without: { kind: "order_attempt", id: attempt.id } })];
+      return `  - [${attempt.id}] "${attempt.instruction}" -- ${stands}`;
     }));
   }
 
@@ -889,6 +924,7 @@ export function renderCharacterPortrait(
       (message.toCharacterId === characterId || (message.toCharacterId === null && character?.polityId != null && message.toPolityId === character.polityId)),
   );
   const enemyPowers = new Set(character?.polityId == null ? [] : enemiesOf(world.polityAgreements, character.polityId));
+  lines.push(...describeDiplomaticBusiness(world, characterId));
   if (letters.length > 0) {
     lines.push(
       "Letters awaiting their answer:",

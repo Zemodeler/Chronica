@@ -99,12 +99,12 @@ export async function withPlayerWorld<T>(
    */
   const db = getSharedDatabase(requiredDatabaseUrl());
   {
-    const [player] = await db
+    const [players, view] = await Promise.all([db
       .select({ id: schema.players.id, characterId: schema.players.characterId })
       .from(schema.players)
       .where(and(eq(schema.players.gameId, gameId), eq(schema.players.userId, userId), eq(schema.players.status, "active")))
-      .limit(1);
-    const view = await getWorldView(db, gameId);
+      .limit(1), getWorldView(db, gameId)]);
+    const [player] = players;
     if (view === undefined) return null;
 
     const characterId = player?.characterId ?? null;

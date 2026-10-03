@@ -44,6 +44,8 @@ export const GeoJsonSettlementPropertiesSchema = z.object({
   name: z.string().trim().min(1).max(120),
   provinceId: EntityIdSchema,
   type: SettlementTypeSchema,
+  /** Research provenance; a modeled town is a gameplay abstraction. */
+  historicalBasis: z.enum(["historical-capital", "historical-settlement", "league-seat", "city-state-seat", "modeled-seat", "modeled-town"]).optional(),
 }).strict();
 
 export const RiverClassSchema = z.enum(["minor", "major", "navigable"]);

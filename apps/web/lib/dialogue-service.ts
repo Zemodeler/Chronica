@@ -340,7 +340,7 @@ async function proposeAndPersistSocialEvents(
           actionKind: draft.commitmentProposal.actionKind,
           promisedResult: draft.commitmentProposal.promisedResult,
           conditions: draft.commitmentProposal.conditions,
-          rationale: "",
+          when: null,
           promisorCharacterId: npcCharacterId,
           beneficiaryCharacterId: playerCharacterId,
           requiredOfficeId: null,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useWindowState } from "./window-workspace";
 
 /**
  * Ribbons in a ledger: a document with more than one section to turn to.
@@ -17,13 +18,24 @@ export interface TabSection {
   readonly content: ReactNode;
 }
 
-export function Tabs({ label, sections }: { readonly label: string; readonly sections: readonly TabSection[] }) {
+export function Tabs({ label, sections, initial, selected, onSelect }: {
+  readonly label: string;
+  readonly sections: readonly TabSection[];
+  /** The ribbon to open on, where the player was sent to a particular one. */
+  readonly initial?: string | undefined;
+  /** Set to let the caller move the ribbons too: a link in one page that turns to another. */
+  readonly selected?: string | undefined;
+  readonly onSelect?: ((id: string) => void) | undefined;
+}) {
   const base = useId();
-  const [chosen, setChosen] = useState<string | null>(null);
+  const [remembered, setRemembered] = useWindowState<string | null>(`tabs:${label}`, null);
+  const [own, setOwn] = useState<string | null>(initial ?? remembered);
+  const chosen = selected ?? own;
+  const setChosen = (id: string) => { setOwn(id); setRemembered(id); onSelect?.(id); };
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
   if (sections.length === 0) return null;
   if (sections.length === 1) return <>{sections[0]!.content}</>;
-  const current = sections.find((section) => section.id === chosen) ?? sections[0]!;
+  const current = sections.find((section) => section.id === (chosen ?? remembered)) ?? sections[0]!;
 
   const onKey = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
     const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;

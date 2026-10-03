@@ -212,21 +212,28 @@ function TipNote({ tip, level, register, trail, onBack }: {
     try { element.showPopover(); } catch { /* already shown, or no popover support: it still renders in place */ }
     // Below the word, or above it where there is no room below; never off
     // the side of the window.
-    const at = tip.anchor.getBoundingClientRect();
-    const { offsetWidth: width, offsetHeight: height } = element;
-    let top: number;
-    let left: number;
-    if (tip.beside === true && at.right + 8 + width <= window.innerWidth - 8) {
-      left = at.right + 8;
-      top = Math.min(Math.max(8, at.top - 8), window.innerHeight - height - 8);
-    } else {
-      const below = at.bottom + 6;
-      top = below + height > window.innerHeight - 8 ? Math.max(8, at.top - 6 - height) : below;
-      left = Math.min(Math.max(8, at.left - 12), window.innerWidth - width - 8);
-    }
-    element.style.top = `${top}px`;
-    element.style.left = `${left}px`;
+    const place = () => {
+      const at = tip.anchor.getBoundingClientRect();
+      const { offsetWidth: width, offsetHeight: height } = element;
+      let top: number;
+      let left: number;
+      if (tip.beside === true && at.right + 8 + width <= window.innerWidth - 8) {
+        left = at.right + 8;
+        top = Math.max(8, Math.min(Math.max(8, at.top - 8), window.innerHeight - height - 8));
+      } else {
+        const below = at.bottom + 6;
+        top = below + height > window.innerHeight - 8 ? Math.max(8, at.top - 6 - height) : below;
+        left = Math.min(Math.max(8, at.left - 12), window.innerWidth - width - 8);
+      }
+      element.style.top = `${top}px`;
+      element.style.left = `${left}px`;
+    };
+    place();
+    // A record can expand within its note. Keep the expanded note on screen.
+    const resize = new ResizeObserver(place);
+    resize.observe(element);
     return () => {
+      resize.disconnect();
       register(tip.id, null);
       try { element.hidePopover(); } catch { /* gone already */ }
     };

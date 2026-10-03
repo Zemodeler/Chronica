@@ -1,4 +1,5 @@
 import {
+  polityLever,
   DEFAULT_STRUCTURE_EFFECTS,
   aptitude,
   readDepartments,
@@ -120,6 +121,19 @@ export function provinceTargetsFrom(world: WorldState): Map<string, ProvinceTarg
         if (effect.quantity === "manpower") sum.manpower += effectWorth.manpowerShift(effect);
         sums.set(provinceId, sum);
       }
+    }
+  }
+  // Whom a power calls to its armies (`manpower_basis`): the head count
+  // enrolled, the natives taken into the phalanx. More of its people are men
+  // it may levy, so its provinces fill their rolls to a higher mark.
+  const context = { establishments: world.establishments, doctrines: world.doctrines, today: world.elapsedStep };
+  const calling = new Map(world.establishments.map((establishment) => [establishment.polityId, polityLever(context, establishment.polityId, "manpower_basis")]));
+  if ([...calling.values()].some((value) => value !== 0)) {
+    for (const province of world.map.provinces) {
+      const shift = province.controllerPolityId === null ? 0 : calling.get(province.controllerPolityId) ?? 0;
+      if (shift === 0) continue;
+      const sum = sums.get(province.id) ?? { stability: 0, food: 0, productive: 0, manpower: 0 };
+      sums.set(province.id, { ...sum, manpower: sum.manpower + shift });
     }
   }
   const clamp = (value: number, max: number) => Math.max(-max, Math.min(max, value));

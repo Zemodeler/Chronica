@@ -114,8 +114,8 @@ describe("Rome and Carthage as the world opens", () => {
 
   it("have their treasuries worked by the quaestors and the officers of the accounts, old hands both", () => {
     expect(reader.holding(ROME, "tax_roll").department?.name).toBe("The Treasury of Saturn");
-    // Four quaestors nobody named, and two hundred years of the work.
-    expect(reader.skill(ROME, "tax_roll")).toBe(60);
+    // Four named quaestors (v37), stewards every one, and two hundred years of the work.
+    expect(reader.skill(ROME, "tax_roll")).toBe(83);
     expect(reader.holding({ kind: "polity", id: "carthage" }, "tax_roll").department?.name).toBe("The Office of the Accounts");
   });
 

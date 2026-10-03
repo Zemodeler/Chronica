@@ -17,6 +17,12 @@
 // Usage:
 //   npm run play -- [--dir eval-out/hand-played] [--bursts 2] [--span 30]
 //     [--as gaius-genucius] [--order "<an order; none means waiting>"] [--focused 3] [--ambient 4] [--wait]
+//     [--declare "<role>" --name "<name>"]   play a newly declared Roman instead, as --as
+//
+// With --declare, the player is a new person declared into the opening world
+// the way the web declares one (`materializePlayerCharacter`): "a legionary of
+// the hastati", "a centurion", "a military tribune". The report then says,
+// after each burst, where he stands in his army and what his army is made of.
 //
 // In <dir>: system-<op>.txt is each operation's system prompt, written once;
 // <op>-<hash>.prompt.txt is a call waiting for its answer, <op>-<hash>.json
@@ -25,9 +31,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createHandAdapter } from "@chronica/ai";
-import { punicWarsScenario } from "@chronica/db";
-import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, formatWorldDate, ordersUnderWay, type Fact, type WorldState } from "@chronica/shared";
-import { DEFAULT_BUDGET, orderOutcomeLines, runSimulationBurst, type PendingEvent, type PlanTally, type SimModelPort } from "@chronica/sim";
+import { PUNIC_IDS, punicWarsScenario } from "@chronica/db";
+import { CharacterKnowledgebaseSchema, ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, formatWorldDate, materializePlayerCharacter, ordersUnderWay, type Fact, type WorldState } from "@chronica/shared";
+import { DEFAULT_BUDGET, armyInWords, orderOutcomeLines, runSimulationBurst, serviceInWords, type PendingEvent, type PlanTally, type SimModelPort } from "@chronica/sim";
 
 const args = process.argv.slice(2);
 const option = (name: string, fallback: string): string => {
@@ -47,6 +53,26 @@ mkdirSync(dir, { recursive: true });
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 let world: WorldState = ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
+const declaredRole = args.includes("--declare") ? option("declare", "") : null;
+if (declaredRole !== null) {
+  const rome = world.material.forces.find((force) => force.id === "roman-field-army")?.locationId ?? PUNIC_IDS.rome;
+  world = materializePlayerCharacter(world, player, CharacterKnowledgebaseSchema.parse({
+    version: 1, characterId: player, gameId: "hand-played", canonicalName: option("name", "Titus Vettius"),
+    nickname: null, birthYearApprox: -296, deathYearApprox: null, origin: "invented", period: "270 BCE",
+    locationProvinceId: rome, culture: "Roman", faith: null,
+    biography: "A farmer's son of the Sabine hills, levied for the year.", notableEvents: [],
+    role: declaredRole, authority: [], socioEconomicClass: "Plebeian", startingMoney: 40,
+    skills: { martial: 45, intrigue: 20, learning: 15, piety: 40, stewardship: 20, diplomacy: 20, body: 60, subSkills: {} },
+    skillRationale: {},
+    relations: [
+      { name: "Vettia", relationship: "mother", historical: false, notes: "Keeps the farm.", kind: "person", category: "family", familyRole: "parent" },
+      { name: "Gnaeus Vettius", relationship: "brother", historical: false, notes: "Too young for the levy.", kind: "person", category: "family", familyRole: "sibling" },
+      { name: "Aulus", relationship: "friend", historical: false, notes: "From the next farm.", kind: "person", category: "other", familyRole: null },
+      { name: "Publius", relationship: "creditor", historical: false, notes: "Lent him for his kit.", kind: "person", category: "other", familyRole: null },
+    ],
+    confirmedByPlayer: true, confirmationDraft: null,
+  }), definition.government);
+}
 const polity = world.characters.find((character) => character.id === player)?.polityId ?? null;
 
 let call = 0;
@@ -84,6 +110,10 @@ for (let index = 0; index < bursts; index += 1) {
   const result = await runSimulationBurst({
     world, clock: definition.clock, offices: definition.government.offices, successionRules: definition.government.successionRules, warfare: definition.warfare,
     terrains: definition.map.terrains, burstId: `hand-${index}`, gameId: "hand-played",
+    // As the web passes them (`apps/web/lib/burst-runner.ts`). Left out, nobody
+    // aged, died or was born in any hand run, and the age's pressures never
+    // reached the narrator: the observer's "no deaths, no births" was this.
+    life: definition.life, wealth: definition.wealth, historicalPressures: definition.historicalPressures,
     actorRef: { kind: "character", id: player }, actorPolityId: polity,
     orderText, spanDays, knownFacts, queue, port, budget,
   });
@@ -107,6 +137,14 @@ for (let index = 0; index < bursts; index += 1) {
   // What each part of the order came to, and what the Council would show.
   if (result.orderRecordId !== null) for (const line of orderOutcomeLines(world, result.orderRecordId)) say(`  order: ${line}`);
   for (const item of ordersUnderWay(world, player, definition.government.offices, definition.clock)) say(`  under way${item.stalled ? " (stalled)" : ""}: ${item.label} -- ${item.detail}`);
+  // Where he stands, and what the armies he answers for are made of.
+  const me = world.characters.find((character) => character.id === player);
+  const placed = me === undefined ? null : serviceInWords(world, me);
+  if (placed !== null) say(`  in the ranks: ${placed}`);
+  for (const force of world.material.forces.filter((candidate) => candidate.commanderCharacterId === player || candidate.memberCharacterIds.includes(player))) {
+    const make = armyInWords(world, force);
+    if (make !== null) say(`  army: ${force.name} -- ${make}`);
+  }
   console.log(report.slice(printedFrom).join("\n"));
 }
 

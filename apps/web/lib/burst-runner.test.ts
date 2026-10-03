@@ -25,6 +25,9 @@ describe("the burst's deadline", () => {
     expect(burstDeadlineMs({ CHRONICA_AI_MODE: "hand" })).toBeNull();
     expect(burstDeadlineMs({ CHRONICA_AI_MODE: "hand", CHRONICA_BURST_DEADLINE_MS: "60000" })).toBe(60_000);
     expect(burstDeadlineMs({ CHRONICA_BURST_DEADLINE_MS: "0" })).toBeNull();
+    expect(burstDeadlineMs({}, true)).toBeNull();
+    expect(burstDeadlineMs({ CHRONICA_AI_MODE: "hand" }, false)).toBe(BURST_DEADLINE_MS);
+    expect(burstDeadlineMs({ CHRONICA_BURST_DEADLINE_MS: "60000" }, true)).toBe(60_000);
   });
 });
 

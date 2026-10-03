@@ -90,6 +90,11 @@ export const OrderAttemptSchema = z
     decidedAtStep: ElapsedStepSchema.nullable().default(null),
     /** Facts (legitimacy adjustment, discoverable evidence) recording the fallout of a refusal/subversion. */
     consequenceFactRefs: z.array(z.string().max(120)).max(8).default([]),
+    /**
+     * The part of the order it hands on (`orderPartRef`), so what its holder
+     * does for it joins that part by the id, not by what his words resemble.
+     */
+    servesRef: z.string().max(140).nullable().default(null),
   })
   .strict()
   .superRefine((attempt, context) => {
@@ -110,7 +115,7 @@ export type OrderAttempt = z.infer<typeof OrderAttemptSchema>;
  * `WorldState` dependency; these operate on a single `OrderAttempt` value.
  */
 
-export function issueOrderAttempt(input: Omit<OrderAttempt, "status" | "decidedAtStep" | "recipientDecisionReason" | "consequenceFactRefs">): OrderAttempt {
+export function issueOrderAttempt(input: Omit<OrderAttempt, "status" | "decidedAtStep" | "recipientDecisionReason" | "consequenceFactRefs" | "servesRef"> & { readonly servesRef?: string | null }): OrderAttempt {
   return OrderAttemptSchema.parse({ ...input, status: "issued", decidedAtStep: null, recipientDecisionReason: null, consequenceFactRefs: [] });
 }
 

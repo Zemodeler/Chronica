@@ -115,10 +115,10 @@ describe("a promise kept", () => {
 
   it("is kept when the man himself says so in an answer that changed the world, and not otherwise", () => {
     const start = promised(opening());
-    expect(statusOf(claimPromisesKept(start, HIERON, ["promise-hieron-grain"], false))).toBe("pending");
+    expect(statusOf(claimPromisesKept(start, HIERON, []))).toBe("pending");
     // Only his own promise: the consul cannot claim Hieron's for him.
-    expect(statusOf(claimPromisesKept(start, CONSUL, ["promise-hieron-grain"], true))).toBe("pending");
-    const claimed = claimPromisesKept(start, HIERON, ["promise-hieron-grain"], true);
+    expect(statusOf(claimPromisesKept(start, CONSUL, ["promise-hieron-grain"]))).toBe("pending");
+    const claimed = claimPromisesKept(start, HIERON, ["promise-hieron-grain"]);
     expect(statusOf(claimed)).toBe("prepared");
     expect(statusOf(keepPromises({ world: claimed, toDay: start.elapsedStep + 1, playerCharacterId: CONSUL }).world)).toBe("fulfilled");
   });

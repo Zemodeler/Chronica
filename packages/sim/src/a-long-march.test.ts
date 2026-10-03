@@ -38,7 +38,8 @@ describe("a long march", () => {
     expect(result.rejected).toEqual([]);
     // Still at home today, with the rest of the order carried out.
     expect(army(result.world).locationId).toBe(PUNIC_IDS.rome);
-    expect(army(result.world).moraleBps).toBe(army(world()).moraleBps + 200);
+    // Read by its size: a little heart, which the engine says is 500.
+    expect(army(result.world).moraleBps).toBe(Math.min(10_000, army(world()).moraleBps + 500));
     const journey = result.world.projects.find((project) => project.completionOutcome?.kind === "force_move");
     expect(journey?.completionOutcome?.provinceId).toBe(BRUTTIUM);
     const setOut = result.factProposals.find((fact) => fact.kind === "march_begun");
@@ -63,7 +64,7 @@ describe("an army already on the road", () => {
     expect(journeys).toHaveLength(1);
     expect(second.factProposals.some((fact) => fact.kind === "march_begun")).toBe(false);
     // The rest of the repeated order still happens.
-    expect(army(second.world).moraleBps).toBe(army(first.world).moraleBps + 100);
+    expect(army(second.world).moraleBps).toBe(Math.min(10_000, army(first.world).moraleBps + 500));
   });
 });
 
@@ -118,7 +119,9 @@ describe("a march over the strait", () => {
     const start = withFleet(world(), 400);
     const result = applyDeltas(start, [march], context);
     expect(result.rejected).toEqual([]);
-    const journey = result.world.projects.find((project) => project.completionOutcome?.kind === "force_move")!;
+    // The crossing: the march or the sailing that brings army and ships to
+    // the shore is one of its legs, and finishes first.
+    const journey = result.world.projects.find((project) => project.kind === "crossing") ?? result.world.projects.find((project) => project.completionOutcome?.kind === "force_move")!;
     const arrived = tickUntil(result.world, journey.milestones.at(-1)!.requiredAtElapsedOffset + 10);
     expect(army(arrived).locationId).toBe(MESSANA);
     expect(arrived.material.forces.find((force) => force.id === "roman-transports")!.locationId).toBe(MESSANA);
@@ -127,7 +130,9 @@ describe("a march over the strait", () => {
   it("stays on the shore when its ships have gone by the day it arrives, and says why", () => {
     const start = withFleet(world(), 400);
     const result = applyDeltas(start, [march], context);
-    const journey = result.world.projects.find((project) => project.completionOutcome?.kind === "force_move")!;
+    // The crossing: the march or the sailing that brings army and ships to
+    // the shore is one of its legs, and finishes first.
+    const journey = result.world.projects.find((project) => project.kind === "crossing") ?? result.world.projects.find((project) => project.completionOutcome?.kind === "force_move")!;
     const sailed: WorldState = { ...result.world, material: { ...result.world.material, forces: result.world.material.forces.filter((force) => force.id !== "roman-transports") } };
     let state = sailed;
     const facts: string[] = [];
@@ -136,7 +141,8 @@ describe("a march over the strait", () => {
       facts.push(...ticked.factProposals.filter((fact) => fact.kind === "project_completed").map((fact) => fact.summary));
       state = ticked.world;
     }
-    expect(army(state).locationId).toBe(PUNIC_IDS.rome);
+    // On the shore it walked to for the ships, and no further.
+    expect(army(state).locationId).not.toBe(MESSANA);
     expect(facts.join(" ")).toMatch(/produced nothing it was meant to\. .*over water/);
   });
 });

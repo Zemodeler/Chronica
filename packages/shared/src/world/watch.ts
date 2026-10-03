@@ -130,6 +130,9 @@ export const WATCH_ARMS = [
   z
     .object({
       kind: z.literal("letter_answered"),
+      /** Wait for this exact letter, rather than an unrelated earlier answer. */
+      messageId: EntityIdSchema.optional(),
+      issueKey: z.string().trim().min(1).max(100).optional(),
       fromPolityId: EntityIdSchema,
       toPolityId: EntityIdSchema,
       /** Silence counts as refusal. Any answer, when omitted. */

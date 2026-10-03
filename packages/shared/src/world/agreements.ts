@@ -134,6 +134,21 @@ export const PolityAgreementSchema = z
     endedAtStep: ElapsedStepSchema.nullable().default(null),
     endedReason: z.string().trim().min(1).max(300).nullable().default(null),
     visibility: VisibilitySchema.default("public"),
+    /**
+     * A war's battles, on land and at sea, and who won them (`recordBattle`):
+     * what the war score reads besides ground, men and blood. Kept on the war
+     * itself because a battle's own record is gone a month after it ends.
+     */
+    /** For an alliance that is a league: the power it was made against (`sim/pushback.ts`). */
+    against: EntityIdSchema.nullable().optional(),
+    battles: z.array(z.object({
+      atStep: ElapsedStepSchema,
+      winnerPolityId: EntityIdSchema,
+      loserPolityId: EntityIdSchema,
+      naval: z.boolean(),
+      /** Men (or hulls) who fought on both sides, for how much it counts. */
+      engaged: z.number().int().nonnegative(),
+    }).strict()).max(80).optional(),
   })
   .strict()
   .refine((agreement) => agreement.polityId !== agreement.otherPolityId, {

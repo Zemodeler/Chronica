@@ -6,6 +6,9 @@ import { DETOUR_FACTOR, FERRY_GATHER_KM, describeKm, marchDaysFor, sailDaysFor }
 import { fitStrengthOf, isNavalForce, isWaterCrossing, transportCapacityOf } from "./sea";
 import { sailingSeason } from "./seasons";
 
+/** The longest crossing made when the sea is shut: Messana's strait, the Bosporus, not the open water. */
+const SHUT_SEASON_CROSSING_KM = 60;
+
 /**
  * How an army gets from where it stands to a province some way off.
  *
@@ -171,6 +174,15 @@ function isShore(world: WorldState, provinceId: string): boolean {
   return adjacentTo(world, provinceId).some((neighbour) => isWaterCrossing(neighbour.edge.crossing));
 }
 
+/** The shore nearest a province by land, the province itself when it is one: where ships hired from it muster. */
+export function nearestShore(world: WorldState, provinceId: string): string {
+  if (isShore(world, provinceId)) return provinceId;
+  const onFoot = kmFrom(world, provinceId, { passable: (edge) => !isWaterCrossing(edge.crossing) });
+  let best: { id: string; km: number } | null = null;
+  for (const [id, km] of onFoot) if (isShore(world, id) && (best === null || km < best.km)) best = { id, km };
+  return best?.id ?? provinceId;
+}
+
 export function passagePlanFor(
   world: WorldState,
   army: Force,
@@ -183,45 +195,65 @@ export function passagePlanFor(
   if (landKmBetween(world, army.locationId, toProvinceId) !== null) return null;
   const onFoot = kmFrom(world, army.locationId, { passable: (edge) => !isWaterCrossing(edge.crossing) });
   const fromDestination = kmFrom(world, toProvinceId);
-  // The shore that brings the army soonest to where it is going.
-  let embark: { id: string; marchKm: number; seaKm: number; days: number } | null = null;
+  const needed = fitStrengthOf(army);
+  const preferred = new Set(preferredFleetIds);
+  // Ships already promised to another army's voyage are not free for this
+  // one: four crossings planned on one hired fleet were each refused as "the
+  // world at odds with itself", and took their order parts down with them.
+  const promised = new Set(world.projects
+    .filter((project) => (project.status === "in_progress" || project.status === "funded") && project.completionOutcome?.kind === "force_move" && project.completionOutcome.forceId !== army.id)
+    .flatMap((project) => project.completionOutcome?.fleetIds ?? []));
+  const hulls = world.material.forces
+    .filter((force) => force.id !== army.id && force.polityId === army.polityId && isNavalForce(force, warfare) && !promised.has(force.id))
+    .map((fleet) => ({ fleet, capacity: transportCapacityOf(fleet, warfare), reach: kmFrom(world, fleet.locationId) }))
+    .filter((entry) => entry.capacity > 0);
+  if (hulls.length === 0) return null;
+  const shut = sailingSeason(month) === "shut";
+  // The shore from which army and ships together put it over soonest:
+  // Rhegium for Messana, where the hulls lie, and not a nearer shore the army
+  // reaches in a week and the ships in a month. Judged by the march and the
+  // sailing alone, Legio I once walked to Etruria while every hull it could
+  // use lay at Rhegium, 730 km away, and the crossing failed.
+  let best: PassagePlan | null = null;
+  let bestDays = Number.POSITIVE_INFINITY;
   for (const [provinceId, marchKm] of onFoot) {
     const seaKm = fromDestination.get(provinceId);
     if (seaKm === undefined || !isShore(world, provinceId)) continue;
-    const days = marchDaysFor(marchKm) + sailDaysFor(seaKm);
-    if (embark === null || days < embark.days || (days === embark.days && seaKm < embark.seaKm)) embark = { id: provinceId, marchKm, seaKm, days };
+    const candidates = hulls
+      .map((entry) => ({ fleet: entry.fleet, capacity: entry.capacity, sailKm: entry.fleet.locationId === provinceId ? 0 : entry.reach.get(provinceId) ?? null }))
+      .filter((entry): entry is { fleet: Force; capacity: number; sailKm: number } => entry.sailKm !== null)
+      // The fleets named first; then those that carry the army in the fewest
+      // loads; then the nearest.
+      .sort((a, b) => Number(preferred.has(b.fleet.id)) - Number(preferred.has(a.fleet.id))
+        || Math.ceil(needed / a.capacity) - Math.ceil(needed / b.capacity)
+        || a.sailKm - b.sailKm);
+    const fleets: { fleet: Force; sailKm: number }[] = [];
+    let capacity = 0;
+    for (const entry of candidates) {
+      if (capacity >= needed) break;
+      // Enough to put it over in loads, and every named fleet in: the rest stay where they are.
+      const namedLeft = candidates.some((candidate) => preferred.has(candidate.fleet.id) && !fleets.some((taken) => taken.fleet.id === candidate.fleet.id));
+      if (fleets.length > 0 && !namedLeft && Math.ceil(needed / capacity) <= MAX_FERRY_TRIPS) break;
+      fleets.push({ fleet: entry.fleet, sailKm: entry.sailKm });
+      capacity += entry.capacity;
+    }
+    if (capacity <= 0) continue;
+    const trips = Math.max(1, Math.ceil(needed / capacity));
+    if (trips > MAX_FERRY_TRIPS) continue;
+    const gatherDays = Math.max(Math.ceil(marchDaysFor(marchKm)), ...fleets.map((entry) => sailDaysFor(entry.sailKm)));
+    const crossingDays = CROSSING_OVERHEAD_DAYS + sailDaysFor(seaKm) + (trips - 1) * DAYS_PER_EXTRA_LOAD;
+    const days = gatherDays + crossingDays;
+    if (best !== null && (days > bestDays || (days === bestDays && seaKm >= best.seaKm))) continue;
+    const over = strictKmBetween(world, provinceId, toProvinceId, (crossing) => crossing !== "sea_lane", seaKm * DETOUR_FACTOR) === null ? "sea_lane" as const : "strait" as const;
+    // Out of season only a strait is crossed: a short hop in sight of the far
+    // shore. A "strait" of fifteen hundred sea miles is the open sea -- the
+    // Carthaginian relief of Syracuse was sent to embark at Tingitana, because
+    // a road ran on from there by Spain and Gaul, and it took half a year.
+    if (shut && (over === "sea_lane" || seaKm > SHUT_SEASON_CROSSING_KM)) continue;
+    best = { embarkProvinceId: provinceId, marchKm, fleets, capacity, trips, seaKm, over, gatherDays, crossingDays };
+    bestDays = days;
   }
-  if (embark === null) return null;
-  const over = strictKmBetween(world, embark.id, toProvinceId, (crossing) => crossing !== "sea_lane", embark.seaKm * DETOUR_FACTOR) === null ? "sea_lane" as const : "strait" as const;
-  if (over === "sea_lane" && sailingSeason(month) === "shut") return null;
-  const needed = fitStrengthOf(army);
-  const toShore = kmFrom(world, embark.id);
-  const preferred = new Set(preferredFleetIds);
-  const candidates = world.material.forces
-    .filter((force) => force.id !== army.id && force.polityId === army.polityId && isNavalForce(force, warfare))
-    .map((fleet) => ({ fleet, sailKm: fleet.locationId === embark!.id ? 0 : toShore.get(fleet.locationId) ?? null, capacity: transportCapacityOf(fleet, warfare) }))
-    .filter((entry): entry is { fleet: Force; sailKm: number; capacity: number } => entry.sailKm !== null && entry.capacity > 0)
-    // The fleets named first; then those that carry the army in the fewest
-    // loads; then the nearest.
-    .sort((a, b) => Number(preferred.has(b.fleet.id)) - Number(preferred.has(a.fleet.id))
-      || Math.ceil(needed / a.capacity) - Math.ceil(needed / b.capacity)
-      || a.sailKm - b.sailKm);
-  const fleets: { fleet: Force; sailKm: number }[] = [];
-  let capacity = 0;
-  for (const entry of candidates) {
-    if (capacity >= needed) break;
-    // Enough to put it over in loads, and every named fleet in: the rest stay where they are.
-    const namedLeft = candidates.some((candidate) => preferred.has(candidate.fleet.id) && !fleets.some((taken) => taken.fleet.id === candidate.fleet.id));
-    if (fleets.length > 0 && !namedLeft && Math.ceil(needed / capacity) <= MAX_FERRY_TRIPS) break;
-    fleets.push({ fleet: entry.fleet, sailKm: entry.sailKm });
-    capacity += entry.capacity;
-  }
-  if (capacity <= 0) return null;
-  const trips = Math.max(1, Math.ceil(needed / capacity));
-  if (trips > MAX_FERRY_TRIPS) return null;
-  const gatherDays = Math.max(Math.ceil(marchDaysFor(embark.marchKm)), ...fleets.map((entry) => sailDaysFor(entry.sailKm)));
-  const crossingDays = CROSSING_OVERHEAD_DAYS + sailDaysFor(embark.seaKm) + (trips - 1) * DAYS_PER_EXTRA_LOAD;
-  return { embarkProvinceId: embark.id, marchKm: embark.marchKm, fleets, capacity, trips, seaKm: embark.seaKm, over, gatherDays, crossingDays };
+  return best;
 }
 
 /** "Legio I marches to Rhegium, the Roman Navy sails there from Messana, and it crosses in 2 loads." */

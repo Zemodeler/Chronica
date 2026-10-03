@@ -121,6 +121,8 @@
     white-space: nowrap;
     user-select: none;
   }
+  .shell-coin { display: inline-flex; align-items: center; gap: .4rem; }
+  .shell-coin .shell-coin__info { min-height: 0; padding: 0 .35rem; font: italic 500 var(--step--1) var(--font-serif); color: var(--vellum); border: 1px solid var(--edge); border-radius: 50%; line-height: 1.3; }
   .shell-coin-chip {
     display: inline-flex;
     align-items: center;
@@ -166,7 +168,6 @@
   .calendar-line__next .seal-dot { align-self: center; flex: none; }
   .calendar-line__label { overflow: hidden; text-overflow: ellipsis; }
   .calendar-line__when { flex: none; color: var(--vellum); font-style: normal; }
-  .calendar-line__wanting { flex: none; color: var(--vellum); font-style: normal; }
   /* Threads the player follows, beside the date, as quiet as the date is. */
   .thread-marks { display: flex; gap: .6rem; margin: 0; padding: 0; list-style: none; }
   .thread-mark {
@@ -210,7 +211,7 @@
     min-width: 1200px;
     overflow: hidden;
     background: var(--soot);
-    animation: game-shell-enter .6s var(--ease) both;
+    animation: none;
   }
   /* Its own stacking context, so nothing on the map -- the zoom buttons, the
      army card -- can climb above the Office laid over it. */
@@ -415,4 +416,22 @@
   .office-object--cut-out[data-state="sealed"] .office-object__cut-out {
     filter: drop-shadow(0 0 6px var(--seal)) drop-shadow(0 0 14px color-mix(in srgb, var(--seal) 50%, transparent));
   }
+
+  /* The agenda: three short groups, each item one line until it is opened (calendar-line.tsx). */
+  .agenda { gap: 1rem; }
+  .agenda h3 small { margin-left: .5rem; font: 400 var(--step--1) var(--font-sans); text-transform: none; letter-spacing: 0; }
+  .matters .agenda__item { display: block; padding: 0; }
+  .agenda__head { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; column-gap: .8rem; align-items: baseline; width: 100%; min-height: 0; padding: .45rem .3rem; border: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--fg); text-align: left; font: inherit; }
+  .agenda__head:hover { background: rgb(230 217 190 / 8%); }
+  .agenda__head:focus-visible { outline: 2px solid var(--bronze); outline-offset: -2px; }
+  .agenda__item.is-marked > .agenda__head { box-shadow: inset 2px 0 0 var(--seal); }
+  .agenda__title { min-width: 0; overflow-wrap: anywhere; }
+  .agenda__when { color: var(--fg-muted); font-variant-numeric: oldstyle-nums; white-space: nowrap; }
+  .agenda__status { white-space: nowrap; color: var(--fg-muted); font-size: var(--step--1); }
+  .agenda__context { display: grid; gap: .4rem; padding: .1rem .3rem .7rem; color: var(--fg-muted); font-size: var(--step--1); }
+  .agenda__context p { margin: 0; }
+  .agenda__go, .agenda__more { justify-self: start; min-height: 0; padding: 0; border: 0; border-bottom: 1px dotted var(--edge); border-radius: 0; background: none; box-shadow: none; color: var(--fg); font: inherit; font-size: var(--step--1); cursor: pointer; }
+  .agenda__more { margin-top: .3rem; color: var(--fg-muted); }
+  .agenda__wanting { margin: 0; color: var(--fg-muted); font-size: var(--step--1); }
+  .agenda__threads ol { margin-top: .4rem; }
 }

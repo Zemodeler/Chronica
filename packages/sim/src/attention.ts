@@ -20,6 +20,8 @@ import {
 } from "@chronica/shared";
 import { isBackgroundLetter } from "./letters";
 import { PLAN_SLOTS } from "./plans";
+import { readBoard } from "./board";
+import { ownsGovernmentAim, routineDiplomaticFact } from "./negotiation-business";
 
 /**
  * The attention router (VISION §18, §19).
@@ -113,7 +115,7 @@ export function routeAttention(input: AttentionInput): AttentionResult {
   // (VISION §21 -- otherwise every reaction breeds another forever). Whether
   // its news has reached them yet is gate 1's: word travels to each person
   // at the pace of the road from where it happened (VISION §16).
-  const triggering = input.facts.filter((fact) => fact.causalDepth < input.maxCausalDepth);
+  const triggering = input.facts.filter((fact) => fact.kind !== "senate_speech" && fact.causalDepth < input.maxCausalDepth);
   if (triggering.length === 0) return { focused: [], active: [], relevantCount: 0, dormantCount: world.characters.length };
 
   const authority = buildAuthorityIndex(
@@ -156,6 +158,7 @@ export function routeAttention(input: AttentionInput): AttentionResult {
     routesOf.set(venture.ownerCharacterId, [...(routesOf.get(venture.ownerCharacterId) ?? []), venture.fromProvinceId, venture.toProvinceId]);
   }
 
+  const routineIds = new Set(triggering.filter((fact) => routineDiplomaticFact(fact, world)).map((fact) => fact.id));
   const scored: RoutedActor[] = [];
   let dormantCount = 0;
 
@@ -173,7 +176,8 @@ export function routeAttention(input: AttentionInput): AttentionResult {
     // does, and nothing reaches anybody before the road brings it.
     const answered = input.alreadyAnswered?.get(character.id);
     const knownFacts = heardBy(world, input.offices, authority, triggering, character.id)
-      .filter((fact) => input.authorOf?.get(fact.id) !== character.id && answered?.has(fact.id) !== true);
+      .filter((fact) => input.authorOf?.get(fact.id) !== character.id && answered?.has(fact.id) !== true)
+      .filter((fact) => !routineIds.has(fact.id) || fact.affectedEntities.some((entity) => entity.kind === "character" && entity.id === character.id));
     if (knownFacts.length === 0) {
       dormantCount += 1;
       continue;
@@ -239,7 +243,7 @@ export function routeAttention(input: AttentionInput): AttentionResult {
     // dormant decides the matter by silence.
     if (world.diplomacy.some(
       (message) =>
-        message.status === "awaiting_reply" && isDelivered(message, world.instant.day) && !isBackgroundLetter(message, input.ownPolityId) &&
+        message.status === "awaiting_reply" && message.putToRecipientOnDay == null && isDelivered(message, world.instant.day) && !isBackgroundLetter(message, input.ownPolityId) &&
         (message.toCharacterId === character.id || (message.toCharacterId === null && character.polityId !== null && message.toPolityId === character.polityId)),
     )) {
       score += 30;
@@ -346,6 +350,12 @@ export interface AmbientInput {
   readonly dueStepOwners?: ReadonlyMap<string, string> | undefined;
   /** The player's power: a plain letter between two others wakes nobody (`isBackgroundLetter`). */
   readonly ownPolityId?: string | null | undefined;
+  /**
+   * The standing cast not yet asked this burst (`cast.ts`), with why each is
+   * in it and the dossier he is handed. Every one of them is asked, over and
+   * above `max`: the cast is what the model is spent on, once a burst.
+   */
+  readonly castMembers?: ReadonlyMap<string, { readonly why: string; readonly dossier?: string | undefined }> | undefined;
 }
 
 /**
@@ -470,7 +480,7 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
     }
     if (world.diplomacy.some(
       (message) =>
-        message.status === "awaiting_reply" && isDelivered(message, world.instant.day) && !isBackgroundLetter(message, input.ownPolityId) &&
+        message.status === "awaiting_reply" && message.putToRecipientOnDay == null && isDelivered(message, world.instant.day) && !isBackgroundLetter(message, input.ownPolityId) &&
         (message.toCharacterId === character.id || (message.toCharacterId === null && character.polityId !== null && message.toPolityId === character.polityId)),
     )) {
       score += 28;
@@ -522,15 +532,21 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
       if (wound.km <= REFERENCE_PROVINCE_KM) pressing = true;
       reasons.unshift(wound.why);
     }
-    if (character.polityId !== null && polityHasAims.has(character.polityId)) {
+    if (character.polityId !== null && polityHasAims.has(character.polityId) && ownsGovernmentAim(world, character.id, character.polityId, input.offices)) {
       score += 15;
-      reasons.push("their government is pursuing something");
+      reasons.push("their government is pursuing business within their responsibility");
     }
     // Somebody with nothing on his plate still has a life: he is asked now and
     // then, on the rotation alone, below everybody who has business -- which
     // is what his own purse used to buy him, counted as authority.
     if (score === 0) reasons.push("has his own affairs to see to");
 
+    const cast = input.castMembers?.get(character.id);
+    if (cast !== undefined) {
+      score += 45;
+      pressing = true;
+      reasons.unshift(`is one of the people who matter now (${cast.why})`);
+    }
     // Rotation, so the world elsewhere is not the same two people every time.
     // Bucketed by week and stable within it: a replay picks the same cast.
     score += stableHash([character.id, String(Math.floor(world.instant.day / 7))]) % 12;
@@ -560,11 +576,38 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
     .filter((actor) => input.dueStepOwners?.has(actor.characterId) === true && !antagonist.includes(actor) && !reserved.includes(actor))
     .slice(0, PLAN_SLOTS);
   const held = [...antagonist, ...reserved, ...planned].slice(0, input.max);
-  const rest = scored.filter((actor) => !held.includes(actor)).slice(0, Math.max(0, input.max - held.length));
-  return [...held, ...rest].map((actor) => ({
-    ...actor,
-    knownFacts: heardBy(world, input.offices, authority, input.facts, actor.characterId).slice(-(input.maxFactsEach ?? 6)),
-  }));
+  const rest = scored.filter((actor) => !held.includes(actor) && input.castMembers?.has(actor.characterId) !== true).slice(0, Math.max(0, input.max - held.length));
+  // The cast rides on top of the rotation, not in place of it.
+  const cast = scored.filter((actor) => input.castMembers?.has(actor.characterId) === true && !held.includes(actor));
+  // What each has heard, the news that concerns him first: about him, his own
+  // power, then the powers around it; then the most recent. Ptolemy was told
+  // of grain gluts in Gerrha and a breach at Rhegium, and nothing of Antioch.
+  const board = readBoard(world);
+  const concern = (fact: Fact, character: WorldState["characters"][number] | undefined): number => {
+    const ids = new Set(fact.affectedEntities.map((entity) => entity.id));
+    if (character === undefined) return 0;
+    if (ids.has(character.id)) return 3;
+    if (character.polityId !== null && ids.has(character.polityId)) return 2;
+    const around = character.polityId === null ? [] : board.get(character.polityId)?.neighbours ?? [];
+    return around.some((neighbour) => ids.has(neighbour.polityId)) ? 1 : 0;
+  };
+  const relevant = (facts: readonly Fact[], characterId: string): Fact[] => {
+    const character = world.characters.find((candidate) => candidate.id === characterId);
+    const keep = input.maxFactsEach ?? 6;
+    const chosen = new Set(facts.map((fact, index) => ({ fact, index, weight: concern(fact, character) }))
+      .sort((a, b) => b.weight - a.weight || b.index - a.index)
+      .slice(0, keep)
+      .map((entry) => entry.fact));
+    return facts.filter((fact) => chosen.has(fact));
+  };
+  return [...held, ...cast, ...rest].map((actor) => {
+    const dossier = input.castMembers?.get(actor.characterId)?.dossier;
+    return {
+      ...actor,
+      knownFacts: relevant(heardBy(world, input.offices, authority, input.facts, actor.characterId), actor.characterId),
+      ...(dossier === undefined ? {} : { note: dossier }),
+    };
+  });
 }
 
 /**

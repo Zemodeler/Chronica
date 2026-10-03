@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  type OrderPartStatus,
   factsKnownTo,
   newsArrivesAt,
   newsDaysBetween,
@@ -19,8 +20,10 @@ import {
   allOffices,
   buildStation,
   holdsPolityStanding,
+  warsOf,
 } from "@chronica/shared";
 import { extractJson } from "./json";
+import { claimsItDone } from "./order-outcomes";
 import type { SimModelPort } from "./ports";
 
 /**
@@ -130,7 +133,7 @@ const AMBIENT_KINDS: ReadonlySet<string> = new Set(["price_shock", "illness", "f
  */
 export const MUST_TELL: ReadonlySet<string> = new Set([
   "motion_passed", "motion_failed", "motion_vetoed", "motion_referred", "council_advised", "council_overruled",
-  "siege_laid", "siege_progress", "siege_ended", "siege_lifted", "war_declared", "city_taken", "province_control_change", "order_part_unanswered", "senate_speech",
+  "siege_laid", "siege_progress", "siege_ended", "siege_lifted", "war_declared", "city_taken", "province_control_change", "order_part_unanswered", "political_position_changed",
   // A treaty broken, an ally's call, a province or an army rising: the engine's own turns of fortune (`treaties.ts`, `unrest.ts`).
   "treaty_breached", "call_to_arms", "rising", "civil_war",
   // A promise broken is always told to the two it was between (`promises.ts`).
@@ -350,7 +353,7 @@ export interface BattleAccountLine {
   readonly losses: readonly { readonly name: string; readonly unit?: "men" | "ships"; readonly dead: number; readonly deserted: number; readonly wounded: number }[];
   readonly commanders: readonly { readonly name: string; readonly outcome: string }[];
   /** Named men in the ranks; absent on accounts written before armies had any. */
-  readonly members?: readonly { readonly name: string; readonly force: string; readonly outcome: string }[];
+  readonly members?: readonly { readonly name: string; readonly force: string; readonly outcome: string; readonly place?: string }[];
   readonly retreats: readonly { readonly name: string; readonly to: string | null; readonly orderly: boolean }[];
   readonly outcome: string;
 }
@@ -384,6 +387,10 @@ export interface ChronicleInput {
    * own `knowableAtInstant` says.
    */
   readonly world?: (NewsWorld & { readonly projects?: WorldState["projects"]; readonly orders?: WorldState["orders"] }) | undefined;
+  /** What the reader's campaign is about (`campaignOf`): news touching it is weighed lightly. */
+  readonly campaignIds?: ReadonlySet<string> | undefined;
+  /** Where a part of an order stands, by its ref, read from the whole world (`order-outcomes.ts`). */
+  readonly orderOutcome?: ((partKey: string) => { readonly line: string; readonly status: OrderPartStatus } | null) | undefined;
   /** What the actors said they were doing, for colour the bare facts lack. */
   readonly narrative: readonly NarrativeLine[];
   readonly frictions: readonly NarrativeLine[];
@@ -557,6 +564,8 @@ interface Thread {
   readonly digest: boolean;
   /** The part of an order it tells, when it tells one (`matterKeys`). Two parts are two passages. */
   readonly partKey: string | null;
+  /** Where that part stands, read from the world: what the passage must say and not contradict. */
+  readonly outcome: { readonly line: string; readonly status: OrderPartStatus } | null;
   /** Which of its facts came only as word of mouth, in a thread that also holds what was seen (C05). */
   readonly hearsayIds: ReadonlySet<string>;
 }
@@ -770,6 +779,12 @@ function sameLetters(facts: readonly Fact[], observerPolityId: string | null): [
 }
 
 /** What the model calls writing to somebody. */
+/** A diplomatic act as the record names them: told as a matter of substance when it bears on the reader's campaign. */
+const DIPLOMATIC_ACT = /(appeal|embass|envoy|dispatch|petition|overture|ultimatum|demand|diplomat|offer|negotiat|safe.conduct|neutrality|mediat|parley|truce|armistice|restrain|protection|undertak)/iu;
+/** What a diplomatic act touching the reader's campaign is worth, at least. */
+const CAMPAIGN_DIPLOMACY_WEIGHT = 72;
+/** What any other news touching it gains. */
+const CAMPAIGN_LIFT = 15;
 const LETTER_WORDS = /(appeal|letter|embass|envoy|message|dispatch|petition|propos|overture|ultimatum|demand|request|diplomat|offer|negotiat|summon|invit|wrote|writes)/iu;
 
 /** How far apart a letter and the model's word of it may be dated and still be one act. */
@@ -814,21 +829,11 @@ const FIGHT_DAY_KINDS: ReadonlySet<string> = new Set([
  * people they share. The transport, the accounts inquiry and the ceasefire of
  * a single order all named Clepsina, and were written up as one entry (C01).
  */
-export function matterKeys(world: ChronicleInput["world"]): (fact: Fact) => string | null {
-  const byWork = new Map<string, string>();
-  for (const order of world?.orders ?? []) {
-    order.parts.forEach((part, index) => {
-      for (const ref of part.workRefs) if (!byWork.has(ref.id)) byWork.set(ref.id, `${order.id}-p${index}`);
-    });
-  }
-  return (fact) => {
-    if (fact.sourceActionId !== null && fact.sourceActionId !== undefined) return fact.sourceActionId;
-    for (const entity of fact.affectedEntities) {
-      const key = byWork.get(entity.id);
-      if (key !== undefined && entity.kind !== "character" && entity.kind !== "polity") return key;
-    }
-    return null;
-  };
+export function matterKeys(_world: ChronicleInput["world"]): (fact: Fact) => string | null {
+  // By the part it was stamped with when it happened (`stampWorkFacts`), and
+  // nothing else: a fact that merely names the consul, or the legion, is not
+  // his transport's for naming them (E05).
+  return (fact) => fact.sourceActionId ?? null;
 }
 
 function splitIntoThreads(
@@ -1067,7 +1072,11 @@ function renderBattle(battle: BattleAccountLine): string[] {
   if (battle.commanders.length > 0) lines.push("The commanders:", ...battle.commanders.map((commander) => `  - ${commander.name} was ${commander.outcome}`));
   if ((battle.members ?? []).length > 0) {
     lines.push("Named men in the ranks:", ...(battle.members ?? []).map((member) =>
-      `  - ${member.name}, with ${member.force}: ${member.outcome === "unharmed" ? "came through unhurt" : member.outcome === "killed" ? "was killed" : member.outcome === "wounded" ? "was wounded" : member.outcome}`));
+      `  - ${member.name}, with ${member.force}${member.place === undefined ? "" : ` (${member.place})`}: ${member.outcome === "unharmed" ? "came through unhurt" : member.outcome === "killed" ? "was killed" : member.outcome === "wounded" ? "was wounded" : member.outcome}`));
+    // A man in the ranks sees his own line, not the battle.
+    if ((battle.members ?? []).some((member) => member.place !== undefined)) {
+      lines.push("Where a named man stood, write the fight as it reached him there -- his line, his unit, the men beside him -- as well as the battle as a whole.");
+    }
   }
   if (battle.retreats.length > 0) {
     lines.push("Who left the field:", ...battle.retreats.map((retreat) => `  - ${retreat.name} fell back ${retreat.orderly ? "in order" : "in rout"}${retreat.to === null ? ", with nowhere to go" : ` to ${retreat.to}`}`));
@@ -1092,6 +1101,9 @@ function renderThread(thread: Thread, index: number, said: readonly UtteranceLin
   if (thread.narrative.length > 0) lines.push("Accounts given at the time:", ...thread.narrative.map((line) => `- ${readable(line)}`));
   if (thread.frictions.length > 0) lines.push("Difficulties reported:", ...thread.frictions.map((line) => `- ${readable(line)}`));
   if (thread.battle !== null) lines.push(...renderBattle(thread.battle));
+  // The part of the order this tells, as the world has it: the passage says
+  // it, and says nothing that contradicts it.
+  if (thread.outcome !== null) lines.push(`Where this part of the order stands (say it; never say more was done): ${thread.outcome.line}`);
   if (said.length > 0) lines.push("Words recorded at the time:", ...said.map((line) => `- ${line.speaker}, ${line.occasion}: ${line.line}`));
   // How to tell it, carried with the matter rather than added to the
   // historian's standing instructions: an order nobody obeyed is comedy, and
@@ -1109,7 +1121,18 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   const threshold = input.entryThreshold ?? DEFAULT_ENTRY_THRESHOLD;
   // An unweighted fact cannot be ruled out: where no weight was recorded, the
   // bar is treated as met rather than as failed.
-  const weightOf = (fact: Fact): number => input.significanceByFactId?.get(fact.id) ?? threshold;
+  const recorded = (fact: Fact): number => input.significanceByFactId?.get(fact.id) ?? threshold;
+  // News bearing on the reader's own campaign is weighed up. A negotiation
+  // over the city they march to relieve scored 55 as distant news and letters
+  // 10-15 whatever their terms, and neither reached a consul whose legion was
+  // on its way there. A diplomatic act in it counts as a matter of substance;
+  // anything else in it gains a little.
+  const campaign = input.campaignIds;
+  const weightOf = (fact: Fact): number => {
+    const base = recorded(fact);
+    if (campaign === undefined || campaign.size === 0 || !fact.affectedEntities.some((entity) => campaign.has(entity.id))) return base;
+    return DIPLOMATIC_ACT.test(`${fact.kind} ${fact.summary}`) ? Math.max(base, CAMPAIGN_DIPLOMACY_WEIGHT) : Math.min(100, base + CAMPAIGN_LIFT);
+  };
   const selected = selectFacts(input.facts, input.observer, input.observerPolityId, input.ownEntityIds ?? null, input.to, weightOf, input.world, input.orderFactIds ?? new Set());
   if (selected.length === 0) {
     input.onSelected?.({ carried: [...input.facts], subjects: [] });
@@ -1201,6 +1224,8 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
     input.ownEntityIds !== undefined
     && facts.some((fact) => fact.affectedEntities.some((entity) => input.ownEntityIds!.has(entity.id)));
 
+  /** Where a part of an order stands, as the engine says it (`order-outcomes.ts`). */
+  const outcomeOf = (partKey: string | null): Thread["outcome"] => (partKey === null ? null : input.orderOutcome?.(partKey) ?? null);
   const threadOf = (facts: readonly Fact[], digest = false): Thread => {
     const ids = new Set(facts.map((fact) => fact.id));
     const belongs = (line: { readonly factIds: readonly string[] }): boolean => line.factIds.some((factId) => ids.has(factId));
@@ -1241,6 +1266,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
         .slice(0, 8),
       digest,
       partKey: facts.map(matterOfFact).find((key): key is string => key !== null) ?? null,
+      outcome: outcomeOf(facts.map(matterOfFact).find((key): key is string => key !== null) ?? null),
       hearsayIds: new Set(facts.filter((fact) => reportedIds.has(fact.id)).map((fact) => fact.id)),
     };
   };
@@ -1304,6 +1330,8 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   };
   /** Whether the wider world's matter is weighty enough for how far off it happened. */
   const carriesThisFar = (thread: Thread): boolean => {
+    // Distance does not discount the reader's own campaign.
+    if (input.campaignIds !== undefined && thread.facts.some((fact) => fact.affectedEntities.some((entity) => input.campaignIds!.has(entity.id)))) return true;
     const days = daysOff(thread);
     if (days === null || days <= NEAR_NEWS_DAYS) return true;
     const share = Math.min(1, (days - NEAR_NEWS_DAYS) / (FAR_NEWS_DAYS - NEAR_NEWS_DAYS));
@@ -1343,6 +1371,10 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
     if (thread.battle !== null || alreadyTold.length === 0) return false;
     const subjects = subjectsOf(thread.facts);
     if (subjects.length === 0) return false;
+    // A decision is news though nobody moved: a new offer, undertaking or
+    // refusal between the same few people is a new turn of the matter, not
+    // the old one going on.
+    if (thread.peak >= 50 && thread.facts.some((fact) => DIPLOMATIC_ACT.test(`${fact.kind} ${fact.summary}`))) return false;
     // Something in it actually moved, so it happened.
     if (thread.facts.some((fact) => fact.affectedEntities.some((entity) => movedIds.has(entity.id)))) return false;
 
@@ -1491,6 +1523,16 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
     };
   };
 
+  /**
+   * A passage that says a part was done when the world says it was not is
+   * not published as written: the engine's line and the plain facts stand in
+   * its place, so the record never holds both accounts (E05).
+   */
+  const faithful = (thread: Thread, body: string): string => {
+    if (thread.outcome === null || !claimsItDone(body, thread.outcome.status)) return body;
+    return [thread.outcome.line, ...thread.facts.map((fact) => readable(fact.summary))].join("\n\n");
+  };
+
   // A failed narration must not cost the player the record itself: fall back to
   // the plain facts, under the period as a title, rather than losing the span.
   const plainly = (thread: Thread): ChronicleEntry =>
@@ -1596,7 +1638,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
         // thread is dropped, not printed as bare facts under a period title.
         entry = passage === undefined
           ? (answering ? plainly(thread) : null)
-          : entryOf(thread, passage.title, passage.body.trim());
+          : entryOf(thread, passage.title, faithful(thread, passage.body.trim()));
         const own = passage?.quote ?? null;
         // A quotation is somebody's recorded words, or it is not printed. The
         // historian's own line is kept only where it is, near enough, what that
@@ -1781,6 +1823,35 @@ export function ownSideOf(world: WorldState, characterId: string, polityId: stri
   for (const province of world.map.provinces) if (province.controllerPolityId === polityId) own.add(province.id);
   for (const force of world.material.forces) if (force.polityId === polityId) own.add(force.id);
   return own;
+}
+
+/**
+ * What the reader's present campaign is about: the powers their side is at
+ * war with and those powers' people, and the ground, armies and cities their
+ * open orders aim at. News touching any of it bears on what they have set
+ * going, and is judged by a lower bar than the world's other business.
+ */
+export function campaignOf(world: WorldState, characterId: string, polityId: string | null): Set<string> {
+  const ids = new Set<string>();
+  const enemies = polityId === null ? [] : warsOf(world.polityAgreements, polityId);
+  for (const enemy of enemies) {
+    ids.add(enemy);
+    for (const character of world.characters) if (character.polityId === enemy) ids.add(character.id);
+  }
+  for (const order of world.orders) {
+    if (order.actorCharacterId !== characterId) continue;
+    for (const part of order.parts) {
+      if (part.closedAtStep !== null) continue;
+      for (const goal of part.goals) {
+        if (goal.kind === "force_at") { ids.add(goal.forceId); ids.add(goal.provinceId); }
+        else if (goal.kind === "control") { ids.add(goal.provinceId); ids.add(goal.polityId); if (goal.settlementId !== null) ids.add(goal.settlementId); }
+        else if (goal.kind === "force_strength") ids.add(goal.forceId);
+        else if (goal.kind === "agreement_open") { ids.add(goal.polityId); ids.add(goal.withPolityId); }
+      }
+    }
+  }
+  if (polityId !== null) ids.delete(polityId);
+  return ids;
 }
 
 /**

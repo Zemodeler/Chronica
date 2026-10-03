@@ -1,9 +1,10 @@
+import { projectFundingAvailable } from "../world/money-reservations";
 import { buildStation, holdsPolityStanding, type Station } from "./station";
 import type { Office } from "../characters/character";
 import type { WorldState } from "../world/world-state";
 import type { Project } from "../world/project";
 import { formatWorldDate, type ScenarioClock } from "../world/clock";
-import { ORDER_PART_STATUS_LABEL, orderPartStatus } from "../world/orders";
+import { orderPartLabel, orderPartStatus } from "../world/orders";
 
 /**
  * What the player's orders are doing, as they could know it.
@@ -55,12 +56,18 @@ export function ordersUnderWay(
   };
   const money = (amount: number): string => Math.round(amount).toLocaleString("en-GB");
   const forceName = (id: string): string | null => world.material.forces.find((force) => force.id === id)?.name ?? null;
-  const provinceName = (id: string): string | null => world.map.provinces.find((province) => province.id === id)?.name ?? null;
+  const provinceName = (id: string): string | null => { const province = world.map.provinces.find((candidate) => candidate.id === id); return province?.settlements.find((settlement) => settlement.kind === "port")?.name ?? province?.name ?? null; };
 
   const items: UnderWayItem[] = [];
+  // Assembly legs belong to the crossing they prepare, so one operation does
+  // not crowd the desk with a march, a sailing and a crossing separately.
+  const assemblyLegs = new Set(world.projects.filter((project) => OPEN.has(project.status) && project.kind === "crossing" && project.completionOutcome?.kind === "force_move").flatMap((crossing) => {
+    const outcome = crossing.completionOutcome!;
+    return world.projects.filter((leg) => leg.id !== crossing.id && OPEN.has(leg.status) && (leg.kind === "march" || leg.kind === "sailing") && leg.completionOutcome?.kind === "force_move" && leg.completionOutcome.provinceId === outcome.embarkProvinceId && (leg.completionOutcome.forceId === outcome.forceId || outcome.fleetIds?.includes(leg.completionOutcome.forceId ?? ""))).map((leg) => leg.id);
+  }));
 
   for (const project of world.projects) {
-    if (!OPEN.has(project.status)) continue;
+    if (!OPEN.has(project.status) || assemblyLegs.has(project.id)) continue;
     const outcome = project.completionOutcome;
     const march = outcome?.kind === "force_move" && outcome.forceId !== null ? outcome : null;
     const sponsor = project.sponsorEntityRef;
@@ -76,10 +83,10 @@ export function ordersUnderWay(
       items.push({
         key: `march:${project.id}`,
         kind: "march",
-        label: project.kind === "sailing"
-          ? (to === null ? `The ${bare(force)} at sea` : `The ${bare(force)} sailing for ${to}`)
+        label: project.kind === "sailing" || project.kind === "crossing" || project.kind === "military_transport"
+          ? (to === null ? `The ${bare(force)} at sea` : `The ${bare(force)} being transported to ${to}`)
           : to === null ? `The ${bare(force)} on the march` : `The ${bare(force)} marching on ${to}`,
-        detail: project.targetCompletionStep === null ? "No one can say when it arrives." : `Expected ${when(project.targetCompletionStep)}.`,
+        detail: `${project.kind === "crossing" && world.projects.some((leg) => assemblyLegs.has(leg.id)) ? "The army and ships are assembling at their embarkation shore. " : ""}${project.targetCompletionStep === null ? "No one can say when it arrives." : `Expected ${when(project.targetCompletionStep)}.`}`,
         stalled: project.targetCompletionStep !== null && project.targetCompletionStep < today,
       });
       continue;
@@ -94,7 +101,7 @@ export function ordersUnderWay(
       : world.material.reservations.find((candidate) => candidate.id === project.reservationId);
     const overdue = next !== undefined && next.due < today;
     const short = next !== undefined && next.milestone.costAmount > 0
-      && (reservation === undefined || reservation.status !== "active" || reservation.remainingAmount < next.milestone.costAmount);
+      && (projectFundingAvailable(world, project) < next.milestone.costAmount);
 
     const parts: string[] = [];
     // Who has it in hand, so the player can see that somebody does.
@@ -103,7 +110,7 @@ export function ordersUnderWay(
     if (next !== undefined) parts.push(overdue ? `${next.milestone.label}: overdue.` : `Next: ${lowerFirst(next.milestone.label)}, ${when(next.due)}.`);
     else if (project.targetCompletionStep !== null) parts.push(`Due to be finished ${when(project.targetCompletionStep)}.`);
     if (reservation !== undefined) parts.push(`${money(reservation.reservedAmount - reservation.remainingAmount)} of ${money(reservation.reservedAmount)} spent.`);
-    if (short) parts.push("The money set aside will not cover the next step.");
+    if (short) parts.push("The available funding will not cover the next step.");
 
     items.push({
       key: `project:${project.id}`,
@@ -125,24 +132,38 @@ export function ordersUnderWay(
     for (const [index, part] of order.parts.entries()) {
       if (part.closedAtStep !== null) continue;
       const status = orderPartStatus(world, part);
-      const finished = status === "done" || status === "refused" || status === "unanswered";
+      const finished = status === "achieved" || status === "failed" || status === "refused" || status === "unanswered";
       if (finished && order !== latest) continue;
-      if (status === "done" && part.note === null) continue;
+      if (status === "achieved" && part.note === null) continue;
       // Shown already, as its own work: a project above, or an audit, a plot or
       // a delegated order below.
       const listedBelow = (ref: { readonly kind: string; readonly id: string }): boolean =>
         (ref.kind === "audit" && world.audits.some((audit) => audit.id === ref.id && audit.status === "under_way"))
         || (ref.kind === "plot" && world.covertPlots.some((plot) => plot.id === ref.id && plot.outcome === null))
-        || ref.kind === "order_attempt";
-      if (status !== "blocked" && part.note === null && part.workRefs.length > 0
+        || (ref.kind === "contract" && world.material.contracts.some((contract) => contract.id === ref.id && contract.status === "active"))
+        || ref.kind === "order_attempt"
+        || (ref.kind === "procedure" && world.material.politicalProcedures.some((procedure) => procedure.id === ref.id && procedure.outcome === "passed"));
+      if (status !== "blocked" && status !== "failed" && status !== "authorized" && status !== "acknowledged" && part.note === null && part.workRefs.length > 0
         && part.workRefs.every((ref) => (ref.kind === "project" && shown.has(ref.id)) || listedBelow(ref) || ref.kind === "force" || ref.kind === "entity")) continue;
       const why = part.refusal ?? part.whyNot;
+      const waiting = part.stages.filter((stage) => stage.status === "waiting").flatMap((stage) => stage.waitsOn).map((condition) => {
+        switch (condition.kind) {
+          case "force_at": return `${forceName(condition.forceId) ?? "the army"} to reach ${provinceName(condition.provinceId) ?? "its destination"}`;
+          case "force_named": return `the ${condition.name} force to be raised`;
+          case "transport_capacity": return "enough ships to carry the army";
+          case "procedure_passed": return `the vote on ${world.material.politicalProcedures.find((procedure) => procedure.id === condition.procedureId)?.label ?? "the motion"}`;
+          case "project_done": return `${world.projects.find((project) => project.id === condition.projectId)?.label ?? "the prerequisite work"} to finish`;
+          case "funds": return `${money(condition.amount)} to be available`;
+          case "letter_answered": return `${world.diplomacy.find((message) => message.id === condition.messageId)?.subject ?? "the letter"} to be ${condition.answer === "any" ? "answered" : condition.answer}`;
+        }
+      });
+      const stateLabel = waiting.length > 0 ? `Waiting for ${[...new Set(waiting)].join(" and ")}` : upperFirst(orderPartLabel(status, part));
       items.push({
         key: `order:${order.id}:${index}`,
         kind: "order",
         label: part.said,
-        detail: `${upperFirst(ORDER_PART_STATUS_LABEL[status])}.${why === null || status === "done" ? "" : ` ${lastSentenceWithin(why, 320)}`}${part.note === null ? "" : ` ${upperFirst(part.note)}.`}`,
-        stalled: status === "blocked" || status === "refused" || status === "unanswered",
+        detail: `${stateLabel}.${why === null || status === "achieved" ? "" : ` ${lastSentenceWithin(why, 320)}`}${part.note === null ? "" : ` ${upperFirst(part.note)}.`}`,
+        stalled: status === "blocked" || status === "failed" || status === "refused" || status === "unanswered" || status === "authorized" || status === "acknowledged",
       });
     }
   }
@@ -195,6 +216,16 @@ export function ordersUnderWay(
     return "";
   };
   // What the player has set going in secret. His to know, and nobody else's.
+  for (const contract of world.material.contracts) {
+    if (contract.status !== "active" || !["agent", "assassin", "mercenary", "envoy"].includes(contract.role)) continue;
+    const account = world.material.accounts.find((candidate) => candidate.id === contract.employerAccountId);
+    if (account?.owner.id !== characterId && !(governs && account?.owner.kind === "polity" && account.owner.id === station.polityId)) continue;
+    const employee = world.characters.find((candidate) => candidate.id === contract.employeeCharacterId);
+    items.push({ key: `contract:${contract.id}`, kind: "delegated", secret: contract.role === "agent" || contract.role === "assassin",
+      label: contract.label, detail: `In ${employee?.name ?? "the contractor"}'s hands. ${money(contract.advance)} paid down; ${money(contract.monthlyPay)} a month.${contract.endsAtStep === null ? "" : ` Term ends ${when(contract.endsAtStep)}.`}`, stalled: employee === undefined || !employee.alive });
+    if (contract.journey != null && contract.journey.arrivedAtStep === null) items[items.length - 1] = { ...items[items.length - 1]!, detail: `${items[items.length - 1]!.detail} Travelling; arrival ${when(contract.journey.arrivesAtStep)}.` };
+  }
+
   for (const plot of world.covertPlots) {
     if (plot.sponsorCharacterId !== characterId || plot.outcome !== null) continue;
     const target = world.characters.find((character) => character.id === plot.targetCharacterId)?.name ?? "somebody";

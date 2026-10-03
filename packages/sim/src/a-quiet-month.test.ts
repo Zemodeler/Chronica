@@ -68,9 +68,12 @@ describe("a month let pass", { timeout: 30_000 }, () => {
   });
 
   it("skips a later chain it cannot pay for, rather than ending the month early", async () => {
-    // Seven calls pay for the order and its first chain exactly; the second
-    // finds the budget spent, and the month still runs to its end.
-    const { result } = await aMonth({ ...DEFAULT_BUDGET, maxModelCalls: 7 });
+    // Eight calls pay for the order and its first chain; the second finds the
+    // budget spent, and the month still runs to its end. Seven, before war
+    // took ground as occupation: the Campanian legion's patrols now hold the
+    // Bruttian country round Rhegium on the first day, and Rome's allies hear
+    // of it in the first chain.
+    const { result } = await aMonth({ ...DEFAULT_BUDGET, maxModelCalls: 8 });
     expect(result.world.instant.day).toBe(30);
     expect(result.skipped.some((entry) => entry.reason.includes("call budget is spent"))).toBe(true);
   });

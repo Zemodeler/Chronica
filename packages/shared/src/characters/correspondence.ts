@@ -1,6 +1,6 @@
 import { letterKindLabel } from "../authority/letters-awaiting";
 import { formatWorldDate, type ScenarioClock } from "../world/clock";
-import { isDelivered, type DiplomaticAnswer, type DiplomaticMessage } from "../world/diplomacy";
+import { isDelivered, peaceOfferMetadata, previousPeaceRejection, type DiplomaticAnswer, type DiplomaticMessage } from "../world/diplomacy";
 import type { WorldState } from "../world/world-state";
 
 /**
@@ -29,6 +29,7 @@ export interface LetterPage {
   readonly awaiting: boolean;
   /** Its time to be answered ran out with no answer: said on the letter, never as a page somebody wrote (R56). */
   readonly lapsed?: string | null;
+  readonly previousRejection?: { readonly terms: string; readonly reason: string } | null;
 }
 
 export interface Correspondence {
@@ -74,13 +75,15 @@ export function correspondenceOf(world: WorldState, characterId: string, clock?:
     if (message.toCharacterId === characterId && !isDelivered(message, world.elapsedStep)) return;
     const thread = threads.get(other) ?? { pages: [] };
     const fromYou = message.fromCharacterId === characterId;
+    const rejected = fromYou ? undefined : previousPeaceRejection(world.diplomacy, message);
     thread.pages.push({
       id: message.id,
       messageId: message.id,
       fromYou,
-      label: letterKindLabel(message.kind),
+      label: letterKindLabel(peaceOfferMetadata(message).kind),
       subject: message.subject,
       body: message.terms,
+      previousRejection: rejected === undefined ? null : { terms: rejected.terms, reason: rejected.answerText ?? "They refused these terms." },
       dateLabel: dateOf(message.sentAtStep),
       awaiting: message.status === "awaiting_reply",
       lapsed: message.answer === "ignored" ? `${fromYou ? "No answer came" : "You sent no answer"}, ${dateOf(message.answeredAtStep ?? message.sentAtStep)}` : null,

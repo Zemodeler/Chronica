@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Sheet, type SheetSide } from "../../../components/ui/sheet";
+import { useWindowState } from "../../../components/ui/window-workspace";
 import { Era } from "../../../components/ui/era";
 import { unreadCount, type ChronicleEntry, type EntryTag, type GameViewController } from "./use-game-view";
+import { Tip, TipCard } from "../../../components/ui/tip";
 import { Linkify, Name, ThreadName, useThreads } from "./notes";
 import type { EntityKey } from "@chronica/shared";
 
@@ -55,28 +57,17 @@ function LedgerBody({ body }: { readonly body: string }) {
 /** The engine's account of what each part of the order came to, set under the passage (`withOrderOutcomes` in the sim). */
 const OUTCOME_HEADING = "What came of the order:";
 
-function Outcomes({ block }: { readonly block: string }) {
-  const lines = block.split("\n").slice(1).map((line) => line.replace(/^- /, "")).filter((line) => line.trim() !== "");
-  return (
-    <section className="chronicle-entry__outcomes" aria-label="What came of the order">
-      <h4>What came of the order</h4>
-      <ul>{lines.map((line, index) => <li key={index}><Linkify text={line} /></li>)}</ul>
-    </section>
-  );
+function splitOutcomes(body: string): { readonly prose: string; readonly outcomes: readonly string[] } {
+  const at = body.indexOf(OUTCOME_HEADING);
+  if (at < 0) return { prose: body, outcomes: [] };
+  const lines = body.slice(at).split("\n").slice(1).map((line) => line.replace(/^- /, "")).filter((line) => line.trim() !== "");
+  return { prose: body.slice(0, at).trimEnd(), outcomes: lines };
 }
 
-function EntryBody({ entry }: { readonly entry: ChronicleEntry }) {
-  const at = entry.body.indexOf(OUTCOME_HEADING);
-  const prose = at < 0 ? entry.body : entry.body.slice(0, at).trimEnd();
-  const outcomes = at < 0 ? null : entry.body.slice(at);
-  return (
-    <>
-      {prose !== "" && (entry.kind === "recorded"
-        ? <LedgerBody body={prose} />
-        : <div className="chronicle-entry__body">{prose.split("\n\n").map((paragraph, index) => <p key={index}><Linkify text={paragraph} /></p>)}</div>)}
-      {outcomes !== null && <Outcomes block={outcomes} />}
-    </>
-  );
+function EntryBody({ entry, prose }: { readonly entry: ChronicleEntry; readonly prose: string }) {
+  return prose === "" ? null : entry.kind === "recorded"
+    ? <LedgerBody body={prose} />
+    : <div className="chronicle-entry__body">{prose.split("\n\n").map((paragraph, index) => <p key={index}><Linkify text={paragraph} /></p>)}</div>;
 }
 
 /** Which note a change's subject opens: a province is a place, a polity a power. A purse has none. */
@@ -86,6 +77,7 @@ const noteKeyOf = (change: { readonly kind: string; readonly id: string }): Enti
 
 function Entry({ entry, onTag, focused }: { readonly entry: ChronicleEntry; readonly onTag: (tag: EntryTag) => void; readonly focused: boolean }) {
   const { threads } = useThreads();
+  const { prose, outcomes } = splitOutcomes(entry.body);
   const threadsOf = (of: ChronicleEntry): readonly string[] => (of.storylineIds ?? []).filter((id) => threads[id] !== undefined);
   return (
     <article
@@ -98,7 +90,7 @@ function Entry({ entry, onTag, focused }: { readonly entry: ChronicleEntry; read
         {(entry.date !== null || entry.unread) && (
           <p className="chronicle-entry__date">
             {entry.date !== null && <Era text={entry.date} />}
-            {entry.happened != null && <span className="chronicle-entry__happened"> (events from <Era text={entry.happened} />)</span>}
+            {entry.happened != null && <span className="chronicle-entry__happened"> <Tip label="When it happened" note={() => <TipCard kicker="Events from" title="When it happened"><p>The events told here are from <Era text={entry.happened!} />.</p></TipCard>}>earlier events</Tip></span>}
             {entry.unread && entry.published && <span className="chronicle-entry__new">New</span>}
           </p>
         )}
@@ -112,7 +104,7 @@ function Entry({ entry, onTag, focused }: { readonly entry: ChronicleEntry; read
           <ul className="chronicle-entry__tags" aria-label="Show everything touching">
             {entry.tags.map((tag) => (
               <li key={tagKey(tag)}>
-                <button type="button" className="word-button" onClick={() => onTag(tag)} title={`Everything touching this ${KIND_LABEL[tag.kind] ?? tag.kind}`}>
+                <button type="button" className="word-button" onClick={() => onTag(tag)}>
                   {tag.label}
                 </button>
               </li>
@@ -121,7 +113,7 @@ function Entry({ entry, onTag, focused }: { readonly entry: ChronicleEntry; read
         )}
       </header>
 
-      <EntryBody entry={entry} />
+      <EntryBody entry={entry} prose={prose} />
 
       {entry.quote !== null && (
         <figure className="chronicle-entry__quote">
@@ -130,10 +122,11 @@ function Entry({ entry, onTag, focused }: { readonly entry: ChronicleEntry; read
         </figure>
       )}
 
-      {entry.changes.length > 0 && (
+      {(outcomes.length > 0 || entry.changes.length > 0) && (
         <section className="chronicle-entry__changes">
-          <h4>What this changed, as far as you know</h4>
+          <h4>What this changed</h4>
           <ul>
+            {outcomes.map((line, index) => <li key={`outcome-${index}`}><span className="chronicle-entry__outcome"><Linkify text={line} /></span></li>)}
             {entry.changes.map((change) => (
               <li key={`${change.kind}:${change.id}:${change.detail}`}>
                 <strong><Name k={noteKeyOf(change)}>{change.label}</Name></strong>
@@ -163,7 +156,7 @@ export function ChroniclePanel({ controller, onClose, side, focus = null }: {
   readonly side: SheetSide;
   readonly focus?: ChronicleFocus | null;
 }) {
-  const [filter, setFilter] = useState<EntryTag | null>(focus?.filter ?? null);
+  const [filter, setFilter] = useWindowState<EntryTag | null>("chronicle:filter", focus?.filter ?? null);
   const focusedId = focus?.entryId ?? null;
   // A note inside the open record can ask for another place in it: a
   // thread's entry, a matter's person. Take the new filter when it does.
@@ -175,14 +168,14 @@ export function ChroniclePanel({ controller, onClose, side, focus = null }: {
 
   // "Only what is unread" keeps the entries that were unread when it was
   // chosen: reading one must not make it vanish from under the reader.
-  const [unreadOnly, setUnreadOnly] = useState<ReadonlySet<string> | null>(null);
+  const [unreadOnly, setUnreadOnly] = useWindowState<readonly string[] | null>("chronicle:unread", null);
   const unread = unreadCount(controller.view.chronicle);
 
   // Newest first: a reader opening the record wants where it has got to, and
   // can turn back from there.
   const entries = useMemo(() => {
     let shown = [...controller.view.chronicle].reverse();
-    if (unreadOnly !== null) shown = shown.filter((entry) => unreadOnly.has(entry.id));
+    if (unreadOnly !== null) shown = shown.filter((entry) => unreadOnly.includes(entry.id));
     if (filter === null) return shown;
     const wanted = tagKey(filter);
     return shown.filter((entry) => entry.subjects.some((subject) => tagKey(subject) === wanted));
@@ -206,7 +199,7 @@ export function ChroniclePanel({ controller, onClose, side, focus = null }: {
                   : `${unread} ${unread === 1 ? "entry" : "entries"} you have not read yet, marked New.`}
               </span>
               {unreadOnly === null && unread > 0 && (
-                <button type="button" className="word-button" onClick={() => setUnreadOnly(new Set(controller.view.chronicle.filter((entry) => entry.unread).map((entry) => entry.id)))}>
+                <button type="button" className="word-button" onClick={() => setUnreadOnly(controller.view.chronicle.filter((entry) => entry.unread).map((entry) => entry.id))}>
                   Only what is unread
                 </button>
               )}

@@ -26,6 +26,24 @@
         "3200"
       ],
       "port": 3200
+    },
+    {
+      "name": "Chronica Web (hand, manual)",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "CHRONICA_AI_MODE=hand",
+        "CHRONICA_HAND_RESPONDER=manual",
+        "CHRONICA_HAND_DIR=eval-out/hand-armies-web",
+        "npm",
+        "run",
+        "dev",
+        "--workspace",
+        "@chronica/web",
+        "--",
+        "-p",
+        "3300"
+      ],
+      "port": 3300
     }
   ]
 }

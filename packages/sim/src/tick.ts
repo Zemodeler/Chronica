@@ -1,9 +1,14 @@
 import {
+  spendFromReservation,
+  reconcileCapitals,
+  isOwedATurn,
   AGREEMENT_KIND_IN_WORDS,
   DEFAULT_STRUCTURE_EFFECTS,
   effectWorth,
   advanceProvinceMaterial,
   applyDiplomaticAnswerToStance,
+  diplomaticAnswerChangesTrust,
+  sameNegotiation,
   domesticRevenuePolity,
   provinceTaxCapacity,
   taxBurdens,
@@ -20,12 +25,16 @@ import {
   leverDefinition,
   type SubSkill,
   aimsAtWar,
+  leaderOf,
+  settleOrphanedOccupations,
+  isOccupied,
   warsOf,
   openWar,
   threatWaitsOnAttack,
   isNavalForce,
   nextDueMilestone,
   warfareWith,
+  forceLever,
   type FactProposalDraft,
   type MoneyObligation,
   type ProvinceTargets,
@@ -42,6 +51,7 @@ import {
   tradePremiumBps,
   liveProvinceIds,
   type ProvinceMaterial,
+  allOffices,
 } from "@chronica/shared";
 import { projectConflicts } from "./conflicts";
 import { trespassOf } from "./trespass";
@@ -51,6 +61,7 @@ import { resolvePlots } from "./plots";
 import { reviewContingencies } from "./contingencies";
 import type { BattleAccount } from "./battle";
 import { returnTheMended } from "./battle";
+import { keepTheRanks } from "./ranks";
 import { pressSieges } from "./sieges";
 import { fightEngagements, noteWhoFaces } from "./engagements";
 import { deliverConvoys } from "./grain";
@@ -71,8 +82,11 @@ import { holdElections, type ElectionGovernment } from "./elections";
 import { holdVotes } from "./senate";
 import { ensureConstitutions, keepThrones } from "./constitutions";
 import { reviewSociety } from "./society";
+import { occupyOpenCountry } from "./occupation";
 import { raiseOpenings } from "./openings";
 import { keepContracts } from "./contracts";
+import { newsReach, powersNearThePlayer } from "./far-powers";
+import { keepCommandTenure } from "./command-tenure";
 import { keepDepartments } from "./departments";
 import { assignOverseers, polityOfWork } from "./overseers";
 import { fillAppointments } from "./appointments";
@@ -257,8 +271,14 @@ export function runDeterministicTick(given: TickInput): TickResult {
   const facts: FactProposalDraft[] = [...intercepted.facts];
   const notes: string[] = [];
   let accounts = input.world.material.accounts;
+  let reservations = input.world.material.reservations;
   const transactions: MoneyTransaction[] = [...input.world.material.transactions];
   let localId = 0;
+  /** What an account can spend without touching money set aside for something else. */
+  const spendableOf = (accountId: string, ownReservationId: string | null): number =>
+    Math.max(0, balanceOf(accountId) - reservations
+      .filter((reservation) => reservation.accountId === accountId && reservation.status === "active" && reservation.id !== ownReservationId)
+      .reduce((sum, reservation) => sum + reservation.remainingAmount, 0));
 
   const balanceOf = (accountId: string): number => accounts.find((account) => account.id === accountId)?.balance ?? 0;
   const credit = (accountId: string, amount: number): void => {
@@ -386,7 +406,11 @@ export function runDeterministicTick(given: TickInput): TickResult {
       const route = source.originKind === "venture" ? ventureById.get(source.originId) : undefined;
       const premium = route === undefined ? 10_000
         : tradePremiumBps(provinceGrainPriceBps(input.world, route.fromProvinceId), provinceGrainPriceBps(input.world, route.toProvinceId));
-      const owed = Math.round((source.amount * source.collectionRateBps / 10_000) * premium / 10_000);
+      // And it earns little where the war has reached either end: ground at
+      // war, occupied, or under blockade (docs/plans/a-living-world.md §10).
+      // A grain merchant feels Egypt's war in his ledger.
+      const disrupted = route === undefined ? 10_000 : Math.min(...[route.fromProvinceId, route.toProvinceId].map((provinceId) => routeOpenBps(input.world, provinceId)));
+      const owed = Math.round((source.amount * source.collectionRateBps / 10_000) * premium / 10_000 * disrupted / 10_000);
       // A good collector gathers what is owed better; he cannot gather what
       // the land does not have. He brings in more only as far as the land has
       // room to give, so his gift fades as a tax nears what it bears, and a
@@ -583,8 +607,11 @@ export function runDeterministicTick(given: TickInput): TickResult {
     if (paying === undefined || paying.missedPeriods === force.payArrearsPeriods) return force;
 
     const missed = paying.missedPeriods;
-    const moralePeriods = input.warfare?.arrearsMoralePeriods ?? 1;
-    const desertionPeriods = input.warfare?.arrearsDesertionPeriods ?? 3;
+    // Men who are used to waiting for their pay wait longer before they sulk
+    // and desert (`pay_discipline`); men who serve for the coin, not so long.
+    const patience = Math.round(forceLever({ establishments: input.world.establishments, doctrines: input.world.doctrines, today: input.world.elapsedStep }, force, "pay_discipline"));
+    const moralePeriods = Math.max(1, (input.warfare?.arrearsMoralePeriods ?? 1) + patience);
+    const desertionPeriods = Math.max(moralePeriods + 1, (input.warfare?.arrearsDesertionPeriods ?? 3) + patience);
     if (missed < moralePeriods) return { ...force, payArrearsPeriods: missed };
 
     const moraleBps = Math.max(0, force.moraleBps - MORALE_LOSS_BPS_PER_PERIOD * (missed - moralePeriods + 1));
@@ -725,6 +752,23 @@ export function runDeterministicTick(given: TickInput): TickResult {
   };
   /** The country as the levies this tick left it: its manpower rolls, drawn down. */
   let leviedWorld: WorldState | undefined;
+  /**
+   * Whom a force a work produced answers to: the magistrate who moved it,
+   * where he holds an office that commands. The fleet voted on the consul's
+   * own motion and paid from the treasury he kept finished under the man who
+   * oversaw the yards, and the consul could not give it an order. The overseer
+   * still commands it; the mover is the one it answers to.
+   */
+  const answersTo = (project: WorldState["projects"][number], polityId: string): string | null => {
+    const enactedBy = input.world.enactments.find((enactment) => enactment.projectId === project.id);
+    const procedure = enactedBy === undefined ? undefined : input.world.material.politicalProcedures.find((candidate) => candidate.id === enactedBy.procedureId);
+    const mover = project.sponsorEntityRef.kind === "character" ? project.sponsorEntityRef.id : procedure?.sponsorCharacterId ?? null;
+    if (mover === null) return null;
+    const person = input.world.characters.find((character) => character.id === mover);
+    if (person === undefined || !person.alive || person.polityId !== polityId) return null;
+    const commanding = new Set(allOffices(input.world, input.government?.offices ?? []).filter((office) => office.authorisedActionIds.some((action) => action === "force_modify" || action === "force_create")).map((office) => office.id));
+    return input.world.material.officeSeats.some((seat) => seat.holderCharacterId === mover && seat.status === "held" && commanding.has(seat.officeId)) ? mover : null;
+  };
   const produceOutcome = (project: WorldState["projects"][number]): { entityId: string; summary: string } | null => {
     const outcome = project.completionOutcome;
     if (outcome === null || outcome.kind === "none") return null;
@@ -759,7 +803,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
         name: outcome.label,
         polityId,
         commanderCharacterId: commanderId,
-        controllerCharacterId: commanderId,
+        controllerCharacterId: answersTo(project, polityId) ?? commanderId,
         locationId: provinceId,
         positionId: null,
         authorizedStrength: strength,
@@ -991,16 +1035,38 @@ export function runDeterministicTick(given: TickInput): TickResult {
           // shortfall is real and has to be said. Balances floor at zero and a
           // sponsor with no account at all pays nothing, so without this the
           // money simply vanished and nobody was answerable for it.
-          const short = funderId === undefined
-            ? dueMilestone.costAmount
-            : Math.max(0, dueMilestone.costAmount - balanceOf(funderId));
-          if (funderId !== undefined) {
-            credit(funderId, -dueMilestone.costAmount);
+          // Money set aside for this work is spent first (`world/money-
+          // reservations.ts`); money set aside for something else is not
+          // this work's to spend, and never was.
+          const reservation = project.reservationId === null ? undefined
+            : reservations.find((candidate) => candidate.id === project.reservationId && candidate.status === "active" && candidate.accountId === funderId);
+          const fromReserve = reservation === undefined ? 0 : Math.min(reservation.remainingAmount, dueMilestone.costAmount);
+          const payable = funderId === undefined ? 0 : fromReserve + Math.min(spendableOf(funderId, reservation?.id ?? null) - fromReserve, dueMilestone.costAmount - fromReserve);
+          const short = Math.max(0, dueMilestone.costAmount - Math.max(0, payable));
+          if (reservation !== undefined && fromReserve > 0) {
+            reservations = reservations.map((candidate) => candidate.id === reservation.id ? spendFromReservation(candidate, fromReserve, input.toDay) : candidate);
+          }
+          // Past what the order allowed: the work goes on -- a legate may
+          // spend beyond his leave -- and the man who set the limit hears of it.
+          if (reservation !== undefined && dueMilestone.costAmount > fromReserve && reservation.purposeKind === "order_part") {
+            facts.push({
+              localId: nextLocalId("envelope"),
+              kind: "envelope_breach",
+              summary: `${project.label} spent past what the order allowed: ${reservation.reservedAmount} was set aside, and ${dueMilestone.label.toLowerCase()} cost ${dueMilestone.costAmount - fromReserve} more.`.slice(0, 600),
+              affectedRefs: [{ kind: "project", id: project.id }, ...(funderId === undefined ? [] : [{ kind: "account" as const, id: funderId }])],
+              visibility: "polity",
+              discoveryState: "polity",
+              significance: 40,
+              knowableInDays: 0,
+            });
+          }
+          if (funderId !== undefined && payable > 0) {
+            credit(funderId, -Math.max(0, payable));
             transactions.push({
               id: input.ids.next("txn"),
               atStep: dueAtStep,
               kind: "purchase",
-              amount: dueMilestone.costAmount,
+              amount: Math.max(0, payable),
               sourceAccountId: funderId,
               cause: { kind: "project_milestone", id: project.id, explanation: dueMilestone.label },
               visibility: "polity",
@@ -1113,6 +1179,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
         ...input.world.material,
         provinceMaterial: leviedWorld?.material.provinceMaterial ?? input.world.material.provinceMaterial,
         accounts,
+        reservations,
         incomeSources: newIncome.length === 0 ? incomeSources : [...incomeSources, ...newIncome],
         obligations: newPay.length === 0 ? servicedObligations : [...servicedObligations, ...newPay],
         loans,
@@ -1228,7 +1295,10 @@ export function runDeterministicTick(given: TickInput): TickResult {
    */
   let polityStances = recovered.polityStances;
   const unread = (message: (typeof recovered.diplomacy)[number]): boolean => {
-    if (message.putToRecipientOnDay != null || message.toCharacterId === null || message.toCharacterId === input.playerCharacterId) return false;
+    if (message.toCharacterId === null || message.toCharacterId === input.playerCharacterId) return false;
+    // Put to him, and the burst never got round to asking him what he said:
+    // his turn is owed him, and his silence is not yet his (E06).
+    if (message.putToRecipientOnDay != null) return isOwedATurn(recovered, message.toCharacterId);
     return recovered.characters.some((character) => character.id === message.toCharacterId && character.alive);
   };
   const polityName = (id: string): string => recovered.map.polities.find((polity) => polity.id === id)?.name ?? id;
@@ -1250,12 +1320,13 @@ export function runDeterministicTick(given: TickInput): TickResult {
     // something else is no answer to it.
     const wroteBack = message.kind === "ultimatum" ? undefined : recovered.diplomacy.find((other) => other.id !== message.id
       && other.fromPolityId === message.toPolityId && other.toPolityId === message.fromPolityId
-      && other.sentAtStep >= (message.deliveredOnDay ?? message.sentAtStep));
+      && other.sentAtStep >= (message.deliveredOnDay ?? message.sentAtStep)
+      && (other.inReplyToMessageId === message.id || sameNegotiation(message, other)));
     if (wroteBack !== undefined) {
       return { ...message, status: "answered" as const, answer: "countered" as const, answerText: `Answered in "${wroteBack.subject}".`.slice(0, 600), answeredAtStep: wroteBack.sentAtStep };
     }
     const ignored = { ...message, status: "answered" as const, answer: "ignored" as const, answerText: "No answer came.", answeredAtStep: input.toDay };
-    polityStances = [...applyDiplomaticAnswerToStance(polityStances, ignored, input.toDay)];
+    if (diplomaticAnswerChangesTrust(recovered.diplomacy, ignored)) polityStances = [...applyDiplomaticAnswerToStance(polityStances, ignored, input.toDay)];
     silenced.push(message);
     // An ultimatum's threat, carried out when its term runs out unanswered.
     // A threat that waits on an attack stands on silence; it is not carried out by it.
@@ -1327,23 +1398,53 @@ export function runDeterministicTick(given: TickInput): TickResult {
   const expiredSeats = recovered.material.officeSeats.filter(
     (seat) => seat.status === "held" && seat.termExpiresAtStep !== null && seat.termExpiresAtStep <= input.toDay,
   );
+  // A successor elected ahead takes the seat the day it falls vacant, for a
+  // term as long as the one that ended (`holdElections`, consuls designate).
+  const designateOf = (seat: (typeof expiredSeats)[number]): string | null => {
+    const id = seat.designateCharacterId ?? null;
+    return id !== null && recovered.characters.some((character) => character.id === id && character.alive) ? id : null;
+  };
   const officeSeats = expiredSeats.length === 0
     ? recovered.material.officeSeats
-    : recovered.material.officeSeats.map((seat) =>
-      expiredSeats.some((expired) => expired.id === seat.id)
-        ? { ...seat, status: "vacant" as const, vacancyCause: "term_expired" as const, holderCharacterId: null }
-        : seat);
+    : recovered.material.officeSeats.map((seat) => {
+      if (!expiredSeats.some((expired) => expired.id === seat.id)) return seat;
+      const successor = designateOf(seat);
+      if (successor === null) return { ...seat, status: "vacant" as const, vacancyCause: "term_expired" as const, holderCharacterId: null, designateCharacterId: null };
+      const span = seat.termStartedAtStep !== null && seat.termExpiresAtStep !== null && seat.termExpiresAtStep > seat.termStartedAtStep ? seat.termExpiresAtStep - seat.termStartedAtStep : 365;
+      return { ...seat, status: "held" as const, vacancyCause: "none" as const, holderCharacterId: successor, designateCharacterId: null, termStartedAtStep: input.toDay, termExpiresAtStep: input.toDay + span };
+    });
+  for (const seat of expiredSeats) {
+    const successor = designateOf(seat);
+    if (successor === null) continue;
+    const office = allOffices(recovered, input.government?.offices ?? []).find((candidate) => candidate.id === seat.officeId);
+    const name = recovered.characters.find((character) => character.id === successor)?.name ?? successor;
+    facts.push({
+      localId: nextLocalId("term"),
+      kind: "office_taken_up",
+      summary: `${name} took office${office === undefined ? "" : ` as ${office.label}`}, elected the term before.`,
+      affectedRefs: [{ kind: "character", id: successor }, ...(office === undefined ? [] : [{ kind: "polity" as const, id: office.polityId }])],
+      visibility: "public",
+      discoveryState: "public",
+      knowableInDays: 0,
+      significance: 35,
+    });
+  }
   const laidDown = new Set(expiredSeats.flatMap((seat) => (seat.holderCharacterId === null ? [] : [seat.holderCharacterId])));
+  // A far power's calendar is its own people's news, not Rome's (`far-powers.ts`).
+  const near = expiredSeats.length === 0 ? null : powersNearThePlayer(recovered, input.playerCharacterId);
+  const officesNow = allOffices(recovered, input.government?.offices ?? []);
   for (const seat of expiredSeats) {
     if (seat.holderCharacterId === null) continue;
     const who = recovered.characters.find((character) => character.id === seat.holderCharacterId)?.name ?? seat.holderCharacterId;
+    const office = officesNow.find((candidate) => candidate.id === seat.officeId);
+    const reach = newsReach(near, office?.polityId);
     facts.push({
       localId: nextLocalId("term"),
       kind: "office_term_ended",
-      summary: `${who} laid down his office at the end of its term.`,
-      affectedRefs: [{ kind: "character", id: seat.holderCharacterId }],
-      visibility: "public",
-      discoveryState: "public",
+      summary: `${who} laid down his office${office === undefined ? "" : ` of ${office.label}`} at the end of its term.`,
+      affectedRefs: [{ kind: "character", id: seat.holderCharacterId }, ...(office === undefined ? [] : [{ kind: "polity" as const, id: office.polityId }])],
+      visibility: reach,
+      discoveryState: reach,
       knowableInDays: 0,
       // A magistracy running out on the calendar is ordinary. Who holds it
       // next is the news, and the election says so (`holdElections`).
@@ -1376,21 +1477,29 @@ export function runDeterministicTick(given: TickInput): TickResult {
   // engagement that caused one records it.
   const afterTime = projectConflictsInto({
     ...recovered,
+    // Ground held with no war left under it is the holder's (`settleOrphanedOccupations`).
+    map: { ...recovered.map, provinces: settleOrphanedOccupations(recovered.map.provinces, polityAgreements, input.toDay) as typeof recovered.map.provinces },
     storylines,
     diplomacy,
     polityStances,
     polityAgreements,
     // Aims that say the wars that are, and not the ones that ended.
-    polityOutlooks: aimsAtWar(recovered.polityOutlooks, (polityId) => warsOf(polityAgreements, polityId), polityName, input.toDay),
+    polityOutlooks: aimsAtWar(recovered.polityOutlooks, (polityId) => warsOf(polityAgreements, polityId), polityName, input.toDay, {
+      leaderOf: (polityId) => leaderOf(polityAgreements, polityId),
+      ownEnemiesOf: (polityId) => polityAgreements
+        .filter((agreement) => agreement.status === "active" && agreement.kind === "war" && (agreement.polityId === polityId || agreement.otherPolityId === polityId))
+        .map((agreement) => (agreement.polityId === polityId ? agreement.otherPolityId : agreement.polityId)),
+    }),
     material: { ...recovered.material, officeSeats },
     // The mirror on the character, which the seat cannot reach on its own.
     // A year in office teaches the office: two points of what it asked of him.
-    characters: laidDown.size === 0
+    characters: laidDown.size === 0 && !expiredSeats.some((seat) => designateOf(seat) !== null)
       ? recovered.characters
       : recovered.characters.map((character) => {
-        if (!laidDown.has(character.id)) return character;
+        const takesUp = expiredSeats.find((seat) => designateOf(seat) === character.id)?.officeId;
+        if (!laidDown.has(character.id)) return takesUp === undefined ? character : { ...character, officeId: takesUp };
         const held = expiredSeats.find((seat) => seat.holderCharacterId === character.id)?.officeId ?? "";
-        return { ...learnedInOffice(character, taughtBy(input.world, held)), officeId: null };
+        return { ...learnedInOffice(character, taughtBy(input.world, held)), officeId: takesUp ?? null };
       }),
   });
 
@@ -1437,7 +1546,12 @@ export function runDeterministicTick(given: TickInput): TickResult {
   facts.push(...mended.facts);
   // Armies in the field eat, sicken and rest (`campaign.ts`) -- the besiegers
   // among them, before the siege is pressed.
-  const fielded = keepTheField({ world: mended.world, toDay: input.toDay, month, warfare: input.warfare === undefined ? undefined : warfareWith(mended.world, input.warfare) });
+  // New men drawn up, drill and seasons, a doctrine's keep, and the men in
+  // the ranks -- their places, campaigns, discharges and promotions
+  // (`ranks.ts`). Before the field is kept, which counts the same days.
+  const ranked = keepTheRanks({ world: mended.world, toDay: input.toDay, warfare: input.warfare, ids: input.ids, playerCharacterId: input.playerCharacterId ?? null });
+  facts.push(...ranked.facts);
+  const fielded = keepTheField({ world: ranked.world, toDay: input.toDay, month, warfare: input.warfare === undefined ? undefined : warfareWith(ranked.world, input.warfare) });
   facts.push(...fielded.facts);
   const besieged = pressSieges(fielded.world, input.toDay, { warfare: input.warfare, ids: input.ids, playerCharacterId: input.playerCharacterId ?? null });
   facts.push(...besieged.facts);
@@ -1534,11 +1648,21 @@ export function runDeterministicTick(given: TickInput): TickResult {
     ? { world: elections.world, facts: [] as readonly FactProposalDraft[] }
     : holdVotes({ world: elections.world, offices: input.government.offices, successionRules: input.government.successionRules, toDay: input.toDay, ids: input.ids });
 
+  // What a year's end does to a commander's army: prorogued, kept until his
+  // successor arrives, handed over -- and what he answers for, out of office.
+  const tenure = input.government === undefined
+    ? { world: votes.world, facts: [] as readonly FactProposalDraft[] }
+    : keepCommandTenure({
+      world: votes.world, government: input.government, toDay: input.toDay, ids: input.ids,
+      endedTerms: expiredSeats.flatMap((seat) => (seat.holderCharacterId === null || seat.termExpiresAtStep === null ? [] : [{ characterId: seat.holderCharacterId, officeId: seat.officeId, seatId: seat.id, endedAtStep: seat.termExpiresAtStep }])),
+      playerCharacterId: input.playerCharacterId ?? null,
+    });
+
   // Once a month the world is read for its groups; and whoever could take a
   // moment to change a government is told it is there.
   const society = input.government === undefined
-    ? { world: votes.world, facts: [] as readonly FactProposalDraft[] }
-    : reviewSociety({ world: votes.world, government: input.government, warfare: input.warfare, toDay: input.toDay, ids: input.ids });
+    ? { world: tenure.world, facts: [] as readonly FactProposalDraft[] }
+    : reviewSociety({ world: tenure.world, government: input.government, warfare: input.warfare, toDay: input.toDay, ids: input.ids });
   const opened = input.government === undefined
     ? society.world
     : raiseOpenings({ world: society.world, government: input.government, toDay: input.toDay, ...(input.playerCharacterId === undefined ? {} : { playerCharacterId: input.playerCharacterId }) });
@@ -1555,9 +1679,12 @@ export function runDeterministicTick(given: TickInput): TickResult {
   // And once a year, what age and disuse have done to everybody's gifts.
   const aged = reviewSkills(overseen, input.toDay);
 
+  // Last: the day's armies stand where the day left them, and the open
+  // country they stand in at war is theirs to hold (`occupation.ts`).
+  const occupied = occupyOpenCountry(aged, input.toDay);
   return {
-    world: aged,
-    factProposals: [...facts, ...plans.facts, ...plots.facts, ...lives.facts, ...contracts.facts, ...thrones.facts, ...elections.facts, ...votes.facts, ...society.facts, ...kept.facts, ...appointed.facts],
+    world: reconcileCapitals(occupied.world),
+    factProposals: [...facts, ...plans.facts, ...plots.facts, ...lives.facts, ...contracts.facts, ...thrones.facts, ...elections.facts, ...votes.facts, ...tenure.facts, ...society.facts, ...kept.facts, ...appointed.facts, ...occupied.facts],
     notes,
     died: [...plots.died, ...lives.died],
     sprungContingencies: plans.sprung,
@@ -1600,4 +1727,17 @@ export function structureSite(
   // A private man's building is his power's to tax and defend; the owner of
   // record is the power, as it always was for a named polity.
   return { provinceId, settlementId, polityId };
+}
+
+/**
+ * How open a trading end is, in basis points: whole in peace; a third when
+ * its holder is at war; a fifth when it is occupied by somebody else or under
+ * blockade. What a war abroad does to a merchant who never sees it.
+ */
+export function routeOpenBps(world: WorldState, provinceId: string): number {
+  const province = world.map.provinces.find((candidate) => candidate.id === provinceId);
+  if (province === undefined || province.controllerPolityId === null) return 10_000;
+  const blockaded = world.blockades.some((blockade) => blockade.provinceId === provinceId && blockade.status === "active");
+  if (isOccupied(province) || blockaded) return 2_000;
+  return warsOf(world.polityAgreements, province.controllerPolityId).length > 0 ? 3_500 : 10_000;
 }

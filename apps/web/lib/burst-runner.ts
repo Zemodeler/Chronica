@@ -16,6 +16,7 @@ import {
   listPendingEvents,
   markBurstProgress,
   listRecentFacts,
+  listUntoldFacts,
   reapStaleBursts,
   schema,
   startBurst,
@@ -60,6 +61,8 @@ export interface BurstJob {
   readonly knownFacts: readonly Fact[];
   readonly queue: readonly { id: string; dueInstantSortKey: number; kind: string; summary: string; payload: unknown }[];
   readonly recentSubjects: Awaited<ReturnType<typeof subjectsOfRecentReports>>;
+  /** News of earlier runs that no passage has told (`listUntoldFacts`). */
+  readonly untold: { readonly facts: readonly Fact[]; readonly significanceByFactId: ReadonlyMap<string, number> };
   readonly recentTitles: Awaited<ReturnType<typeof titlesOfRecentReports>>;
   readonly orderText: string | null;
   readonly spanDays: number | undefined;
@@ -120,6 +123,7 @@ export async function prepareBurst(
       listPendingEvents(db, gameId),
       subjectsOfRecentReports(db, gameId),
       titlesOfRecentReports(db, gameId),
+      listUntoldFacts(db, gameId),
     ]);
   } catch (error) {
     // A save that will not open is refused here, with a sentence that says
@@ -129,7 +133,7 @@ export async function prepareBurst(
     console.error(`[game ${gameId}] ${error instanceof Error ? error.message : String(error)}`);
     return { status: "error", message: unopenable };
   }
-  const [view, open, running, factRows, queueRows, recentSubjects, recentTitles] = read;
+  const [view, open, running, factRows, queueRows, recentSubjects, recentTitles, untoldRows] = read;
   if (view === undefined) return { status: "error", message: "This world has no state to act on yet." };
   // An answer carries its own decision, and is the one order allowed to run
   // while one is open -- it is what closes it.
@@ -168,6 +172,13 @@ export async function prepareBurst(
       queue: queueRows.map((row) => ({ id: row.id, dueInstantSortKey: row.dueInstantSortKey, kind: row.kind, summary: row.summary, payload: row.payload })),
       recentSubjects,
       recentTitles,
+      untold: {
+        facts: untoldRows.flatMap((row) => {
+          const parsed = FactSchema.safeParse(row.fact);
+          return parsed.success ? [parsed.data] : [];
+        }),
+        significanceByFactId: new Map(untoldRows.map((row) => [row.id, row.significance])),
+      },
       orderText: input.orderText,
       spanDays: input.spanDays,
       answeredDecision: input.answeredDecision,
@@ -237,12 +248,13 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
   };
   const heartbeat = setInterval(() => beat(heartbeatBurst(db, burstId), "a heartbeat"), HEARTBEAT_MS);
   const progressed = (): void => beat(markBurstProgress(db, burstId), "progress");
+  let progressWrites = Promise.resolve();
   const say = (line: ProgressLine): void => {
     hooks.onProgress?.(line);
     progressed();
     // Not awaited: the burst never waits on its own commentary. A line that
     // cannot be written is said in the log, never swallowed.
-    void appendBurstProgress(db, { gameId, burstId, kind: "progress", payload: line })
+    progressWrites = progressWrites.then(() => appendBurstProgress(db, { gameId, burstId, kind: "progress", payload: line })).then(() => {})
       .catch((error: unknown) => { console.warn(`[burst ${burstId}] a progress line was not recorded:`, error); });
   };
   const fail = async (message: string): Promise<void> => {
@@ -251,7 +263,8 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
   };
 
   try {
-    const timed = createTimedPort({ db, userId, gameId, adapter: createAiAdapter() });
+    const adapter = createAiAdapter();
+    const timed = createTimedPort({ db, userId, gameId, adapter });
     // Every answered call is progress, whichever stage asked for it.
     const port: SimModelPort = {
       complete: async (operation, system, user) => {
@@ -261,7 +274,7 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
       },
     };
     const turnStartedAt = performance.now();
-    const deadline = burstDeadlineMs();
+    const deadline = burstDeadlineMs(process.env, adapter.free === true);
     const deadlineAt = deadline === null ? null : Date.now() + deadline;
     const from = view.world.instant;
     const clock = view.scenarioClock;
@@ -278,6 +291,7 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
       offices,
       recentSubjects: job.recentSubjects,
       recentTitles: job.recentTitles,
+      untold: job.untold,
       onEntry: async (entry, window) => {
         ordinal += 1;
         await appendBurstProgress(db, {
@@ -390,6 +404,7 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
     }
 
     say({ stage: "committing", line: "The record is entered." });
+    await progressWrites;
     try {
       await commitBurst(db, {
         gameId,
@@ -518,13 +533,13 @@ export function workNotDone(result: Pick<BurstResult, "skipped" | "parseFailures
  * off). A burst answered by hand waits on a person, not a provider, so it has
  * none unless one is asked for.
  */
-export function burstDeadlineMs(env: Readonly<Record<string, string | undefined>> = process.env): number | null {
+export function burstDeadlineMs(env: Readonly<Record<string, string | undefined>> = process.env, freeAdapter?: boolean): number | null {
   const raw = env.CHRONICA_BURST_DEADLINE_MS?.trim();
   if (raw !== undefined && raw.length > 0) {
     const ms = Number(raw);
     return Number.isFinite(ms) && ms > 0 ? ms : null;
   }
-  if (env.CHRONICA_AI_MODE === "hand") return null;
+  if (freeAdapter ?? (env.CHRONICA_AI_MODE === "hand")) return null;
   return BURST_DEADLINE_MS;
 }
 

@@ -1,4 +1,5 @@
-import { ORDER_PART_STATUS_LABEL, orderPartStatus, type OrderPart, type WorldState } from "@chronica/shared";
+import { spentForOrderPart } from "@chronica/shared";
+import { orderPartLabel, orderPartStatus, type OrderPart, type WorldState } from "@chronica/shared";
 import type { ChronicleEntry } from "./chronicle";
 
 /**
@@ -19,27 +20,37 @@ export function orderOutcomeLines(world: WorldState, orderRecordId: string): rea
   const told = order.parts.map((part) => lineOf(world, part, order.actorCharacterId));
   // A one-part order carried out is answered by its passage, and a line
   // saying "done" under it says nothing the passage did not.
-  if (order.parts.length === 1 && orderPartStatus(world, order.parts[0]!) === "done" && order.parts[0]!.note === null) return [];
+  if (order.parts.length === 1 && orderPartStatus(world, order.parts[0]!) === "achieved" && order.parts[0]!.note === null) return [];
   return told;
 }
 
-function lineOf(world: WorldState, part: OrderPart, actorId: string): string {
+/** One part's line: what it came to, in the engine's words. */
+export function lineOf(world: WorldState, part: OrderPart, actorId: string): string {
   const status = orderPartStatus(world, part);
   const project = part.workRefs.find((ref) => ref.kind === "project");
   const work = project === undefined ? undefined : world.projects.find((candidate) => candidate.id === project.id);
   const next = work?.milestones.find((milestone) => milestone.status === "pending");
-  const how = status === "started" && work !== undefined
+  const how = status === "under_way" && work !== undefined
     ? `: ${work.label}${next === undefined ? "" : `, next ${lowerFirst(next.label)}`}`
     : "";
   const why = part.refusal ?? part.whyNot;
-  const reason = why === null || status === "done" || status === "started" ? "" : `: ${sentencesWithin(why.replace(/\s+/g, " "), 320)}`;
+  const reason = why === null || status === "achieved" || status === "under_way" ? "" : `: ${sentencesWithin(why.replace(/\s+/g, " "), 320)}`;
   // Secret work says what it cost and whose money it was, to the man who paid.
   const plotRef = part.workRefs.find((ref) => ref.kind === "plot");
   const plot = plotRef === undefined ? undefined : world.covertPlots.find((candidate) => candidate.id === plotRef.id);
   const payer = plot?.fundingAccountId == null ? null : world.material.accounts.find((account) => account.id === plot.fundingAccountId);
   const paid = plot === undefined || plot.spend <= 0 ? "" : ` (${plot.spend} paid${payer?.owner.kind === "character" && payer.owner.id === actorId ? " from your own purse" : payer?.owner.kind === "polity" ? " from the treasury" : ""})`;
-  const note = `${paid}${part.note === null ? "" : ` (${part.note})`}`;
-  return `"${part.said}" -- ${ORDER_PART_STATUS_LABEL[status]}${how}${reason}${note}.`.replace(/\.\.$/, ".");
+  // What it was allowed, what was set aside and what went: three different
+  // things, which the record used to say as one or not at all (E07).
+  const reservation = part.spend?.reservationId == null ? undefined : world.material.reservations.find((candidate) => candidate.id === part.spend!.reservationId);
+  const spent = spentForOrderPart(world, part);
+  const envelope = part.spend === null ? ""
+    : reservation === undefined
+      ? ` (up to ${part.spend.cap} allowed; ${spent} spent; nothing currently set aside)`
+      : ` (up to ${part.spend.cap} allowed; ${reservation.status === "active" ? reservation.remainingAmount : 0} currently set aside, ${Math.max(spent, reservation.reservedAmount - reservation.remainingAmount)} spent)`;
+  const guessed = part.attribution === "guessed" ? " (its work was matched to it by the words alone)" : "";
+  const note = `${paid}${envelope}${part.note === null ? "" : ` (${part.note})`}${guessed}`;
+  return `"${part.said}" -- ${orderPartLabel(status, part)}${how}${reason}${note}.`.replace(/\.\.$/, ".");
 }
 
 /** Whole sentences up to a length, never a word cut in half. */
@@ -91,4 +102,16 @@ export function withOrderOutcomes(
     fromInstantSortKey: last?.toInstantSortKey ?? atInstantSortKey,
     toInstantSortKey: last?.toInstantSortKey ?? atInstantSortKey,
   }];
+}
+
+/**
+ * Whether a passage says a part of an order was done when the world says it
+ * was not. The historian was handed "no crossing is recorded" and wrote that
+ * the legion would be carried over; the record then held both. Only the
+ * words for a thing finished are looked for, and only against a part that is
+ * not: a passage may say what was begun, allowed or asked for.
+ */
+export function claimsItDone(body: string, status: ReturnType<typeof orderPartStatus>): boolean {
+  if (status === "achieved") return false;
+  return /\b(arrived|landed|crossed over|made the crossing|reached|was completed|were completed|was carried out|were carried out|accomplished|achieved|succeeded|was done|stands now in|now stood in)\b/i.test(body);
 }

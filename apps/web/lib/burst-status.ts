@@ -1,3 +1,5 @@
+import { getSelectedLocalAiProvider } from "@chronica/ai";
+
 /**
  * What a running burst looks like to the page polling it.
  *
@@ -28,6 +30,9 @@ export const BURST_NO_PROGRESS_MS = 8 * 60_000;
  */
 export const BURST_DEADLINE_MS = 12 * 60_000;
 
+/** Long enough for any person answering by hand, short enough to be a date. */
+const HAND_NO_PROGRESS_MS = 100 * 365 * 24 * 60 * 60_000;
+
 /** The cutoffs a running burst is judged alive by, at `now`. */
 export function livenessAt(now: Date, noProgressMs = noProgressAllowedMs()): { readonly aliveAfter: Date; readonly progressAfter: Date } {
   return { aliveAfter: new Date(now.getTime() - BURST_STALE_MS), progressAfter: new Date(now.getTime() - noProgressMs) };
@@ -37,8 +42,11 @@ export function livenessAt(now: Date, noProgressMs = noProgressAllowedMs()): { r
  * A burst answered by hand waits on a person writing the answer, which can
  * take far longer than eight minutes; only a stopped heartbeat reaps it.
  */
-export function noProgressAllowedMs(env: Readonly<Record<string, string | undefined>> = process.env): number {
-  return env.CHRONICA_AI_MODE === "hand" ? Number.MAX_SAFE_INTEGER / 2 : BURST_NO_PROGRESS_MS;
+export function noProgressAllowedMs(env: Readonly<Record<string, string | undefined>> = process.env, freeAdapter = env === process.env && getSelectedLocalAiProvider() === "codex"): number {
+  // A century, not Number.MAX_SAFE_INTEGER / 2: that is 142,000 years, and
+  // `now` minus it is a date Postgres refuses ("time zone displacement out of
+  // range"), which failed every read of a hand-mode save's running burst.
+  return env.CHRONICA_AI_MODE === "hand" || freeAdapter ? HAND_NO_PROGRESS_MS : BURST_NO_PROGRESS_MS;
 }
 
 export interface BurstRow {
@@ -109,7 +117,7 @@ export function isStale(row: BurstRow, now: Date, staleMs = BURST_STALE_MS): boo
 }
 
 export function toBurstStatus(row: BurstRow, rows: readonly ProgressRow[], afterId: number, now: Date): BurstStatusView {
-  const abandoned = abandonment(row, now);
+  const abandoned = abandonment(row, now, BURST_STALE_MS, noProgressAllowedMs());
   const stale = abandoned !== null;
   const progress = rows
     .filter((entry) => entry.id > afterId && entry.kind === "progress")

@@ -21,6 +21,7 @@ import type { Province } from "../world/map";
 import { resolveForcePosition } from "./position";
 import type { TacticalModifierProposal } from "./tactical-modifier";
 import type { Structure } from "../world/structure";
+import { ENGAGEMENT_EXPOSURE, pursuitExposure, readFormation, type FormationReading, type WarfareRules } from "./formation";
 
 // Deterministic battle resolution (docs/19 Phase 3, ADR-0031).
 //
@@ -175,7 +176,7 @@ export interface ResolveBattleInput {
   readonly provinceMaterial: ProvinceMaterial | null;
   /** Candidate retreat destinations, in a stable order (the caller decides adjacency/order). */
   readonly adjacentProvinceIds: readonly string[];
-  readonly warfareRules?: ScenarioWarfareRules;
+  readonly warfareRules?: WarfareRules;
   /** Novel tactics a player/NPC proposed for this battle (docs/19 Phase 3). */
   readonly tacticalProposals?: readonly TacticalModifierProposal[] | undefined;
   /**
@@ -265,11 +266,56 @@ function garrisonOvercrowdingBps(participant: ResolveBattleParticipant, province
  * Fit heads counted at their category's combat weight: a hundred cavalry and
  * a hundred levies are not a hundred each.
  */
-export function paperWeightedStrength(force: Force, rules: ScenarioWarfareRules | undefined): number {
+export function paperWeightedStrength(force: Force, rules: WarfareRules | undefined): number {
   return force.personnel.reduce((sum, category) => {
     const definition = categoryDefinition(rules, category.categoryId);
-    return sum + category.fit * (definition.combatWeightBps / 10_000);
+    // What drill, experience and doctrine make of the men (`formation.ts`),
+    // already capped: a formation is worth at most a quarter more per head.
+    const edge = readFormation(rules, force, category).strengthEdgeBps;
+    return sum + category.fit * (definition.combatWeightBps / 10_000) * (1 + edge / 10_000);
   }, 0);
+}
+
+/** Each row's reading, once. */
+function readingsOf(force: Force, rules: WarfareRules | undefined): FormationReading[] {
+  return force.personnel.map((category) => readFormation(rules, force, category));
+}
+
+/** A lever's worth across an army, weighted by the men it reaches. */
+function weightedBy(force: Force, readings: readonly FormationReading[], pick: (reading: FormationReading) => number, onlyLines?: ReadonlySet<string>): number {
+  const men = force.personnel.reduce((sum, category) => sum + category.fit, 0);
+  if (men <= 0) return 0;
+  let total = 0;
+  force.personnel.forEach((category, index) => {
+    const reading = readings[index]!;
+    if (onlyLines !== undefined && !onlyLines.has(reading.line)) return;
+    total += pick(reading) * category.fit;
+  });
+  return total / men;
+}
+
+const RESERVE_LINES = new Set(["second", "third", "reserve"]);
+
+/**
+ * How fast an army loses its cohesion under loss, against an ordinary one.
+ *
+ * `steadinessBps` was declared on every kind of troops -- "feeds cohesion loss
+ * under pressure" -- and read by nothing: horse that will not stand and
+ * veterans who will broke at exactly the same rate. Now the army's own
+ * steadiness (weighted by head) sets the pace, drill, experience and doctrine
+ * slow it, and fresh lines coming up through a tired one slow it again -- if
+ * there are fresh lines to come.
+ */
+function cohesionLossFactor(force: Force, rules: WarfareRules | undefined, readings: readonly FormationReading[]): number {
+  const men = force.personnel.reduce((sum, category) => sum + category.fit, 0);
+  if (men <= 0) return 1;
+  const steadiness = force.personnel.reduce((sum, category) => sum + categoryDefinition(rules, category.categoryId).steadinessBps * category.fit, 0) / men;
+  const byKind = Math.max(0.75, Math.min(1.5, 7_000 / Math.max(1, steadiness)));
+  const protection = weightedBy(force, readings, (reading) => reading.protectionBps) / 10_000;
+  const hasReserve = force.personnel.some((category, index) => category.fit > 0 && RESERVE_LINES.has(readings[index]!.line))
+    && force.personnel.some((category, index) => category.fit > 0 && readings[index]!.line === "first");
+  const relief = hasReserve ? Math.min(0.3, weightedBy(force, readings, (reading) => reading.reliefBps) / 10_000) : 0;
+  return Math.max(0.5, byKind * (1 - protection) * (1 - relief));
 }
 
 /**
@@ -282,7 +328,7 @@ export function paperWeightedStrength(force: Force, rules: ScenarioWarfareRules 
  * terrain, position, structures, supply, the commander, posture, tactics and
  * the day's variance. None of that exists until there is a field.
  */
-export function standingEffectiveStrength(force: Force, rules: ScenarioWarfareRules | undefined): number {
+export function standingEffectiveStrength(force: Force, rules: WarfareRules | undefined): number {
   const moraleFactor = force.moraleBps / 10_000;
   const cohesionFactor = force.cohesionBps / 10_000;
   const fatiguePenalty = 1 - (force.fatigueBps / 10_000) * 0.5;
@@ -293,11 +339,12 @@ function computeForceContribution(
   participant: ResolveBattleParticipant,
   province: Province,
   provinceMaterial: ProvinceMaterial | null,
-  rules: ScenarioWarfareRules | undefined,
+  rules: WarfareRules | undefined,
   varianceBps: number,
   tacticBps: number,
   structures: readonly Structure[],
   adjacentProvinceIds: readonly string[],
+  enemyAfloat = false,
 ): ForceContribution {
   const { force } = participant;
   const baseStrength = paperWeightedStrength(force, rules);
@@ -316,7 +363,17 @@ function computeForceContribution(
   // out of the schema as "authorizedStrength: expected number, received NaN" --
   // a rejected battle whose stated reason names neither battles nor posture.
   const postureBps = participant.posture ? POSTURE_MODIFIER_BPS[participant.posture] ?? 0 : 0;
-  const modifierBps = positionBps + terrainBps
+  // What its doctrines make of this field: the phalanx on broken ground, the
+  // skirmish line at contact, the boarding-bridge when two fleets close. Each
+  // weighted by the men it reaches, attacker or defender alike -- a legion is
+  // as articulated going uphill as standing on top.
+  const readings = readingsOf(force, rules);
+  const rough = !afloat && terrainDefenseBps(province.terrainId) > 0;
+  const groundBps = rough ? weightedBy(force, readings, (reading) => reading.roughGroundBps) : 0;
+  const screenBps = afloat ? 0 : weightedBy(force, readings, (reading) => reading.screenBps)
+    * (force.personnel.some((category, index) => category.fit > 0 && readings[index]!.line === "screen") ? 1 : 0);
+  const boardingBps = afloat && enemyAfloat ? weightedBy(force, readings, (reading) => reading.boardingBps) : 0;
+  const modifierBps = positionBps + terrainBps + groundBps + screenBps + boardingBps
     + structureDefenseBps(participant, province, structures)
     + garrisonOvercrowdingBps(participant, province, structures)
     + supplyModifierBps(force, provinceMaterial, province.id, adjacentProvinceIds, structures)
@@ -416,8 +473,12 @@ export function resolveBattle(input: ResolveBattleInput, seed: string): BattleRe
   const attackerVarianceBps = drawVariance("attacker");
   const defenderVarianceBps = drawVariance("defender");
 
-  const attackerContributions = attackers.map((p) => computeForceContribution(p, province, provinceMaterial, warfareRules, attackerVarianceBps, tacticBpsByForceId.get(p.forceId) ?? 0, structures, adjacentProvinceIds));
-  const defenderContributions = defenders.map((p) => computeForceContribution(p, province, provinceMaterial, warfareRules, defenderVarianceBps, tacticBpsByForceId.get(p.forceId) ?? 0, structures, adjacentProvinceIds));
+  const afloatSide = (side: readonly ResolveBattleParticipant[]): boolean =>
+    side.some((p) => p.force.personnel.some((category) => category.fit > 0 && categoryDefinition(warfareRules, category.categoryId).naval));
+  const attackersAfloat = afloatSide(attackers);
+  const defendersAfloat = afloatSide(defenders);
+  const attackerContributions = attackers.map((p) => computeForceContribution(p, province, provinceMaterial, warfareRules, attackerVarianceBps, tacticBpsByForceId.get(p.forceId) ?? 0, structures, adjacentProvinceIds, defendersAfloat));
+  const defenderContributions = defenders.map((p) => computeForceContribution(p, province, provinceMaterial, warfareRules, defenderVarianceBps, tacticBpsByForceId.get(p.forceId) ?? 0, structures, adjacentProvinceIds, attackersAfloat));
   const attackerEffectiveStrength = Math.round(attackerContributions.reduce((sum, c) => sum + c.effectiveStrength, 0));
   const defenderEffectiveStrength = Math.round(defenderContributions.reduce((sum, c) => sum + c.effectiveStrength, 0));
 
@@ -460,9 +521,16 @@ export function resolveBattle(input: ResolveBattleInput, seed: string): BattleRe
       const held = commander === null ? 1 : 1 - skillShare(aptitude(commander, "authority"), 0.5);
       const desertionShare = clampBps(0.10 * (10_000 - force.cohesionBps) / 10_000 * held * 10_000, 0, 4_000) / 10_000;
       let forceCasualtyTotal = 0;
-      for (const category of force.personnel) {
-        const categoryCasualties = Math.floor(category.fit * rate);
-        if (categoryCasualties <= 0) continue;
+      // Who takes the blows: the first line most, the third least
+      // (`ENGAGEMENT_EXPOSURE`), normalised so the army as a whole loses what
+      // the exchange says it loses. An army with no formations is all one line.
+      const readings = readingsOf(force, warfareRules);
+      const men = force.personnel.reduce((sum, category) => sum + category.fit, 0);
+      const meanExposure = men <= 0 ? 1 : force.personnel.reduce((sum, category, index) => sum + ENGAGEMENT_EXPOSURE[readings[index]!.line] * category.fit, 0) / men;
+      force.personnel.forEach((category, index) => {
+        const exposure = meanExposure <= 0 ? 1 : ENGAGEMENT_EXPOSURE[readings[index]!.line] / meanExposure;
+        const categoryCasualties = Math.min(category.fit, Math.floor(category.fit * rate * exposure));
+        if (categoryCasualties <= 0) return;
         const deserted = Math.floor(categoryCasualties * desertionShare);
         const dead = Math.floor((categoryCasualties - deserted) * 0.35);
         const wounded = categoryCasualties - deserted - dead;
@@ -470,13 +538,14 @@ export function resolveBattle(input: ResolveBattleInput, seed: string): BattleRe
         casualties.push({
           forceId: force.id,
           categoryId: category.categoryId,
+          ...(category.formationId === undefined ? {} : { formationId: category.formationId }),
           dead,
           deserted,
           wounded,
           // The first of them, three weeks on; the rest later, or never (`woundsMend`).
           recoveryEligibleAtStep: battle.startedAtStep + WOUND_RETURN_DAYS[0],
         });
-      }
+      });
       casualtyCountByForce.set(force.id, forceCasualtyTotal);
     }
   };
@@ -498,7 +567,7 @@ export function resolveBattle(input: ResolveBattleInput, seed: string): BattleRe
     const { force } = contribution.participant;
     const casualtyCount = casualtyCountByForce.get(force.id) ?? 0;
     const authorized = Math.max(1, totalPersonnel(force));
-    const cohesionLoss = clampBps((casualtyCount / authorized) * 10_000 * 1.5, 0, 10_000);
+    const cohesionLoss = clampBps((casualtyCount / authorized) * 10_000 * 1.5 * cohesionLossFactor(force, warfareRules, readingsOf(force, warfareRules)), 0, 10_000);
     const nextCohesion = clampBps(force.cohesionBps - cohesionLoss);
     const nextMorale = clampBps(force.moraleBps - Math.round(cohesionLoss * 0.6));
     const nextFatigue = clampBps(force.fatigueBps + 1_500);
@@ -569,21 +638,36 @@ export function resolveBattle(input: ResolveBattleInput, seed: string): BattleRe
   const pursue = (fleeing: readonly ForceContribution[], pursuers: readonly ForceContribution[]): void => {
     const heads = pursuers.reduce((sum, c) => sum + totalPersonnel(c.participant.force), 0);
     if (heads === 0) return;
+    // How quick the victors are, by head: horse count whole, a marching man
+    // nothing, and anything between by how much quicker than him it is. A
+    // fleet rides down a beaten fleet as horse do a beaten army.
+    const quickness = (definition: TroopCategoryDefinition): number =>
+      definition.naval ? (definition.mobilityBps >= 8_000 ? 1 : 0) : Math.max(0, Math.min(1, (definition.mobilityBps - 5_000) / 4_500));
     const horse = pursuers.reduce((sum, c) => sum + c.participant.force.personnel
-      .filter((category) => categoryDefinition(warfareRules, category.categoryId).mobilityBps >= 8_000)
-      .reduce((men, category) => men + category.fit, 0), 0);
-    const rate = 0.03 + 0.12 * (horse / heads);
+      .reduce((men, category) => men + category.fit * quickness(categoryDefinition(warfareRules, category.categoryId)), 0), 0);
+    const pressed = pursuers.reduce((sum, c) => {
+      const force = c.participant.force;
+      return sum + weightedBy(force, readingsOf(force, warfareRules), (reading) => reading.pursuitBps) * totalPersonnel(force);
+    }, 0) / heads;
+    const rate = Math.min(0.3, (0.03 + 0.12 * (horse / heads)) * (1 + pressed / 10_000));
     for (const contribution of fleeing) {
       const { force } = contribution.participant;
       let cut = 0;
-      for (const category of force.personnel) {
-        const already = casualties.filter((c) => c.forceId === force.id && c.categoryId === category.categoryId).reduce((sum, c) => sum + c.dead + c.deserted + c.wounded, 0);
-        const lost = Math.floor(Math.max(0, category.fit - already) * rate);
-        if (lost <= 0) continue;
+      force.personnel.forEach((category) => {
+        const already = casualties
+          .filter((c) => c.forceId === force.id && c.categoryId === category.categoryId && c.formationId === category.formationId)
+          .reduce((sum, c) => sum + c.dead + c.deserted + c.wounded, 0);
+        const lost = Math.floor(Math.max(0, category.fit - already) * Math.min(0.5, rate * pursuitExposure(categoryDefinition(warfareRules, category.categoryId))));
+        if (lost <= 0) return;
         const dead = Math.floor(lost / 2);
         cut += lost;
-        casualties.push({ forceId: force.id, categoryId: category.categoryId, dead, deserted: lost - dead, wounded: 0, recoveryEligibleAtStep: battle.startedAtStep + WOUND_RETURN_DAYS[0] });
-      }
+        casualties.push({
+          forceId: force.id,
+          categoryId: category.categoryId,
+          ...(category.formationId === undefined ? {} : { formationId: category.formationId }),
+          dead, deserted: lost - dead, wounded: 0, recoveryEligibleAtStep: battle.startedAtStep + WOUND_RETURN_DAYS[0],
+        });
+      });
       casualtyCountByForce.set(force.id, (casualtyCountByForce.get(force.id) ?? 0) + cut);
     }
   };

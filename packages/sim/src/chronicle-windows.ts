@@ -1,4 +1,4 @@
-import { diffWorlds, type Fact, type Office, type OrderPartyRef, type ScenarioClock, type WorldState } from "@chronica/shared";
+import { diffWorlds, findOrderPart, orderPartStatus, type Fact, type Office, type OrderPartyRef, type ScenarioClock, type WorldState } from "@chronica/shared";
 import type { BattleAccount } from "./battle";
 import type { WindowSnapshot } from "./burst";
 import {
@@ -6,6 +6,7 @@ import {
   WINDOW_MAX_ENTRIES,
   composeChronicle,
   nameOfSubject,
+  campaignOf,
   ownSideOf,
   personallyTouchedBy,
   whoIsWho,
@@ -14,6 +15,7 @@ import {
   type UtteranceLine,
 } from "./chronicle";
 import type { SimModelPort } from "./ports";
+import { lineOf } from "./order-outcomes";
 
 /**
  * The record, written window by window while the burst runs.
@@ -40,6 +42,13 @@ export interface WindowWriterInput {
   /** What earlier reports were about and said, so a matter merely continuing is not headlined again. */
   readonly recentSubjects: readonly (readonly string[])[];
   readonly recentTitles: readonly string[];
+  /**
+   * News from earlier runs that no passage ever told, with the weight each
+   * was given when it happened. A run's windows hold only what the run itself
+   * made, so a matter that reached the court after its own run had ended
+   * would otherwise never be offered to the historian again.
+   */
+  readonly untold?: { readonly facts: readonly Fact[]; readonly significanceByFactId: ReadonlyMap<string, number> } | undefined;
   /** Called with each passage as it is written, in the order of the record. Awaited, so passages are handed out in order. */
   readonly onEntry?: ((entry: ChronicleEntry, window: number) => Promise<void>) | undefined;
 }
@@ -73,7 +82,7 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
    * goes into the pool and rides with the next window to start; a matter
    * carried past a window still composing is dated when it is finally told.
    */
-  let pool: readonly Fact[] = [];
+  let pool: readonly Fact[] = [...(input.untold?.facts ?? [])];
   const composing: Promise<readonly ChronicleEntry[]>[] = [];
   let publishing: Promise<void> = Promise.resolve();
 
@@ -84,8 +93,14 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
     ownEntityIds: ownSideOf(world, observer.id, observerPolityId),
     personalEntityIds: personallyTouchedBy(world, observer.id, observerPolityId, offices),
     storylines: world.storylines,
+    campaignIds: campaignOf(world, observer.id, observerPolityId),
     // Where everybody is when the window closes, for the road news travels.
     world,
+    // Where each part of an order stands when the window closes (`lineOf`).
+    orderOutcome: (partKey: string) => {
+      const found = findOrderPart(world, partKey);
+      return found === null ? null : { line: lineOf(world, found.part, found.order.actorCharacterId), status: orderPartStatus(world, found.part) };
+    },
   });
 
   // The record is indexed by the day a matter entered it, and a page has
@@ -127,7 +142,9 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
     if (window.orderFactIds.length > 0) orderFactIds = new Set(window.orderFactIds);
     lastWorld = window.worldAfter;
     span = { from: span?.from ?? window.from, to: window.to };
-    const facts = [...pool, ...window.facts];
+    // Routine speeches remain in the factual ledger. The chamber's opening,
+    // changed positions, vetoes and final count tell the political story.
+    const facts = [...pool, ...window.facts].filter((fact) => fact.kind !== "senate_speech");
     pool = [];
     try {
       const out = await composeChronicle({
@@ -142,7 +159,7 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
         frictions,
         utterances,
         battleAccounts,
-        significanceByFactId: window.significanceByFactId,
+        significanceByFactId: input.untold === undefined ? window.significanceByFactId : new Map([...input.untold.significanceByFactId, ...window.significanceByFactId]),
         ...viewsOf(window.worldAfter),
         orderFactIds,
         changes: diffWorlds(window.worldBefore, window.worldAfter, offices),

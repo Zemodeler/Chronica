@@ -3,6 +3,7 @@ import { after } from "next/server";
 import { and, eq } from "drizzle-orm";
 import {
   createDatabase,
+  getSharedDatabase,
   findRunningBurst,
   getBurst,
   getOpenDecision,
@@ -46,13 +47,15 @@ export interface SimulationContext {
   readonly characterId: string;
 }
 
-export async function resolveContext(gameId: string): Promise<SimulationContext | null> {
+export async function resolveContext(gameId: string, shared = false): Promise<SimulationContext | null> {
   if (!isAuthenticationConfigured()) return null;
   const session = await getAuthentication().api.getSession({ headers: await headers() });
   const userId = session?.user.id;
   if (userId === undefined) return null;
 
-  const { db, close } = createDatabase(requiredDatabaseUrl());
+  const { db, close } = shared
+    ? { db: getSharedDatabase(requiredDatabaseUrl()), close: async () => {} }
+    : createDatabase(requiredDatabaseUrl());
   const [player] = await db
     .select({ id: schema.players.id, characterId: schema.players.characterId })
     .from(schema.players)
@@ -156,7 +159,7 @@ export async function getBurstStatus(gameId: string, burstId: string, afterId: n
 }
 
 export async function getGameView(gameId: string) {
-  const context = await resolveContext(gameId);
+  const context = await resolveContext(gameId, true);
   if (context === null) return null;
   const { db, close, userId, characterId } = context;
   try {
@@ -175,6 +178,7 @@ export async function getGameView(gameId: string) {
       change.kind !== "account" || (typeof change.id === "string" && seesAccount(station, change.id));
     return {
       gameTitle: view.gameTitle,
+      worldRevision: String(view.revision),
       instant: view.world.instant,
       // The lintel's date. Read with the record, so the date moves in the same
       // breath as the Chronicle that says why.
@@ -347,4 +351,3 @@ function namedTags(world: WorldState, stored: unknown): { kind: string; id: stri
     return [{ kind, id, label: nameOfSubject(world, { kind, id } as OrderPartyRef) ?? id }];
   });
 }
-

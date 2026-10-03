@@ -9,10 +9,10 @@ const overlay: DynamicMapOverlay = {
   provinces: [],
   settlements: [{ settlementId: "fort", provinceId: "sicily", anchorFeatureId: "fort", name: "Fort Agrigentum", kind: "fortress", controllerPolityId: "carthage", capitalPolityId: null, importance: 50, underSiege: false, damaged: false }],
   forces: [
-    { forceId: "battle-a", provinceId: "sicily", ownerPolityId: "rome", name: "Legio I", commanderLabel: "Scipio", strengthLabel: "3,000", relation: "friendly", selected: false, movement: null },
-    { forceId: "battle-b", provinceId: "sicily", ownerPolityId: "carthage", name: "Carthaginian army", commanderLabel: "Hanno", strengthLabel: "3,000", relation: "hostile", selected: false, movement: null },
-    { forceId: "attacker", provinceId: "sicily", ownerPolityId: "rome", name: "Siege army", commanderLabel: "Marcellus", strengthLabel: "1,000", relation: "friendly", selected: false, movement: null },
-    { forceId: "defender", provinceId: "sicily", ownerPolityId: "carthage", name: "Garrison", commanderLabel: "Bomilcar", strengthLabel: "800", relation: "hostile", selected: false, movement: null },
+    { forceId: "battle-a", provinceId: "sicily", ownerPolityId: "rome", name: "Legio I", commanderLabel: "Scipio", strengthLabel: "3,000", naval: false, relation: "friendly", selected: false, movement: null },
+    { forceId: "battle-b", provinceId: "sicily", ownerPolityId: "carthage", name: "Carthaginian army", commanderLabel: "Hanno", strengthLabel: "3,000", naval: false, relation: "hostile", selected: false, movement: null },
+    { forceId: "attacker", provinceId: "sicily", ownerPolityId: "rome", name: "Siege army", commanderLabel: "Marcellus", strengthLabel: "1,000", naval: false, relation: "friendly", selected: false, movement: null },
+    { forceId: "defender", provinceId: "sicily", ownerPolityId: "carthage", name: "Garrison", commanderLabel: "Bomilcar", strengthLabel: "800", naval: false, relation: "hostile", selected: false, movement: null },
   ],
   conflicts: {
     battles: [{ battleId: "battle", participantForceIds: ["battle-a", "battle-b"], attackerForceIds: ["battle-a"] }],

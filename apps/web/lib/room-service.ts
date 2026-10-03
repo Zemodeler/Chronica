@@ -1,9 +1,14 @@
 import "server-only";
+import { readPeaceTables, type PeaceTablesView } from "@chronica/sim";
 
 import { factSignificances, getCharacterKnowledgebase, listChronicle, listFollowedThreads, listRecentFacts } from "@chronica/db";
 import {
   FactSchema,
   lettersAwaitingYou,
+  lettersDirectory,
+  correspondenceOf,
+  orderPartStatus,
+  orderPartLabel,
   mattersInHand,
   musterTheForces,
   ordersUnderWay,
@@ -25,8 +30,22 @@ import {
   notableEventsSince,
   readTheMirror,
   readTheBooks,
+  readService,
+  type ServiceReading,
   readTheState,
   readYourStanding,
+  readOfficeInsights,
+  readConstitutionHistory,
+  readLaws,
+  readStandingOrders,
+  readAdministration,
+  buildAgenda,
+  type Agenda,
+  type Administration,
+  type ConstitutionReading,
+  type LawsReading,
+  type StandingOrders,
+  type OfficeInsights,
   roomStates,
   type Books,
   type MirrorReading,
@@ -39,6 +58,7 @@ import {
 } from "@chronica/shared";
 import { getContactsView } from "./dialogue-service";
 import { withPlayerWorld } from "./player-world";
+import type { DirectoryView } from "./directory-service";
 
 /**
  * What is in the player's room, and what each thing in it says when opened.
@@ -67,15 +87,38 @@ import { withPlayerWorld } from "./player-world";
 export type BooksView = Books & { readonly currencyName: string };
 export type MusterView = Muster & { readonly currencyName: string };
 
+export interface OrderHistoryView {
+  readonly id: string;
+  readonly text: string;
+  readonly when: string;
+  readonly parts: readonly { readonly label: string; readonly status: string; readonly detail: string | null }[];
+}
+
 export interface RoomSheets {
+  readonly directory?: DirectoryView;
+  readonly contacts?: Awaited<ReturnType<typeof getContactsView>>;
+  readonly orderHistory?: readonly OrderHistoryView[];
+  readonly insights: OfficeInsights;
   /** The strongbox: what is in his own name. */
   readonly own: BooksView;
   /** The ledger stand: what he keeps for somebody else. */
   readonly kept: BooksView;
   readonly forces: MusterView;
+  /** His own place in an army's ranks, for the muster. Null for anyone not serving. */
+  readonly service: ServiceReading | null;
   readonly standing: Standing;
   /** The state he serves, for the seal case. */
   readonly state: StateReading;
+  /** How that state came to be governed as it is (`readConstitutionHistory`): public to its citizens, office or none. */
+  readonly constitution: ConstitutionReading;
+  /** Its measures in force and before the councils (`readLaws`). */
+  readonly laws: LawsReading;
+  /** His conditional orders (`readStandingOrders`), for the writing desk. */
+  readonly standingOrders: StandingOrders;
+  /** The departments of the state he keeps books for (`readAdministration`), for the ledger stand. */
+  readonly administration: Administration;
+  /** Everything open to him, once each, in three groups (`buildAgenda`), opened from the date. */
+  readonly agenda: Agenda;
   /** The bronze mirror: who he is now. Null while his character has not yet entered the world. */
   readonly self: MirrorReading | null;
   /** What has happened to him since the opening (life-story.ts), newest first. */
@@ -86,6 +129,8 @@ export interface RoomSheets {
   readonly underWay: readonly UnderWayItem[];
   /** Open promises either way (`promisesOf`), for the mirror. */
   readonly promises: readonly PromiseReading[];
+  /** Peace talks his power is at, and the wars it might talk its way out of (`readPeaceTables`). */
+  readonly peace: PeaceTablesView;
   /** Letters waiting on his answer (`lettersAwaitingYou`). */
   readonly letters: readonly AwaitingLetter[];
   /** Everything open that concerns him (`mattersInHand`), opened from the date. */
@@ -117,10 +162,18 @@ export async function getRoomContents(gameId: string): Promise<RoomContents | nu
     const own = { ...readTheBooks(world, characterId, offices, "own"), currencyName };
     const kept = { ...readTheBooks(world, characterId, offices, "kept"), currencyName };
     const forces = { ...musterTheForces(world, characterId, offices, view.scenarioClock, view.scenarioWarfare), currencyName };
+    // His own place in the ranks, where he serves in an army (`readService`).
+    const service = readService(world, characterId);
     const standing = readYourStanding(world, characterId, offices, view.scenarioClock);
     // The declaration only lends its words -- "elder brother", a line of
     // notes -- to people the world already has on the list.
-    const declared = playerId === null ? null : await getCharacterKnowledgebase(db, gameId, playerId).catch(() => null);
+    const [declared, record, contacts, recentFacts, followed] = await Promise.all([
+      playerId === null ? null : getCharacterKnowledgebase(db, gameId, playerId).catch(() => null),
+      listChronicle(db, gameId, RECORD_READ),
+      playerId === null ? [] : getContactsView(db, gameId, playerId).catch(() => []),
+      listRecentFacts(db, gameId).catch(() => []),
+      listFollowedThreads(db, gameId).catch(() => []),
+    ]);
     const self = readTheMirror({
       world,
       characterId,
@@ -128,7 +181,6 @@ export async function getRoomContents(gameId: string): Promise<RoomContents | nu
       clock: view.scenarioClock,
       declared: (declared?.relations ?? []).map((relation) => ({ name: relation.name, relationship: relation.relationship, notes: relation.notes ?? "" })),
     });
-    const record = await listChronicle(db, gameId, RECORD_READ);
     const story = notableEventsSince({
       world,
       characterId,
@@ -137,8 +189,7 @@ export async function getRoomContents(gameId: string): Promise<RoomContents | nu
       entries: await storyEntries(db, gameId, world, characterId, record),
     });
     const clock = view.scenarioClock;
-    const contacts = playerId === null ? [] : await getContactsView(db, gameId, playerId).catch(() => []);
-    const facts = (await listRecentFacts(db, gameId).catch(() => []))
+    const facts = recentFacts
       .map((row) => FactSchema.safeParse(row.fact))
       .flatMap((parsed): Fact[] => (parsed.success ? [parsed.data] : []));
     const glossary = readGlossary({
@@ -152,26 +203,51 @@ export async function getRoomContents(gameId: string): Promise<RoomContents | nu
       facts,
       conversationPartnerIds: contacts.filter((contact) => !contact.isGroup).map((contact) => contact.npcCharacterId).filter((id) => id.length > 0),
     });
+    const state = readTheState(world, characterId, offices, clock, view.scenarioGovernment?.successionRules ?? []);
+    const constitution = readConstitutionHistory(world, characterId, offices, clock);
+    const laws = readLaws(world, characterId, offices, clock);
+    const standingOrders = readStandingOrders(world, characterId, offices, clock);
+    const administration = readAdministration(world, characterId, offices, clock);
+    const matters = mattersInHand(world, characterId, offices, clock);
+    const agenda = buildAgenda({ calendar: whatComesNext(world, characterId, offices, clock, 60), matters, laws, orders: standingOrders, administration });
+    // A citizen with no office still has a state: how it is governed and its
+    // laws are public to the people under them, so the seal case is theirs.
+    const publicState = state.government !== null || constitution.entries.length > 0 || laws.inForce.length > 0 || laws.before.length > 0 || state.offices.length > 0;
     return {
-      forces: forces.forces.length > 0,
-      standing: standing.nothing === null,
-      books: kept.accounts.length > 0,
+      // A man in the ranks has his own place in an army, whether or not he commands one.
+      forces: forces.forces.length > 0 || service !== null,
+      standing: standing.nothing === null || publicState,
+      books: kept.accounts.length > 0 || administration.departments.length > 0,
       purse: own.accounts.length > 0,
       states: roomStates(world, characterId, offices, view.scenarioClock, view.scenarioWarfare),
       sheets: {
-        own, kept, forces, standing, state: readTheState(world, characterId, offices, clock, view.scenarioGovernment?.successionRules ?? []), self, story,
+        directory: {
+          groups: lettersDirectory({ world, viewerId: characterId, conversationPartnerIds: contacts.filter((contact) => !contact.isGroup).map((contact) => contact.npcCharacterId), offices, clock }),
+          letters: lettersAwaitingYou(world, characterId, offices, clock),
+          correspondence: correspondenceOf(world, characterId, clock),
+        },
+        contacts,
+        orderHistory: world.orders.filter((order) => order.actorCharacterId === characterId).slice(-60).reverse().map((order) => ({
+          id: order.id,
+          text: order.text,
+          when: formatWorldDate({ day: order.givenAtStep, minute: 0 }, clock),
+          parts: order.parts.map((part) => ({ label: part.said, status: orderPartLabel(orderPartStatus(world, part), part), detail: part.refusal ?? part.whyNot ?? part.note })),
+        })),
+        insights: readOfficeInsights({ world, characterId, offices, clock, warfare: view.scenarioWarfare, facts, ownBooks: own, keptBooks: kept, muster: forces }),
+        own, kept, forces, service, standing, state, constitution, laws, standingOrders, administration, agenda, self, story,
         calendar: whatComesNext(world, characterId, offices, clock),
         underWay: ordersUnderWay(world, characterId, offices, clock),
         promises: promisesOf(world, characterId, clock),
+        peace: readPeaceTables(world, characterId, offices, (day) => formatWorldDate({ day, minute: 0 }, clock)),
         letters: lettersAwaitingYou(world, characterId, offices, clock),
-        matters: mattersInHand(world, characterId, offices, clock),
+        matters,
         glossary,
         peers: peersOf(world, characterId, offices),
         threads: threadsYouSee({
           world,
           characterId,
           offices,
-          followedIds: new Set(await listFollowedThreads(db, gameId).catch(() => [])),
+          followedIds: new Set(followed),
           entries: record.map((row) => ({
             id: row.id,
             title: row.title,
@@ -179,6 +255,7 @@ export async function getRoomContents(gameId: string): Promise<RoomContents | nu
             sortKey: row.toInstantSortKey,
             read: row.readAt !== null,
             storylineIds: Array.isArray(row.storylineIds) ? (row.storylineIds as unknown[]).filter((id): id is string => typeof id === "string") : [],
+            factIds: Array.isArray(row.factIds) ? (row.factIds as unknown[]).filter((id): id is string => typeof id === "string") : [],
             subjects: refsOf(row.subjects),
           })),
         }),

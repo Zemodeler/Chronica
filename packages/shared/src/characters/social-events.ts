@@ -5,6 +5,7 @@ import { CharacterProfileSchema } from "./character-profile";
 import { SocialLinkKindSchema } from "./relationship-dimensions";
 import { CharacterPressureKindSchema } from "./pressures";
 import { BeliefKindSchema, KnowledgeChannelSchema } from "./beliefs";
+import { PromiseTriggerSchema } from "./commitments";
 
 // Character social events (character-sim phase 1).
 //
@@ -135,7 +136,10 @@ export const CommitmentProposalSchema = z
     ]),
     promisedResult: z.string().trim().min(1).max(400),
     conditions: z.string().trim().max(400).default(""),
-    rationale: z.string().trim().max(400).default(""),
+    /** A promise to hold back ("I will not accuse you without proof") is "refrain". */
+    form: z.enum(["do", "refrain"]).optional(),
+    /** What it waits on, when "conditions" says it waits on something. */
+    when: PromiseTriggerSchema.nullable().default(null),
     promisorCharacterId: EntityIdSchema,
     beneficiaryCharacterId: EntityIdSchema,
     requiredOfficeId: EntityIdSchema.nullable().default(null),
@@ -146,7 +150,9 @@ export const CommitmentProposalSchema = z
       .default(null),
     reviewInSteps: z.number().int().positive().max(100).default(6),
   })
-  .strict();
+  // A "rationale" was asked for and never read; an answer that still writes
+  // one is not refused for it.
+  .strip();
 export type CommitmentProposal = z.infer<typeof CommitmentProposalSchema>;
 
 /**

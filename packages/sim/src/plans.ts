@@ -1,4 +1,6 @@
 import {
+  isOwedATurn,
+  negotiationIssue,
   formatWorldDate,
   type Ambition,
   type Character,
@@ -54,6 +56,7 @@ export interface DueStep {
   readonly ambitionId: string;
   readonly stepId: string;
   readonly why: string;
+  readonly waiting?: boolean;
 }
 
 const activeAmbitions = (character: Character): readonly Ambition[] =>
@@ -68,10 +71,48 @@ const sameWant = (held: string, named: string): boolean => {
 /** Whether what the step waits on has happened, read the way a contingency reads its trigger. */
 function waitIsOver(step: PlanStep, world: WorldState): boolean {
   if (step.waitsOn === null) return false;
-  if (step.waitsOn.kind === "province_control_changes" || step.waitsOn.kind === "settlement_control_changes") {
-    return firedBetween(step.waitsOn, step.armedReading ?? "", watchReading(step.waitsOn, world));
+  if (step.waitsOn.kind === "province_control_changes" || step.waitsOn.kind === "settlement_control_changes" || step.waitsOn.kind === "letter_answered") {
+    return firedBetween(step.waitsOn, step.armedReading ?? "", watchReading(step.waitsOn, step.waitsOn.kind === "letter_answered" ? dependencyWorld(world) : world));
   }
   return holdsIn(step.waitsOn, world);
+}
+
+/** The exact correspondence a dependency concerns; previous unrelated replies never release it. */
+function dependencyLetters(step: PlanStep, world: WorldState) {
+  const wait = step.waitsOn;
+  if (wait?.kind !== "letter_answered") return [];
+  return world.diplomacy.filter((message) => message.fromPolityId === wait.fromPolityId && message.toPolityId === wait.toPolityId
+    && (wait.messageId === undefined ? message.sentAtStep >= step.laidOnDay : message.id === wait.messageId)
+    && (wait.issueKey === undefined || negotiationIssue(message) === wait.issueKey.toLowerCase()));
+}
+function dependencyWorld(world: WorldState): WorldState {
+  return { ...world, diplomacy: world.diplomacy.map((message) => message.status === "answered" && replyArrivalDay(message) > world.instant.day
+    ? { ...message, status: "awaiting_reply" as const, answer: null, answeredAtStep: null } : message) };
+}
+function replyArrivalDay(message: WorldState["diplomacy"][number]): number {
+  return (message.answeredAtStep ?? message.sentAtStep) + Math.max(0, (message.deliveredOnDay ?? message.sentAtStep) - message.sentAtStep);
+}
+const waitsForExternalDecision = (step: PlanStep): boolean => step.waitsOn?.kind === "letter_answered" || step.waitsOn?.kind === "question_decided";
+function dependencyReviewDay(step: PlanStep, world: WorldState): number {
+  if (step.waitsOn?.kind === "question_decided") {
+    const procedureId = step.waitsOn.procedureId;
+    const procedure = world.material.politicalProcedures.find((entry) => entry.id === procedureId);
+    return Math.max(step.dueDay, procedure?.deadlineStep ?? step.dueDay);
+  }
+  const pending = dependencyLetters(step, world).filter((message) => message.status === "awaiting_reply" || replyArrivalDay(message) > world.instant.day).at(-1);
+  return pending === undefined ? step.dueDay : Math.max(step.dueDay, pending.status === "answered" ? replyArrivalDay(pending) : pending.replyDueByStep ?? ((pending.deliveredOnDay ?? pending.sentAtStep) + 30));
+}
+function effectiveDueDay(step: PlanStep, world: WorldState): number {
+  if (!waitsForExternalDecision(step)) return step.dueDay;
+  const duration = step.afterConditionDays ?? Math.max(1, step.dueDay - step.laidOnDay);
+  if (!waitIsOver(step, world)) return dependencyReviewDay(step, world) + duration;
+  if (step.waitsOn?.kind === "question_decided") {
+    const procedureId = step.waitsOn.procedureId;
+    const procedure = world.material.politicalProcedures.find((entry) => entry.id === procedureId);
+    return Math.max(step.dueDay, (procedure?.resolvedAtStep ?? step.laidOnDay) + duration);
+  }
+  const answered = dependencyLetters(step, world).filter((message) => message.status === "answered").at(-1);
+  return Math.max(step.dueDay, (answered === undefined ? step.laidOnDay : replyArrivalDay(answered)) + duration);
 }
 
 const withAmbition = (world: WorldState, ownerId: string, ambitionId: string, change: (ambition: Ambition) => Ambition): WorldState => ({
@@ -104,17 +145,27 @@ function trailingMisses(ambition: Ambition): number {
  * forget that he already sent the envoys. Anything missed is marked seen, so
  * the miss that made him replan does not wake him a second time.
  */
-export function layPlan(world: WorldState, ownerId: string, plan: PlanProposal, ids: IdFactory): { readonly world: WorldState; readonly ambitionId: string | null } {
+export function layPlan(world: WorldState, ownerId: string, plan: PlanProposal, ids: IdFactory, assignedIds: ReadonlyMap<string, string> = new Map()): { readonly world: WorldState; readonly ambitionId: string | null } {
   const owner = world.characters.find((character) => character.id === ownerId);
   if (owner === undefined || !owner.alive) return { world, ambitionId: null };
   const today = world.instant.day;
-  const steps: PlanStep[] = plan.steps.map((step) => ({
+  // A reply dependency may name the letter just sent in this same answer.
+  // Resolve its handle while that answer's assignments are still available.
+  const resolved = plan.steps.map((step) => {
+    if (step.when?.kind !== "letter_answered" || step.when.messageId === undefined) return step;
+    const ref = step.when.messageId;
+    const messageId = ref.startsWith("local:") ? assignedIds.get(ref.slice(6)) : ref;
+    return messageId === undefined ? null : { ...step, when: { ...step.when, messageId } };
+  });
+  if (resolved.some((step) => step === null)) return { world, ambitionId: null };
+  const steps: PlanStep[] = resolved.filter((step) => step !== null).map((step) => ({
     id: ids.next("plan-step"),
     act: step.act,
     dueDay: today + step.inDays,
     laidOnDay: today,
     waitsOn: step.when,
-    armedReading: step.when === null ? null : watchReading(step.when, world),
+    ...(step.afterConditionDays === undefined ? {} : { afterConditionDays: step.afterConditionDays }),
+    armedReading: step.when === null ? null : watchReading(step.when, step.when.kind === "letter_answered" ? dependencyWorld(world) : world),
     status: "pending",
     wokenOnDay: null,
     settledOnDay: null,
@@ -148,14 +199,16 @@ export function layPlan(world: WorldState, ownerId: string, plan: PlanProposal, 
 }
 
 /**
- * Steps a man says his answer carried out.
+ * Steps a man's answer carried out: the ones an act that changed the world
+ * was written for (`servedByChange`).
  *
- * Only his own, only ones not already done, and only when the answer changed
- * the world: a step is something that happened, and an answer that only wrote
- * about it did not happen. A missed step done late still counts.
+ * Only his own, and only ones not already done. A step is something that
+ * happened, and an answer that only wrote about it did not happen -- nor did
+ * one whose change was something else: letters to a friend do not raise the
+ * fleet his plan wanted. A missed step done late still counts.
  */
-export function takeSteps(world: WorldState, ownerId: string, stepIds: readonly string[], leftAMark: boolean): { readonly world: WorldState; readonly taken: number } {
-  if (!leftAMark || stepIds.length === 0) return { world, taken: 0 };
+export function takeSteps(world: WorldState, ownerId: string, stepIds: readonly string[]): { readonly world: WorldState; readonly taken: number } {
+  if (stepIds.length === 0) return { world, taken: 0 };
   const owner = world.characters.find((character) => character.id === ownerId);
   if (owner === undefined) return { world, taken: 0 };
   const wanted = new Set(stepIds);
@@ -199,6 +252,14 @@ export function dueSteps(world: WorldState, clock: ScenarioClock, excludeIds: re
       }
       const next = ambition.steps.find((step) => step.status === "pending");
       if (next === undefined || next.wokenOnDay !== null) continue;
+      if (waitsForExternalDecision(next) && !waitIsOver(next, world)) {
+        if (today >= dependencyReviewDay(next, world) && next.waitingReviewOnDay == null) {
+          found = { ownerId: character.id, ambitionId: ambition.id, stepId: next.id, waiting: true,
+            why: `the decision needed for "${next.act}" has not arrived by its review day; decide whether to wait, send a due reminder, change terms or abandon it` };
+          break;
+        }
+        continue;
+      }
       if (next.waitsOn !== null ? waitIsOver(next, world) : today >= wakeDay(next)) {
         found = {
           ownerId: character.id,
@@ -206,7 +267,7 @@ export function dueSteps(world: WorldState, clock: ScenarioClock, excludeIds: re
           stepId: next.id,
           why: next.waitsOn !== null
             ? `what the next step of their plan to ${ambition.label} was waiting for has happened (${predicateInWords(next.waitsOn, world)}): "${next.act}"`
-            : `the next step of their plan to ${ambition.label} is due by ${dayInWords(next.dueDay, clock)}: "${next.act}"`,
+            : `the next step of their plan to ${ambition.label} is due by ${dayInWords(effectiveDueDay(next, world), clock)}: "${next.act}"`,
         };
         break;
       }
@@ -220,7 +281,8 @@ export function dueSteps(world: WorldState, clock: ScenarioClock, excludeIds: re
 export function markWoken(world: WorldState, woken: readonly DueStep[]): WorldState {
   if (woken.length === 0) return world;
   const today = world.instant.day;
-  const byStep = new Set(woken.map((entry) => entry.stepId));
+  const byStep = new Set(woken.filter((entry) => !entry.waiting).map((entry) => entry.stepId));
+  const waiting = new Set(woken.filter((entry) => entry.waiting).map((entry) => entry.stepId));
   const owners = new Set(woken.map((entry) => entry.ownerId));
   return {
     ...world,
@@ -228,7 +290,7 @@ export function markWoken(world: WorldState, woken: readonly DueStep[]): WorldSt
       ...character,
       ambitions: character.ambitions.map((ambition) => ({
         ...ambition,
-        steps: ambition.steps.map((step) => (byStep.has(step.id) ? { ...step, wokenOnDay: today } : step)),
+        steps: ambition.steps.map((step) => (byStep.has(step.id) ? { ...step, wokenOnDay: today } : waiting.has(step.id) ? { ...step, waitingReviewOnDay: today } : step)),
       })),
     })),
   };
@@ -251,7 +313,7 @@ export function settleOverdueSteps(world: WorldState, clock: ScenarioClock, loca
     let changed = false;
     const ambitions = character.ambitions.map((ambition) => {
       if (ambition.status !== "active") return ambition;
-      const late = ambition.steps.filter((step) => step.status === "pending" && today > step.dueDay);
+      const late = ambition.steps.filter((step) => step.status === "pending" && today > effectiveDueDay(step, world));
       if (late.length === 0) return ambition;
       changed = true;
       // The first time a step his owner has already been shown runs past its
@@ -260,9 +322,14 @@ export function settleOverdueSteps(world: WorldState, clock: ScenarioClock, loca
       // not a judgment: a plan that has not yet missed anything, and a step
       // that has not yet slipped, are slipped once. Whoever has missed already,
       // or a step already slipped, is asked what the plan now is.
-      const graced = trailingMisses(ambition) === 0
-        ? new Set(late.filter((step) => (step.slips ?? 0) === 0 && step.wokenOnDay !== null).map((step) => step.id))
-        : new Set<string>();
+      // And a man the burst never got round to asking has missed nothing: his
+      // turn is owed him (`WorldState.owed`), and his steps wait for it (E06).
+      const owed = isOwedATurn(world, character.id);
+      const graced = owed
+        ? new Set(late.map((step) => step.id))
+        : trailingMisses(ambition) === 0
+          ? new Set(late.filter((step) => (step.slips ?? 0) === 0 && step.wokenOnDay !== null).map((step) => step.id))
+          : new Set<string>();
       const behind = late.filter((step) => !graced.has(step.id));
       slipped += graced.size;
       missed += behind.length;
@@ -271,7 +338,7 @@ export function settleOverdueSteps(world: WorldState, clock: ScenarioClock, loca
         facts.push({
           localId: localId("plan_behind"),
           kind: "plan_fell_behind",
-          summary: `${character.name}'s plan to ${ambition.label} fell behind: ${behind.map((step) => `"${step.act}" was not done by ${dayInWords(step.dueDay, clock)}`).join("; ")}.`,
+          summary: `${character.name}'s plan to ${ambition.label} fell behind: ${behind.map((step) => `"${step.act}" was not done by ${dayInWords(effectiveDueDay(step, world), clock)}`).join("; ")}.`,
           affectedRefs: [{ kind: "character", id: character.id }],
           visibility: "private",
           discoveryState: "private",
@@ -286,7 +353,7 @@ export function settleOverdueSteps(world: WorldState, clock: ScenarioClock, loca
           if (lateIds.has(step.id)) return { ...step, status: "missed" as const, settledOnDay: today, wokenOnDay: null };
           // Slipped: as long again as it was given, and never less than a fortnight.
           // His owner has seen it once already, so it stays seen.
-          if (graced.has(step.id)) return { ...step, dueDay: today + Math.min(120, Math.max(14, step.dueDay - step.laidOnDay)), slips: (step.slips ?? 0) + 1 };
+          if (graced.has(step.id)) return { ...step, dueDay: today + Math.min(120, Math.max(14, step.dueDay - step.laidOnDay)), slips: Math.min(3, (step.slips ?? 0) + 1) };
           return step;
         }),
       };
@@ -314,7 +381,11 @@ export function nextPlanDay(world: WorldState): number | undefined {
       for (const step of ambition.steps) {
         if (step.status !== "pending") continue;
         if (step.waitsOn === null && step.wokenOnDay === null) consider(wakeDay(step));
-        consider(step.dueDay + 1);
+        if (waitsForExternalDecision(step) && !waitIsOver(step, world)) {
+          if (step.waitingReviewOnDay == null) consider(dependencyReviewDay(step, world));
+          for (const message of dependencyLetters(step, world)) if (message.status === "answered") consider(replyArrivalDay(message));
+        }
+        consider(effectiveDueDay(step, world) + 1);
       }
     }
   }
@@ -329,7 +400,7 @@ function dayInWords(day: number, clock: ScenarioClock): string {
  * What a man wants, and how far he has got with it, in his own section.
  *
  * Every step is printed with its id because those are what he names in
- * "stepsTaken"; the ones done and missed are printed because a plan he
+ * "serves"; the ones done and missed are printed because a plan he
  * cannot see the history of is a plan he will lay again from the start.
  */
 export function describePlans(character: Character, world: WorldState, clock: ScenarioClock, limit: number): string[] {
@@ -343,9 +414,11 @@ export function describePlans(character: Character, world: WorldState, clock: Sc
     for (const step of ambition.steps) {
       if (step.status === "done") { lines.push(`      done: ${step.act}`); continue; }
       if (step.status === "missed") { lines.push(`      missed [${step.id}]: ${step.act} (was due by ${dayInWords(step.dueDay, clock)})`); continue; }
-      const days = step.dueDay - today;
-      const when = `by ${dayInWords(step.dueDay, clock)} (${days <= 0 ? "today" : `in ${days} day${days === 1 ? "" : "s"}`})`;
+      const dueDay = effectiveDueDay(step, world);
+      const days = dueDay - today;
+      const when = `by ${dayInWords(dueDay, clock)} (${days <= 0 ? "today" : `in ${days} day${days === 1 ? "" : "s"}`})`;
       const waits = step.waitsOn === null ? "" : `, once ${predicateInWords(step.waitsOn, world)}${waitIsOver(step, world) ? " -- which has happened" : ""}`;
+      if (waitsForExternalDecision(step) && !waitIsOver(step, world)) lines.push(`      waiting on an external decision; review day ${dependencyReviewDay(step, world)}. Waiting itself is not a missed action.`);
       lines.push(`      ${nextShown ? "then" : "next"} [${step.id}] ${when}${waits}: ${step.act}`);
       nextShown = true;
     }

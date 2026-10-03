@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useWindowState } from "../../../components/ui/window-workspace";
 import { purseIsSpent, type GameViewController } from "./use-game-view";
 
 /**
@@ -23,7 +23,7 @@ export function MapOrderBar({
   readonly controller: GameViewController;
   readonly onGoToDesk: () => void;
 }) {
-  const [order, setOrder] = useState("");
+  const [order, setOrder] = useWindowState("desk:draft", "");
   const { view, busy } = controller;
   const spentOut = purseIsSpent(view.coins);
 
@@ -44,8 +44,9 @@ export function MapOrderBar({
         event.preventDefault();
         const text = order.trim();
         if (text.length === 0 || busy || spentOut) return;
-        setOrder("");
-        void controller.send(text);
+        void controller.send(text).then((sent) => {
+          if (sent) setOrder((current) => current.trim() === text ? "" : current);
+        });
       }}
     >
       <label className="visually-hidden" htmlFor="map-order">Your order</label>

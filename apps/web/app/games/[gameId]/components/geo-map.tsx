@@ -5,7 +5,8 @@ import type { DynamicMapOverlay, GeoJsonPosition } from "@chronica/shared";
 import { provinceAtPoint, type StaticWorldGeometry } from "./world-geometry";
 import { resolveMapForcePlacements } from "./map-dynamic-geometry";
 import { deriveForceConflictStatuses } from "./map-conflict-state";
-import { ARMY_STANDARD_HIT_SLOP_PIXELS, FALLBACK_FORCE_FLAG, FORCES_VISIBLE_FROM_SCALE, armyStandardHitBounds, armyStandardWidthForZoom, fannedStandardCentre, type ForceFlagAsset } from "./army-standard";
+import { ARMY_STANDARD_HIT_SLOP_PIXELS, FORCES_VISIBLE_FROM_SCALE, armyStandardHitBounds, armyStandardWidthForZoom, fannedStandardCentre, type ForceFlagAsset } from "./army-standard";
+import { standardFor } from "../../../../lib/army-standards";
 import type { ViewportTransform } from "./map-viewport";
 import { displayUnit } from "./map-display-unit";
 
@@ -13,7 +14,7 @@ export type { ForceFlagAsset };
 
 type ZoomBand = "far" | "medium" | "close";
 type MapEvent = Pick<PointerEvent<HTMLDivElement>, "currentTarget" | "clientX" | "clientY">;
-export interface ForceMapDetails { readonly forceId: string; readonly ownerPolityId: string; readonly name: string; readonly commanderLabel: string | null; readonly statusLabel: string; readonly strengthLabel: string; readonly locationLabel: string; readonly destinationLabel: string; readonly progressBps: number | null; readonly movementState: "moving" | "retreating" | null; readonly commandable: boolean; }
+export interface ForceMapDetails { readonly forceId: string; readonly ownerPolityId: string; readonly naval: boolean; readonly name: string; readonly commanderLabel: string | null; readonly statusLabel: string; readonly strengthLabel: string; readonly locationLabel: string; readonly destinationLabel: string; readonly progressBps: number | null; readonly movementState: "moving" | "retreating" | null; readonly commandable: boolean; }
 
 interface GeoMapProps {
   /** Pre-computed world geometry — shared with the canvas terrain layer. */
@@ -100,7 +101,7 @@ export function GeoMap({ world, viewBox, overlay, zoomBand, liveTransform, force
     const slop = ARMY_STANDARD_HIT_SLOP_PIXELS * point.unit / point.m;
     for (let index = forceMarkers.length - 1; index >= 0; index--) {
       const force = forceMarkers[index]!;
-      const asset = forceFlagUrls.get(force.forceId) ?? FALLBACK_FORCE_FLAG;
+      const asset = forceFlagUrls.get(force.forceId) ?? standardFor(force.ownerPolityId, force.naval ? "navy" : "army", force.flagAssetId);
       const conflict = conflictByForceId.get(force.forceId);
       const centre = fannedStandardCentre(force.placement, armyWidth);
       const bounds = armyStandardHitBounds(asset, centre.x, centre.y, conflict !== undefined, armyWidth);
@@ -114,7 +115,7 @@ export function GeoMap({ world, viewBox, overlay, zoomBand, liveTransform, force
     const destination = force.movement?.destination;
     const destinationLabel = destination === undefined ? "Holding position" : provinceAtPoint(world, destination, "first")?.name ?? coordinateLabel(destination);
     const conflict = conflictByForceId.get(force.forceId);
-    const details: ForceMapDetails = { forceId: force.forceId, ownerPolityId: force.ownerPolityId, name: force.name, commanderLabel: force.commanderLabel, statusLabel: conflict?.statusLabel ?? "Not in combat", strengthLabel: force.strengthLabel, locationLabel, destinationLabel, progressBps: force.movement?.progressBps ?? null, movementState: force.movement?.state ?? null, commandable: force.commandable === true };
+    const details: ForceMapDetails = { forceId: force.forceId, ownerPolityId: force.ownerPolityId, naval: force.naval, name: force.name, commanderLabel: force.commanderLabel, statusLabel: conflict?.statusLabel ?? "Not in combat", strengthLabel: force.strengthLabel, locationLabel, destinationLabel, progressBps: force.movement?.progressBps ?? null, movementState: force.movement?.state ?? null, commandable: force.commandable === true };
     onForceClick(details);
   }, [conflictByForceId, onForceClick, world]);
 

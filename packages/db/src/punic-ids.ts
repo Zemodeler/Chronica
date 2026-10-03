@@ -36,6 +36,10 @@ export const PUNIC_IDS = {
   agrigentum: anchor("agrigentum"),
   syracuse: anchor("syracuse"),
   messana: anchor("messana"),
+  // Where the Hellenistic kings' field armies stand on the first day (v42).
+  pella: anchor("pella"),
+  apamea: anchor("apamea-orontes"),
+  alexandria: anchor("alexandria"),
   // Ground with no settlement to name it, found by coordinates (`scripts/map-gen/resolve-extra-anchors.ts`).
   ...PUNIC_EXTRA_IDS,
 } as const;

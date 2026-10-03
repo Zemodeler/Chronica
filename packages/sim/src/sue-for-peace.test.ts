@@ -48,3 +48,21 @@ describe("a power tired of its war", () => {
     expect(sueForPeace(sued.world, 750, createIdFactory("again")).facts).toEqual([]);
   });
 });
+
+
+describe("one opening offer per exhausted war", () => {
+  it("lets the other exhausted side answer rather than opening a crossing negotiation", () => {
+    const world = beaten();
+    world.polityAgreements = world.polityAgreements.filter((agreement) => [agreement.polityId, agreement.otherPolityId].includes(CAMPANIANS) && [agreement.polityId, agreement.otherPolityId].includes("rome"));
+    world.material.forces = world.material.forces.map((force) => [CAMPANIANS, "rome"].includes(force.polityId)
+      ? { ...force, history: [...force.history, { id: `long-war-losses-${force.id}`, causeId: "long-war", atStep: 100, kind: "battle_death" as const, count: 100_000, categoryId: force.personnel[0]?.categoryId ?? "infantry" }] }
+      : force);
+    world.material.accounts = world.material.accounts.map((account) => account.owner.kind === "polity" && [CAMPANIANS, "rome"].includes(account.owner.id) ? { ...account, balance: 0 } : account);
+    world.material.provinceMaterial = world.material.provinceMaterial.map((entry) => ({ ...entry, foodSecurityBps: 1_000, stabilityBps: 1_000 }));
+    expect(warWeariness(world, "rome", CAMPANIANS).score).toBeGreaterThanOrEqual(40);
+    expect(warWeariness(world, CAMPANIANS, "rome").score).toBeGreaterThanOrEqual(40);
+    const sued = sueForPeace(world, 720, createIdFactory("both-tired"));
+    expect(sued.facts).toHaveLength(1);
+    expect(sueForPeace(sued.world, 750, createIdFactory("already-bargaining")).facts).toEqual([]);
+  });
+});

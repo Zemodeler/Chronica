@@ -1,5 +1,7 @@
+import { orderPartRef, orderPartStatus, type OrderPartStatus } from "@chronica/shared";
 import type { BurstResult } from "./burst";
 import type { ChronicleEntry } from "./chronicle";
+import { ORDER_OUTCOME_HEADING } from "./order-outcomes";
 
 /**
  * What became of one order, in the terms the game promises.
@@ -12,8 +14,14 @@ import type { ChronicleEntry } from "./chronicle";
  * scored.
  */
 export interface OrderOutcome {
-  /** Something the order's giver could see happened. */
+  /**
+   * Every part of it is done -- its goal is so in the world -- or was refused
+   * by the world. Reading the order's ledger, never its facts: a fact of the
+   * order's acceptance once scored as the order carried out (E01, E11).
+   */
   readonly carriedOut: boolean;
+  /** Where each part stands, in the order's own order. */
+  readonly parts: readonly OrderPartStatus[];
   /** The world would not: the treasury was short, the ground out of reach. */
   readonly refusedByWorld: readonly string[];
   /** Nobody was obliged to obey. */
@@ -26,7 +34,11 @@ export interface OrderOutcome {
   readonly unreadable: readonly string[];
   /** Fields the engine dropped from an otherwise good answer. */
   readonly salvaged: readonly string[];
-  /** The Chronicle has an entry for it. The one thing that must always be true. */
+  /**
+   * The Chronicle tells every part of it: a passage made of that part's
+   * facts, or the engine's own line for it under "What came of the order". A
+   * passage that merely held one of its facts used to count for the whole.
+   */
   readonly inChronicle: boolean;
 }
 
@@ -34,18 +46,28 @@ export function outcomeOfOrder(result: BurstResult, entries: readonly ChronicleE
   const ours = new Set(result.orderFactIds);
   const facts = result.newFacts.filter((fact) => ours.has(fact.id));
   const summaries = (kind: string) => facts.filter((fact) => fact.kind === kind).map((fact) => fact.summary);
-  const bookkeeping = new Set(["execution_friction", "order_ignored", "engine_rejection", "order_given", "authority_breach"]);
   const answeredOnly = facts.some((fact) => fact.kind === "order_given");
+  const order = result.orderRecordId === null ? undefined : result.world.orders.find((candidate) => candidate.id === result.orderRecordId);
+  const parts = order === undefined ? [] : order.parts.map((part) => orderPartStatus(result.world, part));
+  const partOfFact = new Map(result.newFacts.filter((fact) => fact.sourceActionId !== null).map((fact) => [fact.id, fact.sourceActionId]));
+  const told = (index: number): boolean => {
+    if (order === undefined) return false;
+    const ref = orderPartRef(order.id, index);
+    return entries.some((entry) => entry.factIds.some((id) => partOfFact.get(id) === ref)
+      || (entry.body.includes(ORDER_OUTCOME_HEADING) && entry.body.includes(`"${order.parts[index]!.said}"`)));
+  };
   return {
-    // Visible to the one who gave it: the same test the turn uses before it
-    // writes "nothing came of it", so the two can never both be true.
-    carriedOut: !answeredOnly && facts.some((fact) => !bookkeeping.has(fact.kind) && fact.visibility !== "private"),
+    carriedOut: parts.length > 0 && parts.every((status) => status === "achieved" || status === "refused") && parts.includes("achieved"),
+    parts,
     refusedByWorld: summaries("execution_friction"),
     ignored: summaries("order_ignored"),
     malformed: summaries("engine_rejection"),
     answeredOnly,
     unreadable: result.parseFailures,
     salvaged: result.salvaged,
-    inChronicle: entries.some((entry) => entry.factIds.some((id) => ours.has(id))),
+    // An order the engine could not record at all is told when anything of it is.
+    inChronicle: order === undefined
+      ? entries.some((entry) => entry.factIds.some((id) => ours.has(id)))
+      : order.parts.every((_, index) => told(index)),
   };
 }

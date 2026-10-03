@@ -225,6 +225,7 @@ export const gameRepository = {
         extraPrincipalsPerPlayer: parsed.continuity.extraPrincipalsPerPlayer,
         hostUserId: userId,
         coinBudgetMicroUnits: parseCoinAmount(parsed.coinCap),
+        difficulty: parsed.difficulty,
       });
     });
   },

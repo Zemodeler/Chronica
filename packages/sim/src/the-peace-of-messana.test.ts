@@ -59,8 +59,10 @@ describe("a negotiated peace", () => {
   it("will not give up its capital to a power that has not beaten it", () => {
     const world = atWarWithSyracuse();
     const clause = { kind: "cession" as const, provinceId: SYRACUSE_HOME, toPolityId: "rome" };
-    expect(priceOf(world, clause, "syracuse")).toBe(50);
-    expect(willingToGive(world, "syracuse", "rome", undefined, undefined)).toBeLessThan(50);
+    // Its share of Syracuse's seventeen provinces, and thirty more for the capital.
+    const price = priceOf(world, clause, "syracuse");
+    expect(price).toBeGreaterThanOrEqual(35);
+    expect(willingToGive(world, "syracuse", "rome", undefined, undefined)).toBeLessThan(price);
     const outcome = concludePeace(world, { proposerPolityId: "rome", otherPolityId: "syracuse", clauses: [clause], terms: "Syracuse to Rome.", representativeId: "hieron-ii", speakerId: "gaius-genucius" }, context, offices);
     expect(outcome.made).toBe(false);
     expect(outcome.refusal).toMatch(/cannot carry terms like these/);

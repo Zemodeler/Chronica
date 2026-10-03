@@ -31,6 +31,7 @@ import type { IdFactory } from "./ports";
 import { concernsOf } from "./questions";
 import { judgmentLean, sentenceByOutcome } from "./trials";
 import { rulerOf } from "./constitutions";
+import { tenureLean } from "./command-tenure";
 
 /**
  * A chamber's questions, debated by its people and decided by the count.
@@ -113,13 +114,29 @@ export function seatByOutcome(world: WorldState, procedure: PoliticalProcedure, 
       : world.material.officeSeats.find((seat) => seat.id === procedure.subjectId)?.holderCharacterId ?? null;
     return holder === null ? world : vacateOfficesOf(world, holder, "removal", atStep);
   }
+  if (procedure.subjectKind !== "character") return world;
+  const appointed = world.characters.find((character) => character.id === procedure.subjectId);
+  if (appointed === undefined || !appointed.alive) return world;
+  const every = allOffices(world, offices);
+  // A measure that makes an office for a named man -- "Gaius Genucius
+  // Clepsina, proconsul of Sicily" -- makes it his. Carried, the office was
+  // made and left empty, and the consul named somebody else to it the next
+  // week: the Senate's vote about a man had nothing to do with the man.
+  const made = world.enactments.find((candidate) => candidate.procedureId === procedure.id)?.office;
+  if (made != null && !made.abolish && procedure.type !== "denunciation") {
+    const office = every.find((candidate) => candidate.id === made.officeId);
+    const seats = world.material.officeSeats.filter((seat) => seat.officeId === made.officeId);
+    if (office !== undefined && !seats.some((seat) => seat.holderCharacterId === appointed.id && seat.status === "held")) {
+      const vacant = seats.find((seat) => seat.status !== "held" && seat.holderCharacterId === null);
+      return seatCharacterInOffice(world, appointed.id, { office, vacantSeatId: vacant?.id ?? null }, atStep, made.termDays ?? null);
+    }
+    return world;
+  }
   if (procedure.type === "appointment" || procedure.type === "command_assignment" || procedure.type === "nomination") {
-    if (procedure.subjectKind !== "character") return world;
-    const appointed = world.characters.find((character) => character.id === procedure.subjectId);
-    if (appointed === undefined || !appointed.alive) return world;
     // The office is named by the question itself -- "Make Lucius praetor" --
-    // which is the same match declaration already uses.
-    const matched = findOfficeSeatForRole(world, { offices }, appointed.polityId, procedure.label);
+    // which is the same match declaration already uses. Offices made in play
+    // are offices too.
+    const matched = findOfficeSeatForRole(world, { offices: every }, appointed.polityId, procedure.label);
     return matched === undefined ? world : seatCharacterInOffice(world, appointed.id, matched, atStep);
   }
   return world;
@@ -246,9 +263,14 @@ export function blocLeanings(world: WorldState, procedure: PoliticalProcedure, i
     const sway = Math.max(1, Math.round((character.prestigeBps / SWAY_PER_STANDING_BPS) * voice * name)) + clientsOf(character.id);
     return [{ name: character.name, signed: signOf(position.position) * sway, position: position.position }];
   });
-  const houseShift = speakers.reduce((sum, speaker) => sum + speaker.signed, 0);
-  // A trial leans as its court is run (`trials.ts`).
-  const judged = judgmentLean(world, procedure, institution.polityId);
+  // Ordinary declarations represent a chamber's opinion, not an unlimited
+  // bonus proportional to the number of named senators in the scenario.
+  const houseShift = speakers.length === 0 ? 0 : Math.round(speakers.reduce((sum, speaker) => sum + speaker.signed, 0) / speakers.length * Math.min(MAX_SPEAKERS, speakers.length));
+  // A trial leans as its court is run (`trials.ts`); a command kept or a
+  // triumph asked, as the man's war went (`command-tenure.ts`).
+  const tried = judgmentLean(world, procedure, institution.polityId);
+  const tenure = tenureLean(world, procedure);
+  const judged = { lean: tried.lean + tenure.lean, reasons: [...tried.reasons, ...tenure.reasons] };
   return institution.votingBlocs.map((bloc) => {
     const reasons: string[] = [`its own disposition (${bloc.baseSupport})`];
     let lean = bloc.baseSupport;
@@ -688,13 +710,21 @@ export function debatersOf(
     const polityOffices = new Set(everyOffice.filter((office) => office.polityId === institution.polityId).map((office) => office.id));
     const vetoOffices = new Set(everyOffice.filter((office) => office.polityId === institution.polityId && office.vetoes === true).map((office) => office.id));
     const eligible = world.characters.filter((character) =>
-      character.alive && character.polityId === institution.polityId && !excluded.has(character.id) && !declared.has(character.id));
+      character.alive && character.polityId === institution.polityId);
     const sponsor = eligible.filter((character) => character.id === procedure.sponsorCharacterId);
     const vetoers = eligible.filter((character) => seatedIn(character.id, vetoOffices));
     const senior = eligible
       .filter((character) => seatedIn(character.id, polityOffices))
       .sort((a, b) => b.prestigeBps - a.prestigeBps || a.id.localeCompare(b.id));
-    const chosen = [...new Map([...sponsor, ...vetoers, ...senior].map((character) => [character.id, character])).values()].slice(0, MAX_SPEAKERS);
+    // Select the same pivotal cohort for the whole question, not four new
+    // senators every day after the previous four have spoken.
+    const leaderIds = new Set(institution.votingBlocs.flatMap((bloc) => {
+      const group = world.material.politicalGroups.find((candidate) => candidate.id === bloc.groupId);
+      return group?.leaderCharacterId == null ? [] : [group.leaderCharacterId];
+    }));
+    const leaders = eligible.filter((character) => leaderIds.has(character.id));
+    const cohort = [...new Map([...sponsor, ...vetoers.slice(0, 1), ...leaders, ...senior].map((character) => [character.id, character])).values()].slice(0, MAX_SPEAKERS);
+    const chosen = cohort.filter((character) => !declared.has(character.id) && !excluded.has(character.id));
     const inDays = day - today;
     const forecast = forecastInWords(world, procedure, offices);
     for (const character of chosen) {

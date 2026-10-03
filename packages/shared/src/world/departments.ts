@@ -535,7 +535,17 @@ export const AuditSchema = z
     departmentId: EntityIdSchema.nullable(),
     startedAtStep: ElapsedStepSchema,
     dueAtStep: ElapsedStepSchema,
-    status: z.enum(["under_way", "found", "cleared"]),
+    /**
+     * - `found`: something taken, found.
+     * - `no_discrepancy`: the whole of what was asked was gone through and nothing found.
+     * - `incomplete`: nothing found in what could be gone through, and some of what was asked could not be.
+     * - `interrupted`: it could not run -- the auditor died, or there was nobody to send.
+     *
+     * Only the second answers an accusation: an inquiry that could not look is not a clearing (E09).
+     */
+    status: z.enum(["under_way", "found", "no_discrepancy", "incomplete", "interrupted"]),
+    /** What was gone through, when it was: the books of the department and the households named. */
+    reviewed: z.array(DepartmentScopeSchema).max(4).optional(),
     /**
      * A household gone through beside the department: "examine the public and
      * household accounts" is one inquiry of two sets of books, and the public

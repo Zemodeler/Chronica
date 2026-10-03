@@ -57,9 +57,18 @@ export interface PopulationInput {
 }
 
 /** Polities named by recent history -- whoever the player is currently entangled with. */
+/**
+ * The calendar's own facts: a term run out, an election called or held, a
+ * seat filled. A power far away holding its yearly elections is not history
+ * naming it, and counting them had Heraclea Pontica and the Ionian Islands
+ * filled in for a consul in Sicily.
+ */
+const ROUTINE_KINDS: ReadonlySet<string> = new Set(["office_term_ended", "election_called", "election_held", "election_failed", "office_filled"]);
+
 function involvedPolityIds(facts: readonly Fact[]): Set<string> {
   return new Set(
-    facts.flatMap((fact) => fact.affectedEntities.filter((entity) => entity.kind === "polity").map((entity) => entity.id)),
+    facts.filter((fact) => !ROUTINE_KINDS.has(fact.kind))
+      .flatMap((fact) => fact.affectedEntities.filter((entity) => entity.kind === "polity").map((entity) => entity.id)),
   );
 }
 
@@ -109,7 +118,10 @@ export function findPolityGaps(input: PopulationInput): PolityGap[] {
     // that the powers of the age would have to reckon with it. The rest stay
     // names on the map until play arrives, which is the moment this same check
     // starts returning them.
-    const major = provinceCount >= majorProvinces || polity.capitalSettlementId !== null;
+    // By size alone: nearly every country on the whole map has a capital, and
+    // counting one as reason enough had the Boii and the Dacians filled in
+    // turn after turn for a consul at Messana.
+    const major = provinceCount >= majorProvinces;
     if (!involved.has(polity.id) && !neighbours.has(polity.id) && !major) continue;
 
     const needsLeader = !world.characters.some((character) => character.polityId === polity.id && character.alive);
@@ -126,7 +138,7 @@ export function findPolityGaps(input: PopulationInput): PolityGap[] {
     let score = Math.min(Math.round((provinceCount / world.map.provinces.length) * SIZE_SCORE_PER_SHARE), MAX_SIZE_SCORE);
     if (involved.has(polity.id)) {
       score += 1_000;
-      reasons.push("the player is dealing with them now");
+      reasons.push("recent events name them");
     }
     if (neighbours.has(polity.id)) {
       score += 400;

@@ -219,6 +219,34 @@ function provinceLinePaths(political: PoliticalMapState, provinces: readonly Sta
   return paths;
 }
 
+/** Stripes for occupied ground: this many device pixels apart, and this wide. */
+const OCCUPIED_STRIPE_PX = 9;
+const OCCUPIED_STRIPE_WIDTH_PX = 3;
+const OCCUPIED_STRIPE_ALPHA = 0.85;
+const stripeTiles = new Map<string, HTMLCanvasElement | OffscreenCanvas>();
+
+/** One tile of diagonal stripes in a colour, made once and reused. */
+function stripeTile(colour: string): HTMLCanvasElement | OffscreenCanvas | null {
+  const known = stripeTiles.get(colour);
+  if (known !== undefined) return known;
+  const size = OCCUPIED_STRIPE_PX;
+  const tile = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(size, size) : typeof document !== "undefined" ? Object.assign(document.createElement("canvas"), { width: size, height: size }) : null;
+  const paint = tile?.getContext("2d") as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null | undefined;
+  if (tile == null || paint == null) return null;
+  paint.strokeStyle = colour;
+  paint.lineWidth = OCCUPIED_STRIPE_WIDTH_PX;
+  paint.lineCap = "square";
+  // Corner to corner, and the two corners again, so the tile repeats seamlessly.
+  for (const offset of [-size, 0, size]) {
+    paint.beginPath();
+    paint.moveTo(offset, size);
+    paint.lineTo(offset + size, 0);
+    paint.stroke();
+  }
+  stripeTiles.set(colour, tile);
+  return tile;
+}
+
 function fillProvinces(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, world: StaticWorldGeometry, political: PoliticalMapState, provinces: readonly StaticProvince[], devicePixelsPerUnit: number, lines: { readonly style: ProvinceLineStyle; readonly screenPixelsPerUnit: number } | null): void {
   const ownedByPolity = new Map<string, StaticProvince[]>();
   for (const province of provinces) {
@@ -228,6 +256,16 @@ function fillProvinces(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingC
     if (owned) owned.push(province); else ownedByPolity.set(owner, [province]);
     ctx.fillStyle = politicalColourWithAlpha(owner, ATLAS.washAlpha, political.leaderByPolity);
     ctx.fill(getProvincePath(world, province.id, province.svgPath));
+    // Held by another: the occupier's stripes over the owner's wash, the same
+    // width on screen at every zoom (the pattern is drawn in device pixels).
+    const occupier = political.occupierByProvince?.get(province.id);
+    const tile = occupier === undefined ? null : stripeTile(politicalColourWithAlpha(occupier, OCCUPIED_STRIPE_ALPHA, political.leaderByPolity));
+    const stripes = tile === null ? null : ctx.createPattern(tile, "repeat");
+    if (stripes !== null) {
+      stripes.setTransform(new DOMMatrix().scale(1 / devicePixelsPerUnit));
+      ctx.fillStyle = stripes;
+      ctx.fill(getProvincePath(world, province.id, province.svgPath));
+    }
   }
   // The thin province lines, under the outline bands. Widths are set against the
   // screen's resolution, not the cache's, so they match what is drawn straight.

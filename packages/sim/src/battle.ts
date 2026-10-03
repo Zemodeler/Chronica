@@ -1,4 +1,7 @@
 import {
+  recordBattle,
+  difficultyRules,
+  fitStrengthOf,
   AILMENT_DAYS,
   aptitude,
   practise,
@@ -33,6 +36,7 @@ import { adjacentTo } from "@chronica/shared";
 import { handOverForcesOf, killCharacter } from "./mortality";
 import { divertFieldFates, openFieldPerils } from "./field-perils";
 import { summonToJudgment } from "./trials";
+import { recordTheFight } from "./ranks";
 
 /**
  * Battle (VISION §3, §12, §29).
@@ -146,6 +150,32 @@ export interface MemberFate {
 /** Of a force's wounded, the share whose wounds are a maiming. */
 const MAIMED_SHARE = 0.3;
 
+/** How much more, or less, a man's conduct exposes him. */
+const CONDUCT_EXPOSURE = { steady: 1, glory: 1.6, cautious: 0.55 } as const;
+
+/**
+ * The death and wound rates a named man faces: his formation's where he has
+ * one, varied for his own unit, and scaled by how he bears himself.
+ */
+function memberRates(force: Force, result: BattleResult, member: Character, deadRate: number, woundedRate: number): { dead: number; wounded: number } {
+  const service = member.service;
+  const conduct = CONDUCT_EXPOSURE[service?.conduct ?? "steady"];
+  const row = service?.forceId === force.id && service.formationId !== null
+    ? force.personnel.find((group) => group.formationId === service.formationId)
+    : undefined;
+  if (row === undefined || row.fit <= 0) return { dead: Math.min(0.95, deadRate * conduct), wounded: Math.min(0.95, woundedRate * conduct) };
+  const losses = result.casualties.filter((casualty) => casualty.forceId === force.id && casualty.formationId === row.formationId);
+  const dead = losses.reduce((sum, casualty) => sum + casualty.dead, 0) / row.fit;
+  const wounded = losses.reduce((sum, casualty) => sum + casualty.wounded, 0) / row.fit;
+  const unit = unitShare(result.battleId, row.formationId ?? force.id, service?.unitIndex ?? 0);
+  return { dead: Math.min(0.95, dead * unit * conduct), wounded: Math.min(0.95, wounded * unit * conduct) };
+}
+
+/** One unit's luck against its formation's: between half as bad and half as bad again. */
+export function unitShare(battleId: string, formationId: string, unitIndex: number): number {
+  return 0.5 + (stableHash([battleId, formationId, unitIndex, "unit-luck"]) / 0x1_0000_0000);
+}
+
 export function memberFates(world: WorldState, result: BattleResult): MemberFate[] {
   const fates: MemberFate[] = [];
   for (const forceId of result.participantIds) {
@@ -159,10 +189,16 @@ export function memberFates(world: WorldState, result: BattleResult): MemberFate
     for (const characterId of force.memberCharacterIds) {
       const member = world.characters.find((character) => character.id === characterId);
       if (member === undefined || !member.alive || characterId === force.commanderCharacterId) continue;
+      // A man shares his own formation's day, not the army's: the hastati
+      // bled while the triarii knelt behind them. His own unit's luck varies
+      // about that (`unitShare`), and so does how he bore himself -- the man
+      // after glory goes where the dying is, the man keeping his head down
+      // does not, and is sometimes seen not to.
+      const rates = memberRates(force, result, member, deadRate, woundedRate);
       const roll = stableHash([result.battleId, forceId, characterId, "fate"]) / 0x1_0000_0000;
-      if (roll < deadRate) {
+      if (roll < rates.dead) {
         fates.push({ forceId, characterId, outcome: "killed", injuryId: null });
-      } else if (roll < deadRate + woundedRate) {
+      } else if (roll < rates.dead + rates.wounded) {
         const maimed = stableHash([result.battleId, characterId, "maimed"]) / 0x1_0000_0000 < MAIMED_SHARE;
         const injury = maimed ? INJURIES[stableHash([result.battleId, characterId, "injury"]) % INJURIES.length] ?? null : null;
         fates.push({ forceId, characterId, outcome: injury === null ? "wounded" : "maimed", injuryId: injury?.id ?? null });
@@ -202,6 +238,9 @@ function shareAmong(groups: readonly { readonly fit: number }[], owed: number): 
 
 interface CategoryLoss { dead: number; deserted: number; wounded: number }
 
+/** A loss keyed by formation rather than by kind of troops. */
+const FORMATION_KEY = "formation:";
+
 /**
  * A wound heals: a commander hurt in the field was barred from office for the
  * rest of his life, because nothing ever lifted "wounded". It passes as any
@@ -212,12 +251,16 @@ function healsBy(character: Character, status: string, atStep: number): NonNulla
 }
 
 function applyResult(world: WorldState, result: BattleResult, atStep: number, members: readonly MemberFate[]): { world: WorldState; spoils: SpoilsTaken[] } {
+  // Keyed by formation where the resolver named one -- the hastati of Legio II
+  // bore their own losses -- and by kind of troops otherwise, to be shared
+  // among the rows of that kind by strength as before.
   const lossesByForce = new Map<string, Map<string, CategoryLoss>>();
   for (const casualty of result.casualties) {
     if (casualty.dead + casualty.deserted + casualty.wounded === 0) continue;
     const byCategory = lossesByForce.get(casualty.forceId) ?? new Map<string, CategoryLoss>();
-    const was = byCategory.get(casualty.categoryId) ?? { dead: 0, deserted: 0, wounded: 0 };
-    byCategory.set(casualty.categoryId, {
+    const key = casualty.formationId === undefined ? casualty.categoryId : `${FORMATION_KEY}${casualty.formationId}`;
+    const was = byCategory.get(key) ?? { dead: 0, deserted: 0, wounded: 0 };
+    byCategory.set(key, {
       dead: was.dead + casualty.dead,
       deserted: was.deserted + casualty.deserted,
       wounded: was.wounded + casualty.wounded,
@@ -241,8 +284,14 @@ function applyResult(world: WorldState, result: BattleResult, atStep: number, me
     let personnel = force.personnel;
     let gone = 0;
     const maimed = new Map<string, number>();
-    for (const [categoryId, loss] of losses ?? []) {
-      const indices = personnel.map((group, index) => (group.categoryId === categoryId ? index : -1)).filter((index) => index >= 0);
+    for (const [key, loss] of losses ?? []) {
+      const formationId = key.startsWith(FORMATION_KEY) ? key.slice(FORMATION_KEY.length) : null;
+      const categoryId = formationId === null ? key : personnel.find((group) => group.formationId === formationId)?.categoryId ?? key;
+      const indices = personnel
+        .map((group, index) => (formationId !== null ? (group.formationId === formationId ? index : -1) : group.categoryId === categoryId && group.formationId === undefined ? index : -1))
+        .filter((index) => index >= 0);
+      // A kind of troops with no unformed row left takes its loss across its formations.
+      if (indices.length === 0 && formationId === null) indices.push(...personnel.map((group, index) => (group.categoryId === categoryId ? index : -1)).filter((index) => index >= 0));
       const groups = indices.map((index) => personnel[index]!);
       const lost = shareAmong(groups, loss.dead + loss.deserted);
       const afterLost = groups.map((group, at) => group.fit - lost[at]!);
@@ -261,7 +310,7 @@ function applyResult(world: WorldState, result: BattleResult, atStep: number, me
           unavailable: [
             ...group.unavailable,
             ...mending.back.map((cohort, week) => ({
-              id: boundedId(result.battleId, force.id, categoryId, String(at), `wounded${week}`),
+              id: boundedId(result.battleId, force.id, key, String(at), `wounded${week}`),
               count: cohort.count,
               causeKind: "wounds" as const,
               causeId: result.battleId,
@@ -280,9 +329,17 @@ function applyResult(world: WorldState, result: BattleResult, atStep: number, me
       count,
       causeId: result.battleId,
     });
+    // Told by kind of troops, not by formation: a history of sixty-four
+    // events is not to be filled by one battle's fourteen formations.
+    const byKind = new Map<string, CategoryLoss>();
+    for (const [key, loss] of losses ?? []) {
+      const categoryId = key.startsWith(FORMATION_KEY) ? force.personnel.find((group) => group.formationId === key.slice(FORMATION_KEY.length))?.categoryId ?? key : key;
+      const was = byKind.get(categoryId) ?? { dead: 0, deserted: 0, wounded: 0 };
+      byKind.set(categoryId, { dead: was.dead + loss.dead, deserted: was.deserted + loss.deserted, wounded: was.wounded + loss.wounded });
+    }
     const history = [
       ...force.history,
-      ...[...(losses ?? [])].flatMap(([categoryId, loss]) => [
+      ...[...byKind].flatMap(([categoryId, loss]) => [
         ...(loss.dead > 0 ? [event(categoryId, "battle_death", loss.dead)] : []),
         ...(loss.deserted > 0 ? [event(categoryId, "desertion", loss.deserted)] : []),
         ...(loss.wounded > 0 ? [event(categoryId, "unavailable", loss.wounded)] : []),
@@ -643,9 +700,33 @@ export interface BattleAccount {
   readonly losses: readonly { readonly name: string; readonly unit: "men" | "ships"; readonly dead: number; readonly deserted: number; readonly wounded: number }[];
   readonly commanders: readonly { readonly name: string; readonly outcome: string }[];
   /** Named men in the ranks, and what became of each -- including those who came through. */
-  readonly members: readonly { readonly name: string; readonly force: string; readonly outcome: string }[];
+  /** And where each stood, for a man in a formation: his line, his unit, what it lost. */
+  readonly members: readonly { readonly name: string; readonly force: string; readonly outcome: string; readonly place?: string }[];
   readonly retreats: readonly { readonly name: string; readonly to: string | null; readonly orderly: boolean }[];
   readonly outcome: string;
+}
+
+const LINE_PLACES: Readonly<Record<string, string>> = {
+  screen: "out in front with the skirmishers", first: "in the first line", second: "in the second line", third: "in the third line, behind the others", wing: "on the wing", reserve: "in the reserve", afloat: "aboard",
+};
+
+/**
+ * Where a named man stood and what his part of the line lost: "the hastati of
+ * Legio I, in the first line; they lost 14 dead and 31 wounded of 1,000". Read
+ * from the world before the fight, so the strength is what went in.
+ */
+function placeInTheLine(world: WorldState, result: BattleResult, characterId: string, forceId: string): string | null {
+  const service = world.characters.find((character) => character.id === characterId)?.service;
+  if (service?.forceId !== forceId || service.formationId === null) return null;
+  const force = world.material.forces.find((candidate) => candidate.id === forceId);
+  const row = force?.personnel.find((candidate) => candidate.formationId === service.formationId);
+  const formation = force?.formations?.find((candidate) => candidate.id === service.formationId);
+  if (force === undefined || row === undefined || formation === undefined) return null;
+  const losses = result.casualties.filter((casualty) => casualty.forceId === forceId && casualty.formationId === formation.id);
+  const dead = losses.reduce((sum, casualty) => sum + casualty.dead, 0);
+  const hurt = losses.reduce((sum, casualty) => sum + casualty.wounded, 0);
+  const fled = losses.reduce((sum, casualty) => sum + casualty.deserted, 0);
+  return `${row.label}, ${LINE_PLACES[formation.line] ?? formation.line}; they lost ${dead} dead, ${hurt} wounded${fled > 0 ? ` and ${fled} who ran` : ""} of ${row.fit}`;
 }
 
 function accountOf(world: WorldState, result: BattleResult, provinceId: string, factIds: readonly string[], members: readonly MemberFate[], naval: ReadonlySet<string>): BattleAccount {
@@ -689,11 +770,15 @@ function accountOf(world: WorldState, result: BattleResult, provinceId: string, 
     commanders: result.commanderChanges
       .filter((change) => change.outcome !== "unharmed")
       .map((change) => ({ name: characterName(change.characterId), outcome: change.outcome })),
-    members: members.map((fate) => ({
-      name: characterName(fate.characterId),
-      force: forceName(fate.forceId),
-      outcome: fate.injuryId === null ? fate.outcome : INJURIES.find((injury) => injury.id === fate.injuryId)?.label ?? fate.outcome,
-    })),
+    members: members.map((fate) => {
+      const place = placeInTheLine(world, result, fate.characterId, fate.forceId);
+      return {
+        name: characterName(fate.characterId),
+        force: forceName(fate.forceId),
+        outcome: fate.injuryId === null ? fate.outcome : INJURIES.find((injury) => injury.id === fate.injuryId)?.label ?? fate.outcome,
+        ...(place === null ? {} : { place }),
+      };
+    }),
     retreats: result.retreats.map((retreat) => ({
       name: forceName(retreat.forceId),
       to: retreat.toProvinceId === null ? null : provinceName(retreat.toProvinceId),
@@ -822,11 +907,20 @@ function trampled(world: WorldState, result: BattleResult, provinceId: string, n
 }
 
 export function resolveEngagement(input: EngagementInput, index: number): EngagementResult {
-  const { world, attacker, defender } = input;
+  const { world } = input;
+  // The difficulty's edge in the player's own fights (`world/pushback.ts`):
+  // his men fight as if a little surer, or a little less, for this battle
+  // only. Nobody else's battles are touched.
+  const edge = difficultyRules(world.difficulty).playerEdgeBps;
+  const player = input.playerCharacterId ?? null;
+  const edged = (force: Force): Force => (edge === 0 || player === null || (force.commanderCharacterId !== player && force.controllerCharacterId !== player) ? force
+    : { ...force, moraleBps: Math.max(0, Math.min(10_000, force.moraleBps + edge)) });
+  const attacker = edged(input.attacker);
+  const defender = edged(input.defender);
   const province = world.map.provinces.find((candidate) => candidate.id === attacker.locationId);
   if (province === undefined) return { world, facts: [] };
-  const attackers = [attacker, ...(input.attackerAllies ?? []).filter((force) => force.id !== attacker.id && force.id !== defender.id)];
-  const defenders = [defender, ...(input.defenderAllies ?? []).filter((force) => !attackers.some((ally) => ally.id === force.id) && force.id !== defender.id)];
+  const attackers = [attacker, ...(input.attackerAllies ?? []).filter((force) => force.id !== attacker.id && force.id !== defender.id).map(edged)];
+  const defenders = [defender, ...(input.defenderAllies ?? []).filter((force) => !attackers.some((ally) => ally.id === force.id) && force.id !== defender.id).map(edged)];
 
   // What the plan was worth, decided from the field and not from the prose.
   const preRejected: { actorId: string; reason: string }[] = [];
@@ -923,7 +1017,11 @@ export function resolveEngagement(input: EngagementInput, index: number): Engage
   const diverted = divertFieldFates(world, rolled, memberFates(world, rolled), input.playerCharacterId ?? null);
   const result = diverted.result;
   const members = diverted.members;
-  const applied = applyResult(world, result, world.elapsedStep, members);
+  const unrecorded = applyResult(world, result, world.elapsedStep, members);
+  // What the men did, into their records: battles, wounds, decorations, and
+  // the experience of the formations that fought (`ranks.ts`).
+  const recorded = recordTheFight(unrecorded.world, result, members, input.playerCharacterId ?? null);
+  const applied = { ...unrecorded, world: recorded.world };
   // A power that judges its generals sends for the one who lost.
   const judged = summonToJudgment(withStandingFromTheField(applied.world, result, attackers, defenders), result,
     result.outcome === "attacker_victory" ? defenders : result.outcome === "defender_victory" ? attackers : [], province.name);
@@ -931,14 +1029,27 @@ export function resolveEngagement(input: EngagementInput, index: number): Engage
   const rules = warfareWith(world, input.warfare);
   const naval = new Set([...attackers, ...defenders].filter((force) => isNavalForce(force, rules)).map((force) => force.id));
   const perils = openFieldPerils(trampled(judged.world, result, province.id, naval), diverted.plights, { battleId: result.battleId, provinceId: province.id, provinceName: province.name }, world.elapsedStep);
-  const facts = [...factsFor(world, result, province.id, index, members, naval), ...spoilsFacts(world, applied.spoils, index), ...judged.facts, ...perils.facts];
+  const facts = [...factsFor(world, result, province.id, index, members, naval), ...spoilsFacts(world, applied.spoils, index), ...judged.facts, ...perils.facts, ...recorded.facts];
   const account = accountOf(world, result, province.id, facts.map((fact) => fact.localId), members, naval);
   const plights = diverted.plights.map((plight) => ({
     name: world.characters.find((character) => character.id === plight.characterId)?.name ?? plight.characterId,
     outcome: plight.plight === "encircled" ? "surrounded, fate undecided" : "cut off, fate undecided",
   }));
+  // A decisive fight goes into its war's tally, on land or at sea (`recordBattle`).
+  const winners = result.outcome === "attacker_victory" ? attackers : result.outcome === "defender_victory" ? defenders : [];
+  const losers = result.outcome === "attacker_victory" ? defenders : result.outcome === "defender_victory" ? attackers : [];
+  const tallied = winners.length === 0 || losers.length === 0 ? perils.world : {
+    ...perils.world,
+    polityAgreements: recordBattle(perils.world.polityAgreements, {
+      atStep: world.elapsedStep,
+      winnerPolityId: winners[0]!.polityId,
+      loserPolityId: losers[0]!.polityId,
+      naval: [...attackers, ...defenders].every((force) => naval.has(force.id)),
+      engaged: [...attackers, ...defenders].reduce((sum, force) => sum + fitStrengthOf(force), 0),
+    }),
+  };
   return {
-    world: perils.world,
+    world: tallied,
     facts,
     // Read from the world as it stood *before* the fight, so the strengths are
     // what each side brought to it rather than what survived it.

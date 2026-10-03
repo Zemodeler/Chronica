@@ -372,6 +372,14 @@ function levyContingents(world: WorldState, war: PolityAgreement, ids: IdFactory
         });
         continue;
       }
+      // An ally with an army already afoot answers with it: a second levy
+      // beside the first is the same men counted twice.
+      const afoot = next.material.forces.filter((force) => force.polityId === ally && fitOf(force) >= CONTINGENT_MIN && !force.personnel.every((group) => /ship|galley|hull|fleet/i.test(group.categoryId)))
+        .sort((a, b) => fitOf(b) - fitOf(a) || a.id.localeCompare(b.id))[0];
+      if (afoot !== undefined) {
+        sent.push({ polityId: ally, men: fitOf(afoot) });
+        continue;
+      }
       const heldByAlly = new Set(next.map.provinces.filter((province) => province.controllerPolityId === ally).map((province) => province.id));
       const lands = next.material.provinceMaterial.filter((row) => heldByAlly.has(row.provinceId));
       const available = lands.reduce((sum, row) => sum + row.availableManpower, 0);

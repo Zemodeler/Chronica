@@ -1,4 +1,6 @@
 import type { ScenarioWarfareRules, TroopCategoryDefinition } from "./battle";
+import type { Doctrine, MilitaryEstablishment } from "./establishment";
+import type { WarfareRules } from "./formation";
 
 /**
  * Kinds of troops the world has made for itself, beside the ones the scenario
@@ -41,11 +43,26 @@ export function allTroopCategories(
  * elephants in April, in a battle resolved by code that never heard of them.
  */
 export function warfareWith(
-  world: { readonly troopCategories?: readonly TroopCategoryDefinition[] },
+  world: {
+    readonly troopCategories?: readonly TroopCategoryDefinition[];
+    readonly establishments?: readonly MilitaryEstablishment[];
+    readonly doctrines?: readonly Doctrine[];
+    readonly elapsedStep?: number;
+  },
   warfare: ScenarioWarfareRules,
-): ScenarioWarfareRules {
+): WarfareRules {
   const categories = allTroopCategories(world, warfare.troopCategories);
-  return categories === warfare.troopCategories ? warfare : { ...warfare, troopCategories: [...categories] };
+  const merged = categories === warfare.troopCategories ? warfare : { ...warfare, troopCategories: [...categories] };
+  // And how each power makes war (`establishment.ts`): read by the battle, the
+  // muster and drill alike, so a doctrine brought in by a law in March is
+  // fought by in April without any of them being told.
+  if ((world.establishments?.length ?? 0) === 0 && (world.doctrines?.length ?? 0) === 0) return merged;
+  return {
+    ...merged,
+    establishments: world.establishments ?? [],
+    doctrines: world.doctrines ?? [],
+    ...(world.elapsedStep === undefined ? {} : { today: world.elapsedStep }),
+  };
 }
 
 /**
@@ -115,4 +132,17 @@ export function labelFromCategoryId(categoryId: string): string {
   const words = categoryId.split(/[-_:\s]+/u).filter((word) => word.length > 0);
   if (words.length === 0) return categoryId;
   return words.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
+}
+
+/**
+ * What one head of a hired company costs a month, at least: about what a
+ * government already pays to keep its own. Rome paid 190 a month for 7,100
+ * legionaries and allies and 40 to victual 18 allied hulls, so a hired foot
+ * soldier is put at 0.04 (a little above a citizen's keep) and a hull at 2.5,
+ * each scaled by what it is worth in the line. Without a floor, 400 warships
+ * were hired for 900 down and nothing a month.
+ */
+export function hireFloorPerMonth(category: Pick<TroopCategoryDefinition, "naval" | "combatWeightBps">): number {
+  const worth = Math.max(0.5, category.combatWeightBps / BASELINE_COMBAT_WEIGHT_BPS);
+  return (category.naval === true ? 2.5 : 0.04) * worth;
 }

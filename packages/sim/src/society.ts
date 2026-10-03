@@ -20,6 +20,10 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { circleName, clientsName, CLASS_NAMES } from "./group-names";
+import { forceLever, polityLever, type WarfareContext } from "@chronica/shared";
+
+/** The doctrines a world's powers and armies practise, for the levers society reads. */
+const contextOf = (world: WorldState): WarfareContext => ({ establishments: world.establishments, doctrines: world.doctrines, today: world.elapsedStep });
 import { chambersOf, polityPhrase, rulerOf, rulerOfficeOf, templateFor, type GovernmentRules } from "./constitutions";
 import { grumbleAtOfficers } from "./grumbling";
 import { aimsFromState } from "./outlooks";
@@ -276,7 +280,11 @@ function veterans(world: WorldState, toDay: number): Candidate[] {
   const out: Candidate[] = [];
   for (const polity of world.map.polities) {
     const men = world.society.discharged.filter((entry) => entry.polityId === polity.id && entry.atStep >= toDay - VETERAN_MEMORY_DAYS).reduce((sum, entry) => sum + entry.count, 0);
-    const strength = clampBps(men * 2);
+    // Men promised land press harder for it than men sent home with nothing
+    // (`veteran_claim`, and an establishment that owes its discharged land).
+    const owedLand = world.establishments.find((establishment) => establishment.polityId === polity.id)?.discharge === "land" ? 500 : 0;
+    const claim = men > 0 ? polityLever(contextOf(world), polity.id, "veteran_claim") + owedLand : 0;
+    const strength = clampBps(men * 2 + claim);
     if (strength < GROUP_DISSOLVES_BPS) continue;
     out.push({
       key: `veterans:${polity.id}`, type: "veterans", name: CLASS_NAMES.veterans, polityId: polity.id, leaderId: null, interest: "veterans",
@@ -360,10 +368,13 @@ function ownArmies(world: WorldState, toDay: number): Candidate[] {
   for (const force of world.material.forces) {
     if (force.outlaw === true || menIn(force) < 500) continue;
     const since = world.society.commandSince.find((entry) => entry.forceId === force.id && entry.commanderCharacterId === force.commanderCharacterId)?.sinceStep;
-    if (since === undefined || toDay - since < OWN_ARMY_DAYS) continue;
+    // Long service and a general's own bounty make an army his sooner
+    // (`loyalty_to_general`): the head count enrolled by Marius followed Marius.
+    const owned = Math.round(OWN_ARMY_DAYS * Math.max(0.3, 1 - forceLever(contextOf(world), force, "loyalty_to_general")));
+    if (since === undefined || toDay - since < owned) continue;
     const commander = world.characters.find((character) => character.id === force.commanderCharacterId && character.alive);
     if (commander === undefined) continue;
-    const strength = clampBps(3_000 + ((toDay - since - OWN_ARMY_DAYS) / 365) * 1_500 + (force.moraleBps - 5_000) / 2);
+    const strength = clampBps(3_000 + ((toDay - since - owned) / 365) * 1_500 + (force.moraleBps - 5_000) / 2);
     out.push({
       key: `army:${force.id}:${commander.id}`, type: "military_command", name: `${force.name}, loyal to ${commander.name}`.slice(0, 120), polityId: force.polityId, leaderId: commander.id, interest: "soldiers",
       strengthBps: strength, memberIds: [...force.memberCharacterIds], platform: [`Follow ${commander.name}`],
@@ -724,7 +735,7 @@ function officesByNeed(world: WorldState, government: GovernmentRules, warfare: 
     const ships = next.material.forces.filter((force) => force.polityId === polity.id && isNavalForce(force, warfare)).reduce((sum, force) => sum + menIn(force), 0);
     if (ships >= 20 && !has(/\b(fleet|fleets|navy|naval|admiral|nauarch)\b/iu)) make("admiral", `Admiral of the fleet of ${polityPhrase(polity.name)}`, 1, "it has ships and nobody to command them");
     const taken = next.map.provinces.filter((province) => province.controllerPolityId === polity.id && native.has(province.id) && native.get(province.id) !== polity.id).length;
-    if (taken >= 2 && !has(/\b(governor|governors|satrap|prefect|proconsul)\b/iu)) make("governor", `Governor of the conquered lands of ${polityPhrase(polity.name)}`, Math.min(12, taken), "it holds conquered provinces and nobody to govern them");
+    if (taken >= 2 && !has(/\b(governor|governors|satrap|prefect|praefectus|praefect|proconsul)\b/iu)) make("governor", `Governor of the conquered lands of ${polityPhrase(polity.name)}`, Math.min(12, taken), "it holds conquered provinces and nobody to govern them");
   }
 
   // Idle offices: remembered from the month they fell idle, and lapsing after three years.

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { punicWarsScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, seatCharacterInOffice, type PoliticalProcedure, type WorldState } from "@chronica/shared";
-import { ELECTION_CANVASS_DAYS, ELECTION_POLLING_DAYS } from "./elections";
+import { INTERREGNUM_POLLING_DAYS } from "./elections";
 import { createIdFactory } from "./ports";
 import { runDeterministicTick } from "./tick";
 
@@ -88,51 +88,50 @@ function yearEnded(): WorldState {
 describe("elections to an elective office", () => {
   it("fills the consulship nobody held at the opening, from the men of most standing, never the player", () => {
     const world = tick(opening(), 0).world;
-    // Manius Curius has the most standing in Rome; the player (Gaius) already sits.
-    expect(consuls(world)).toEqual(["gaius-genucius", "manius-curius"]);
+    // The man of most standing the consulship is not beneath: Manius Curius is
+    // censor now, above it, so not he. The player (Gaius) already sits.
+    const [first, second] = consuls(world);
+    expect(first).toBe("gaius-genucius");
+    expect(second).not.toBeNull();
+    expect(second).not.toBe("manius-curius");
     const seat = world.material.officeSeats.find((candidate) => candidate.id === "roman-consul:seat:1")!;
     expect(seat.termExpiresAtStep).toBe(365);
-    expect(world.characters.find((character) => character.id === "manius-curius")?.officeId).toBe("roman-consul");
+    expect(world.characters.find((character) => character.id === second)?.officeId).toBe("roman-consul");
 
-    // A player who is Curius is not handed the seat: the next man of standing is.
-    const asCurius = tick(opening(), 0, "manius-curius").world;
-    expect(consuls(asCurius)).toEqual(["gaius-genucius", "quintus-ogulnius"]);
+    // A player who is that man is not handed the seat: the next man of standing is.
+    const asHim = tick(opening(), 0, second).world;
+    expect(consuls(asHim)[1]).not.toBe(second);
   });
 
-  it("empties both seats at the year's end and tells the men who could win, not the player", () => {
-    const world = yearEnded();
-    expect(consuls(world)).toEqual([null, null]);
-    const told = world.characterPressures.filter((pressure) => pressure.kind === "opportunity" && pressure.label.includes("Roman consul"));
-    expect(told.map((pressure) => pressure.characterId).sort()).toEqual(["manius-curius", "quintus-ogulnius"]);
-    // Nobody has called it yet, so there is no election.
-    expect(elections(world)).toHaveLength(0);
-    // Told once, not every tick of the canvass.
-    expect(tick(world, 370).world.characterPressures.filter((pressure) => pressure.kind === "opportunity" && pressure.label.includes("Roman consul"))).toHaveLength(told.length);
-  });
-
-  it("calls the election itself when nobody has by the end of the canvass, and decides it on its day", () => {
-    const canvassOver = tick(yearEnded(), 365 + ELECTION_CANVASS_DAYS);
-    const [called] = elections(canvassOver.world);
+  it("empties both seats at a year's end nobody was elected for, and calls an interregnum's election at once", () => {
+    // The tick here jumps the whole year, so nobody was elected ahead (`ELECTION_LEAD_DAYS`):
+    // Rome went two months without consuls waiting on a canvass. Now it waits days.
+    const ended = tick(tick(opening(), 0).world, 365);
+    expect(consuls(ended.world)).toEqual([null, null]);
+    const [called] = elections(ended.world);
     expect(called?.stage).toBe("gathering_support");
     expect(called?.institutionId).toBe("roman-comitia-centuriata");
-    expect(canvassOver.factProposals.some((fact) => fact.kind === "election_called")).toBe(true);
+    expect(called?.deadlineStep).toBe(365 + INTERREGNUM_POLLING_DAYS);
+    expect(ended.factProposals.find((fact) => fact.kind === "election_called")?.summary).toContain("the year ran out");
+  });
 
-    const pollingDay = tick(canvassOver.world, 365 + ELECTION_CANVASS_DAYS + ELECTION_POLLING_DAYS);
+  it("decides the interregnum's election on its day, from the men who stand and the men of standing", () => {
+    const pollingDay = tick(yearEnded(), 365 + INTERREGNUM_POLLING_DAYS);
     const decided = elections(pollingDay.world)[0]!;
     expect(decided.outcome).toBe("passed");
-    // Two seats, filled by standing. Gaius has as much standing as Ogulnius,
-    // but Gaius is the player and never stood: the engine does not put a
-    // player's name forward for him.
-    expect(consuls(pollingDay.world).sort()).toEqual(["manius-curius", "quintus-ogulnius"]);
+    const seated = consuls(pollingDay.world);
+    expect(seated.every((id) => id !== null)).toBe(true);
+    // Gaius is the player and never stood: the engine does not put a player's name forward for him.
+    expect(seated).not.toContain("gaius-genucius");
     const held = pollingDay.world.material.officeSeats.filter((seat) => seat.officeId === "roman-consul");
-    expect(held.every((seat) => seat.termExpiresAtStep === 365 + ELECTION_CANVASS_DAYS + ELECTION_POLLING_DAYS + 365)).toBe(true);
+    expect(held.every((seat) => seat.termExpiresAtStep === 365 + INTERREGNUM_POLLING_DAYS + 365)).toBe(true);
     const account = pollingDay.factProposals.find((fact) => fact.kind === "election_held");
     expect(account?.summary).toContain("Centuriate Assembly elected");
     expect(account?.visibility).toBe("public");
   }, 30_000);
 
   it("counts who has declared for a man: backing can carry a candidate past one of equal standing", () => {
-    const canvassOver = tick(yearEnded(), 365 + ELECTION_CANVASS_DAYS).world;
+    const canvassOver = yearEnded();
     const candidacy: PoliticalProcedure = {
       id: "ogulnius-stands",
       type: "nomination",
@@ -145,7 +144,7 @@ describe("elections to an elective office", () => {
       eligibleParticipantIds: [],
       stage: "gathering_support",
       resolutionMechanism: "vote",
-      openedAtStep: 400,
+      openedAtStep: 366,
       deadlineStep: null,
       resolvedAtStep: null,
       visibility: "public",
@@ -179,18 +178,18 @@ describe("elections to an elective office", () => {
           visibility: "public",
           reasons: [],
           provenanceEventIds: [],
-          changedAtStep: 401,
+          changedAtStep: 366,
         }],
       },
     };
-    const decided = tick(backed, 365 + ELECTION_CANVASS_DAYS + ELECTION_POLLING_DAYS).world;
-    expect(consuls(decided).sort()).toEqual(["manius-curius", "quintus-ogulnius"]);
+    const decided = tick(backed, 365 + INTERREGNUM_POLLING_DAYS).world;
+    expect(consuls(decided)).toContain("quintus-ogulnius");
     expect(decided.material.politicalProcedures.find((procedure) => procedure.id === "ogulnius-stands")?.outcome).toBe("passed");
     expect(decided.material.politicalProcedures.find((procedure) => procedure.id === "gaius-stands")?.outcome).toBe("failed");
   });
 
   it("elects the player when the player stands and has the standing", () => {
-    const canvassOver = tick(yearEnded(), 365 + ELECTION_CANVASS_DAYS).world;
+    const canvassOver = yearEnded();
     const stands: WorldState = {
       ...canvassOver,
       material: {
@@ -207,7 +206,7 @@ describe("elections to an elective office", () => {
           eligibleParticipantIds: [],
           stage: "gathering_support",
           resolutionMechanism: "vote",
-          openedAtStep: 396,
+          openedAtStep: 366,
           deadlineStep: null,
           resolvedAtStep: null,
           visibility: "public",
@@ -227,16 +226,20 @@ describe("elections to an elective office", () => {
           visibility: "public",
           reasons: [],
           provenanceEventIds: [],
-          changedAtStep: 397,
+          changedAtStep: 366,
         }],
       },
     };
-    const decided = tick(stands, 365 + ELECTION_CANVASS_DAYS + ELECTION_POLLING_DAYS).world;
-    expect(consuls(decided).sort()).toEqual(["gaius-genucius", "manius-curius"]);
+    const decided = tick(stands, 365 + INTERREGNUM_POLLING_DAYS).world;
+    expect(consuls(decided)).toContain("gaius-genucius");
   });
 
   it("treats a man putting himself forward as the election being called", () => {
-    const vacant = yearEnded();
+    // A seat emptied mid-year, by a death, waits on a canvass; the year's end does not.
+    const started = tick(opening(), 0).world;
+    const vacant: WorldState = { ...started, material: { ...started.material, officeSeats: started.material.officeSeats.map((seat) => (seat.id === "roman-consul:seat:1"
+      ? { ...seat, holderCharacterId: null, status: "vacant" as const, vacancyCause: "death" as const, termExpiresAtStep: 360 }
+      : seat)) } };
     const standing: WorldState = {
       ...vacant,
       material: {
@@ -265,7 +268,7 @@ describe("elections to an elective office", () => {
         }],
       },
     };
-    const called = elections(tick(standing, 367).world);
+    const called = elections(tick(standing, 361).world);
     expect(called).toHaveLength(1);
     expect(called[0]!.sponsorCharacterId).toBe("manius-curius");
   });

@@ -237,7 +237,7 @@ export function attemptRegimeChange(input: RegimeChangeInput): RegimeChangeResul
       const vacant = next.material.officeSeats.find((seat) => seat.officeId === office.id && seat.status === "vacant")?.id ?? null;
       next = seatCharacterInOffice(next, actorId, { office, vacantSeatId: vacant }, input.atStep, office.termDays ?? null);
     }
-    const done = recastHistoryOnly(next, polityId, current, actorId, input.atStep, summary);
+    const done = recastHistoryOnly(next, polityId, current, actorId, input.atStep, summary, route);
     next = ruler === null ? done : foundDeposedParty(done, polityId, ruler.id, [ruler.id], input.atStep, current);
     facts = [{
       localId: `regime_${polityId}_${input.atStep}`.slice(0, 60),
@@ -247,7 +247,7 @@ export function attemptRegimeChange(input: RegimeChangeInput): RegimeChangeResul
       visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 85,
     }];
   } else {
-    const done = recast({ world, polityId, toForm: targetForm, origin, byCharacterId: actorId, seatRuler, government: input.government, atStep: input.atStep, summary });
+    const done = recast({ world, polityId, toForm: targetForm, origin, byCharacterId: actorId, seatRuler, government: input.government, atStep: input.atStep, summary, route });
     next = done.world;
     facts = done.facts;
   }
@@ -277,11 +277,11 @@ export function attemptRegimeChange(input: RegimeChangeInput): RegimeChangeResul
 }
 
 /** A seat taken without the constitution changing: its history still says who took it. */
-function recastHistoryOnly(world: WorldState, polityId: string, form: GovernmentForm, byCharacterId: string, atStep: number, summary: string): WorldState {
+function recastHistoryOnly(world: WorldState, polityId: string, form: GovernmentForm, byCharacterId: string, atStep: number, summary: string, route: "coup" | "revolution" | "imposition" | "restoration"): WorldState {
   return {
     ...world,
     constitutions: world.constitutions.map((entry) => (entry.polityId === polityId
-      ? { ...entry, history: [...entry.history, { atStep, origin: "seizure" as const, fromForm: form, toForm: form, summary: summary.slice(0, 400), byCharacterId }].slice(-24) }
+      ? { ...entry, history: [...entry.history, { atStep, origin: "seizure" as const, fromForm: form, toForm: form, summary: summary.slice(0, 400), byCharacterId, route }].slice(-24) }
       : entry)),
   };
 }

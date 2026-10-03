@@ -67,6 +67,25 @@ describe("a siege's turning points", () => {
     expect(taken.material.forces.some((force) => force.id === "mamertine-garrison")).toBe(true);
   });
 
+  it("gives an undefended city up at the breach instead of asking about nobody", () => {
+    const state = pressedTo(besieged(), 4_990);
+    const empty: WorldState = { ...state, material: { ...state.material, forces: state.material.forces.filter((force) => !(force.locationId === MESSANA && force.polityId === "mamertines")) } };
+    const ticked = tick(empty, 5);
+    expect(ticked.world.sieges[0]!.status).toBe("taken");
+    expect(siegeDecision(ticked.world, PLAYER)).toBeUndefined();
+    expect(ticked.factProposals.some((fact) => /no garrison left to hold the breach/.test(fact.summary))).toBe(true);
+  });
+
+  it("carries a breach its garrison has left, and the city falls the same day", () => {
+    const asked = tick(pressedTo(besieged(), 4_990), 5).world;
+    expect(asked.sieges[0]!.awaiting?.kind).toBe("breach");
+    const gone: WorldState = { ...asked, material: { ...asked.material, forces: asked.material.forces.filter((force) => !(force.locationId === MESSANA && force.polityId === "mamertines")) } };
+    expect(siegeDecision(gone, PLAYER)!.prompt).toMatch(/No soldiers are left/);
+    const stormed = answerSiege(gone, PLAYER, "siege-storm", 6, definition.warfare, createIdFactory("storm-empty"));
+    expect(stormed.world.sieges[0]!.status).toBe("taken");
+    expect(stormed.facts.map((fact) => fact.kind)).toEqual(expect.arrayContaining(["siege_event", "siege_ended"]));
+  });
+
   it("lets a careful NPC besieger take terms himself", () => {
     const state = pressedTo(besieged(), 7_490, ["breach"]);
     const careful: WorldState = { ...state, characters: state.characters.map((character) => (character.id === PLAYER ? { ...character, mind: { ...character.mind, temperament: { ...character.mind.temperament, caution: 80 } } } : character)) };

@@ -4,12 +4,14 @@ import {
   allSuccessionRules,
   createPressure,
   currentAgeYears,
+  isStanding,
   type Character,
   type WorldState,
 } from "@chronica/shared";
 import { chambersOf, constitutionOf, rulerOf, rulerOfficeOf, sovereignChamberOf, type GovernmentRules } from "./constitutions";
 import { capitalProvinceOf } from "./regime";
 import { armyLoyaltyTo } from "./society";
+import { reformOpenings } from "./reform-openings";
 
 /**
  * The moments a government can change, offered to the men who could take them.
@@ -136,13 +138,36 @@ export function raiseOpenings(input: RaiseOpeningsInput): WorldState {
     }
   }
 
+  // 7½. Armies ripe for reform (`reform-openings.ts`): levies running dry, a
+  // war longer than a season, a defeat by a better way of fighting. Put to a
+  // man who could carry a law, or to the general who could change his army.
+  for (const polity of world.map.polities) {
+    const people = world.characters.filter((character) => character.alive && character.polityId === polity.id && character.id !== player);
+    if (people.length === 0) continue;
+    const reforms = reformOpenings(world, polity.id, toDay);
+    if (reforms.length === 0) continue;
+    const polityOffices = new Set(allOffices(world, government.offices).filter((candidate) => candidate.polityId === polity.id).map((candidate) => candidate.id));
+    const councillor = people.filter((character) => world.material.officeSeats.some((seat) => seat.holderCharacterId === character.id && seat.status === "held" && polityOffices.has(seat.officeId))).sort(byStanding)[0];
+    const general = world.material.forces
+      .filter((force) => force.polityId === polity.id && force.outlaw !== true)
+      .sort((a, b) => b.personnel.reduce((sum, row) => sum + row.fit, 0) - a.personnel.reduce((sum, row) => sum + row.fit, 0))
+      .map((force) => people.find((character) => character.id === force.commanderCharacterId))
+      .find((character): character is Character => character !== undefined);
+    for (const reform of reforms) {
+      const to = reform.to === "general" ? general ?? councillor : councillor ?? general;
+      if (to === undefined) continue;
+      openings.push({ polityId: polity.id, moment: reform.moment, characterId: to.id, intensity: reform.intensity, label: reform.label.slice(0, 200) });
+    }
+  }
+
   // 7. A conqueror in another power's capital, or a senior ally over a failing one.
   for (const target of world.map.polities) {
+    if (!isStanding(target)) continue;
     const capital = capitalProvinceOf(world, target.id);
     const holder = capital === null ? null : world.map.provinces.find((province) => province.id === capital)?.controllerPolityId ?? null;
     const senior = world.polityAgreements.find((agreement) => agreement.status === "active" && (agreement.kind === "foedus" || agreement.kind === "protectorate") && agreement.polityId === target.id && legitimacyOf(world, target.id) < 3_500)?.otherPolityId ?? null;
     const over = holder !== null && holder !== target.id ? holder : senior;
-    if (over === null) continue;
+    if (over === null || !world.map.polities.some((polity) => polity.id === over && isStanding(polity))) continue;
     const master = rulerOf(world, over, government);
     if (master === null || master.id === player) continue;
     openings.push({

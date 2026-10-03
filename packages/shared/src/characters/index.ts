@@ -45,3 +45,6 @@ export * from "./aptitude";
 export * from "./names-by-culture";
 export * from "./peers";
 export * from "./candidates";
+export * from "./staffing";
+export * from "./ordo";
+export * from "./vices";

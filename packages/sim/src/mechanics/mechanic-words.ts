@@ -42,7 +42,7 @@ export function predicateInWords(predicate: MechanicPredicate, world: WorldState
     case "polity_trust_above": return `${named(world, predicate.polityId)}'s trust of ${named(world, predicate.towardPolityId)} is above ${predicate.score}`;
     case "polity_trust_below": return `${named(world, predicate.polityId)}'s trust of ${named(world, predicate.towardPolityId)} is below ${predicate.score}`;
     case "at_war": return `${named(world, predicate.polityId)} is ${predicate.atWar ? "at war" : "at peace"} with ${named(world, predicate.otherPolityId)}`;
-    case "letter_answered": return `${named(world, predicate.toPolityId)} ${predicate.answer === undefined ? "answers" : predicate.answer === "accepted" ? "accepts" : "refuses"} a letter from ${named(world, predicate.fromPolityId)}`;
+    case "letter_answered": return `${named(world, predicate.toPolityId)} ${predicate.answer === undefined ? "answers" : predicate.answer === "accepted" ? "accepts" : "refuses"} ${predicate.messageId === undefined ? "a letter" : `letter [${predicate.messageId}]`} from ${named(world, predicate.fromPolityId)}${predicate.issueKey === undefined ? "" : ` about ${predicate.issueKey}`}`;
     case "in_months": return `it is ${predicate.months.map((month) => MONTHS[month - 1] ?? String(month)).join(" or ")}`;
   }
 }

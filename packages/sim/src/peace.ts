@@ -2,6 +2,7 @@ import {
   WorldDeltaSchema,
   aptitude,
   leaning,
+  ownerOf,
   readDepartments,
   skillShare,
   warStanding,
@@ -53,20 +54,36 @@ export interface PeaceTerms {
   readonly speakerId: string;
 }
 
+/**
+ * What a province is worth to the power giving it up, by the war score's own
+ * measure (`war-score.ts`): its share of that power's land out of twenty-five,
+ * each of its cities' share of that power's cities out of forty -- a city of a
+ * three-city power is dear, a city of an empire cheap -- and thirty-five more
+ * for the capital. Half as much when the taker already holds it: ground
+ * occupied is ground half given.
+ */
+export function provinceWorth(world: WorldState, provinceId: string, giver: string): number {
+  const province = world.map.provinces.find((candidate) => candidate.id === provinceId);
+  if (province === undefined || ownerOf(province) !== giver) return 0;
+  const owned = world.map.provinces.filter((candidate) => ownerOf(candidate) === giver);
+  const cities = Math.max(1, owned.reduce((sum, candidate) => sum + candidate.settlements.length, 0));
+  const capital = world.map.polities.find((polity) => polity.id === giver)?.capitalSettlementId;
+  const base = Math.max(2, Math.round(25 / Math.max(1, owned.length) + (40 * province.settlements.length) / cities))
+    + (province.settlements.some((city) => city.id === capital) ? 35 : 0);
+  return province.controllerPolityId !== giver ? Math.round(base / 2) : base;
+}
+
 /** What a clause costs the side giving it up, in the currency of a war going badly. */
 export function priceOf(world: WorldState, clause: PeaceClause, giver: string): number {
-  if (clause.kind === "cession") {
-    const province = world.map.provinces.find((candidate) => candidate.id === clause.provinceId);
-    if (province === undefined || province.controllerPolityId !== giver) return 0;
-    const capital = world.map.polities.find((polity) => polity.id === giver)?.capitalSettlementId;
-    return 20 + (province.settlements.some((city) => city.id === capital) ? 30 : 0);
-  }
+  if (clause.kind === "cession") return provinceWorth(world, clause.provinceId, giver);
   if (clause.kind === "indemnity") {
     if (clause.payerPolityId !== giver) return 0;
     const treasury = world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === giver);
     return Math.round((25 * clause.amount * clause.periods) / Math.max(500, treasury?.balance ?? 0));
   }
   if (clause.kind === "hostage") return world.characters.find((character) => character.id === clause.characterRef)?.polityId === giver ? 8 : 0;
+  if (clause.kind === "undertaking") return clause.byPolityId === giver ? 10 : 0;
+  if (clause.kind === "force_transfer") return world.material.forces.find((force) => force.id === clause.forceRef)?.polityId === giver ? 25 : 0;
   return clause.polityId === giver ? 100 : 0;
 }
 
@@ -102,7 +119,7 @@ export interface PeaceOutcome {
   readonly dictated: boolean;
 }
 
-export function concludePeace(world: WorldState, peace: PeaceTerms, context: Omit<ApplyContext, "actorRef">, offices: readonly Office[]): PeaceOutcome {
+export function concludePeace(world: WorldState, peace: PeaceTerms, context: Omit<ApplyContext, "actorRef">, offices: readonly Office[], bought = 0): PeaceOutcome {
   const name = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
   const refuse = (refusal: string): PeaceOutcome => ({ made: false, world, facts: [], refusal, dictated: false });
   const standing = warStanding(world, peace.proposerPolityId, peace.otherPolityId);
@@ -123,7 +140,8 @@ export function concludePeace(world: WorldState, peace: PeaceTerms, context: Omi
   if (peace.clauses.some((clause) => clause.kind === "submission" && clause.polityId === peace.otherPolityId) && !dictated) {
     return refuse(`${name(peace.otherPolityId)} will not give itself up to a power that has not beaten it.`);
   }
-  const bearable = willingToGive(world, peace.otherPolityId, peace.proposerPolityId, representative, speaker);
+  // Plus what a bribe at the peace table bought (`peace-table.ts`).
+  const bearable = willingToGive(world, peace.otherPolityId, peace.proposerPolityId, representative, speaker) + bought;
   if (theyGive > bearable) {
     return refuse(`${representative.name} cannot carry terms like these to ${name(peace.otherPolityId)}: they ask more than its war has cost it${standing.days < 60 ? ", and it is not yet tired of fighting" : ""}.`);
   }
@@ -156,6 +174,8 @@ export function concludePeace(world: WorldState, peace: PeaceTerms, context: Omi
     if (clause.kind === "cession") return `${world.map.provinces.find((province) => province.id === clause.provinceId)?.name ?? clause.provinceId} to ${name(clause.toPolityId)}`;
     if (clause.kind === "indemnity") return `${name(clause.payerPolityId)} to pay ${clause.amount} ${clause.periods} times`;
     if (clause.kind === "hostage") return `${world.characters.find((character) => character.id === clause.characterRef)?.name ?? "a hostage"} given as a hostage`;
+    if (clause.kind === "undertaking") return `${name(clause.byPolityId)} to ${clause.what}`;
+    if (clause.kind === "force_transfer") return `${world.material.forces.find((force) => force.id === clause.forceRef)?.name ?? "an army"} to serve ${name(clause.toPolityId)}`;
     return `${name(clause.polityId)} to give itself up to ${name(clause.toPolityId)}`;
   });
   const summary = dictated

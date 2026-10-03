@@ -1,4 +1,4 @@
-import { allOffices, buildAuthorityIndex, formatWorldDate, isDelivered, type DiplomaticMessage, type Office, type ScenarioClock, type WorldState } from "@chronica/shared";
+import { allOffices, buildAuthorityIndex, formatWorldDate, isDelivered, peaceOfferMetadata, readDepartments, type DiplomaticMessage, type Office, type ScenarioClock, type WorldState } from "@chronica/shared";
 
 /**
  * Who answers a letter sent to a power.
@@ -24,11 +24,22 @@ export function diplomaticAnswererOf(world: WorldState, polityId: string, office
     allOffices(world, offices),
     world.elapsedStep,
   );
+  // The department that writes the state's letters, where it has one; then
+  // whoever may treat for it, the ruler before a cavalry commander with the
+  // same powers -- the Bruttians' letter once went to their hipparch by the
+  // alphabet, and their ruler never saw it.
+  const reader = readDepartments(world);
+  const office = reader.holding({ kind: "polity", id: polityId }, "foreign_letters");
+  const clerk = office.department === null ? undefined : office.people.find((person) => members.has(person.id));
+  if (clerk !== undefined) return clerk.id;
+  const rulers = new Set(reader.rulers(polityId).map((person) => person.id));
   const diplomats = index.grants
     .filter((grant) => grant.domain === "diplomatic" && grant.scope.kind === "polity" && grant.scope.id === polityId
       && grant.holder.kind === "character" && members.has(grant.holder.id))
-    .sort((a, b) => b.powers.length - a.powers.length || a.holder.id.localeCompare(b.holder.id));
+    .sort((a, b) => b.powers.length - a.powers.length || Number(rulers.has(b.holder.id)) - Number(rulers.has(a.holder.id)) || a.holder.id.localeCompare(b.holder.id));
   if (diplomats.length > 0) return diplomats[0]!.holder.id;
+  const ruler = [...rulers].find((id) => members.has(id));
+  if (ruler !== undefined) return ruler;
   const officeHolders = world.characters
     .filter((character) => members.has(character.id) && character.officeId !== null)
     .map((character) => character.id)
@@ -42,6 +53,7 @@ export function diplomaticAnswererOf(world: WorldState, polityId: string, office
  * sent. Run once at the top of a burst, before anybody is asked anything.
  */
 export function addressWaitingLetters(world: WorldState, offices: readonly Office[]): WorldState {
+  world = { ...world, diplomacy: world.diplomacy.map((message) => ({ ...message, ...peaceOfferMetadata(message) })) };
   if (!world.diplomacy.some((message) => message.status === "awaiting_reply" && message.toCharacterId === null)) return world;
   return {
     ...world,

@@ -10,13 +10,45 @@
  * is where it refused plain orders for want of a detail. An order in a chain
  * is given to the world the previous one left, by the same person.
  */
+import type { WorldState } from "@chronica/shared";
+
+/**
+ * What the world must show after an order, read from its own fields --
+ * where an army stands, what an account holds -- and never from the engine's
+ * own verdict on itself (E11). Null when it holds; otherwise what did not.
+ */
+export type WorldOracle = (before: WorldState, after: WorldState, actorId: string) => string | null;
+
 export interface CorpusOrder {
   readonly id: string;
   /** Orders sharing a chain run in sequence against one evolving world. */
   readonly chain: string;
   readonly actor: "gaius-furius" | "marcus-metellus" | "quintus-agrippinus" | "gaius-genucius" | "leptines-syracuse";
   readonly text: string;
+  readonly expect?: WorldOracle;
 }
+
+const MESSANA = "sic-q659z";
+/** Legio I stands in Messana, or the order says honestly why not. */
+const legionInMessana: WorldOracle = (_before, after, actorId) => {
+  const legion = after.material.forces.find((force) => force.id === "roman-field-army");
+  if (legion?.locationId === MESSANA) return null;
+  const order = [...after.orders].reverse().find((candidate) => candidate.actorCharacterId === actorId);
+  const told = order?.parts.some((part) => part.refusal !== null || part.stages.some((stage) => stage.status === "waiting") || part.workRefs.some((ref) => ref.kind === "project" || ref.kind === "order_attempt"));
+  return told === true ? null : "the legion is not in Messana, and nothing under way or refused says why";
+};
+/** The actor's own purse was not spent on the order unless it said so. */
+const ownPurseUntouched: WorldOracle = (before, after, actorId) => {
+  const purses = new Set(after.material.accounts.filter((account) => account.owner.kind === "character" && account.owner.id === actorId).map((account) => account.id));
+  const spent = after.material.transactions.slice(before.material.transactions.length).filter((transaction) => transaction.sourceAccountId !== undefined && purses.has(transaction.sourceAccountId));
+  return spent.length === 0 ? null : `${spent.length} payment(s) from the consul's own purse the order never allowed`;
+};
+/** Three hundred left the lender's purse. */
+const lentThreeHundred: WorldOracle = (before, after, actorId) => {
+  const purses = new Set(after.material.accounts.filter((account) => account.owner.kind === "character" && account.owner.id === actorId).map((account) => account.id));
+  const out = after.material.transactions.slice(before.material.transactions.length).filter((transaction) => transaction.sourceAccountId !== undefined && purses.has(transaction.sourceAccountId)).reduce((sum, transaction) => sum + transaction.amount, 0);
+  return out >= 300 ? null : `only ${out} left his purse`;
+};
 
 export const CORPUS: readonly CorpusOrder[] = [
   {
@@ -57,7 +89,14 @@ export const CORPUS: readonly CorpusOrder[] = [
   { id: "consul-cult", chain: "cult", actor: "gaius-genucius", text: "Suppress the Bacchic cult in Campania and seize its temples." },
   { id: "trade-rome-1-cutlery", chain: "trade-rome", actor: "marcus-metellus", text: "I make a business deal and start selling cutlery in the streets of Rome." },
   { id: "trade-rome-2-stall", chain: "trade-rome", actor: "marcus-metellus", text: "The cutlery sells well. I hire two apprentices and open a second stall near the Forum." },
-  { id: "trade-rome-3-loan", chain: "trade-rome", actor: "marcus-metellus", text: "I lend 300 drachmae to a shipowner at Ostia against his next cargo of grain." },
+  { id: "trade-rome-3-loan", chain: "trade-rome", actor: "marcus-metellus", text: "I lend 300 drachmae to a shipowner at Ostia against his next cargo of grain.", expect: lentThreeHundred },
+  // The decisive regression of the Clepsina gaps report: the simple order,
+  // then the diagnostic one with its payer, cap, secrecy and alternatives.
+  { id: "messana-1-simple", chain: "messana", actor: "gaius-genucius", text: "Bring Legio I to Messana using our ships; seek funding if needed.", expect: legionInMessana },
+  {
+    id: "messana-2-detailed", chain: "messana", actor: "gaius-genucius", expect: (before, after, actorId) => legionInMessana(before, after, actorId) ?? ownPurseUntouched(before, after, actorId),
+    text: "Tiberius Coruncanius is to carry Legio I to Messana in the Roman Navy. Seek the Senate's leave and allocate up to 3,000 from the treasury, not from my own purse. If there are not enough hulls, hire them. Quietly have someone independent of me examine both the public and the household accounts for the diversion alleged against me, and report to me alone.",
+  },
   { id: "trade-syracuse-1-oil", chain: "trade-syracuse", actor: "leptines-syracuse", text: "I fit out a ship and trade olive oil to Messana." },
   { id: "trade-syracuse-2-guild", chain: "trade-syracuse", actor: "leptines-syracuse", text: "I found a guild of Syracusan cutlers and pay for its hall out of my own purse." },
   { id: "private-1-greek", chain: "private-life", actor: "marcus-metellus", text: "I spend the season learning Greek from a tutor and reading Homer." },

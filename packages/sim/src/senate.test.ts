@@ -99,7 +99,8 @@ describe("a question before the Senate", () => {
     const { world, id } = warTaxes();
     // The Populars' leaders come out against it, and two of the first men of
     // the house speak with them: the Patricians' lean falls below their line.
-    const senior = [...debatersOf(world, offices, 30 - DEBATE_LEAD_DAYS, ["gaius-genucius"]).keys()].slice(0, 2);
+    const vetoOffices = new Set(offices.filter((office) => office.vetoes).map((office) => office.id));
+    const senior = [...debatersOf(world, offices, 30 - DEBATE_LEAD_DAYS, ["gaius-genucius"]).keys()].filter((id) => !world.material.officeSeats.some((seat) => seat.holderCharacterId === id && vetoOffices.has(seat.officeId))).slice(0, 2);
     expect(senior).toHaveLength(2);
     let spoken = speak(world, id, { kind: "group", id: "popular-bloc" }, "oppose");
     for (const senator of senior) spoken = speak(spoken, id, { kind: "character", id: senator }, "oppose");
@@ -229,7 +230,7 @@ describe("a tribune's veto", () => {
       ...state,
       material: {
         ...state.material,
-        officeSeats: [...state.material.officeSeats, {
+        officeSeats: [...state.material.officeSeats.filter((seat) => seat.officeId !== "roman-tribune"), {
           id: "roman-tribune:seat:veto", officeId: "roman-tribune", seatIndex: 0, holderCharacterId: TRIBUNE, status: "held", vacancyCause: "none",
           termStartedAtStep: 0, termExpiresAtStep: 365, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: [],
         }],

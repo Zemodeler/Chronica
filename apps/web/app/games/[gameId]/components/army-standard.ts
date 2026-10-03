@@ -5,7 +5,6 @@ export interface ForceFlagAsset {
 }
 
 /** Drawn for a force whose standard has not been resolved yet. */
-export const FALLBACK_FORCE_FLAG: ForceFlagAsset = { url: "/maps/generic-merchant-ship-standard.png", aspectRatio: 3 / 2 };
 
 // The conflict treatment is deliberately excluded: this is the exact painted
 // flag rectangle, which is the only pointer target that may open army details.
