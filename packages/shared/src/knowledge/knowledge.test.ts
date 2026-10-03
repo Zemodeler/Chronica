@@ -138,7 +138,7 @@ describe("why a word is the word it is", () => {
   });
 
   it("says a heavy tax as a share of what the land can give, never the sums", () => {
-    const why = taxWhy({ polityId: "rome", bearable: 1_000, asked: 1_200, collectedShare: 0.5, stabilityShiftBps: -2_000 });
+    const why = taxWhy({ polityId: "rome", bearable: 1_000, asked: 1_200, collectedShare: 0.5, held: 1, stabilityShiftBps: -2_000 });
     expect(why.causes.map((cause) => cause.label)).toEqual([
       "More is asked than the land can give",
       "The collectors bring in little of it",

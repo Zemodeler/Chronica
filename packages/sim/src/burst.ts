@@ -3,6 +3,7 @@ import {
   addMinutes,
   readDepartments,
   ProposalSchema,
+  CognitionProposalSchema,
   STATECRAFT_LOG_MAX,
   CAST_SIZE_DEFAULT,
   difficultyRules,
@@ -24,6 +25,7 @@ import {
   WorldStateSchema,
   WorldDeltaSchema,
   type Fact,
+  type FactProposal,
   type FactProposalDraft,
   type Office,
   type SuccessionRule,
@@ -73,7 +75,7 @@ import { keepAsArrangement } from "./apply/keep-as-arrangement";
 import { actsBehindFacts, asClaim, isClaim, whereTheActorIs } from "./apply/fill-gaps";
 import { kindsIn } from "./bare-refs";
 import { misfiledWorldActs } from "./apply/misfiled";
-import { routeAmbientActors, routeAttention } from "./attention";
+import { hasSomethingNew, playersPeopleFirst, routeAmbientActors, routeAttention } from "./attention";
 import { renderCharacterPortrait, runCognition } from "./cognition";
 import { materializeFacts } from "./facts";
 import { answerByTemper } from "./insubordination";
@@ -91,6 +93,7 @@ import { answerSiege, siegeDecision } from "./siege-decisions";
 import { commandersFollowTheirArmies } from "./commanders-in-the-field";
 import { fieldDecision, playerPlight, resolveFieldPerils } from "./field-perils";
 import { factsNamingRefusals, reconcileFacts } from "./reconcile-facts";
+import { reconcileTheRound, repairTheRound, unanswered, type CorrectionCalls, type RoundCorrection } from "./round-corrections";
 import { repairDeltas, worthRepairing } from "./repair-deltas";
 import { runDeterministicTick } from "./tick";
 import { isWatchSatisfied } from "./watch";
@@ -112,8 +115,9 @@ import { decideStatecraft, ledgerEntry, rulerOptions, type StatecraftInput } fro
 import { castDossier, reviewCast } from "./cast";
 import { reviewPushback } from "./pushback";
 import { decideVillainy, seizeThrones, usurpations } from "./villainy";
-import { powersDealtWith, powersNearThePlayer } from "./far-powers";
-import { keepFarNewsHome } from "./far-news";
+import { newsRelations, powersDealtWith, powersNearThePlayer } from "./far-powers";
+import { groundOfForce } from "./force-ground";
+import { farBusinessFloor, keepFarNewsHome } from "./far-news";
 
 /**
  * One simulation burst: everything that happens between the player pressing
@@ -131,7 +135,16 @@ const STATECRAFT_EVERY_DAYS = 30;
 
 export interface SimulationBudget {
   readonly maxIterations: number;
+  /** The hard ceiling on a burst's model calls, however long it runs (`callCapFor`). */
   readonly maxModelCalls: number;
+  /**
+   * What a burst may spend, by how long it runs: this many calls, and one
+   * more for every `modelCallDays` days of its span, never past
+   * `maxModelCalls`. One number for every span spent a week's budget on a
+   * month or a month's on a week (L17).
+   */
+  readonly baseModelCalls: number;
+  readonly modelCallDays: number;
   readonly maxSimulatedDays: number;
   readonly maxCausalDepth: number;
   readonly maxFocusedActors: number;
@@ -188,7 +201,16 @@ export const DEFAULT_BUDGET: SimulationBudget = {
   // bounds the work, and this is only the guard against a loop that will not
   // stop -- set above the worst honest case, three rounds of three calls each
   // with a repair apiece, rather than at it.
-  maxModelCalls: 20,
+  //
+  // And then scaled by the span (L17). Twenty for any span was spent in the
+  // first three days of a month: in the Codex play-test every turn hit it with
+  // up to 26 of 29 days nobody was asked about. A round now costs one or two
+  // calls and at most one repair and one reconciliation, so eight calls and
+  // one for every three days -- eighteen for a month, forty at most for a
+  // season -- walks the whole span.
+  maxModelCalls: 40,
+  baseModelCalls: 8,
+  modelCallDays: 3,
   maxSimulatedDays: 90,
   maxCausalDepth: 3,
   // Ten people to a round rather than six. A month in which four people in the
@@ -205,6 +227,11 @@ export const DEFAULT_BUDGET: SimulationBudget = {
   // the world's own doings get the second. Counted apart from `maxModelCalls`.
   maxMechanicCalls: 2,
 };
+
+/** The model calls a burst over this many days may spend (`baseModelCalls`), never past `maxModelCalls`. */
+export function callCapFor(budget: SimulationBudget, spanDays: number): number {
+  return Math.min(budget.maxModelCalls, budget.baseModelCalls + Math.ceil(Math.max(0, spanDays) / Math.max(1, budget.modelCallDays)));
+}
 
 export interface ScheduledEventDraft {
   readonly id: string;
@@ -587,6 +614,20 @@ interface OrderActs {
   readonly factIdsByLocalId?: ReadonlyMap<string, string>;
   /** The ids its handles were given. */
   readonly assignedIds?: ReadonlyMap<string, string>;
+  /** What it left its round to correct (`round-corrections.ts`). */
+  readonly correction?: RoundCorrection;
+}
+
+/** How one pass of an answer is applied, beyond whose it is (`round-corrections.ts`). */
+interface ProposalPass {
+  /** Who pays for correcting what the engine refused. */
+  readonly calls: CorrectionCalls;
+  /** Handles an earlier pass of the same answer was given, which this one may name. */
+  readonly seedIds?: ReadonlyMap<string, string> | undefined;
+  /** A later pass of the same answer: its acts are corrections, its facts were already read for the acts behind them. */
+  readonly later?: "repair" | "facts" | undefined;
+  /** Facts the world writes about the act lighter than this are not written down at all: the powers' far business (L16). */
+  readonly factFloor?: number | undefined;
 }
 
 /** A part of the order as the orchestrator read it. */
@@ -680,6 +721,12 @@ function withoutDirectives(sliceText: string): string {
 
 /** Calls kept back from the world's own business for the people the player's order waits on. */
 const ORDER_RESERVE_CALLS = 3;
+
+/** Calls each later chain a span has room for keeps back from the chains before it: a round of one cognition call and its correction (L17). */
+const LATER_CHAIN_CALLS = 2;
+
+/** How many facts losing a place are told one by one in a burst's log; the rest are counted in one line (E29). */
+const FACT_PLACES_TOLD = 3;
 
 /** How much of a private intent's words a fact must share to be that intent said aloud. */
 const PRIVATE_MIND_OVERLAP = 0.5;
@@ -817,7 +864,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   const closeWindow = (final = false): void => {
     // Far news that is not worth the telling stays with the powers it
     // happened to (`far-news.ts`): the Chronicle reads only what reached us.
-    keepFarNewsHome(newFacts, windowMark.facts, world, input.actorRef.kind === "character" ? input.actorRef.id : null);
+    keepFarNewsHome(newFacts, windowMark.facts, world, input.actorRef.kind === "character" ? input.actorRef.id : null, significanceByFactId);
     if (input.onWindowClosed === undefined) return;
     const snapshot: WindowSnapshot = {
       final,
@@ -845,6 +892,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     }
   };
   let modelCalls = 0;
+  /** What this burst may spend, by how long it may run (`callCapFor`). */
+  const callCap = callCapFor(budget, Math.max(1, Math.min(input.spanDays ?? budget.maxSimulatedDays, input.clock.maxSpanDays)));
   let iterations = 0;
   let significance = 0;
   const newFacts: Fact[] = [];
@@ -858,6 +907,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   const parseFailures: string[] = [];
   const salvaged: string[] = [];
   const skipped: BurstSkip[] = [];
+  /** Facts that lost a place no army of theirs stands at or is bound for (`FACT_PLACES_TOLD`). */
+  let placesDropped = 0;
   let ambientOnlyRounds = 0;
   /** Who the passage of time took, so the burst can end on the question of who follows. */
   const deadThisBurst = new Set<string>();
@@ -1270,6 +1321,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     actsForTheWorld = false,
     /** What the actor said his acts were for (`CognitionOutput.serves`). */
     serves: readonly { readonly ref: string; readonly acts: readonly number[] }[] = [],
+    pass: ProposalPass = { calls: "own" },
   ): Promise<OrderActs> => {
     // The world's own business first, so the order is carried out in the world
     // as it now stands -- a chieftain the world has just given the Boii is
@@ -1283,7 +1335,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       }) };
     }
     // A fact only the engine can make true stands beside its act, or becomes it (`actsBehindFacts`).
-    const behind = actsBehindFacts(proposal.facts, [...(proposal.worldDeltas ?? []), ...proposal.deltas], world, input.actorRef.kind === "character" ? input.actorRef.id : null);
+    const behind = pass.later !== undefined ? { facts: proposal.facts, acts: [], claims: [], dropped: [] }
+      : actsBehindFacts(proposal.facts, [...(proposal.worldDeltas ?? []), ...proposal.deltas], world, input.actorRef.kind === "character" ? input.actorRef.id : null);
     for (const reason of behind.dropped) skipped.push({ stage: "engine_facts", reason });
     const worldDeltas = [...(proposal.worldDeltas ?? []), ...(proposal.worldDeltas === undefined ? [] : behind.acts)];
     // The world's own business written into the order is the world's, whichever
@@ -1315,8 +1368,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       ...(assignedIds === undefined ? {} : { assignedIds }),
     });
 
-    let result = applyDeltas(world, [...worldDeltas, ...proposal.deltas, ...(proposal.worldDeltas === undefined ? behind.acts : [])], applyContext());
-    recordAudit(result, actorRef, "first");
+    let result = applyDeltas(world, [...worldDeltas, ...proposal.deltas, ...(proposal.worldDeltas === undefined ? behind.acts : [])], applyContext(pass.seedIds));
+    recordAudit(result, actorRef, pass.later === "repair" ? "repair" : "first");
     /** The order's own acts the engine could not read, as they stand after every attempt. */
     const unreadable = (pass: ApplyResult) => pass.rejected.filter((rejection) => rejection.kind === "reference" && rejection.ofTheOrder === true);
     let unkept: RejectedDelta[] = unreadable(result);
@@ -1334,13 +1387,13 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
      */
     const referenceRejections = result.rejected.filter((rejection) => rejection.kind === "reference");
     const repairable = referenceRejections.filter(worthRepairing);
-    if (referenceRejections.length > 0 && repairable.length === 0) {
+    if (referenceRejections.length > 0 && repairable.length === 0 && pass.calls !== "none") {
       skipped.push({ stage: "repair", reason: `${referenceRejections.length} refusal(s) no correction can cure: ${referenceRejections.map((rejection) => rejection.reason.slice(0, 80)).join(" | ")}` });
     }
-    if (repairable.length > 0 && modelCalls >= budget.maxModelCalls) {
-      skipped.push({ stage: "repair", reason: `the call budget is spent (${modelCalls} of ${budget.maxModelCalls}); ${repairable.length} refusal(s) left uncorrected: ${repairable.map((rejection) => rejection.reason.slice(0, 80)).join(" | ")}` });
+    if (repairable.length > 0 && pass.calls === "own" && modelCalls >= callCap) {
+      skipped.push({ stage: "repair", reason: `the call budget is spent (${modelCalls} of ${callCap}); ${repairable.length} refusal(s) left uncorrected: ${repairable.map((rejection) => rejection.reason.slice(0, 80)).join(" | ")}` });
     }
-    if (repairable.length > 0 && modelCalls < budget.maxModelCalls) {
+    if (repairable.length > 0 && pass.calls === "own" && modelCalls < callCap) {
       const repair = await repairDeltas({ port: input.port, worldText: sliceText, rejected: repairable, world });
       modelCalls += repair.calls;
       if (repair.failure !== null) parseFailures.push(repair.failure);
@@ -1500,13 +1553,18 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       }
     }
     const naming = result.rejected.length === 0 ? [] : factsNamingRefusals(aboutRealThings, result.rejected, namedBeside);
-    if (result.rejected.length > 0 && aboutRealThings.length > 0 && naming.length === 0) {
+    if (result.rejected.length > 0 && aboutRealThings.length > 0 && naming.length === 0 && pass.calls !== "none") {
       skipped.push({ stage: "reconcile", reason: `${result.rejected.length} refusal(s), and none of ${aboutRealThings.length} fact(s) names them` });
     }
-    if (naming.length > 0 && modelCalls >= budget.maxModelCalls) {
-      skipped.push({ stage: "reconcile", reason: `the call budget is spent (${modelCalls} of ${budget.maxModelCalls}); ${naming.length} fact(s) still name what was refused` });
+    if (naming.length > 0 && pass.calls === "own" && modelCalls >= callCap) {
+      skipped.push({ stage: "reconcile", reason: `the call budget is spent (${modelCalls} of ${callCap}); ${naming.length} fact(s) still name what was refused` });
     }
-    if (naming.length > 0 && modelCalls < budget.maxModelCalls) {
+    // Left to the round, the facts naming what was refused wait for its one
+    // reconciliation; with nobody paying, they are kept as what was said.
+    const heldBack = new Set(pass.calls === "own" ? [] : naming.map((fact) => fact.localId));
+    if (heldBack.size > 0) happened = aboutRealThings.filter((fact) => !heldBack.has(fact.localId));
+    if (pass.calls === "none") claims.push(...naming.map(asClaim));
+    if (naming.length > 0 && pass.calls === "own" && modelCalls < callCap) {
       const reconciled = await reconcileFacts({ port: input.port, facts: naming, refused: result.rejected });
       modelCalls += reconciled.calls;
       if (reconciled.failure !== null) parseFailures.push(`fact reconciliation: ${reconciled.failure}`);
@@ -1535,14 +1593,17 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       // An army is where it is. A fact naming the Carthaginian fleet and
       // Lilybaeum, with the fleet in Africa, put it in Sicily in the record; a
       // province named beside an army is the army's ground -- where it stands,
-      // or stood before this answer moved it -- or it is dropped from the fact.
+      // or stood before this answer moved it, or is marching, embarking,
+      // fighting or besieging (`groundOfForce`) -- or it is dropped from the fact.
       .map((fact) => {
         const forces = fact.affectedRefs.filter((ref) => ref.kind === "force").map((ref) => world.material.forces.find((force) => force.id === ref.id)).filter((force) => force !== undefined);
         if (forces.length === 0) return fact;
-        const ground = new Set(forces.flatMap((force) => [force.locationId, stoodBefore.get(force.id) ?? force.locationId]));
+        const ground = new Set(forces.flatMap((force) => [...groundOfForce(world, force.id), stoodBefore.get(force.id) ?? force.locationId]));
         const astray = fact.affectedRefs.filter((ref) => ref.kind === "province" && !ground.has(ref.id));
         if (astray.length === 0) return fact;
-        skipped.push({ stage: "fact_places", reason: `"${fact.summary.slice(0, 80)}" named ${astray.map((ref) => ref.id).join(", ")}, where none of its armies stands; dropped from the fact.` });
+        // A few told, the rest counted: it was a line every turn (E29).
+        placesDropped += 1;
+        if (placesDropped <= FACT_PLACES_TOLD) skipped.push({ stage: "fact_places", reason: `"${fact.summary.slice(0, 80)}" named ${astray.map((ref) => ref.id).join(", ")}, where none of its armies stands or is bound; dropped from the fact.` });
         return { ...fact, affectedRefs: fact.affectedRefs.filter((ref) => !astray.includes(ref)) };
       });
     // What a man privately means, restated as a fact, is still private: the
@@ -1643,8 +1704,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
 
     // What the engine itself made true (casualties, seizures) counts as history
     // exactly as much as what the actor said they were doing.
+    // Except the far powers' small business, which is nobody's news (L16).
+    const worthWriting = (fact: FactProposalDraft): boolean => pass.factFloor === undefined || fact.significance >= pass.factFloor;
     const materialized = materializeFacts({
-      proposals: [...keptSecret, ...result.factProposals, ...breachFacts],
+      proposals: [...keptSecret.filter(worthWriting), ...result.factProposals.filter(worthWriting), ...breachFacts],
       now: world.instant,
       forces: world.material.forces,
       atStep: world.elapsedStep,
@@ -1869,7 +1932,77 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       ],
       factIdsByLocalId: materialized.factIds,
       assignedIds: result.assignedIds,
+      ...(pass.calls !== "round" ? {} : { correction: {
+        actorRef, causalDepth, repairable, naming, refused: result.rejected, namedBeside: [...namedBeside], assignedIds: result.assignedIds,
+      } }),
     };
+  };
+
+  /**
+   * What a round's people left to correct, corrected in one repair and one
+   * reconciliation for all of them (`round-corrections.ts`). Each man's
+   * corrections are applied in his own name, as a later pass of his answer;
+   * then his facts that still name what stands refused are reconciled with
+   * everybody else's, and what survives is written down in his name too.
+   * Returns how much it changed, for the round's tally.
+   */
+  const settleTheRound = async (owed: readonly { readonly correction: RoundCorrection; readonly idle: boolean }[]): Promise<number> => {
+    let changed = 0;
+    const later = async (entry: (typeof owed)[number], proposal: Proposal, how: ProposalPass): Promise<OrderActs> => {
+      const before = newFacts.length;
+      const acts = await applyProposal(proposal, entry.correction.actorRef, entry.correction.causalDepth, false, [], how);
+      stampWorkFacts(before);
+      const authorId = entry.correction.actorRef.kind === "character" ? entry.correction.actorRef.id : null;
+      for (const fact of newFacts.slice(before)) {
+        if (authorId !== null) authorOf.set(fact.id, authorId);
+        if (entry.idle && acts.changed === 0) significanceByFactId.set(fact.id, Math.min(significanceByFactId.get(fact.id) ?? IDLE_FACT_WEIGHT, IDLE_FACT_WEIGHT));
+      }
+      changed += acts.changed + (newFacts.length - before);
+      return acts;
+    };
+    const nothingSaid = CognitionProposalSchema.parse({});
+    const refusals = owed.reduce((sum, entry) => sum + entry.correction.repairable.length, 0);
+    let corrections: readonly (readonly WorldDelta[])[] = owed.map(() => []);
+    if (refusals > 0 && modelCalls >= callCap) {
+      skipped.push({ stage: "repair", reason: `the call budget is spent (${modelCalls} of ${callCap}); ${refusals} refusal(s) of the round left uncorrected` });
+    } else if (refusals > 0) {
+      const repaired = await repairTheRound({ port: input.port, worldText: sliceText, world, owed: owed.map((entry) => entry.correction) });
+      modelCalls += repaired.calls;
+      if (repaired.failure !== null) parseFailures.push(repaired.failure);
+      corrections = repaired.corrections;
+    }
+    // What still stands refused, man by man, once his corrections have had their turn.
+    const held: { facts: FactProposal[]; refused: RejectedDelta[]; ids: ReadonlyMap<string, string> }[] = [];
+    for (const [at, entry] of owed.entries()) {
+      const deltas = corrections[at] ?? [];
+      let refused: RejectedDelta[] = [...entry.correction.refused];
+      let ids = entry.correction.assignedIds;
+      if (deltas.length > 0) {
+        const pass = await later(entry, { ...nothingSaid, deltas: [...deltas] }, { calls: "round", seedIds: ids, later: "repair" });
+        refused = unanswered(refused, deltas.map((delta) => delta.op), pass.correction?.refused ?? []);
+        ids = pass.assignedIds ?? ids;
+      }
+      const naming = entry.correction.naming.length === 0 || refused.length === 0 ? [] : factsNamingRefusals(entry.correction.naming, refused, entry.correction.namedBeside);
+      held.push({ facts: naming, refused, ids });
+    }
+    // Facts that no longer name anything refused stand as written.
+    const standing = owed.map((entry, at) => entry.correction.naming.filter((fact) => !held[at]!.facts.includes(fact)));
+    let reconciled: readonly (readonly FactProposal[])[] = held.map((entry) => entry.facts);
+    const asked = held.reduce((sum, entry) => sum + entry.facts.length, 0);
+    if (asked > 0 && modelCalls >= callCap) {
+      skipped.push({ stage: "reconcile", reason: `the call budget is spent (${modelCalls} of ${callCap}); ${asked} fact(s) of the round that name what was refused are kept as reports` });
+      reconciled = held.map((entry) => entry.facts.map(asClaim));
+    } else if (asked > 0) {
+      const settled = await reconcileTheRound({ port: input.port, held });
+      modelCalls += settled.calls;
+      if (settled.failure !== null) parseFailures.push(`fact reconciliation: ${settled.failure}`);
+      reconciled = settled.facts;
+    }
+    for (const [at, entry] of owed.entries()) {
+      const facts = [...standing[at]!, ...(reconciled[at] ?? [])];
+      if (facts.length > 0) await later(entry, { ...nothingSaid, facts }, { calls: "none", seedIds: held[at]!.ids, later: "facts" });
+    }
+    return changed;
   };
 
   const firedEventIds: string[] = [];
@@ -2980,14 +3113,18 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // Without this a war between Macedon and Epirus woke both kings for the
     // model, inside the order's own budget.
     const dealtWith = powersDealtWith(world, playerId);
+    const relations = newsRelations(world, playerId);
     for (const decision of decisions) {
       const before = newFacts.length;
       const touchesUs = dealtWith === null || dealtWith.has(decision.polityId) || (decision.targetPolityId !== null && dealtWith.has(decision.targetPolityId));
+      // The engine's own writing: nothing it refuses is worth a model call (L17).
       const acts = await applyProposal(
         { ...ProposalSchema.parse({ narrativeSummary: decision.why.slice(0, 240) || "The world moves.", facts: [...decision.facts] }), worldDeltas: decision.deltas },
         { kind: "character", id: decision.actorCharacterId },
         touchesUs ? 0 : budget.maxCausalDepth,
         true,
+        [],
+        { calls: "none", factFloor: farBusinessFloor(relations, [decision.polityId, decision.targetPolityId]) },
       );
       stampWorkFacts(before);
       if (acts.changed > 0) entries.push(ledgerEntry(decision, world.instant.day));
@@ -3065,7 +3202,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // A letter its reader has still to be shown, or has read past its term,
     // is settled within days, not at the next thing on the calendar -- while
     // there is still a call to pay him with.
-    const readerKey = modelCalls < budget.maxModelCalls && aLetterWaitsOnItsReader(world, input.actorRef.kind === "character" ? [input.actorRef.id] : [], input.actorPolityId)
+    const readerKey = modelCalls < callCap && aLetterWaitsOnItsReader(world, input.actorRef.kind === "character" ? [input.actorRef.id] : [], input.actorPolityId)
       ? reactionKey
       : Number.MAX_SAFE_INTEGER;
     const targetKey = Math.min(hops === 1 ? reactionKey : nextScheduled ?? idle, replyDueKey, readerKey, ceilingKey);
@@ -3116,6 +3253,12 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       ...[...input.knownFacts, ...newFacts.slice(0, chainNewsFrom)].filter(arrivedSince).map((fact) => ({ ...fact, causalDepth: 0 })),
       ...newFacts.slice(chainNewsFrom),
     ].filter((fact) => !backgroundChatter(fact));
+    // Whoever holds an order of the player's: asked first wherever the
+    // player's people compete for a place (L17), and the only ones asked once
+    // the last calls are kept for the order (`ORDER_RESERVE_CALLS`).
+    const orderPeople = new Set(world.orderAttempts
+      .filter((attempt) => attempt.issuerRef.id === input.actorRef.id && ["issued", "received", "delayed", "accepted"].includes(attempt.status))
+      .map((attempt) => attempt.recipientRef.id));
     const attention = routeAttention({
       world,
       facts: reactTo,
@@ -3126,6 +3269,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       alreadyAnswered: answeredBy,
       authorOf,
       ownPolityId: input.actorPolityId,
+      firstCharacterIds: orderPeople,
     });
 
     // Actors who care but do not warrant a model call still record what they
@@ -3221,14 +3365,19 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // spent all but `ORDER_RESERVE_CALLS`, only the people the player's order
     // is waiting on are asked. A burst once ran out answering senators on the
     // Anio waterworks while the man handed the transport was never asked (R80).
-    const orderPeople = new Set(world.orderAttempts
-      .filter((attempt) => attempt.issuerRef.id === input.actorRef.id && ["issued", "received", "delayed", "accepted"].includes(attempt.status))
-      .map((attempt) => attempt.recipientRef.id));
-    const reserved = modelCalls >= budget.maxModelCalls - ORDER_RESERVE_CALLS && orderPeople.size > 0;
-    const asking = reserved ? castNow.filter((actor) => orderPeople.has(actor.characterId)) : castNow;
-    if (reserved && asking.length < castNow.length) {
-      skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: the last calls are kept for the order; ${castNow.length - asking.length} others left unasked` });
-      oweTurns(castNow.filter((actor) => !asking.includes(actor)), (id) => dueWhy.get(id));
+    const reserved = modelCalls >= callCap - ORDER_RESERVE_CALLS && orderPeople.size > 0;
+    // Nobody is asked again with nothing new to answer (`hasSomethingNew`):
+    // the rotation, put before the model two days after its last look, said
+    // nothing had changed, at a call a time (L17).
+    const owesAnAnswer = new Set(world.orderAttempts.filter((attempt) => attempt.status === "issued" || attempt.status === "received").map((attempt) => attempt.recipientRef.id));
+    const fresh = playersPeopleFirst(castNow.filter((actor) => hasSomethingNew(actor, answeredBy.get(actor.characterId), dueWhy, owesAnAnswer)), orderPeople);
+    if (fresh.length < castNow.length) {
+      skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: ${castNow.length - fresh.length} with nothing new since they last answered left unasked (${castNow.filter((actor) => !fresh.includes(actor)).map((actor) => actor.name).join(", ").slice(0, 160)})` });
+    }
+    const asking = reserved ? fresh.filter((actor) => orderPeople.has(actor.characterId)) : fresh;
+    if (reserved && asking.length < fresh.length) {
+      skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: the last calls are kept for the order; ${fresh.length - asking.length} others left unasked` });
+      oweTurns(fresh.filter((actor) => !asking.includes(actor)), (id) => dueWhy.get(id));
     }
     // Nobody pressing means the rotation alone, and the burst pays for only
     // so many of those rounds: the world elsewhere gets its look, not a look
@@ -3245,7 +3394,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       if (ambientOnly) ambientOnlyRounds += 1;
       // Somebody has something to say and there is nothing left to pay them
       // with. Stopping here is honest; carrying on would silence them.
-      const spent = modelCalls >= budget.maxModelCalls || (!reactionsSpent && iterations - chainStartIterations >= budget.maxIterations);
+      const spent = modelCalls >= callCap || (!reactionsSpent && iterations - chainStartIterations >= budget.maxIterations);
       // The order's own consequences stop the burst when they cannot be paid
       // for, and so does anything in a burst the player gave no span: he gets
       // the wheel back rather than a world that went quiet. A span he asked
@@ -3259,10 +3408,18 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     }
     // The world's later business, and a plan's, are not the order's: a round
     // of them the budget cannot pay for is skipped, and the span carries on.
-    const canPay = modelCalls < budget.maxModelCalls && (reactionsSpent || iterations - chainStartIterations < budget.maxIterations);
+    // And a chain may not spend what the weeks still to come need: each later
+    // chain the span has room for keeps a round's calls back, unless the
+    // round is the player's own people (L17). The order's first chain once
+    // spent a month's budget in its first three days.
+    const keptForLater = input.spanDays === undefined || asking.some((actor) => orderPeople.has(actor.characterId)) ? 0
+      : Math.min(Math.floor(callCap / 2), LATER_CHAIN_CALLS * Math.floor(Math.max(0, startDay + maxDays - world.instant.day) / budget.newChainAfterDays));
+    const canPay = modelCalls < callCap - keptForLater && (reactionsSpent || iterations - chainStartIterations < budget.maxIterations);
     if (wantsAnswering && !canPay) {
       asked = false;
-      skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: chain ${chain}, the call budget is spent; ${asking.length} left unasked` });
+      skipped.push({ stage: "cognition", reason: modelCalls < callCap && modelCalls >= callCap - keptForLater
+        ? `hop ${hops} on ${today()}: chain ${chain}, ${keptForLater} call(s) are kept for the weeks to come; ${asking.length} left unasked`
+        : `hop ${hops} on ${today()}: chain ${chain}, the call budget is spent; ${asking.length} left unasked` });
       oweTurns(asking, (id) => dueWhy.get(id) ?? (orderPeople.has(id) ? "an order of the ruler's he holds" : undefined));
     }
     if (wantsAnswering && canPay) {
@@ -3302,9 +3459,16 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       if (cognition.parseFailure !== null) parseFailures.push(cognition.parseFailure);
       salvaged.push(...cognition.salvaged);
       let roundChanged = 0;
+      // What the round's people leave to correct is corrected once, for all of
+      // them, after the last has answered; the world elsewhere riding along
+      // is not worth a call (`round-corrections.ts`).
+      const owedCorrection: { correction: RoundCorrection; idle: boolean }[] = [];
+      const ridingAlong = new Set(asking.filter((actor) => actor.impetus === "own_business" && !orderPeople.has(actor.characterId)).map((actor) => actor.characterId));
       for (const actor of cognition.output.actors) {
         const factsBeforeActor = newFacts.length;
-        const acts = await applyProposal(actor.proposal, actor.actorRef, causalDepth, false, actor.serves);
+        const pays: CorrectionCalls = actor.actorRef.kind === "character" && castIds.has(actor.actorRef.id) && !ridingAlong.has(actor.actorRef.id) ? "round" : "none";
+        const acts = await applyProposal(actor.proposal, actor.actorRef, causalDepth, false, actor.serves, { calls: pays });
+        if (acts.correction !== undefined && (acts.correction.repairable.length > 0 || acts.correction.naming.length > 0)) owedCorrection.push({ correction: acts.correction, idle: acts.changed === 0 });
         stampWorkFacts(factsBeforeActor);
         roundChanged += acts.changed + (newFacts.length - factsBeforeActor);
         // Said and not done: kept, and weighed as what it was.
@@ -3342,6 +3506,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
           if (laid || took.taken > 0) plans.actedOnAPlan += 1;
         }
       }
+      if (owedCorrection.length > 0) roundChanged += await settleTheRound(owedCorrection);
       idleRounds = roundChanged === 0 ? idleRounds + 1 : 0;
       causalDepth += 1;
     }
@@ -3415,7 +3580,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     playerDecision,
     parseFailures,
     salvaged,
-    skipped,
+    skipped: placesDropped <= FACT_PLACES_TOLD ? skipped : [...skipped, { stage: "fact_places", reason: `and ${placesDropped - FACT_PLACES_TOLD} more fact(s) named a place none of their armies stands at or is bound for` }],
     audit,
     plans,
     chainRounds,

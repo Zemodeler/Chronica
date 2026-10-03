@@ -105,6 +105,38 @@ export interface AttentionInput {
   readonly authorOf?: ReadonlyMap<string, string> | undefined;
   /** The player's power: a plain letter between two others wakes nobody (`isBackgroundLetter`). */
   readonly ownPolityId?: string | null | undefined;
+  /**
+   * People the player is waiting on -- holding an order or a request of his
+   * -- who are taken before anybody else the news woke, however it scored
+   * them. The focus cap is where the player's man used to lose his place to a
+   * king reading the same dispatch (L17).
+   */
+  readonly firstCharacterIds?: ReadonlySet<string> | undefined;
+}
+
+/**
+ * Whether a person put before the model this round has anything to answer
+ * that he has not already answered this burst (L17): news reaching him since,
+ * a plan's step or a vote or a letter that wants him (`wanted`), an order to
+ * answer, or no look at all yet. A reactor always has -- the router woke him
+ * for news he had not been shown. The rest of the rotation, asked again two
+ * days later with nothing new, answered that nothing had changed, at the cost
+ * of a call; a round of nobody with anything new is not asked at all.
+ */
+export function hasSomethingNew(
+  actor: Pick<RoutedActor, "characterId" | "impetus" | "knownFacts">,
+  answered: ReadonlySet<string> | undefined,
+  wanted: ReadonlyMap<string, string>,
+  owesAnAnswer: ReadonlySet<string>,
+): boolean {
+  if (actor.impetus === "reaction" || answered === undefined) return true;
+  if (wanted.has(actor.characterId) || owesAnAnswer.has(actor.characterId)) return true;
+  return actor.knownFacts.some((fact) => !answered.has(fact.id));
+}
+
+/** The people the player is waiting on first, everybody else after, each in the router's order. */
+export function playersPeopleFirst<T extends { readonly characterId: string }>(actors: readonly T[], waitedOn: ReadonlySet<string>): T[] {
+  return [...actors.filter((actor) => waitedOn.has(actor.characterId)), ...actors.filter((actor) => !waitedOn.has(actor.characterId))];
 }
 
 export function routeAttention(input: AttentionInput): AttentionResult {
@@ -292,7 +324,8 @@ export function routeAttention(input: AttentionInput): AttentionResult {
 
   // Deterministic ordering: score first, then a stable hash, never insertion
   // order -- a replay must select the same people for the same reasons.
-  scored.sort((a, b) => b.score - a.score || stableHash([a.characterId]) - stableHash([b.characterId]));
+  const first = input.firstCharacterIds ?? new Set<string>();
+  scored.sort((a, b) => Number(first.has(b.characterId)) - Number(first.has(a.characterId)) || b.score - a.score || stableHash([a.characterId]) - stableHash([b.characterId]));
 
   // The focus bar is set at the score of someone who can know about an event,
   // has reason to care, and holds the authority to do something about it
