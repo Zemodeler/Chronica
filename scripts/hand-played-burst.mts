@@ -165,5 +165,8 @@ say("");
 say(`Across the run, ${total.onPlan} of ${total.acted} answers that left a mark belonged to a plan. ${call} model call(s), all answered from ${dir}.`);
 
 writeFileSync(path.join(dir, "report.txt"), `${report.join("\n")}\n`);
-writeFileSync(path.join(dir, "world.json"), JSON.stringify(world));
+// A world that will not load is never saved as though it would (E1).
+const loadable = WorldStateSchema.safeParse(world);
+if (!loadable.success) throw new Error(`The world would not load (${loadable.error.issues.slice(0, 3).map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}); it was not written.`);
+writeFileSync(path.join(dir, "world.json"), JSON.stringify(loadable.data));
 console.log(report.join("\n"));

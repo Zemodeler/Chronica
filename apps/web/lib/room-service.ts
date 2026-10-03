@@ -231,7 +231,7 @@ export async function getRoomContents(gameId: string): Promise<RoomContents | nu
           id: order.id,
           text: order.text,
           when: formatWorldDate({ day: order.givenAtStep, minute: 0 }, clock),
-          parts: order.parts.map((part) => ({ label: part.said, status: orderPartLabel(orderPartStatus(world, part), part), detail: part.refusal ?? part.whyNot ?? part.note })),
+          parts: order.parts.map((part) => ({ label: part.said, status: orderPartLabel(orderPartStatus(world, part), part, world), detail: part.refusal ?? part.whyNot ?? part.note })),
         })),
         insights: readOfficeInsights({ world, characterId, offices, clock, warfare: view.scenarioWarfare, facts, ownBooks: own, keptBooks: kept, muster: forces }),
         own, kept, forces, service, standing, state, constitution, laws, standingOrders, administration, agenda, self, story,

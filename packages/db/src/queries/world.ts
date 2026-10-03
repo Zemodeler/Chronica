@@ -212,9 +212,13 @@ export async function getWorldView(db: ChronicaDatabase, gameId: string): Promis
  * discovered NPC: those are small, additive, last-write-wins edits made outside
  * a burst. Anything the simulation loop commits goes through `commitBurst`,
  * which does check, and a repair goes through `persistRepairedWorld`, which
- * checks too.
+ * checks too -- and so does this: an unchecked write is how a world that
+ * would not load was saved (E1).
  */
-export async function persistOpeningWorld(db: ChronicaDatabase, gameId: string, world: WorldState): Promise<void> {
+export async function persistOpeningWorld(db: ChronicaDatabase, gameId: string, given: WorldState): Promise<void> {
+  const loadable = WorldStateSchema.safeParse(given);
+  if (!loadable.success) throw new WorldWouldNotLoadError(gameId, loadable.error.issues.slice(0, 5).map(issueLine).join("; "));
+  const world = loadable.data;
   await db
     .insert(gameWorlds)
     .values({

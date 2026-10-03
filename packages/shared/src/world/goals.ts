@@ -38,6 +38,13 @@ export const OrderGoalSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("control"), provinceId: EntityIdSchema, settlementId: EntityIdSchema.nullable().default(null), polityId: EntityIdSchema }).strict(),
   /** A thing made: an army raised, an arrangement set up. It is met while the thing stands. */
   z.object({ kind: z.literal("exists"), of: z.enum(["force", "entity"]), id: EntityIdSchema }).strict(),
+  /**
+   * A person where the order sent him, and out of the army he left. "Leave
+   * the army and travel to Rome" read "done" with the man still in the ranks
+   * in Sicily: nothing could read a person's place or his service.
+   */
+  z.object({ kind: z.literal("character_at"), characterId: EntityIdSchema, provinceId: EntityIdSchema }).strict(),
+  z.object({ kind: z.literal("out_of_service"), characterId: EntityIdSchema, forceId: EntityIdSchema }).strict(),
 ]).meta({ id: "OrderGoal" });
 export type OrderGoal = z.infer<typeof OrderGoalSchema>;
 
@@ -127,6 +134,18 @@ export function goalMet(world: WorldState, goal: OrderGoal): GoalReading {
       const settlement = province.settlements.find((candidate) => candidate.id === goal.settlementId);
       if (settlement === undefined) return "impossible";
       return settlement.controllerPolityId === goal.polityId ? "met" : "not_yet";
+    }
+    case "character_at": {
+      const person = world.characters.find((character) => character.id === goal.characterId);
+      if (person === undefined || !person.alive) return "impossible";
+      return person.locationProvinceId === goal.provinceId ? "met" : "not_yet";
+    }
+    case "out_of_service": {
+      const person = world.characters.find((character) => character.id === goal.characterId);
+      if (person === undefined || !person.alive) return "impossible";
+      const inTheRanks = world.material.forces.some((force) => force.id === goal.forceId && force.memberCharacterIds.includes(goal.characterId))
+        || person.service?.forceId === goal.forceId;
+      return inTheRanks ? "not_yet" : "met";
     }
     case "exists": {
       const stands = goal.of === "force"

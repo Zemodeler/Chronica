@@ -49,7 +49,7 @@ function opening(): WorldState {
 
 const part = (change: Partial<OrderPart>): OrderPart => ({
   said: "Carry Legio I to Messana", goals: [], workRefs: [], refusal: null, note: null, whyNot: null, factIds: [],
-  stages: [], spend: null, attribution: "tagged", closedAtStep: null, ...change,
+  stages: [], spend: null, attribution: "tagged", closedAtStep: null, refusedAtStep: null, actsCarried: 0, actsRefused: 0, ...change,
 });
 
 function scripted(script: Partial<Record<SimOperation, string[]>>): SimModelPort {
@@ -105,7 +105,7 @@ describe("the report's probes, held to what they should have been", () => {
       ] }],
     };
     const fact = { id: "fact-accepted", kind: "order_accepted", sourceActionId: "rec-p0", affectedEntities: [], summary: "Coruncanius accepted the transport." };
-    const result = { world, orderRecordId: "rec", orderFactIds: [fact.id], newFacts: [fact], parseFailures: [], salvaged: [] } as unknown as BurstResult;
+    const result = { world, orderRecordId: "rec", orderFactIds: [fact.id], newFacts: [fact], parseFailures: [], salvaged: [], unwritten: [] } as unknown as BurstResult;
     const entries = [{ title: "The transport", body: "Coruncanius accepted the transport.", factIds: [fact.id] }] as unknown as ChronicleEntry[];
     const outcome = outcomeOfOrder(result, entries);
     expect(outcome.carriedOut).toBe(false);

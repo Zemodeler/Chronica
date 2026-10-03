@@ -1220,8 +1220,9 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     }));
 
   // Orders he gave or was given, unless he speaks for the government that
-  // gives them all.
-  const openOrders = world.orderAttempts
+  // gives them all. Newest first: the oldest were listed first and filled the
+  // list, and an order accepted months ago was decided again (E6).
+  const openOrders = [...world.orderAttempts].reverse()
     .filter((attempt) => attempt.status === "issued" || attempt.status === "received" || attempt.status === "delayed" || attempt.status === "accepted")
     .filter((attempt) => station === null || speaksForTheGovernment || attempt.issuerRef.id === station.characterId || attempt.recipientRef.id === station.characterId)
     .slice(0, CAPS.events)
@@ -1507,7 +1508,9 @@ export function renderWorldSlice(slice: WorldSlice): string {
     return `[${letter.id}] ${letter.kind} ${letter.ours ? `we sent to ${letter.to}` : `${letter.from} sent us`} — ${letter.subject}: ${letter.terms} (${due}${road})`;
   }));
   section("STANDING INTENTIONS", slice.intents.map((intent) => `${intent.actor} means to ${intent.action}: ${intent.rationale}`));
-  section("ORDERS AWAITING AN ANSWER", slice.openOrders.map((order) => `${order.id} to ${order.recipient} — ${order.status}`));
+  section("ORDERS AWAITING AN ANSWER", slice.openOrders.filter((order) => order.status !== "accepted").map((order) => `${order.id} to ${order.recipient} — ${order.status}`));
+  // Taken up already: under way, and not a question to answer again.
+  section("ORDERS ALREADY ANSWERED, NOT TO DECIDE AGAIN", slice.openOrders.filter((order) => order.status === "accepted").map((order) => `${order.id} to ${order.recipient} — accepted`));
   section("YOUR STANDING ORDERS", slice.standingOrders.map((order) =>
     `"${order.said}" — ${order.status}${order.why === null ? "" : `: ${order.why.slice(0, 200)}`}${order.work.length === 0 ? "" : ` [${order.work.join(", ")}]`}`));
   section("RECENT HISTORY (only what is known to them)", slice.recentHistory.map((entry) => `${entry.summary} [${entry.id}]`));

@@ -123,6 +123,9 @@ const withAmbition = (world: WorldState, ownerId: string, ambitionId: string, ch
   })),
 });
 
+/** How many times a step may slip before it is missed: the most its schema holds (`PlanStepSchema.slips`). */
+const MAX_SLIPS = 3;
+
 /** How many missed steps in a row a plan may carry before laying it again gives it up. */
 export const STALE_AFTER_MISSES = 3;
 
@@ -324,9 +327,12 @@ export function settleOverdueSteps(world: WorldState, clock: ScenarioClock, loca
       // or a step already slipped, is asked what the plan now is.
       // And a man the burst never got round to asking has missed nothing: his
       // turn is owed him (`WorldState.owed`), and his steps wait for it (E06).
+      // Only so far, though: a step slipped three times is missed whether he
+      // was asked or not. Graced without end, an owed man's step slipped past
+      // the limit its own schema sets, and the saved world would not load (E1).
       const owed = isOwedATurn(world, character.id);
       const graced = owed
-        ? new Set(late.map((step) => step.id))
+        ? new Set(late.filter((step) => (step.slips ?? 0) < MAX_SLIPS).map((step) => step.id))
         : trailingMisses(ambition) === 0
           ? new Set(late.filter((step) => (step.slips ?? 0) === 0 && step.wokenOnDay !== null).map((step) => step.id))
           : new Set<string>();
@@ -353,7 +359,7 @@ export function settleOverdueSteps(world: WorldState, clock: ScenarioClock, loca
           if (lateIds.has(step.id)) return { ...step, status: "missed" as const, settledOnDay: today, wokenOnDay: null };
           // Slipped: as long again as it was given, and never less than a fortnight.
           // His owner has seen it once already, so it stays seen.
-          if (graced.has(step.id)) return { ...step, dueDay: today + Math.min(120, Math.max(14, step.dueDay - step.laidOnDay)), slips: Math.min(3, (step.slips ?? 0) + 1) };
+          if (graced.has(step.id)) return { ...step, dueDay: today + Math.min(120, Math.max(14, step.dueDay - step.laidOnDay)), slips: Math.min(MAX_SLIPS, (step.slips ?? 0) + 1) };
           return step;
         }),
       };

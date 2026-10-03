@@ -123,7 +123,7 @@ describe("persistent conditional work and accounts", () => {
     const result = await run(opening(), { intent: { summary: "Send the future force", parts: [{ said: "When a punitive force is raised, send it with the Greek ships", acts: [], whenForceExists: "punitive", whyNot: "No such force yet" }] } });
     const part = result.world.orders.at(-1)!.parts[0]!;
     expect(part.stages[0]?.waitsOn).toContainEqual({ kind: "force_named", name: "punitive", polityId: "rome" });
-    expect(part.whyNot).toBeNull(); expect(orderPartStatus(result.world, part)).toBe("pending");
+    expect(part.whyNot).toBeNull(); expect(orderPartStatus(result.world, part)).toBe("awaiting_condition");
   });
   it("resumes a waiting instruction through an officer when its force appears", async () => {
     const base = opening(); const army = base.material.forces.find((force) => force.id === "roman-field-army")!;

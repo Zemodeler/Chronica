@@ -378,7 +378,7 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
     const answered = result.orderRecordId === null
       ? chronicle.entries
       : withOrderOutcomes(chronicle.entries, [
-        ...orderOutcomeLines(result.world, result.orderRecordId),
+        ...orderOutcomeLines(result.world, result.orderRecordId, clock),
         // A turn cut short for want of calls says so, rather than passing the
         // engine's limit off as the world's quiet (R52, R80). What was left
         // stays on the order, and the next order takes it up.

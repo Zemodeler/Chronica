@@ -177,6 +177,8 @@ const BEYOND_REPAIR = [
   /An audit goes through a department's books or a household's; name one\./,
   /A letter must be between two powers that exist\./,
   /which nothing in this batch created\./,
+  // A payment of nothing: a correction can only invent a sum nobody ordered.
+  /^Nothing to pay: /,
 ];
 
 export function worthRepairing(rejection: { readonly reason: string }): boolean {

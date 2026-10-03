@@ -22,7 +22,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createAiAdapter } from "@chronica/ai";
-import type { Fact } from "@chronica/shared";
+import { WorldStateSchema, type Fact } from "@chronica/shared";
 import { definition, opening } from "./opening";
 import { DEFAULT_BUDGET, createWindowWriter, outcomeOfOrder, runSimulationBurst, type AuditEntry, type OrderOutcome, type SimModelPort } from "@chronica/sim";
 import { CORPUS, type CorpusOrder } from "./corpus";
@@ -100,7 +100,10 @@ async function runChain(chain: readonly CorpusOrder[]): Promise<void> {
       state = { world: result.world, facts: [...state.facts, ...result.newFacts] };
       // The world each chain leaves, for `let-time-pass.mts` to run on.
       mkdirSync(outDir, { recursive: true });
-      writeFileSync(join(outDir, `world-${order.chain}.json`), JSON.stringify(result.world));
+      // A world that will not load is never saved as though it would (E1).
+      const loadable = WorldStateSchema.safeParse(result.world);
+      if (!loadable.success) throw new Error(`The world this chain left would not load (${loadable.error.issues.slice(0, 3).map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}); it was not written.`);
+      writeFileSync(join(outDir, `world-${order.chain}.json`), JSON.stringify(loadable.data));
       const before = stateBefore.world;
       row = { order, outcome: outcomeOfOrder(result, chronicle.entries), oracle: order.expect === undefined ? null : order.expect(before, result.world, order.actor), entries: chronicle.entries.map(({ title, body }) => ({ title, body })), error: null, seconds: (performance.now() - started) / 1000, audit: result.audit, skipped: result.skipped };
     } catch (error) {

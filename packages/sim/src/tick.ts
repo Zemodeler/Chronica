@@ -486,6 +486,8 @@ export function runDeterministicTick(given: TickInput): TickResult {
             ? {}
             : { destinationAccountId: obligation.recipientAccountId }),
           cause: { kind: "obligation", id: obligation.id, explanation: obligation.label },
+          // The order that set it up spends what it pays (`spentForOrderPart`).
+          ...(obligation.sourceActionId == null ? {} : { sourceActionId: obligation.sourceActionId }),
           visibility: "polity",
         });
         arrears = 0;
