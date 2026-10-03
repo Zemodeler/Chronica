@@ -27,6 +27,8 @@ const government = { offices: definition.government.offices, successionRules: de
 const withoutBlasio = (world: WorldState): WorldState => ({
   ...world,
   characters: world.characters.filter((character) => character.id !== "gnaeus-cornelius"),
+  // His wife and children stay, and are nobody's now: the houses have families since L10.
+  familyLinks: world.familyLinks.filter((link) => link.characterId !== "gnaeus-cornelius" && link.relatedCharacterId !== "gnaeus-cornelius"),
   material: {
     ...world.material,
     officeSeats: world.material.officeSeats

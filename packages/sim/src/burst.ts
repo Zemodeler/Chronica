@@ -77,7 +77,9 @@ import { settleRatifications } from "./ratification";
 import { commandChanges } from "./command-changes";
 import type { BattleAccount } from "./battle";
 import type { ApplyResult, AuthorityBreach, MadeMoney, RejectedDelta } from "./apply/context";
-import { keepAsArrangement } from "./apply/keep-as-arrangement";
+import { duplicatesAVenture, keepAsArrangement } from "./apply/keep-as-arrangement";
+import { loanOffersFact } from "./money";
+import { accuseInEarnest, answerAThreat, prosecutePrivateMen } from "./personal-pushback";
 import { actsBehindFacts, asClaim, isClaim, whereTheActorIs } from "./apply/fill-gaps";
 import { kindsIn } from "./bare-refs";
 import { misfiledWorldActs, whyMisfiled } from "./apply/misfiled";
@@ -88,7 +90,7 @@ import { answerByTemper } from "./insubordination";
 import { answerForTheSilent } from "./requests";
 import { recordActiveIntents } from "./intents";
 import { decideNarratorSeeds, engineWork, recordSeedsOffered, seedParticipants, seedWasTaken, type NarratorSeed } from "./narrator";
-import { chooseNemesis, conductInWords, nemesisStance, recordNemesis, retireNemesis, shouldRetire, stanceInWords } from "./nemesis";
+import { chooseNemesis, conductInWords, nemesisStance, recordNemesis, retireNemesis, shouldRetire, stanceInWords, stationOf } from "./nemesis";
 import { orchestrate } from "./orchestrate";
 import { describeBreach, findWhoWouldNotice, noticersAsRefs } from "./oversight";
 import { createIdFactory, type SimModelPort } from "./ports";
@@ -104,7 +106,7 @@ import { reconcileTheRound, repairTheRound, unanswered, type CorrectionCalls, ty
 import { repairDeltas, worthRepairing } from "./repair-deltas";
 import { runDeterministicTick } from "./tick";
 import { isWatchSatisfied } from "./watch";
-import { attachMechanic } from "./mechanics/attach-mechanic";
+import { attachMechanic, worthARule } from "./mechanics/attach-mechanic";
 import { newDebitLedger } from "./mechanics/instantiate";
 import { mechanicInWords } from "./mechanics/mechanic-words";
 import { readableRefsFor } from "./mechanics/refs";
@@ -1524,7 +1526,9 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         // the order: the stricter reading, and the one that cannot be used to
         // launder a refusal.
         const correctsTheOrder = orderDeltas !== undefined && repairable.some((rejection) => rejection.ofTheOrder === true);
-        const second = applyDeltas(world, repair.deltas, applyContext(result.assignedIds, correctsTheOrder ? new Set(repair.deltas) : undefined));
+        // Never a second price for a venture opened today (E19, `duplicatesAVenture`).
+        const corrections = repair.deltas.filter((delta) => !duplicatesAVenture(delta, world, actorRef));
+        const second = applyDeltas(world, corrections, applyContext(result.assignedIds, correctsTheOrder ? new Set(corrections) : undefined));
         recordAudit(second, actorRef, "repair");
         // The repair answers some of what was refused and says nothing of the
         // rest; which correction answers which refusal is not kept, so an act
@@ -1562,11 +1566,12 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // does not take the others with it.
     // By handle, not by object: the applier hands back a filled copy of what
     // it was given.
-    const keptLocalIds = new Set<string>();
+    // Each kept handle, with the act it was kept from (`worthARule`).
+    const keptLocalIds = new Map<string, string>();
     for (const rejection of unkept) {
       const arrangement = keepAsArrangement(rejection.delta, world, actorRef, rejection.reason);
       if (arrangement === null) continue;
-      if ("localId" in arrangement && typeof arrangement.localId === "string") keptLocalIds.add(arrangement.localId);
+      if ("localId" in arrangement && typeof arrangement.localId === "string") keptLocalIds.set(arrangement.localId, rejection.delta.op);
       const kept = applyDeltas(world, [arrangement], applyContext(result.assignedIds, new Set([arrangement])));
       world = kept.world;
       if (kept.applied.length === 0) {
@@ -2006,8 +2011,12 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // for ever (plan §2). Counted whether or not a writer exists, so the
     // audit says how many orders would pay for the call before it is built.
     const candidates: { entityId: string; delta: WorldDelta; attempt: AuditEntry["attempt"]; ofTheOrder: boolean }[] = [];
+    // Written beside a letter or a meeting and doing nothing of its own, an
+    // arrangement is the record of what was said, not a business (E20).
+    const spoken = result.applied.some((entry) => entry.delta.op === "diplomatic_message_send" || entry.delta.op === "social_events");
     for (const applied of result.applied) {
-      if (applied.delta.op !== "generic_entity_create" || applied.delta.kind === "law") continue;
+      if (applied.delta.op !== "generic_entity_create" || !worthARule(applied.delta, keptLocalIds.get(applied.delta.localId) ?? null)) continue;
+      if (spoken && (applied.delta.effects ?? []).length === 0) continue;
       const madeId = result.assignedIds.get(applied.delta.localId) ?? applied.delta.localId;
       const attempt = keptLocalIds.has(applied.delta.localId) ? "keep" : "first";
       audit.push({
@@ -2334,12 +2343,14 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       const refs = readableRefsFor(world, owner, entity);
       const ownerCharacterId = owner.kind === "character" ? owner.id : null;
       const attach = (draft: Parameters<typeof validateMechanic>[0]): boolean => {
-        const checked = validateMechanic(draft, world, refs, input.offices);
+        // What the player's order said, for whom it pays and whether it pays at all.
+        const orderSaid = candidate.ofTheOrder ? input.orderText : null;
+        const checked = validateMechanic(draft, world, refs, input.offices, orderSaid);
         if (!checked.ok) {
           audit.push({ actorRef, op: candidate.delta.op, kind: "mechanic_refused", ofTheOrder: candidate.ofTheOrder, attempt: candidate.attempt, reason: `${entity.id}: ${checked.reason}`, delta: candidate.delta });
           return false;
         }
-        const attached = attachMechanic({ world, entity, draft: checked.draft, origin: "written", warrants: checked.warrants, refs, ids, offices: input.offices, warfare: input.warfare, gameId: input.gameId });
+        const attached = attachMechanic({ world, entity, draft: checked.draft, origin: "written", warrants: checked.warrants, refs, ids, offices: input.offices, warfare: input.warfare, gameId: input.gameId, orderText: orderSaid });
         if (!attached.ok) {
           audit.push({ actorRef, op: candidate.delta.op, kind: "mechanic_refused", ofTheOrder: candidate.ofTheOrder, attempt: candidate.attempt, reason: `${entity.id}: ${attached.reason}`, delta: candidate.delta });
           return false;
@@ -2589,7 +2600,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     const rival = world.characters.find((character) => character.id === nemesis.characterId);
     if (rival === undefined) return undefined;
     const ruler = world.characters.find((character) => character.id === playerId)?.name ?? "the ruler";
-    return `${conductInWords(rival, ruler)} ${stanceInWords(nemesisStance(world, nemesis, input.actorPolityId), ruler)}`;
+    return `${conductInWords(rival, ruler, stationOf(world, playerId))} ${stanceInWords(nemesisStance(world, nemesis, input.actorPolityId), ruler)}`;
   };
 
   /**
@@ -3031,6 +3042,13 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   // one stirring a season is not a world that moves on its own.
   // A power's waiting letters, put to the one person who answers for it.
   world = addressWaitingLetters(world, input.offices);
+  // Men who would lend to a player whose purse is low, said to him once a season (`money.ts`).
+  const offeredLoans = playerId === null ? null : loanOffersFact(world, playerId, input.knownFacts);
+  if (offeredLoans !== null) newFacts.push(...materializeFacts({ proposals: [offeredLoans], now: world.instant, atStep: world.elapsedStep, ids, causalDepth: 0, assignedIds: new Map() }).facts);
+  // A threat against the state in his order is answered by the state (`personal-pushback.ts`).
+  const threatened = answerAThreat(world, playerId, input.orderText, world.instant.day);
+  world = threatened.world;
+  if (threatened.facts.length > 0) newFacts.push(...materializeFacts({ proposals: threatened.facts, now: world.instant, atStep: world.elapsedStep, ids, causalDepth: 0, assignedIds: new Map() }).facts);
 
   // While somebody is owed a turn from the last burst, the world's new
   // stirrings wait their place behind him: one at most (E06).
@@ -3059,9 +3077,14 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   // carry out (`engineWork`), before the orchestrator is asked anything; it
   // is shown only the ones that need somebody to decide something.
   const offeredSeeds: NarratorSeed[] = [];
-  for (const seed of seeds) {
+  for (const given of seeds) {
     // The months that shut passes and close roads (`isWinterMonth`).
     const month = calendarDateOf(world.instant, input.clock).month;
+    // On hard, an accusation laid on the player is brought to court in earnest (`personal-pushback.ts`).
+    const accused = accuseInEarnest(world, given, playerId, world.instant.day);
+    const seed = accused.seed;
+    world = accused.world;
+    if (accused.facts.length > 0) newFacts.push(...materializeFacts({ proposals: accused.facts, now: world.instant, atStep: world.elapsedStep, ids, causalDepth: 0, assignedIds: new Map() }).facts);
     const work = engineWork(seed, isWinterMonth(month));
     if (work === null) {
       offeredSeeds.push(seed);
@@ -3145,11 +3168,9 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       if (recorded.applied.length > 0) {
         world = recorded.world;
         audit.push({ actorRef: input.actorRef, op: pursuing.op, kind: "pursuit", ofTheOrder: true, attempt: "floor", reason: `The order left nothing in the world; recorded as a pursuit: "${orchestration.output.intent.summary}".`, delta: pursuing });
-        if (pursuing.op === "generic_entity_create") {
-          const madeId = recorded.assignedIds.get("pursuit") ?? "pursuit";
-          audit.push({ actorRef: input.actorRef, op: pursuing.op, kind: "mechanic_candidate", ofTheOrder: true, attempt: "floor", reason: `${madeId}: a pursuit the world could be asked to write a mechanic for.`, delta: pursuing });
-          await offerMechanics([{ entityId: madeId, delta: pursuing, attempt: "floor", ofTheOrder: true }], input.actorRef, input.orderText);
-        }
+        // Never offered a rule: what a man says he is doing is not a business,
+        // and a letter of respect so offered became a monthly charge on his
+        // last coins (play-test E20, `worthARule`).
       } else {
         recordAudit(recorded, input.actorRef, "floor");
       }
@@ -3314,8 +3335,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // Whoever killed his ruler last month sits on the throne now (`villainy.ts`).
     const usurped = usurpations(world, playerId);
     const seized = seizeThrones(usurped.world, playerId, statecraftInput().playedByModel);
-    world = seized.world;
-    const thrones = [...usurped.facts, ...seized.facts];
+    // And a private man answers for what he did beyond the law (`personal-pushback.ts`, L11).
+    const prosecuted = prosecutePrivateMen(seized.world, world.instant.day, playerId);
+    world = prosecuted.world;
+    const thrones = [...usurped.facts, ...seized.facts, ...prosecuted.facts];
     if (thrones.length > 0) {
       const materialized = materializeFacts({ proposals: thrones, now: world.instant, atStep: world.elapsedStep, ids, causalDepth: 0, assignedIds: new Map() });
       newFacts.push(...materialized.facts);

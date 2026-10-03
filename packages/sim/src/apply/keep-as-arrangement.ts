@@ -1,4 +1,5 @@
 import { EffectBandSchema, type OrderPartyRef, type StandingEffect, type WorldDelta, type WorldState } from "@chronica/shared";
+import { sameWork } from "./apply-deltas";
 import { whereTheActorIs } from "./fill-gaps";
 import { accountOf } from "./normalize-refs";
 
@@ -29,9 +30,43 @@ const KEPT_AS: Readonly<Record<string, { readonly kind: string; readonly yields:
 const NAME_FIELDS = ["title", "label", "name"] as const;
 const PLACE_FIELDS = ["provinceId", "fromProvinceId", "locationId"] as const;
 
+/** An act that would set a man trading, or pay him as trade does. */
+function tradesOrYields(delta: WorldDelta): { readonly title: string; readonly places: readonly string[] } | null {
+  switch (delta.op) {
+    // Where it sells: the far end is what tells two ventures from one market apart.
+    case "trade_venture_open": return { title: delta.title, places: [delta.toProvinceId] };
+    case "income_source_upsert": return { title: delta.label, places: [] };
+    case "generic_entity_create": {
+      const pays = (delta.effects ?? []).some((effect) => effect.quantity === "income" && effect.direction === "raise");
+      return pays || /trade|venture|cargo|shop|stall|business|merchant/i.test(delta.kind) ? { title: delta.label, places: delta.provinceId == null ? [] : [delta.provinceId] } : null;
+    }
+    default: return null;
+  }
+}
+
+/**
+ * Whether this act is a second writing of a venture the same man opened
+ * today: the model wrote the cargo as a venture and the income it brings as
+ * an income besides, the income was refused, and the repair or the keep made
+ * it an arrangement with a price of its own -- so the merchant paid twice for
+ * one ship (play-test E19). The same place at either end, or the same words
+ * in its name, is the same business; an income that names no place is his
+ * venture's.
+ */
+export function duplicatesAVenture(delta: WorldDelta, world: WorldState, actorRef: OrderPartyRef): boolean {
+  if (actorRef.kind !== "character") return false;
+  const act = tradesOrYields(delta);
+  if (act === null) return false;
+  return world.material.ventures.some((venture) => venture.ownerCharacterId === actorRef.id && venture.status === "running" && venture.openedAtStep === world.elapsedStep
+    && ((act.places.length === 0 && delta.op !== "trade_venture_open")
+      || act.places.some((place) => place === venture.toProvinceId || (delta.op !== "trade_venture_open" && place === venture.fromProvinceId))
+      || sameWork("trade", act.title, "trade", venture.title)));
+}
+
 export function keepAsArrangement(delta: WorldDelta, world: WorldState, actorRef: OrderPartyRef, why: string): WorldDelta | null {
   const kept = KEPT_AS[delta.op];
   if (kept === undefined || (actorRef.kind !== "character" && actorRef.kind !== "polity")) return null;
+  if (duplicatesAVenture(delta, world, actorRef)) return null;
   const written = delta as unknown as Record<string, unknown>;
   const name = NAME_FIELDS.map((field) => written[field]).find((value): value is string => typeof value === "string" && value.trim().length > 0)
     ?? (typeof written.reason === "string" ? written.reason : null);

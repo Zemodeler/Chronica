@@ -13,6 +13,8 @@ export interface MechanicPrice {
   readonly setup: number;
   /** The keep folded into the entity's upkeep, or null: a private rule pays none unless the model named one worth a band at the province's scale. */
   readonly upkeepBand: EffectBand | null;
+  /** What that keep comes to a month, charged at the province's scale. */
+  readonly keepPerMonth: number;
   readonly scale: number;
 }
 
@@ -22,9 +24,17 @@ export function mechanicScale(world: WorldState, entity: GenericEntity, ownerPol
   return entity.ownerRef?.kind === "polity" ? province : Math.max(1, province * MECHANIC_PRIVATE_SCALE_SHARE);
 }
 
-export function priceMechanic(world: WorldState, entity: GenericEntity, ownerPolityId: string | null, named: { readonly setup: number; readonly upkeepPerMonth: number }): MechanicPrice {
+/**
+ * `movesMoney`: whether the rule pays or takes anything. The setup floor is
+ * for a rule that does -- a toll-house is built, a dole has its granaries --
+ * and a rule that only moves a man's regard or an army's spirits costs what
+ * the model said it does, nothing included. A letter of respect was charged
+ * the floor, and the floor was a private man's last coins (play-test E20).
+ */
+export function priceMechanic(world: WorldState, entity: GenericEntity, ownerPolityId: string | null, named: { readonly setup: number; readonly upkeepPerMonth: number }, movesMoney = true): MechanicPrice {
   const scale = mechanicScale(world, entity, ownerPolityId);
-  const setup = Math.round(Math.min(Math.max(named.setup, scale * MECHANIC_SETUP_MIN_SHARE), scale * MECHANIC_SETUP_MAX_SHARE));
+  const floor = movesMoney ? scale * MECHANIC_SETUP_MIN_SHARE : 0;
+  const setup = Math.round(Math.min(Math.max(named.setup, floor), scale * MECHANIC_SETUP_MAX_SHARE));
   // The keep is charged by `settleStandingEffects` at the province's scale,
   // whoever owns the thing, so it is folded in only when the sum the model
   // named comes to at least the slight band there; below that a private rule
@@ -37,7 +47,7 @@ export function priceMechanic(world: WorldState, entity: GenericEntity, ownerPol
     upkeepBand = bands[0]!;
     for (const band of bands) if (Math.abs(UPKEEP_SHARE[band] - wanted) < Math.abs(UPKEEP_SHARE[upkeepBand] - wanted)) upkeepBand = band;
   }
-  return { setup, upkeepBand, scale };
+  return { setup, upkeepBand, keepPerMonth: upkeepBand === null ? 0 : Math.round(provinceScale * UPKEEP_SHARE[upkeepBand]), scale };
 }
 
 /** The stronger of two keeps: a rule never lowers what the arrangement already paid. */

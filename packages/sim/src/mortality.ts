@@ -289,7 +289,7 @@ export function reviewLives(input: LifeReviewInput): LifeReviewResult {
       const mother = world.characters.find((candidate) => candidate.id === living.id)!;
       const chance = birthChance(world, mother, due, interval);
       if (chance > 0 && roll("birth") < chance) {
-        const born = bearChild(world, mother, due, ids, (character) => mattersEnough(world, character, player));
+        const born = bearChild(world, mother, due, (character) => mattersEnough(world, character, player));
         if (born !== null) {
           world = born.world;
           facts.push(...born.facts);

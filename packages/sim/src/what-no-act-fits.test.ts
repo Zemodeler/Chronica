@@ -42,9 +42,10 @@ describe("an arrangement that pays has a price", () => {
     const result = applyDeltas(world, [stall()], as());
     expect(result.rejected).toEqual([]);
     const price = clears * VENTURE_PRICE_MONTHS;
-    // More than his purse holds: he pays what he has down and owes the rest, as for a venture.
+    // More than his purse holds: he pays down all but a tenth he keeps back
+    // for his household (E19 -- it was the whole purse) and owes the rest.
     expect(price).toBeGreaterThan(balance(world, "leptines-purse"));
-    expect(balance(result.world, "leptines-purse")).toBe(0);
+    expect(balance(result.world, "leptines-purse")).toBe(Math.ceil(balance(world, "leptines-purse") * 0.1));
     expect(result.world.material.obligations.some((obligation) => obligation.label === "Repayment of credit for A cutler's stall")).toBe(true);
     expect(result.world.genericEntities.find((entity) => entity.label === "A cutler's stall")!.upkeep).toEqual({ fromAccountId: "leptines-purse", band: "slight" });
   });

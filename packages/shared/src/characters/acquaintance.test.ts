@@ -7,14 +7,20 @@ import type { WorldState } from "../world/world-state";
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 const offices = definition.government.offices;
 const world = (): WorldState => WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
+/**
+ * The opening without the great houses' families (L10): a man knows his own
+ * wife and children from the first day, and the two tests below are about
+ * everybody else.
+ */
+const strangers = (): WorldState => ({ ...world(), familyLinks: [] });
 const consul = (s: WorldState): string =>
   s.material.officeSeats.find((x) => x.status === "held" && x.holderCharacterId !== null)!.holderCharacterId!;
 
 /**
  * Give the viewer a real dealing with somebody.
  *
- * At scenario opening the social graph is all but empty -- no family links,
- * one social link, no order attempts, and the consul has no recorded relation
+ * At scenario opening the social graph is all but empty -- no ties but the
+ * great houses' families, one social link, no order attempts, and the consul has no recorded relation
  * with anyone. That is the honest state of turn zero, so a test that wants an
  * acquaintance has to say so rather than hope one is lying about.
  */
@@ -54,7 +60,7 @@ describe("everyone you know, and what you know of them", () => {
     // knowsPerson once ended in a polity-standing hatch; under it a consul
     // was acquainted with every character alive. Give him one real dealing
     // so the assertion is about the hatch and not about an empty graph.
-    const base = world();
+    const base = strangers();
     const viewer = consul(base);
     const state = acquainted(base, viewer, someoneElse(base, viewer));
     const known = peopleYouKnow({ world: state, viewerId: viewer, offices });
@@ -65,8 +71,16 @@ describe("everyone you know, and what you know of them", () => {
   it("knows nobody at the opening, because nothing has happened yet", () => {
     // Not a defect: at turn zero the consul has no recorded dealings with
     // anyone, and the honest answer is an empty list that fills as he governs.
-    const state = world();
+    const state = strangers();
     expect(peopleYouKnow({ world: state, viewerId: consul(state), offices })).toEqual([]);
+  });
+
+  it("knows his own household from the first day", () => {
+    const state = world();
+    const viewer = consul(state);
+    const household = state.familyLinks.filter((link) => link.characterId === viewer || link.relatedCharacterId === viewer).length;
+    expect(household).toBeGreaterThan(0);
+    expect(peopleYouKnow({ world: state, viewerId: viewer, offices })).toHaveLength(household);
   });
 
   it("never leaks a score, an id, or a private reading", () => {

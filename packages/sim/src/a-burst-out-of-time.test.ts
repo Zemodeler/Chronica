@@ -76,14 +76,15 @@ describe("a burst told to stop", () => {
 });
 
 describe("a burst out of calls", () => {
-  it("keeps a line for everybody the budget left unasked, and for every rule it did not write", async () => {
+  it("keeps a line for everybody the budget left unasked", async () => {
     const asked: SimOperation[] = [];
-    // One call: the order's, and nothing left for the people who hear of it
-    // -- nor for the rule the order's standing pursuit would have been given.
+    // One call: the order's, and nothing left for the people who hear of it.
+    // The order's standing pursuit is no longer offered a rule at all (E20),
+    // so there is no skipped rule to keep a line for: none was owed.
     const result = await runSimulationBurst(input(port(asked), { spanDays: undefined, budget: { ...DEFAULT_BUDGET, maxModelCalls: 1, maxMechanicCalls: 0 } }));
     expect(asked).toEqual(["simulate_orchestrate"]);
     expect(result.stopReason).toBe("budget_exhausted");
     expect(result.skipped.some((skip) => skip.stage === "cognition" && /budget is spent/.test(skip.reason))).toBe(true);
-    expect(result.skipped.some((skip) => skip.stage === "mechanic")).toBe(true);
+    expect(result.skipped.some((skip) => skip.stage === "mechanic")).toBe(false);
   });
 });
