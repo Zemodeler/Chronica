@@ -55,13 +55,25 @@ export interface DifficultyRules {
   readonly standingBps: number;
   /** An edge in the player's own battles and plots (basis points on the odds). */
   readonly playerEdgeBps: number;
+  /**
+   * The world pushing back on the player as a person, not only on his power
+   * (play-test L11): of the world's stirrings each season, the share that
+   * befall him and his house (`narrator.ts`) ...
+   */
+  readonly personalSeedShare: number;
+  /** ... the weight of what a private man has to answer for at which he is prosecuted (`personal-pushback.ts`) ... */
+  readonly prosecuteAt: number;
+  /** ... and the twelfths a month that a man who hates him moves against him by plot (`villainy.ts`). */
+  readonly plotAgainstPlayerTwelfths: number;
+  /** Whether an accusation the narrator lays on him is brought before a court in earnest. */
+  readonly accusationsInEarnest: boolean;
 }
 
 export const DIFFICULTY_RULES: Readonly<Record<Difficulty, DifficultyRules>> = {
-  gentle: { alarmGain: 0.5, coalitionAt: 75, appetiteAgainstPlayer: -10, hostileSeats: 0, purseShare: 1.5, standingBps: 500, playerEdgeBps: 1_000 },
-  normal: { alarmGain: 1, coalitionAt: 60, appetiteAgainstPlayer: 0, hostileSeats: 1, purseShare: 1, standingBps: 0, playerEdgeBps: 0 },
-  hard: { alarmGain: 1.5, coalitionAt: 50, appetiteAgainstPlayer: 10, hostileSeats: 2, purseShare: 0.75, standingBps: 0, playerEdgeBps: -500 },
-  merciless: { alarmGain: 2, coalitionAt: 40, appetiteAgainstPlayer: 20, hostileSeats: 3, purseShare: 0.5, standingBps: -500, playerEdgeBps: -1_000 },
+  gentle: { alarmGain: 0.5, coalitionAt: 75, appetiteAgainstPlayer: -10, hostileSeats: 0, purseShare: 1.5, standingBps: 500, playerEdgeBps: 1_000, personalSeedShare: 0.2, prosecuteAt: 6, plotAgainstPlayerTwelfths: 0, accusationsInEarnest: false },
+  normal: { alarmGain: 1, coalitionAt: 60, appetiteAgainstPlayer: 0, hostileSeats: 1, purseShare: 1, standingBps: 0, playerEdgeBps: 0, personalSeedShare: 1 / 3, prosecuteAt: 3, plotAgainstPlayerTwelfths: 1, accusationsInEarnest: false },
+  hard: { alarmGain: 1.5, coalitionAt: 50, appetiteAgainstPlayer: 10, hostileSeats: 2, purseShare: 0.75, standingBps: 0, playerEdgeBps: -500, personalSeedShare: 0.5, prosecuteAt: 2, plotAgainstPlayerTwelfths: 2, accusationsInEarnest: true },
+  merciless: { alarmGain: 2, coalitionAt: 40, appetiteAgainstPlayer: 20, hostileSeats: 3, purseShare: 0.5, standingBps: -500, playerEdgeBps: -1_000, personalSeedShare: 0.6, prosecuteAt: 1, plotAgainstPlayerTwelfths: 3, accusationsInEarnest: true },
 };
 
 export const difficultyRules = (difficulty: Difficulty | undefined): DifficultyRules => DIFFICULTY_RULES[difficulty ?? "normal"];

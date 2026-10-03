@@ -1,4 +1,5 @@
 import {
+  boundedId,
   childrenOf,
   createCanonicalNpc,
   currentAgeYears,
@@ -9,7 +10,6 @@ import {
   type FactProposalDraft,
   type WorldState,
 } from "@chronica/shared";
-import type { IdFactory } from "./ports";
 
 /**
  * Children, born to the couples the world already records.
@@ -113,19 +113,24 @@ function nameFor(world: WorldState, father: Character, gender: Character["gender
  * father's standing -- enough that a king's son is somebody, not enough that
  * every infant's fever is foreshadowed. Both parents are recorded as parents,
  * which is what primogeniture reads.
+ *
+ * The child's id is the mother's and the day's, not the next off a counter:
+ * once the great houses had wives (L10) children were born in every long
+ * span, and a counter's id differed with how the span was cut into hops -- a
+ * world that replays differently is not one to trust (`mortality.test.ts`).
+ * A mother bears at most once inside `MIN_DAYS_BETWEEN_BIRTHS`, so it is unique.
  */
 export function bearChild(
   world: WorldState,
   mother: Character,
   atStep: number,
-  ids: IdFactory,
   isSignificant: (character: Character) => boolean,
 ): Birth | null {
   const father = husbandAtHand(world, mother, atStep);
   if (father === undefined) return null;
   const gender: Character["gender"] = stableHash([mother.id, atStep, "birth", "sex"]) % 2 === 0 ? "male" : "female";
   const average = (a: number, b: number): number => Math.round((a + b) / 2);
-  const childId = ids.next("character");
+  const childId = boundedId("child", mother.id, atStep);
   const created = createCanonicalNpc(world, {
     characterId: childId,
     name: nameFor(world, father, gender),

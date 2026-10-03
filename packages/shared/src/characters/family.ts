@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ElapsedStepSchema, EntityIdSchema, InheritanceRuleSchema, VisibilitySchema } from "../material-state";
-import { LifeStageSchema } from "./age";
+import { currentAgeYears, LifeStageSchema } from "./age";
 
 // Family, household, and life-contract graph (character-sim phase 5).
 //
@@ -102,6 +102,54 @@ export function familyLinksOf(world: FamilyGraphView, characterId: string, atSte
     }
   }
   return views;
+}
+
+/** The youngest a bride and a groom may be: twelve and fourteen, as Roman law had it. */
+export const MARRIAGE_AGE = { female: 12, male: 14 } as const;
+
+/** What a marriage asks of the two people in it, and of the world around them. */
+export interface MarriageView extends FamilyGraphView {
+  readonly elapsedStep: number;
+  readonly characters: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly alive: boolean;
+    readonly gender: "male" | "female";
+    readonly ageYearsAtStart: number;
+    readonly birthStep: number | null;
+  }[];
+  readonly material: { readonly officeSeats: readonly { readonly officeId: string; readonly holderCharacterId: string | null; readonly status: string }[] };
+}
+
+/** Whether she is a Vestal: sworn to the goddess for thirty years, and nobody's to marry. */
+export function isVestal(world: Pick<MarriageView, "material">, characterId: string): boolean {
+  return world.material.officeSeats.some((seat) => seat.holderCharacterId === characterId && seat.status === "held" && /vestal/i.test(seat.officeId));
+}
+
+/**
+ * Why these two cannot be married, or null if they can (play-test L10).
+ *
+ * A tie of marriage was written with no guard at all: a man could be made
+ * the husband of a Vestal, of a girl of six, of his own sister, of a second
+ * wife beside the first, or of another man. Both living, a man and a woman,
+ * old enough, neither married already, not near kin, and not a Vestal.
+ */
+export function marriageBar(world: MarriageView, aId: string, bId: string): string | null {
+  const a = world.characters.find((character) => character.id === aId);
+  const b = world.characters.find((character) => character.id === bId);
+  if (a === undefined || b === undefined) return "one of them does not exist";
+  if (!a.alive || !b.alive) return `${!a.alive ? a.name : b.name} is dead`;
+  if (a.gender === b.gender) return `${a.name} and ${b.name} are both ${a.gender === "male" ? "men" : "women"}`;
+  for (const person of [a, b]) {
+    const age = currentAgeYears(person, world.elapsedStep);
+    if (age < MARRIAGE_AGE[person.gender]) return `${person.name} is ${age}, too young to marry`;
+    if (isVestal(world, person.id)) return `${person.name} is a Vestal, sworn to the goddess`;
+    const spouse = familyLinksOf(world, person.id, world.elapsedStep).find((view) => view.kind === "spouse_or_partner" && view.counterpartCharacterId !== (person === a ? b.id : a.id));
+    if (spouse !== undefined) return `${person.name} is married already`;
+  }
+  const near = familyLinksOf(world, a.id, world.elapsedStep).find((view) => view.counterpartCharacterId === b.id && (view.kind === "parent" || view.kind === "child" || view.kind === "sibling"));
+  if (near !== undefined) return `${a.name} and ${b.name} are too near kin`;
+  return null;
 }
 
 /** Every child of `characterId`: the counterpart of each link where `characterId` is the parent. */
