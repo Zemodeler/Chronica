@@ -1,7 +1,9 @@
 import {
-  adjustPolityLegitimacy, allOffices, allSuccessionRules, findOfficeForRole,
-  type AuthorityCheckResult, type FactProposalDraft, type Office, type SuccessionRule, type WorldDelta, type WorldState,
+  adjustPolityLegitimacy, allOffices, allSuccessionRules, appointersOf, findOfficeForRole,
+  type AuthorityCheckResult, type FactProposalDraft, type GovernmentInstitution, type Office, type RequestAsk, type SuccessionRule, type WorldDelta, type WorldState,
 } from "@chronica/shared";
+import { sovereignChamberOf } from "../constitutions";
+import { askAConvener, convenersByLikelihood } from "./asking";
 
 /**
  * What a power-wide grant does not reach, however wide it is, and what the
@@ -43,7 +45,29 @@ import {
 export interface Judged {
   readonly authority: AuthorityCheckResult;
   readonly forbidden?: string;
+  /**
+   * The act as it is done instead: a motion put by the magistrate who agreed
+   * to put it; a man made without the office that was not the actor's to give.
+   */
+  readonly instead?: WorldDelta;
+  /** What the world says of how it came to be done that way. */
+  readonly fact?: FactProposalDraft;
+  /**
+   * Not an act at all but a favour asked of a man, who answers it in his own
+   * time, or the engine for him when it falls due (`requests.ts`).
+   */
+  readonly request?: { readonly recipientId: string; readonly instruction: string; readonly ask: RequestAsk };
 }
+
+/**
+ * Questions that put something to a chamber, and so need a magistrate who may
+ * call it. The rest -- a petition, an endorsement, an appointment, a command
+ * -- ask a man for something, and were refused with the sentence for an
+ * unconvened motion: "ask Ogulnius to take me as his legate" was told that
+ * only a consul, a praetor, a dictator or a tribune may put a question to the
+ * Senate (E13).
+ */
+const MOTIONS: ReadonlySet<string> = new Set(["vote", "council_deliberation", "decree", "treaty_ratification", "removal", "opposition_motion", "denunciation"]);
 
 export function whoseToGive(
   delta: WorldDelta,
@@ -91,15 +115,88 @@ export function whoseToGive(
       return { authority };
     }
     case "political_procedure_open": {
-      const institution = delta.institutionRef === null ? undefined : world.material.institutions.find((candidate) => candidate.id === id(delta.institutionRef!));
-      const conveners = institution?.convenedByOfficeIds ?? [];
       // A man put forward for an office is a candidacy, not a motion.
-      if (institution === undefined || conveners.length === 0 || delta.type === "nomination") return { authority };
-      // Put by him, or in the name of a magistrate who may put it: a private
-      // man's motion is laid by a consul or a tribune who will.
+      if (delta.type === "nomination") return { authority };
+      // The chamber it will go before, as the applier will send it: a vote
+      // naming no body is put to the state's own (`applyOne`). Asked only of
+      // the body named, a null one skipped the convener's rule altogether.
+      const institution = chamberOfQuestion(delta, world, actorId, id);
+      const conveners = institution?.convenedByOfficeIds ?? [];
       const sponsorId = id(delta.sponsorCharacterRef);
-      if ([actorId, sponsorId].some((who) => seatsOf(who).some((held) => conveners.includes(held.id)))) return { authority };
-      return { authority, forbidden: `Only a ${conveners.map(label).join(", a ")} may put a question to the ${institution.name}. He may ask one of them to put it, and speak to it when it is put.` };
+      const convenes = (who: string): boolean => seatsOf(who).some((held) => conveners.includes(held.id));
+      // A favour asked of a man -- to take him as legate, to speak for him, to
+      // put his petition -- is a request to that man, or to the magistrate
+      // likeliest to hear it, and he answers it (`requests.ts`).
+      if (!MOTIONS.has(delta.type) && !convenes(actorId)) {
+        const subjectId = delta.subjectKind === "character" && delta.subjectRef !== null ? id(delta.subjectRef) : null;
+        const named = [sponsorId, subjectId].find((who): who is string => who !== null && who !== actorId && world.characters.some((character) => character.id === who && character.alive));
+        if (named === undefined && (institution === undefined || conveners.length === 0)) return { authority };
+        const recipientId = named ?? convenersByLikelihood(world, actorId, institution!, delta)[0];
+        if (recipientId === undefined) return { authority, forbidden: `Only a ${conveners.map(label).join(", a ")} may put a question to the ${institution!.name}, and none is in office to hear it.` };
+        return { authority, request: { recipientId, instruction: delta.label, ask: askOfQuestion(delta, institution) } };
+      }
+      if (institution === undefined || conveners.length === 0 || convenes(actorId)) return { authority };
+      // A motion he may not put himself is put by a magistrate who agrees to
+      // put it -- the one he named first, if he named one -- and by nobody
+      // who was not asked. Before, the friendliest consul's name went on it
+      // and the consul never heard of it (L5).
+      const asked = askAConvener(world, actorId, institution, delta, convenes(sponsorId) ? sponsorId : null, scenarioOffices);
+      if ("declined" in asked) return { authority, forbidden: asked.declined };
+      const sponsor = world.characters.find((character) => character.id === asked.sponsorId)?.name ?? asked.sponsorId;
+      return {
+        authority: { authorized: true, grant: authority.grant, standing: "lawful", reason: `Put by ${sponsor}, who may put it and agreed to.` },
+        instead: { ...delta, sponsorCharacterRef: asked.sponsorId },
+        fact: asked.fact,
+      };
+    }
+    // A man made with an office is a man seated in it, and judged as the seat
+    // is: by whoever fills it. Made by somebody who may not fill it, he is
+    // made all the same -- the world has him -- but holds nothing (M5). The
+    // office label went straight past `office_seat_set`'s rules, so a
+    // senator's letter could make its addressee a magistrate.
+    case "character_create": {
+      if (delta.officeLabel === null) return { authority };
+      const office = findOfficeForRole(offices, id(delta.polityId), delta.officeLabel);
+      const rule = office === undefined ? undefined : allSuccessionRules(world, scenarioRules ?? []).find((candidate) => candidate.id === office.successionRuleId);
+      const appointers = rule?.appointerOfficeIds ?? [];
+      const filler = seatsOf(actorId).find((held) => appointers.includes(held.id));
+      const why = filler !== undefined ? null
+        : appointers.length > 0 ? `${office!.label} is filled by ${appointers.map(label).join(" or ")}, and by nobody else`
+          : rule?.kind === "elective" ? `${office!.label} is chosen by election, and nobody names a man to it`
+            : authority.authorized ? null
+              : `nobody gave ${world.characters.find((character) => character.id === actorId)?.name ?? "him"} an office to give`;
+      if (filler !== undefined) return { authority: { authorized: true, grant: authority.grant, standing: "lawful", reason: `Filled by him as ${filler.label}, whose office it is to fill it.` } };
+      if (why === null) return { authority };
+      return {
+        authority: { authorized: true, grant: null, standing: "lawful", reason: "Made, holding nothing." },
+        instead: { ...delta, officeLabel: null, officeAuthorises: [] },
+        fact: {
+          localId: `unseated_${delta.localId}`.slice(0, 60),
+          kind: "office_not_given",
+          summary: `${delta.name} is no ${delta.officeLabel}: ${why}.`.slice(0, 600),
+          affectedRefs: [{ kind: "character", id: actorId }],
+          visibility: "private",
+          discoveryState: "private",
+          knowableInDays: 0,
+          knownToRefs: [{ kind: "character", id: actorId }],
+          significance: 15,
+        },
+      };
+    }
+    // A post in an army is given by whoever the establishment says gives it,
+    // and by the army's own commander (`appointersOf`). Anybody else's word is
+    // refused by the men (`nobodyListens`).
+    case "force_post_set": {
+      const force = world.material.forces.find((candidate) => candidate.id === id(delta.forceRef));
+      const rank = world.establishments.find((establishment) => establishment.polityId === force?.polityId)?.ranks.find((candidate) => candidate.id === delta.rankId);
+      const man = world.characters.find((character) => character.id === id(delta.characterRef));
+      if (force === undefined || rank === undefined) return { authority };
+      const formationId = delta.formationRef === undefined ? man?.service?.formationId ?? null : id(delta.formationRef);
+      const unitIndex = delta.unitIndex ?? man?.service?.unitIndex ?? null;
+      const givers = formationId === null ? [force.commanderCharacterId, force.controllerCharacterId] : appointersOf(world, force, rank, formationId, rank.level === "unit" || rank.level === "sub" ? unitIndex : null);
+      if (givers.includes(actorId)) return { authority: { authorized: true, grant: authority.grant, standing: "lawful", reason: `He gives the post of ${rank.label}.` } };
+      const names = givers.map((giver) => world.characters.find((character) => character.id === giver)?.name ?? giver);
+      return refused(`${rank.label} in ${force.name} is given by ${names.length === 0 ? "its commander" : names.join(" or ")}, not by him.`);
     }
     case "generic_entity_create": {
       // A tribune's intercession is his office's own act.
@@ -133,6 +230,31 @@ export function whoseToGive(
   if (theirs === null || mine === null || mine > theirs) return { authority };
   const name = world.characters.find((character) => character.id === general)?.name ?? "its general";
   return refused(`${force.name} is ${name}'s command, and his imperium is no less than his own: it takes its orders from him.`);
+}
+
+/** The chamber a question goes before: the one named, or the state's own for a vote that names none, as `applyOne` puts it. */
+function chamberOfQuestion(
+  delta: Extract<WorldDelta, { op: "political_procedure_open" }>,
+  world: WorldState,
+  actorId: string,
+  id: (ref: string) => string,
+): GovernmentInstitution | undefined {
+  if (delta.institutionRef !== null) return world.material.institutions.find((candidate) => candidate.id === id(delta.institutionRef!));
+  if (delta.type !== "council_deliberation" && delta.resolutionMechanism !== "vote") return undefined;
+  const sponsorPolity = world.characters.find((character) => character.id === id(delta.sponsorCharacterRef))?.polityId
+    ?? world.characters.find((character) => character.id === actorId)?.polityId ?? null;
+  const polityId = (delta.subjectKind === "polity" && delta.subjectRef !== null ? id(delta.subjectRef) : null) ?? sponsorPolity;
+  return polityId === null ? undefined : sovereignChamberOf(world, polityId) ?? undefined;
+}
+
+/** What a question that asks a man for something asks him for, so that his yes can be carried out. */
+function askOfQuestion(delta: Extract<WorldDelta, { op: "political_procedure_open" }>, institution: GovernmentInstitution | undefined): RequestAsk {
+  switch (delta.type) {
+    case "endorsement": return { kind: "speak_for" };
+    case "appointment":
+    case "command_assignment": return /\blegat/i.test(delta.label) ? { kind: "take_as_legate" } : { kind: "other" };
+    default: return institution === undefined ? { kind: "other" } : { kind: "put_question", ref: institution.id };
+  }
 }
 
 /** What an intercession may name: the levy, the treasury, the chambers, the seats -- or all of his acts in the city. */

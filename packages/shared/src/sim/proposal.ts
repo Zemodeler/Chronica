@@ -4,6 +4,7 @@ import { FactDiscoveryStateSchema, FactVisibilitySchema } from "../world/facts";
 import { OrderPartyRefSchema } from "../world/party-ref";
 import { WatchPredicateSchema } from "../world/watch";
 import { AmbitionKindSchema } from "../characters/character";
+import { RequestAskSchema } from "../authority/order-attempt";
 import { LocalIdSchema, MaybeRefSchema, RefSchema } from "./refs";
 import { WorldDeltaSchema } from "./deltas";
 
@@ -83,6 +84,7 @@ export const DelegationProposalSchema = z.object({
   instruction: SummarySchema,
   /** The order's part it hands on, by its place in intent.parts. */
   part: z.number().int().min(0).max(9).nullable().default(null),
+  ask: RequestAskSchema.optional(),
 });
 export type DelegationProposal = z.infer<typeof DelegationProposalSchema>;
 

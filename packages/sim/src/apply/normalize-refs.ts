@@ -44,6 +44,10 @@ function buildKnownIds(world: WorldState): Set<string> {
     ...world.map.polities.map((polity) => polity.id),
     ...world.characters.map((character) => character.id),
     ...world.material.forces.map((force) => force.id),
+    // A formation's id is the start of its officers' ids, so unknown it was
+    // "put right" to the centurion's: a legionary's drill of his own hastati
+    // was read as an order to a man, and refused as one (E12).
+    ...world.material.forces.flatMap((force) => (force.formations ?? []).map((formation) => formation.id)),
     ...world.material.accounts.map((account) => account.id),
     ...world.material.obligations.map((obligation) => obligation.id),
     ...world.material.institutions.map((institution) => institution.id),

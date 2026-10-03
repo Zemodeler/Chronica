@@ -55,6 +55,8 @@ import {
   orderPartRef,
   findOrderPart,
   MAX_OWED_BURSTS,
+  BINDING_ANSWER_DAYS,
+  REQUESTED_ANSWER_DAYS,
   capOrders,
   availableBalance,
   openReservation,
@@ -72,11 +74,12 @@ import type { ApplyResult, AuthorityBreach, RejectedDelta } from "./apply/contex
 import { keepAsArrangement } from "./apply/keep-as-arrangement";
 import { actsBehindFacts, asClaim, isClaim, whereTheActorIs } from "./apply/fill-gaps";
 import { kindsIn } from "./bare-refs";
-import { misfiledWorldActs } from "./apply/misfiled";
+import { misfiledWorldActs, whyMisfiled } from "./apply/misfiled";
 import { routeAmbientActors, routeAttention } from "./attention";
 import { renderCharacterPortrait, runCognition } from "./cognition";
 import { materializeFacts } from "./facts";
 import { answerByTemper } from "./insubordination";
+import { answerForTheSilent } from "./requests";
 import { recordActiveIntents } from "./intents";
 import { decideNarratorSeeds, engineWork, recordSeedsOffered, seedParticipants, seedWasTaken, type NarratorSeed } from "./narrator";
 import { chooseNemesis, conductInWords, nemesisStance, recordNemesis, retireNemesis, shouldRetire, stanceInWords } from "./nemesis";
@@ -359,7 +362,7 @@ export interface WindowSnapshot {
  * router to look at.
  */
 export interface BurstSkip {
-  readonly stage: "cognition" | "reconcile" | "repair" | "fact_places" | "engine_facts" | "mechanic" | "private_minds" | "invariant";
+  readonly stage: "cognition" | "reconcile" | "repair" | "fact_places" | "engine_facts" | "mechanic" | "private_minds" | "invariant" | "delegation";
   readonly reason: string;
 }
 
@@ -1289,10 +1292,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // The world's own business written into the order is the world's, whichever
     // list it arrived in (`misfiledWorldActs`). Left where it stands, so what
     // it makes is made before whatever in the order names it.
-    const misfiled = actsForTheWorld && proposal.worldDeltas !== undefined ? misfiledWorldActs(proposal.deltas, world, actorRef) : new Set<WorldDelta>();
+    const misfiled = actsForTheWorld && proposal.worldDeltas !== undefined ? misfiledWorldActs(proposal.deltas, world, actorRef, input.offices) : new Set<WorldDelta>();
     const orderDeltas = actsForTheWorld && proposal.worldDeltas !== undefined ? new Set<WorldDelta>(proposal.deltas.filter((delta) => !misfiled.has(delta))) : undefined;
     for (const delta of misfiled) {
-      audit.push({ actorRef, op: delta.op, kind: "refiled", ofTheOrder: false, attempt: "first", reason: "Written into the order, but it makes something for another power with the actor nowhere in it: judged as the world's.", delta });
+      audit.push({ actorRef, op: delta.op, kind: "refiled", ofTheOrder: false, attempt: "first", reason: whyMisfiled(delta), delta });
     }
     const worldAtStart = world;
     const aliveBefore = new Set(world.characters.filter((character) => character.alive).map((character) => character.id));
@@ -1802,7 +1805,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     }
 
     applyDiscoveries(proposal.discoveries, causalDepth);
-    world = recordDelegations(world, proposal.delegations, ids, result.assignedIds, input.offices);
+    world = recordDelegations(world, proposal.delegations, ids, result.assignedIds, input.offices, actorRef, skipped);
     // A man handed an order his temper will not let him carry out answers it
     // before he is ever asked (`insubordination.ts`).
     const tempered = answerByTemper(world, input.actorRef.kind === "character" ? [input.actorRef.id] : []);
@@ -3377,12 +3380,24 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   if (playerDecision !== null) stopReason = "player_decision";
   // Whoever is still owed a turn at the end has waited one burst more; after
   // `MAX_OWED_BURSTS` the world stops waiting for him.
+  const owedBefore = world.owed;
   world = {
     ...world,
     owed: world.owed
       .map((entry) => (owedThisBurst.has(entry.characterId) ? entry : { ...entry, bursts: entry.bursts + 1 }))
       .filter((entry) => entry.bursts < MAX_OWED_BURSTS),
   };
+  // And what was put to him is answered for him, rather than waiting on a
+  // turn that will not come: dropped, his requests used to wait for ever (E14).
+  const silent = answerForTheSilent(world, owedBefore.filter((entry) => !world.owed.some((kept) => kept.characterId === entry.characterId)).map((entry) => entry.characterId), {
+    toDay: world.elapsedStep, offices: input.offices, ids, playerCharacterId: input.actorRef.kind === "character" ? input.actorRef.id : null,
+  });
+  world = silent.world;
+  if (silent.facts.length > 0) {
+    const told = materializeFacts({ proposals: silent.facts, now: world.instant, forces: world.material.forces, atStep: world.elapsedStep, ids, causalDepth: 0, assignedIds: new Map() });
+    newFacts.push(...told.facts);
+    for (const [factId, weight] of told.significanceByFactId) significanceByFactId.set(factId, weight);
+  }
   // The last window: the clock will not move again in this burst.
   closeWindow(true);
   report({ kind: "settled", date: today() });
@@ -3453,12 +3468,15 @@ function linkFactsToStorylines(world: WorldState, storylineByFactId: ReadonlyMap
  * Delegations become order attempts the recipient answers for themselves
  * (VISION §13) -- not deltas the issuer applies on their behalf.
  */
-function recordDelegations(
+export function recordDelegations(
   world: WorldState,
   delegations: Proposal["delegations"],
   ids: { next(prefix: string): string },
   assignedIds: ReadonlyMap<string, string>,
   offices: readonly Office[],
+  /** Whose answer this is: every order in it is his to give (M3). */
+  actorRef?: OrderPartyRef,
+  skipped?: BurstSkip[],
 ): WorldState {
   if (delegations.length === 0) return world;
   const resolveParty = (ref: Proposal["delegations"][number]["issuerRef"]) =>
@@ -3468,9 +3486,23 @@ function recordDelegations(
     // An order to someone who does not exist is not an order. This happens when
     // the model names a person it only planned to create.
     .filter((delegation) => world.characters.some((character) => character.id === resolveParty(delegation.recipientRef).id))
-    .map((delegation) => {
-      const issuerRef = resolveParty(delegation.issuerRef);
+    .flatMap((delegation) => {
+      // The man answering gives the orders in his answer. The model wrote
+      // other issuers -- the consul's order "from" his legate, a man handing an
+      // order to himself -- and the record held orders nobody gave (M3).
+      // An order passed between two men of another power is theirs, as their
+      // treaties are (`misfiledWorldActs`).
+      const written = resolveParty(delegation.issuerRef);
       const recipientRef = resolveParty(delegation.recipientRef);
+      const polityOf = (id: string) => world.characters.find((character) => character.id === id)?.polityId ?? null;
+      const ours = actorRef?.kind === "character" ? polityOf(actorRef.id) : null;
+      const betweenOthers = ours !== null && written.kind === "character" && polityOf(written.id) !== null && polityOf(written.id) !== ours && polityOf(recipientRef.id) !== ours;
+      const issuerRef = actorRef?.kind === "character" && !betweenOthers ? actorRef : written;
+      // Nobody answers his own order: what he means to do himself is his act, not a delegation.
+      if (issuerRef.kind === recipientRef.kind && issuerRef.id === recipientRef.id) {
+        skipped?.push({ stage: "delegation", reason: `"${delegation.instruction.slice(0, 80)}" was handed by ${issuerRef.id} to himself, and dropped.` });
+        return [];
+      }
       // Every delegation ever recorded said `authorized: true`. It was a
       // constant, so a merchant's request and a consul's command were the same
       // record, and the instruction itself was smuggled through a field
@@ -3480,7 +3512,7 @@ function recordDelegations(
       // serves: the legate who tells a shipmaster to find hulls is still
       // carrying the consul's transport.
       const held = world.orderAttempts.filter((attempt) => attempt.recipientRef.id === issuerRef.id && attempt.status === "accepted" && attempt.servesRef !== null);
-      return {
+      return [{
         id: ids.next("order"),
         actionId: ids.next("action"),
         issuerRef,
@@ -3500,7 +3532,10 @@ function recordDelegations(
         decidedAtStep: null,
         consequenceFactRefs: [],
         servesRef: held.length === 1 ? held[0]!.servesRef : null,
-      };
+        // What it asks for, to be carried out on a yes, and the day it is owed an answer by (`requests.ts`).
+        ...(delegation.ask === undefined ? {} : { ask: delegation.ask }),
+        answerDueByStep: world.elapsedStep + (verdict.standing === "binding" ? BINDING_ANSWER_DAYS : REQUESTED_ANSWER_DAYS),
+      }];
     });
   return { ...world, orderAttempts: [...world.orderAttempts, ...attempts] };
 }
