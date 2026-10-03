@@ -44,7 +44,8 @@ Rules:
   honest empty list is better than a second wrong answer.
 - Ids are the world's, never yours. Use an id exactly as the world gave it, or
   a "local:" handle created earlier in this same answer.
-- Do not add changes nobody asked for. Only the refused ones.`;
+- Do not add changes nobody asked for. Only the refused ones.
+- Give each correction the number of the refusal it corrects, as "refusal": n.`;
 
 /** Read loosely: each correction is checked on its own below, so one bad one costs only itself. */
 const RepairEnvelopeSchema = z.object({ deltas: z.array(z.record(z.string(), z.unknown())).max(24) }).passthrough();
@@ -59,23 +60,30 @@ const RepairEnvelopeSchema = z.object({ deltas: z.array(z.record(z.string(), z.u
  * original of the same kind: the repaired fields win, and everything it left
  * out is what was written the first time.
  */
-function overOriginal(correction: Record<string, unknown>, index: number, refused: readonly RejectedDelta[]): unknown {
-  const sameKind = refused.filter((rejection) => rejection.delta.op === correction["op"]);
-  const localId = correction["localId"];
+function overOriginal(correction: Record<string, unknown>, index: number, refused: readonly RejectedDelta[]): { readonly merged: unknown; readonly original: RejectedDelta | undefined } {
+  // The number it says it corrects, when it says one and the kind agrees: a
+  // round's refusals are several people's, and each correction goes back to
+  // whoever's refusal it answers (`round-corrections.ts`).
+  const { refusal, ...rest } = correction;
+  const numbered = typeof refusal === "number" && refused[refusal - 1]?.delta.op === rest["op"] ? refused[refusal - 1] : undefined;
+  const sameKind = refused.filter((rejection) => rejection.delta.op === rest["op"]);
+  const localId = rest["localId"];
   const byHandle = typeof localId === "string" ? sameKind.find((rejection) => "localId" in rejection.delta && rejection.delta.localId === localId) : undefined;
-  const byPlace = refused[index]?.delta.op === correction["op"] ? refused[index] : undefined;
-  const original = (byHandle ?? byPlace ?? sameKind[0])?.delta;
-  return original === undefined ? correction : { ...original, ...correction };
+  const byPlace = refused[index]?.delta.op === rest["op"] ? refused[index] : undefined;
+  const original = numbered ?? byHandle ?? byPlace ?? sameKind[0];
+  return { merged: original === undefined ? rest : { ...original.delta, ...rest }, original };
 }
 
 export interface DeltaRepairResult {
   readonly deltas: readonly WorldDelta[];
+  /** For each correction, the refusal it answers, as a place in the `rejected` it was given; -1 where none of its kind was refused. */
+  readonly answers: readonly number[];
   readonly calls: number;
   /** Why the repair itself failed, when it did. Kept so a recurring complaint is visible. */
   readonly failure: string | null;
 }
 
-const nothing = (failure: string | null, calls: number): DeltaRepairResult => ({ deltas: [], calls, failure });
+const nothing = (failure: string | null, calls: number): DeltaRepairResult => ({ deltas: [], answers: [], calls, failure });
 
 /** What the world was told, so a correction can be made against the same facts. */
 export interface DeltaRepairInput {
@@ -120,8 +128,9 @@ export async function repairDeltas(input: DeltaRepairInput): Promise<DeltaRepair
   const repairable = input.rejected.filter((rejection) => rejection.kind === "reference");
   if (repairable.length === 0) return nothing(null, 0);
 
+  // Twelve, not eight: a round's people are corrected in one call.
   const complaints = repairable
-    .slice(0, 8)
+    .slice(0, 12)
     .map((rejection, index) => `${index + 1}. ${JSON.stringify(rejection.delta)}\n   REFUSED: ${rejection.reason}${candidatesFor(rejection, input.world)}`)
     .join("\n\n");
 
@@ -143,13 +152,17 @@ export async function repairDeltas(input: DeltaRepairInput): Promise<DeltaRepair
     // Each correction on its own: the good ones are kept whatever the rest
     // look like. Only a repair that fixed nothing at all is a failure.
     const deltas: WorldDelta[] = [];
+    const answers: number[] = [];
     const problems: string[] = [];
     envelope.data.deltas.forEach((correction, index) => {
-      const parsed = WorldDeltaSchema.safeParse(overOriginal(correction, index, repairable));
-      if (parsed.success) deltas.push(parsed.data);
-      else problems.push(parsed.error.issues.slice(0, 3).map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; "));
+      const { merged, original } = overOriginal(correction, index, repairable);
+      const parsed = WorldDeltaSchema.safeParse(merged);
+      if (parsed.success) {
+        deltas.push(parsed.data);
+        answers.push(original === undefined ? -1 : input.rejected.indexOf(original));
+      } else problems.push(parsed.error.issues.slice(0, 3).map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; "));
     });
-    return { deltas, calls: 1, failure: deltas.length === 0 && problems.length > 0 ? problems.join(" | ") : null };
+    return { deltas, answers, calls: 1, failure: deltas.length === 0 && problems.length > 0 ? problems.join(" | ") : null };
   } catch (error) {
     if (abortsTheTurn(error)) throw error;
     // A repair that times out costs the player another wait and buys nothing.

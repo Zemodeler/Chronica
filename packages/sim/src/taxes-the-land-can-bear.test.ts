@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { punicWarsScenario } from "@chronica/db";
-import { CUSTOMARY_TAX_BURDEN, ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, taxBurdens, type WorldState } from "@chronica/shared";
+import { CUSTOMARY_TAX_BURDEN, ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, readDepartments, taxBurdens, taxShortfallSummary, type WorldState } from "@chronica/shared";
 import { createIdFactory } from "./ports";
 import { runDeterministicTick } from "./tick";
 import { withMiddlingManagers } from "./middling-managers";
@@ -107,6 +107,68 @@ describe("taxes the land can bear", () => {
     // under either. (Seventy-odd provinces settle one by one, not two.)
     const tripled = aYearOf(withTributum(opening(), 3_300));
     expect(crushed.monthly.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(tripled.monthly.reduce((a, b) => a + b, 0) * 1.05);
+  });
+
+  describe("ground the enemy holds", () => {
+    // A Roman province the enemy holds pays nobody, so Rome's collected share
+    // falls below one. Which used to be written up as Rome asking more of its
+    // lands than they could bear -- even when a skilled treasury brought in
+    // more than was due: "of 816 due, the collectors raised 874" (E28).
+    /** Rome's provinces taken by Carthage, the poorest first and never Rome itself, until Rome holds no more than `share` of what its own land could pay. */
+    const occupied = (world: WorldState, share: number): WorldState => {
+      const ours = world.map.provinces
+        .filter((province) => province.controllerPolityId === "rome")
+        .map((province) => ({ id: province.id, capacity: world.material.provinceMaterial.find((row) => row.provinceId === province.id)?.taxCapacity ?? 0 }))
+        .sort((a, b) => a.capacity - b.capacity)
+        .slice(0, -1);
+      let current = world;
+      for (const { id } of ours) {
+        if (taxBurdens(current).get("rome")!.held <= share) break;
+        current = { ...current, map: { ...current.map, provinces: current.map.provinces.map((province) => (province.id === id ? { ...province, controllerPolityId: "carthage", ownerPolityId: "rome" } : province)) } };
+      }
+      return current;
+    };
+    const month = (world: WorldState) => runDeterministicTick({ world, toDay: 30, ids: createIdFactory("occupied"), warfare: definition.warfare }).factProposals;
+
+    it("writes no shortfall when a skilled treasury brings in more than was due", () => {
+      const base = opening();
+      const treasury = readDepartments(base).holding({ kind: "polity", id: "rome" }, "tax_roll").department!;
+      const officeId = treasury.headOfficeId ?? treasury.officeIds[0]!;
+      const quaestor = base.characters.find((character) => character.alive && character.polityId === "rome")!;
+      const skilled: WorldState = {
+        ...base,
+        characters: base.characters.map((character) => (character.id === quaestor.id
+          ? { ...character, skills: { ...character.skills, subSkills: { ...character.skills.subSkills, taxation: 100 } } }
+          : character)),
+        material: { ...base.material, officeSeats: [...base.material.officeSeats, {
+          id: "quaestor-seat", officeId, seatIndex: 0, holderCharacterId: quaestor.id, status: "held", vacancyCause: "none",
+          termStartedAtStep: 0, termExpiresAtStep: null, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: [],
+        }] },
+      };
+      const skill = readDepartments(skilled).skill({ kind: "polity", id: "rome" }, "tax_roll");
+      expect(skill).toBeGreaterThan(60);
+      // Held to a share his skill more than makes up for.
+      const world = occupied(skilled, (1 + 1 / (1 + ((skill - 50) / 50) * 0.15)) / 2);
+      const burden = taxBurdens(world).get("rome")!;
+      expect(burden.held).toBeLessThan(1);
+      expect(burden.collectedShare).toBeLessThan(1);
+      expect(month(world).map((fact) => String(fact.kind))).not.toContain("tax_shortfall");
+    });
+
+    it("blames the occupation, not the tax, when the collectors do come back short", () => {
+      const facts = month(occupied(opening(), 0.8));
+      const short = facts.find((fact) => String(fact.kind) === "tax_shortfall" && (fact.affectedRefs ?? []).some((ref) => ref.id === "rome"));
+      expect(short?.summary).toContain("occupied districts, which paid nothing");
+      expect(short?.summary).not.toContain("than they could bear");
+    });
+  });
+
+  it("names its cause in the shortfall line, and writes none for a surplus", () => {
+    const burden = { polityId: "rome", bearable: 1_000, asked: 500, collectedShare: 0.9, held: 0.9, stabilityShiftBps: 0 };
+    expect(taxShortfallSummary("Rome", burden, { asked: 816, raised: 874 })).toBeNull();
+    expect(taxShortfallSummary("Rome", burden, { asked: 816, raised: 734 })).toContain("occupied districts");
+    expect(taxShortfallSummary("Rome", { ...burden, asked: 2_000, held: 1, collectedShare: 0.5 }, { asked: 816, raised: 408 })).toContain("more of its lands than they could bear");
+    expect(taxShortfallSummary("Rome", { ...burden, asked: 2_000, collectedShare: 0.45 }, { asked: 816, raised: 367 })).toMatch(/could bear, and its occupied districts/);
   });
 
   it("leaves trade alone: harbour dues are not a levy on anybody's land", () => {
