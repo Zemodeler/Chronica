@@ -2,6 +2,7 @@ import { z } from "zod";
 import { EntityIdSchema, ElapsedStepSchema } from "../material-state";
 import { OrderPartyRefSchema } from "../world/party-ref";
 import { AuthorityCheckResultSchema } from "./authority-grant";
+import { RefSchema } from "../sim/refs";
 
 /**
  * The order-attempt state machine (docs/32, Phase 7): "orders requiring
@@ -61,6 +62,23 @@ export const isTerminalOrderAttemptStatus = (status: OrderAttemptStatus): boolea
 export const OrderStandingSchema = z.enum(["binding", "requested", "presumptuous"]);
 export type OrderStanding = z.infer<typeof OrderStandingSchema>;
 
+/**
+ * What a request asks for, where it asks for a thing the engine can do: a
+ * question put to a chamber, a post in an army, a place on a general's staff,
+ * a voice for one's cause, money. With it, the man asked who says yes does it
+ * there and then (`sim/requests.ts`); without it, his yes was a word the
+ * engine could not read, and "take me as your legate" was accepted and never
+ * carried out.
+ */
+export const RequestAskSchema = z.object({
+  kind: z.enum(["put_question", "appoint_to_post", "take_as_legate", "speak_for", "grant_funds", "other"]),
+  /** The chamber, rank or question it is about. Unbounded in the schema the model reads, where every character is paid on every call. */
+  ref: RefSchema.optional(),
+  /** Money asked for: positive, which the engine holds it to (`sim/requests.ts`). */
+  amount: z.number().optional(),
+}).strict().describe("A favour asked; ref: chamber, rank or question");
+export type RequestAsk = z.infer<typeof RequestAskSchema>;
+
 export const OrderAttemptSchema = z
   .object({
     id: EntityIdSchema,
@@ -95,6 +113,15 @@ export const OrderAttemptSchema = z
      * does for it joins that part by the id, not by what his words resemble.
      */
     servesRef: z.string().max(140).nullable().default(null),
+    /** What it asks for, where the engine can carry it out on a yes (`RequestAskSchema`). */
+    ask: RequestAskSchema.optional(),
+    /**
+     * The day he owes an answer by. Requests to officeholders waited for ever:
+     * only a model call decided them, and a man whose turn was dropped never
+     * answered at all. Past it, the engine answers for him (`sim/requests.ts`).
+     * Absent on attempts recorded before it was kept: read by `answerDueOf`.
+     */
+    answerDueByStep: ElapsedStepSchema.optional(),
   })
   .strict()
   .superRefine((attempt, context) => {
@@ -108,6 +135,17 @@ export const OrderAttemptSchema = z
     }
   });
 export type OrderAttempt = z.infer<typeof OrderAttemptSchema>;
+
+/** Days a man has to answer an order he is bound to obey, and a request he may decline; and the more a delay buys him. */
+export const BINDING_ANSWER_DAYS = 7;
+export const REQUESTED_ANSWER_DAYS = 14;
+export const DELAYED_ANSWER_DAYS = 14;
+
+/** The day an answer is owed by: as recorded, or by its standing for an attempt recorded before the day was kept. Put off once, a fortnight more. */
+export function answerDueOf(attempt: Pick<OrderAttempt, "answerDueByStep" | "issuedAtStep" | "standing" | "status">): number {
+  const due = attempt.answerDueByStep ?? attempt.issuedAtStep + (attempt.standing === "binding" ? BINDING_ANSWER_DAYS : REQUESTED_ANSWER_DAYS);
+  return attempt.status === "delayed" ? due + DELAYED_ANSWER_DAYS : due;
+}
 
 /*
  * Pure status-transition helpers, in the same style as

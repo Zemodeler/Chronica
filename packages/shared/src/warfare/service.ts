@@ -242,6 +242,73 @@ export function setPost(world: WorldState, forceId: string, post: ForcePost): Wo
   }));
 }
 
+/** Who gives a post, where the establishment does not say: a unit's lesser posts its officer, its officers the body's, the rest the general. */
+export function appointerKindOf(rank: RankTemplate): NonNullable<RankTemplate["appointedBy"]> {
+  if (rank.appointedBy !== undefined) return rank.appointedBy;
+  if (rank.level === "sub") return "unit_officer";
+  if (rank.level === "unit") return "body_officer";
+  return "army_commander";
+}
+
+/**
+ * The living men who may put a man in this post: whoever the establishment
+ * says gives it, and always the army's own commander, over whom nobody in it
+ * stands. Where the post's own appointer is not named -- no centurion over the
+ * maniple, no tribune with the legion -- it falls to the general.
+ */
+export function appointersOf(world: WorldState, force: Force, rank: RankTemplate, formationId: string, unitIndex: number | null): string[] {
+  const establishment = world.establishments.find((candidate) => candidate.polityId === force.polityId);
+  const formation = formationOf(force, formationId);
+  const alive = (id: string | null | undefined): id is string => id != null && world.characters.some((character) => character.id === id && character.alive);
+  const general = [force.commanderCharacterId, force.controllerCharacterId].filter(alive);
+  if (establishment === undefined || formation === undefined) return [...new Set(general)];
+  const kind = appointerKindOf(rank);
+  const posts = force.posts ?? [];
+  const named = ((): string[] => {
+    if (kind === "army_commander") return [];
+    if (kind === "unit_officer") {
+      const officer = unitOfficerRank(establishment, formation.templateId);
+      return posts.filter((post) => post.formationId === formationId && post.unitIndex === unitIndex && post.rankId === officer?.id && post.rankId !== rank.id).map((post) => post.characterId);
+    }
+    if (kind === "body_officer") {
+      const officer = bodyOfficerRank(establishment, formation.templateId);
+      return posts.filter((post) => post.unitIndex === null && post.rankId === officer?.id && formationOf(force, post.formationId)?.bodyId === formation.bodyId).map((post) => post.characterId);
+    }
+    return world.material.officeSeats.filter((seat) => seat.status === "held" && kind.officeIds.includes(seat.officeId)).flatMap((seat) => (seat.holderCharacterId === null ? [] : [seat.holderCharacterId]));
+  })().filter(alive);
+  return [...new Set([...named, ...general])];
+}
+
+/**
+ * A man put in a post: his rank, and the post his. Whoever held it before is
+ * out of it, and so is any other post he held -- a man is one thing at a time.
+ */
+export function putInPost(world: WorldState, forceId: string, post: ForcePost, atStep: number): WorldState {
+  const person = world.characters.find((character) => character.id === post.characterId);
+  if (person === undefined) return world;
+  const service: ServiceRecord = person.service?.forceId === forceId
+    ? { ...person.service, formationId: post.formationId, unitIndex: post.unitIndex ?? person.service.unitIndex, rankId: post.rankId, promotedAtStep: atStep }
+    : {
+      forceId, formationId: post.formationId, unitIndex: post.unitIndex, rankId: post.rankId, enlistedAtStep: atStep, promotedAtStep: atStep,
+      campaigns: 0, priorCampaigns: 0, battles: 0, wounds: 0, decorations: [], punishments: [], conduct: "steady",
+    };
+  return setPost(withMember(setService(world, person.id, service), forceId, person.id), forceId, post);
+}
+
+/**
+ * One unit of a formation set to drill, or let off it. A man in the ranks who
+ * drills his comrades drills his own maniple, not the legion: before, his word
+ * set the whole army drilling (M4).
+ */
+export function drillOneUnit(world: WorldState, forceId: string, formationId: string, unitIndex: number, drilling: boolean): WorldState {
+  return withForce(saveUnit(world, forceId, formationId, unitIndex), forceId, (force) => ({
+    ...force,
+    formations: (force.formations ?? []).map((formation) => (formation.id === formationId
+      ? { ...formation, units: formation.units.map((unit) => (unit.index === unitIndex ? { ...unit, drilling } : unit)) }
+      : formation)),
+  }));
+}
+
 function saveUnit(world: WorldState, forceId: string, formationId: string, unitIndex: number): WorldState {
   const force = world.material.forces.find((candidate) => candidate.id === forceId);
   const formation = force === undefined ? undefined : formationOf(force, formationId);

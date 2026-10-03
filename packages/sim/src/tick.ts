@@ -75,6 +75,7 @@ import { reviewPowers } from "./polity-end";
 import { betweenHarvests, reviewTheLand } from "./economy";
 import { endObligationsOfEndedAgreements, keepTreaties } from "./treaties";
 import { keepPromises } from "./promises";
+import { answerRequests } from "./requests";
 import { settleDebts, termTheLoans } from "./debts";
 import { reviewUnrest } from "./unrest";
 import type { IdFactory } from "./ports";
@@ -1580,8 +1581,11 @@ export function runDeterministicTick(given: TickInput): TickResult {
   facts.push(...treaties.facts);
   const debts = settleDebts({ before: input.world, world: treaties.world });
   facts.push(...debts.facts);
+  // Requests answered when they fall due, by the engine where nobody else has (`requests.ts`).
+  const asked = answerRequests({ world: debts.world, toDay: input.toDay, offices: input.government?.offices ?? [], ids: input.ids, playerCharacterId: input.playerCharacterId ?? null });
+  facts.push(...asked.facts);
   // Promises between people, settled on their day by what was done (`promises.ts`).
-  const promised = keepPromises({ world: debts.world, toDay: input.toDay, playerCharacterId: input.playerCharacterId ?? null });
+  const promised = keepPromises({ world: asked.world, toDay: input.toDay, playerCharacterId: input.playerCharacterId ?? null });
   facts.push(...promised.facts);
   const unrest = reviewUnrest({ world: promised.world, toDay: input.toDay, months: land.months, ids: input.ids, burdens, government: input.government, playerCharacterId: input.playerCharacterId ?? null });
   facts.push(...unrest.facts);

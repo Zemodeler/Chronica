@@ -9,12 +9,13 @@ import {
   forceLever,
   formationOf,
   formationTemplateOf,
+  holderOf,
   nameThePost,
   nextRankUp,
   polityLever,
+  putInPost,
+  ranksIn,
   serveInArmy,
-  setPost,
-  sharingHisUnit,
   skillShare,
   stableHash,
   unitOfficerRank,
@@ -121,12 +122,16 @@ function drillAndHarden(world: WorldState, toDay: number, rules: WarfareRules | 
       const row = force.personnel.find((candidate) => candidate.formationId === formation.id);
       if (row === undefined) return formation;
       let training = formation.trainingBps;
-      if (drills || (formation.drilling === true && free)) {
+      // Units drilled on the word of a man in their own ranks lift the
+      // formation by their share of its men, and no more.
+      const unitShare = free && row.fit > 0 ? Math.min(1, formation.units.filter((unit) => unit.drilling === true).reduce((sum, unit) => sum + unit.fit, 0) / row.fit) : 0;
+      if (drills || (formation.drilling === true && free) || unitShare > 0) {
         const rate = 1 + forceLever(rules, { ...force, personnel: [row] }, "drill_rate");
         const ceiling = drillCeilingOf(rules, force, row);
         // A formation refitting drills twice as hard: it is learning a new way.
         const refitting = formation.refitUntilStep !== undefined && formation.refitUntilStep > toDay ? 2 : 1;
-        if (training < ceiling) training = Math.min(ceiling, training + days * DRILL_PER_DAY_BPS * hand * rate * refitting);
+        const share = drills || formation.drilling === true ? 1 : unitShare;
+        if (training < ceiling) training = Math.min(ceiling, training + days * DRILL_PER_DAY_BPS * hand * rate * refitting * share);
       } else if (training > FORGET_FLOOR_BPS) {
         training = Math.max(FORGET_FLOOR_BPS, training - days * FORGET_PER_DAY_BPS);
       }
@@ -272,7 +277,9 @@ function keepServiceRecords(world: WorldState, toDay: number, rules: WarfareRule
     }
   }
   next = clearDeadPosts(next);
-  next = fillThePlayersChain(next, toDay, playerId, facts);
+  next = fillEmptiedPosts(next, toDay, playerId, facts);
+  next = fillThePlayersChain(next, toDay, playerId);
+  next = reviewMerit(next, toDay, playerId, facts);
   return next;
 }
 
@@ -325,11 +332,11 @@ function clearDeadPosts(world: WorldState): WorldState {
 }
 
 /**
- * A post over the player emptied by death is filled the day it falls empty:
- * by the player, if he is the man next in line and has earned it; by one of
- * his comrades, if one has; or by a man brought in.
+ * The officer over the player's unit, where nobody is: a man brought in. A
+ * post a death emptied has already been offered to the men next in line
+ * (`fillEmptiedPosts`); only one nobody could step up to is filled from outside.
  */
-function fillThePlayersChain(world: WorldState, toDay: number, playerId: string | null, facts: FactProposalDraft[]): WorldState {
+function fillThePlayersChain(world: WorldState, toDay: number, playerId: string | null): WorldState {
   if (playerId === null) return world;
   const player = world.characters.find((character) => character.id === playerId && character.alive);
   const service = player?.service;
@@ -342,29 +349,110 @@ function fillThePlayersChain(world: WorldState, toDay: number, playerId: string 
   if (officer === undefined || officer.id === service.rankId) return world;
   const held = (force.posts ?? []).some((post) => post.formationId === formation.id && post.unitIndex === service.unitIndex && post.rankId === officer.id);
   if (held) return world;
-  // Was there ever an officer here? If not, this is not a vacancy -- name one.
-  const emptied = world.characters.some((character) => !character.alive && character.service?.formationId === formation.id && character.service.unitIndex === service.unitIndex && character.service.rankId === officer.id);
-  const nextUp = nextRankUp(establishment, formation.templateId, service.rankId);
-  if (emptied && nextUp?.id === officer.id && deservesPromotion(player, toDay)) {
-    let next = withService(world, playerId, (record) => ({ ...record, rankId: officer.id, promotedAtStep: toDay }));
-    next = setPost(next, force.id, { formationId: formation.id, unitIndex: service.unitIndex, rankId: officer.id, characterId: playerId });
-    facts.push(promotionFact(player, officer.label, force, toDay));
-    return next;
+  return nameThePost(world, force.id, formation.id, service.unitIndex, officer, toDay);
+}
+
+/** The ranks a man rises through, as opposed to those an election, a birth or the general's own choice gives. */
+const risenTo = (rank: { readonly level: string; readonly filledBy: string }): boolean =>
+  rank.level !== "ranks" && rank.level !== "army" && rank.filledBy !== "elected" && rank.filledBy !== "hereditary";
+const isUnitPost = (establishment: MilitaryEstablishment, rankId: string): boolean =>
+  ["unit", "sub"].includes(establishment.ranks.find((rank) => rank.id === rankId)?.level ?? "");
+
+/**
+ * The man whose next rank this post is, in the formation -- and in the unit,
+ * for a unit's own posts -- who has earned it most. The player only where he
+ * has earned it; never a man already promoted this day.
+ */
+function nextInLine(world: WorldState, force: Force, establishment: MilitaryEstablishment, formationId: string, templateId: string, unitIndex: number | null, rankId: string, toDay: number, playerId: string | null, passedOver: ReadonlySet<string> = new Set()): Character | undefined {
+  return force.memberCharacterIds
+    .map((id) => world.characters.find((character) => character.id === id && character.alive))
+    .filter((character): character is Character => character?.service !== undefined && character.service.forceId === force.id && character.service.formationId === formationId
+      && (unitIndex === null || character.service.unitIndex === unitIndex) && !passedOver.has(character.id)
+      && character.service.promotedAtStep !== toDay
+      && nextRankUp(establishment, templateId, character.service.rankId)?.id === rankId
+      // A post over a whole body -- a prefect of the allies -- is no step for a
+      // man still in the ranks, whatever the ladder says next: it is the
+      // general's to give (`appointersOf`).
+      && (isUnitPost(establishment, rankId) || establishment.ranks.find((rank) => rank.id === character.service!.rankId)?.level !== "ranks"))
+    .filter((character) => character.id !== playerId || deservesPromotion(character, toDay))
+    .sort((a, b) => meritOf(b) - meritOf(a) || campaignsOf(b) - campaignsOf(a) || a.id.localeCompare(b.id))[0];
+}
+
+/**
+ * A post emptied by death, in any unit, is offered to the man whose next rank
+ * it is. It used to be only the officer over the player's own unit, so a man
+ * could rise only by his centurion dying, and only into the centurion's place:
+ * a miles could never become anything (E15).
+ */
+function fillEmptiedPosts(world: WorldState, toDay: number, playerId: string | null, facts: FactProposalDraft[]): WorldState {
+  let next = world;
+  const player = world.characters.find((character) => character.id === playerId);
+  for (const fallen of world.characters) {
+    const service = fallen.service;
+    if (fallen.alive || service?.forceId == null || service.formationId === null) continue;
+    const force = next.material.forces.find((candidate) => candidate.id === service.forceId);
+    const establishment = force === undefined ? undefined : establishmentFor(next, force.polityId);
+    const formation = force === undefined ? undefined : formationOf(force, service.formationId);
+    const rank = establishment?.ranks.find((candidate) => candidate.id === service.rankId);
+    if (force === undefined || establishment === undefined || formation === undefined || rank === undefined || !risenTo(rank)) continue;
+    const unitIndex = rank.level === "unit" || rank.level === "sub" ? service.unitIndex : null;
+    if (holderOf(next, force, formation.id, unitIndex, rank.id) !== null) continue;
+    const heir = nextInLine(next, force, establishment, formation.id, formation.templateId, unitIndex, rank.id, toDay, playerId);
+    if (heir === undefined) continue;
+    next = putInPost(next, force.id, { formationId: formation.id, unitIndex, rankId: rank.id, characterId: heir.id }, toDay);
+    const overPlayer = player !== undefined && heir.id !== player.id && player.service?.forceId === force.id && player.service.formationId === formation.id
+      && player.service.unitIndex === unitIndex && rank.id === unitOfficerRank(establishment, formation.templateId)?.id;
+    facts.push(promotionFact(heir, rank.label, force, toDay, overPlayer ? player : undefined));
   }
-  if (emptied) {
-    const comrade = sharingHisUnit(world, force.id, formation.id, service.unitIndex)
-      .map((id) => world.characters.find((character) => character.id === id))
-      .filter((character): character is Character => character !== undefined && character.id !== playerId && character.alive && character.service !== undefined)
-      .filter((character) => nextRankUp(establishment, formation.templateId, character.service!.rankId)?.id === officer.id)
-      .sort((a, b) => campaignsOf(b) - campaignsOf(a))[0];
-    if (comrade !== undefined) {
-      let next = withService(world, comrade.id, (record) => ({ ...record, rankId: officer.id, promotedAtStep: toDay }));
-      next = setPost(next, force.id, { formationId: formation.id, unitIndex: service.unitIndex, rankId: officer.id, characterId: comrade.id });
-      facts.push(promotionFact(comrade, officer.label, force, toDay, player));
-      return next;
+  return next;
+}
+
+/** The day of the year the campaigning season opens, and the army reviews its men. */
+const REVIEW_DAY_OF_YEAR = 60;
+
+/**
+ * Once a campaigning season, an army looks over its named men and fills the
+ * posts in their units that stand empty, each with the man who has earned the
+ * step -- the player among them. Without it a post nobody died out of was
+ * never anybody's, and a man in the ranks with nobody dying above him stayed
+ * there for sixteen campaigns. One step a man a season.
+ */
+function reviewMerit(world: WorldState, toDay: number, playerId: string | null, facts: FactProposalDraft[]): WorldState {
+  let next = world;
+  const season = (day: number): number => Math.floor((day - REVIEW_DAY_OF_YEAR) / CAMPAIGN_DAYS);
+  for (const force of world.material.forces) {
+    const since = force.reckonedToStep;
+    if (since === undefined || season(toDay) <= season(since)) continue;
+    const establishment = establishmentFor(next, force.polityId);
+    if (establishment === undefined || (force.formations ?? []).length === 0) continue;
+    const promoted = new Set<string>();
+    const units = new Map<string, { formationId: string; templateId: string; unitIndex: number }>();
+    for (const memberId of force.memberCharacterIds) {
+      const service = next.characters.find((character) => character.id === memberId && character.alive)?.service;
+      const formation = service?.formationId == null ? undefined : formationOf(force, service.formationId);
+      if (service === undefined || formation === undefined || service.unitIndex === null) continue;
+      units.set(`${formation.id}:${service.unitIndex}`, { formationId: formation.id, templateId: formation.templateId, unitIndex: service.unitIndex });
+    }
+    for (const unit of units.values()) {
+      for (const rank of ranksIn(establishment, unit.templateId).filter((candidate) => risenTo(candidate) && (candidate.level === "unit" || candidate.level === "sub"))) {
+        const current = next.material.forces.find((candidate) => candidate.id === force.id)!;
+        if (holderOf(next, current, unit.formationId, unit.unitIndex, rank.id) !== null) continue;
+        const heir = nextInLine(next, current, establishment, unit.formationId, unit.templateId, unit.unitIndex, rank.id, toDay, playerId, promoted);
+        if (heir === undefined || (heir.id !== playerId && !deservesPromotion(heir, toDay))) continue;
+        promoted.add(heir.id);
+        next = putInPost(next, force.id, { formationId: unit.formationId, unitIndex: unit.unitIndex, rankId: rank.id, characterId: heir.id }, toDay);
+        facts.push(promotionFact(heir, rank.label, force, toDay));
+      }
     }
   }
-  return nameThePost(world, force.id, formation.id, service.unitIndex, officer, toDay);
+  return next;
+}
+
+/** What a man's service has earned him: campaigns, battles, decorations, less punishments; standing and a commander's air count a little. */
+export function meritOf(character: Character): number {
+  const service = character.service;
+  if (service === undefined) return 0;
+  return Math.min(4, campaignsOf(character)) * 8 + Math.min(5, service.battles) * 6 + service.decorations.length * 20 - service.punishments.length * 25 + character.prestigeBps / 400 + aptitude(character, "authority") / 5;
 }
 
 /**
@@ -372,12 +460,10 @@ function fillThePlayersChain(world: WorldState, toDay: number, playerId: string 
  * and decorations count; a punishment counts against; standing counts a little.
  * Deterministic for the man and the day.
  */
-function deservesPromotion(character: Character, toDay: number): boolean {
-  const service = character.service;
-  if (service === undefined) return false;
-  const merit = Math.min(4, campaignsOf(character)) * 8 + Math.min(5, service.battles) * 6 + service.decorations.length * 20 - service.punishments.length * 25 + character.prestigeBps / 400 + aptitude(character, "authority") / 5;
+export function deservesPromotion(character: Character, toDay: number): boolean {
+  if (character.service === undefined) return false;
   const roll = stableHash([character.id, toDay, "promotion"]) % 100;
-  return roll < Math.max(10, Math.min(90, merit));
+  return roll < Math.max(10, Math.min(90, meritOf(character)));
 }
 
 function promotionFact(character: Character, rankLabel: string, force: Force, toDay: number, overPlayer?: Character): FactProposalDraft {

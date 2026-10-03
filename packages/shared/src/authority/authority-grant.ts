@@ -119,6 +119,7 @@ export const DOMAIN_POWER_BY_ACTION: Readonly<Record<string, AuthorityPower>> = 
   belief_set: "propose",
   force_engage: "command",
   force_membership_set: "command",
+  force_post_set: "appoint",
   polity_outlook_set: "propose",
   legitimacy_shift: "propose",
   province_material_shift: "propose",
