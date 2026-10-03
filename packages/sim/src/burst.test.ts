@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario, FIRST_PUNIC_IDS } from "@chronica/db";
-import { FactSchema, ScenarioDefinitionSchema, WorldStateSchema, factsKnownTo, factsVisibleTo, type Office, type ScenarioClock, type WorldState } from "@chronica/shared";
+import { FactSchema, ScenarioDefinitionSchema, WorldStateSchema, answerDueOf, factsKnownTo, factsVisibleTo, type Office, type ScenarioClock, type WorldState } from "@chronica/shared";
 import { DEFAULT_BUDGET, runSimulationBurst, type BurstInput, type WindowSnapshot } from "./burst";
 import { composeChronicle } from "./chronicle";
 import type { SimModelPort, SimOperation } from "./ports";
@@ -138,7 +138,11 @@ describe("a burst answering \"Raise two new legions\"", () => {
 
     const attempt = result.world.orderAttempts.find((candidate) => candidate.recipientRef.id === "quintus-fabius");
     expect(attempt).toBeDefined();
-    expect(attempt!.status).toBe("issued");
+    expect(attempt!.issuerRef).toEqual({ kind: "character", id: "marcus-atilius" });
+    // Still his to answer until the day it is owed by; past it, the engine
+    // has answered for him rather than leave it waiting (E14).
+    if (result.world.elapsedStep < answerDueOf(attempt!)) expect(attempt!.status).toBe("issued");
+    else expect(attempt!.status).not.toBe("issued");
   });
 
   it("carries the order's friction through to the record rather than swallowing it", async () => {

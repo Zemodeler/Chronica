@@ -53,7 +53,9 @@ import {
   ENDED_BY_WAR,
   crossingAdmitted,
   allOffices,
-  computeOpinion,
+  formationOf,
+  putInPost,
+  ranksIn,
   allTroopCategories,
   isPlotOpen,
   type Settlement,
@@ -152,6 +154,7 @@ import { budgetHolderOf, chargeVotedBudget, withinVotedBudget } from "../voted-b
 import { carryOutUnion, unionVerdict } from "../submission";
 import { namesShips, owesShipsTo, requisitionAlliedHulls } from "../socii-navales";
 import { sacrilegeOf, whoseToGive } from "./whose-to-give";
+import { askOf } from "./asking";
 import { endContract } from "../contracts";
 import { accountOf, normalizeRefs, peopleNamedButNeverMade } from "./normalize-refs";
 import { arrangementNetIncome, recruitSkillBiasIn } from "../standing-effects";
@@ -369,6 +372,8 @@ function scopeOf(delta: WorldDelta, world: WorldState, resolve: (ref: string) =>
       return { kind: "account", id: resolve(delta.paidFromAccountRef) ?? delta.paidFromAccountRef };
     case "force_membership_set":
       return { kind: "force", id: resolve(delta.forceRef) ?? delta.forceRef };
+    case "force_post_set":
+      return { kind: "force", id: resolve(delta.forceRef) ?? delta.forceRef };
     // An arrangement kept at somebody's expense is weighed like the money that
     // keeps it: a shrine a man endows from his purse is his to endow, and one
     // kept out of the treasury is spending the treasury. Before, the account
@@ -411,7 +416,7 @@ function scopeOf(delta: WorldDelta, world: WorldState, resolve: (ref: string) =>
  * that makes a relationship, and a legate who has refused you four times has
  * earned the -32 rather than been handed it.
  */
-function orderAnswerCauses(
+export function orderAnswerCauses(
   world: WorldState,
   decided: OrderAttempt,
   standing: OrderStanding,
@@ -563,6 +568,7 @@ const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   holding_create: "spend",
   holding_improve: "spend",
   force_membership_set: "command",
+  force_post_set: "appoint",
   trade_venture_open: "spend",
   trade_venture_close: "spend",
   storyline_open: "propose",
@@ -711,6 +717,12 @@ function actorIsAnswerableFor(delta: WorldDelta, scope: AuthorityScope, world: W
     return !world.material.politicalProcedures.some((procedure) =>
       procedure.subjectKind === "character" && procedure.subjectId === doomedId && procedure.outcome === "passed");
   }
+  // Writing down that a man exists -- the friend a letter is addressed to, the
+  // steward who keeps the farm -- seats nobody and commands nothing. Scoped to
+  // his power as an act of appointment, every letter to somebody the world had
+  // not yet named was recorded as "made X an officer of the government" (E12).
+  // Made with an office, it is a seat filled, and judged as one (`whoseToGive`).
+  if (delta.op === "character_create" && delta.officeLabel === null) return false;
   // A country coming apart is not an act of office. Scoped to the power it
   // breaks from -- which for a rising is usually the ruler's own -- it would
   // have recorded the ruler as personally insubordinate for a rebellion in his
@@ -1024,6 +1036,17 @@ function applyUngroupedDeltas(world: WorldState, deltas: readonly WorldDelta[], 
           rejected.push({ delta, written, reason: judged.forbidden, kind: "ignored", ofTheOrder });
           continue;
         }
+        // Done another way: put by the magistrate who agreed to, or made without the seat.
+        if (judged.instead !== undefined) delta = judged.instead;
+        if (judged.fact !== undefined) emitFact(judged.fact);
+        // A favour asked of a man is put to him, and he answers it (`requests.ts`).
+        if (judged.request !== undefined) {
+          const asked = askOf(current, context.offices, context.ids, { issuerId: context.actorRef.id, ...judged.request });
+          current = asked.world;
+          applied.push({ delta, written, authority, ofTheOrder, changed: true });
+          factProposals.push(...emitted, asked.fact);
+          continue;
+        }
       }
       // Carried by the chamber whose question it was: the vote is the authority.
       if (context.sanctionedDeltas?.has(written) === true && !authority.authorized) {
@@ -1044,10 +1067,11 @@ function applyUngroupedDeltas(world: WorldState, deltas: readonly WorldDelta[], 
           // them, with him moving it. The act waits on the vote and is done
           // the day it carries (`advanceStages`, `sanctionedDeltas`).
           const motion = ofTheOrder && context.actorRef.kind === "character" ? layBeforeTheChamber(delta, current, context.actorRef.id, resolve) : null;
+          let declined = "";
           if (motion !== null) {
-            // Put by the magistrate who moves it, where the actor may not put a question himself.
-            const mover = motion.op === "political_procedure_open" ? motion.sponsorCharacterRef : context.actorRef.id;
-            const moved = applyUngroupedDeltas(current, [motion], { ...context, atomicGroups: undefined, assignedIds, orderDeltas: new Set([motion]), actorRef: { kind: "character", id: mover } });
+            // Put by him, or by a magistrate he asks who agrees to put it (`whoseToGive`).
+            const moved = applyUngroupedDeltas(current, [motion], { ...context, atomicGroups: undefined, assignedIds, orderDeltas: new Set([motion]) });
+            declined = moved.rejected.length > 0 ? ` ${moved.rejected[0]!.reason}` : "";
             if (moved.applied.length > 0) {
               current = moved.world;
               for (const [handle, id] of moved.assignedIds) assignedIds.set(handle, id);
@@ -1058,7 +1082,7 @@ function applyUngroupedDeltas(world: WorldState, deltas: readonly WorldDelta[], 
               continue;
             }
           }
-          rejected.push({ delta, written, reason: unheard, kind: "ignored", ofTheOrder });
+          rejected.push({ delta, written, reason: `${unheard}${declined}`, kind: "ignored", ofTheOrder });
           continue;
         }
         if (willing !== null) {
@@ -1135,8 +1159,11 @@ function applyUngroupedDeltas(world: WorldState, deltas: readonly WorldDelta[], 
     invariants = new Set(afterInvariants);
 
     // An answer to an order already answered changes nothing, and is no part
-    // of anybody's order (`order_attempt_decide`).
-    const changed = (delta.op !== "diplomatic_message_send" || current.diplomacy.length > previous.diplomacy.length)
+    // of anybody's order (`order_attempt_decide`). A man "made" who turned out
+    // to be somebody already living is nobody new: nothing changed, and nothing
+    // is reported or answered for (E12).
+    const changed = (delta.op === "diplomatic_message_send" ? current.diplomacy.length > previous.diplomacy.length
+      : delta.op !== "character_create" || current.characters.length > previous.characters.length)
       && (delta.op !== "order_attempt_decide" || current.orderAttempts !== previous.orderAttempts);
     applied.push({ delta, written, authority, ofTheOrder, changed, madeMoney: moneyMadeBetween(previous, current) });
     if (changed && assumed.length > 0) assumptions.push({ delta, assumed, ofTheOrder });
@@ -1339,24 +1366,20 @@ export function layBeforeTheChamber(delta: WorldDelta, world: WorldState, actorI
   const chamber = chamberThatDecides(world, ours, "war");
   if (chamber === undefined || other === undefined) return null;
   const otherName = world.map.polities.find((polity) => polity.id === other)?.name ?? other;
-  // Only a magistrate who may convene the chamber puts a question to it: a
-  // private man asks the friendliest of them to put it for him.
-  const conveners = chamber.convenedByOfficeIds ?? [];
-  const holds = (characterId: string): boolean => world.material.officeSeats.some((seat) => seat.holderCharacterId === characterId && seat.status === "held" && conveners.includes(seat.officeId));
-  const mover = conveners.length === 0 || holds(actorId) ? actor : world.characters
-    .filter((character) => character.alive && character.id !== actorId && holds(character.id))
-    .sort((a, b) => computeOpinion(b, actorId) - computeOpinion(a, actorId) || b.prestigeBps - a.prestigeBps || a.id.localeCompare(b.id))[0];
-  if (mover === undefined) return null;
+  // Only a magistrate who may convene the chamber puts a question to it. A
+  // private man's motion is his own; who will put it for him is asked when it
+  // is put (`whoseToGive`, `askAConvener`), rather than the friendliest
+  // consul's name written on it unasked (L5).
   const war = delta.op === "agreement_open" && delta.kind === "war";
   return {
     op: "political_procedure_open",
     localId: `motion_${"localId" in delta ? delta.localId : delta.op}`.slice(0, 60),
     type: war || delta.op === "agreement_close" ? "council_deliberation" : "treaty_ratification",
     institutionRef: chamber.id,
-    sponsorCharacterRef: mover.id,
+    sponsorCharacterRef: actorId,
     subjectKind: "polity",
     subjectRef: other,
-    label: `Motion of ${actor.name}${mover.id === actorId ? "" : `, put by ${mover.name}`}: ${what} ${otherName}`.slice(0, 200),
+    label: `Motion of ${actor.name}: ${what} ${otherName}`.slice(0, 200),
     resolutionMechanism: "vote",
     deadlineInDays: 10,
     visibility: "public",
@@ -3918,6 +3941,43 @@ function applyOne(
           ? { ...character, disqualifyingStatuses: [...character.disqualifyingStatuses, "deserter"].slice(0, 8) }
           : character)),
       };
+    }
+
+    // Who may give the post was judged before this (`whoseToGive`); here the
+    // man is put in it, in his own formation and unit unless another is named.
+    case "force_post_set": {
+      const forceId = required(delta.forceRef, "The army");
+      const force = world.material.forces.find((candidate) => candidate.id === forceId);
+      if (force === undefined) reject(`No force "${forceId}" exists.`, "reference");
+      const characterId = required(delta.characterRef, "The man");
+      const person = world.characters.find((character) => character.id === characterId);
+      if (person === undefined) reject(`No character "${characterId}" exists to take a post.${nearestTo(characterId)}`, "reference");
+      if (!person.alive) reject(`${person.name} is dead.`);
+      const establishment = world.establishments.find((candidate) => candidate.polityId === force.polityId);
+      const own = person.service?.forceId === force.id ? person.service : undefined;
+      const formationId = delta.formationRef === undefined ? own?.formationId ?? null : required(delta.formationRef, "The formation");
+      const formation = formationId === null ? (force.formations ?? [])[0] : formationOf(force, formationId);
+      if (establishment === undefined || formation === undefined) reject(`${force.name} has no formations to hold posts in.`, "reference");
+      const rank = ranksIn(establishment, formation.templateId).find((candidate) => candidate.id === delta.rankId);
+      if (rank === undefined) {
+        reject(`No rank "${delta.rankId}" in ${formation.bodyLabel}: ${ranksIn(establishment, formation.templateId).map((candidate) => candidate.id).join(", ")}.`, "reference");
+      }
+      if (rank.level === "ranks") reject(`${rank.label} is no post: a man is put back in the ranks by giving his post to another.`);
+      if (rank.officeIds !== undefined) reject(`${rank.label} is held by whoever holds the office, not given in the army.`);
+      const overUnit = rank.level === "unit" || rank.level === "sub";
+      const unitIndex = !overUnit ? null : delta.unitIndex !== undefined ? Math.trunc(delta.unitIndex) : own?.formationId === formation.id ? own.unitIndex : null;
+      if (overUnit && (unitIndex === null || unitIndex < 0 || unitIndex > 500)) reject(`Say which ${formation.bodyLabel} unit ${person.name} is to be ${rank.label} of.`);
+      emitFact({
+        localId: `posted_${characterId}_${rank.id}`.slice(0, 60),
+        kind: "soldier_promoted",
+        summary: `${person.name} is made ${rank.label} in ${force.name}.`,
+        affectedRefs: [{ kind: "character", id: characterId }, { kind: "force", id: force.id }],
+        visibility: "polity",
+        discoveryState: "polity",
+        knowableInDays: 0,
+        significance: 45,
+      });
+      return putInPost(world, force.id, { formationId: formation.id, unitIndex, rankId: rank.id, characterId }, atStep);
     }
 
     case "trade_venture_open": {

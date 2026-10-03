@@ -50,6 +50,13 @@ const act = (world: WorldState, actor: string, raw: Record<string, unknown>) => 
   });
 };
 const army = (world: WorldState) => world.material.forces.find((force) => force.id === "roman-field-army")!;
+/** What one man thinks of another, written into his relations. */
+const regard = (world: WorldState, holderId: string, ofId: string, score: number): WorldState => ({
+  ...world,
+  characters: world.characters.map((character) => (character.id === holderId
+    ? { ...character, relations: [...character.relations.filter((relation) => relation.subjectCharacterId !== ofId), { subjectCharacterId: ofId, causes: [{ id: `regard-${holderId}-${ofId}`, label: "Known of old.", score, occurredAtStep: 0, decayPerYearBps: 0, encounterMemoryId: null }] }] }
+    : character)),
+});
 const marchOrder = (world: WorldState) => ({ op: "force_modify", forceRef: "roman-field-army", locationId: adjacentTo(world, army(world).locationId)[0]!.provinceId, reason: "March." });
 
 describe("declaring a Roman below the consuls", () => {
@@ -207,14 +214,32 @@ describe("Rome's constitution as it stood in 270", () => {
       label: "A law on the price of grain", resolutionMechanism: "vote", deadlineInDays: 20, reason: "Bread.",
     });
     const senator = declare("Roman senator", "Patrician", 45);
-    const refused = act(senator, PLAYER, motion("roman-senate", PLAYER));
+    // A senator's motion is put by a magistrate he asks, who answers by what
+    // he thinks of him: none of them will, and he is told who would not.
+    const conveners = senator.material.officeSeats
+      .filter((seat) => seat.status === "held" && ["roman-consul", "roman-praetor", "roman-dictator", "roman-tribune"].includes(seat.officeId))
+      .map((seat) => seat.holderCharacterId!);
+    const shunned = conveners.reduce((world, id) => regard(world, id, PLAYER, -80), senator);
+    const refused = act(shunned, PLAYER, motion("roman-senate", PLAYER));
     expect(refused.applied).toHaveLength(0);
-    expect(refused.rejected[0]!.reason).toMatch(/Only a Roman consul.*may put a question to the Senate/);
+    expect(refused.rejected[0]!.reason).toMatch(/Nobody who may put a question to the Senate would put "A law on the price of grain" for Aulus Probus: .* would not \(he has no love for Aulus Probus\)/);
+    // A consul who thinks the world of him puts it in his own name, and says he agreed to.
+    const put = act(regard(shunned, "gaius-genucius", PLAYER, 80), PLAYER, motion("roman-senate", PLAYER));
+    expect(put.applied).toHaveLength(1);
+    expect(put.world.material.politicalProcedures.find((procedure) => procedure.label === "A law on the price of grain")?.sponsorCharacterId).toBe("gaius-genucius");
+    expect(put.factProposals.find((fact) => fact.kind === "motion_put_for_another")?.summary).toMatch(/Gaius Genucius .* agreed to put Aulus Probus's motion/);
+    // Named as its sponsor, a magistrate is still asked, not assumed (L5).
+    expect(act(shunned, PLAYER, motion("roman-senate", "gaius-genucius")).applied).toHaveLength(0);
     expect(act(opening(), "gaius-genucius", motion("roman-senate", "gaius-genucius")).applied).toHaveLength(1);
     // The plebs' council is the tribunes' to call, and nobody else's.
     const tribune = declare("Tribune of the plebs", "Plebeian", 30);
     expect(act(tribune, PLAYER, motion("roman-concilium-plebis", PLAYER)).applied).toHaveLength(1);
-    expect(act(opening(), "gaius-genucius", motion("roman-concilium-plebis", "gaius-genucius")).applied).toHaveLength(0);
+    // A consul must ask a tribune to put it there, and tribunes who mistrust him will not.
+    const tribunes = opening().material.officeSeats.filter((seat) => seat.status === "held" && seat.officeId === "roman-tribune").map((seat) => seat.holderCharacterId!);
+    const wary = tribunes.reduce((world, id) => regard(world, id, "gaius-genucius", -60), opening());
+    const unput = act(wary, "gaius-genucius", motion("roman-concilium-plebis", "gaius-genucius"));
+    expect(unput.applied).toHaveLength(0);
+    expect(unput.rejected[0]!.reason).toMatch(/Nobody who may put a question to the .* would put/);
     // Standing for office is no motion: any man may be put forward.
     const stands = act(senator, PLAYER, { ...motion("roman-comitia-centuriata", PLAYER), type: "nomination", subjectKind: "character", subjectRef: PLAYER, label: "Aulus Probus stands for Roman praetor" });
     expect(stands.applied).toHaveLength(1);

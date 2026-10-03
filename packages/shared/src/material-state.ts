@@ -920,6 +920,8 @@ export const SavedUnitSchema = z.object({
   fit: z.number().int().nonnegative(),
   /** What it has come to be called, where it has earned a name. */
   name: z.string().trim().min(1).max(80).optional(),
+  /** Drilled on the word of a man in its own ranks, whatever its formation does. */
+  drilling: z.boolean().optional(),
 }).strict();
 export type SavedUnit = z.infer<typeof SavedUnitSchema>;
 

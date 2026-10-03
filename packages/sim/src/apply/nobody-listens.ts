@@ -163,6 +163,14 @@ export function nobodyListens(
     case "force_raid":
     case "force_reinforce":
       return ignoredBy(delta.forceRef);
+    // A post is given by whoever gives it (`appointersOf`); named by anybody
+    // else, the man is what he was before.
+    case "force_post_set": {
+      const force = world.material.forces.find((candidate) => candidate.id === (resolve(delta.forceRef) ?? delta.forceRef));
+      const rank = world.establishments.find((establishment) => establishment.polityId === force?.polityId)?.ranks.find((candidate) => candidate.id === delta.rankId);
+      const named = name(resolve(delta.characterRef) ?? delta.characterRef);
+      return `${who} named ${named} ${rank?.label ?? "an officer"}${force === undefined ? "" : ` in ${force.name}`}. That post is not his to give, and ${named} went on serving as he had.`;
+    }
     // An army out of nothing needs a magistrate's word or a paymaster. A man
     // who pays from his own purse has a private band; a man who only promises
     // has an audience.
@@ -249,6 +257,9 @@ const COMMANDING_FIELDS = [
   "locationId", "positionId", "commanderCharacterRef", "controllerCharacterRef", "polityId", "name", "payObligationRef", "authorizedStrengthDelta", "outlaw",
   // A new way of fighting is taught by the men's own officers, on their general's word.
   "doctrine",
+  // And so is drill: a man with no post and no command set the whole army
+  // drilling (M4). His own unit is his own business (`isOwnBusiness`).
+  "drilling",
 ] as const;
 
 /** Below this, a province's people are restless enough to follow whoever raises a banner. */
