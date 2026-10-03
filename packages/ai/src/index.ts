@@ -20,9 +20,14 @@ export {
   getLocalAiProviderConfiguration,
   getSelectedLocalAiProvider,
   getSelectedLocalAiModel,
+  getSelectedLocalAiEffort,
+  isLocalAiEffort,
+  LOCAL_AI_EFFORTS,
+  DEFAULT_LOCAL_AI_EFFORT,
   selectLocalAiConfiguration,
   validateLocalAiConfiguration,
   type LocalAiProvider,
+  type LocalAiEffort,
   type LocalAiProviderConfiguration,
 } from "./local-key-selection";
 
@@ -34,8 +39,8 @@ import { createMockAdapter, type MockToolStep } from "./adapters/mock";
 import { getSelectedLocalAiProvider } from "./local-key-selection";
 import path from "node:path";
 import { createHandAdapter } from "./adapters/hand";
-import { answerWithHandCodex, handCodexModel } from "./adapters/hand-codex";
-export { prepareHandCodex, answerWithHandCodex, handCodexModel } from "./adapters/hand-codex";
+import { answerWithHandCodex, handCodexCacheNamespace, handCodexModel } from "./adapters/hand-codex";
+export { prepareHandCodex, answerWithHandCodex, handCodexModel, handCodexEffort, handCodexCacheNamespace, readNearlyJson } from "./adapters/hand-codex";
 
 interface MockScriptFile {
   /** Returned verbatim by the plain (non-tool) `call`, e.g. for character declaration. */
@@ -89,12 +94,13 @@ export function createAiAdapter(): AiAdapter {
     }
     const dir = path.resolve(process.env.CHRONICA_HAND_DIR ?? "eval-out/hand");
     const timeout = Number(process.env.CHRONICA_HAND_TIMEOUT_MS ?? "");
+    // The model is the adapter's for its life; the effort is read per call, so a change on the account screen takes effect at the next call.
     const model = handCodexModel();
     return createHandAdapter({
       dir,
       ...(manualHand ? {} : {
-        respond: (system, asked, requestKey) => answerWithHandCodex(system, asked, requestKey, model),
-        cacheNamespace: `codex-v1:${model}:high`,
+        respond: (system, asked, requestKey, operation) => answerWithHandCodex(system, asked, requestKey, { operation, model }),
+        cacheNamespace: (operation) => handCodexCacheNamespace(operation, model),
       }),
       ...(Number.isFinite(timeout) && timeout > 0 ? { timeoutMs: timeout } : {}),
       onWaiting: (promptPath) => console.log(`[ai] waiting for an answer to ${promptPath}`),
