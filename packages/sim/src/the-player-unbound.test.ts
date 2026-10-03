@@ -88,20 +88,24 @@ describe("standing is earned", () => {
 });
 
 describe("kin between people who already exist", () => {
+  // It married Ogulnius to Curius, two men, which the marriage guard now
+  // refuses (L10): the bride is Claudia, Caecus's daughter, whose father is
+  // dead and whose brother is no bar.
   it("marries two of them, and divorces them again", () => {
+    const claudia = world().characters.find((character) => character.name === "Claudia")!.id;
     const married = act("manius-curius", [{
-      op: "family_tie_set", characterRef: "quintus-ogulnius", relatedCharacterRef: "manius-curius", relation: "spouse_or_partner", change: "form", reason: "An alliance of houses.",
+      op: "family_tie_set", characterRef: "quintus-ogulnius", relatedCharacterRef: claudia, relation: "spouse_or_partner", change: "form", reason: "An alliance of houses.",
     }]);
-    const tie = married.world.familyLinks.find((link) => link.endedAtStep === null && link.kind === "spouse_or_partner");
+    const tie = married.world.familyLinks.find((link) => link.endedAtStep === null && link.kind === "spouse_or_partner" && link.relatedCharacterId === claudia);
     expect(tie).toBeDefined();
     // No breach: marrying is nobody's office.
     expect(married.breaches).toEqual([]);
 
     // Stated from the other side, it is the same tie.
     const divorced = act("manius-curius", [{
-      op: "family_tie_set", characterRef: "manius-curius", relatedCharacterRef: "quintus-ogulnius", relation: "spouse_or_partner", change: "end", reason: "The alliance is over.",
+      op: "family_tie_set", characterRef: claudia, relatedCharacterRef: "quintus-ogulnius", relation: "spouse_or_partner", change: "end", reason: "The alliance is over.",
     }], married.world);
-    expect(divorced.world.familyLinks.filter((link) => link.endedAtStep === null && link.kind === "spouse_or_partner")).toHaveLength(0);
+    expect(divorced.world.familyLinks.filter((link) => link.endedAtStep === null && link.kind === "spouse_or_partner" && (link.characterId === claudia || link.relatedCharacterId === claudia))).toHaveLength(0);
   });
 
   it("adopts a grown man as a son, whom the family graph then reads as one", () => {
@@ -157,9 +161,11 @@ describe("paying with what there is", () => {
 
     expect(result.rejected).toEqual([]);
     const loan = result.world.material.loans.find((candidate) => candidate.borrowerAccountId === "curius-purse")!;
-    expect(loan.outstanding).toBe(price - inHand);
+    // All but a tenth he keeps back goes down (E19: it was the whole purse).
+    const kept = Math.ceil(inHand * 0.1);
+    expect(loan.outstanding).toBe(price - (inHand - kept));
     expect(loan.collateralHoldingId).toBe(result.assignedIds.get("farm"));
-    expect(balance(result.world, "curius-purse")).toBe(0);
+    expect(balance(result.world, "curius-purse")).toBe(kept);
     expect(result.factProposals.some((fact) => fact.kind === "bought_on_credit")).toBe(true);
   });
 

@@ -4,7 +4,7 @@ import { PUNIC_DOCTRINES, PUNIC_ESTABLISHMENTS, SEASONED_ARMIES } from "./punic-
 import { POLITY_META, PUNIC_WARS_GRAPH_EDGES, PUNIC_WARS_GRAPH_POLITIES, PUNIC_WARS_GRAPH_PROVINCES, PUNIC_WARS_GRAPH_SETTLEMENTS } from "./punic-wars-map-graph";
 import { foundingPeople, knownRulerId, romanSenators, withFinerSkills } from "./punic-wars-rulers";
 import { WORLD_PRESSURES, withWorldPolitics } from "./punic-wars-politics";
-import { rosterPeople } from "./punic-wars-rosters";
+import { houseFamilies, rosterPeople } from "./punic-wars-rosters";
 
 /**
  * The Mediterranean and the Near East of 270 BCE, on the generated map: 6,384 provinces, 164 powers
@@ -541,9 +541,12 @@ function withFoundingPeople<T extends {
   // Everybody else in the chairs of the five powers written out by hand (v37).
   const seatedSoFar = [...raw.material.officeSeats, ...founding.officeSeats, ...senate.officeSeats] as { officeId: string; seatIndex: number }[];
   const rosters = rosterPeople(definition.government.offices, seatedSoFar);
+  // And the great houses' wives, daughters and sons (play-test L10).
+  const families = houseFamilies([...raw.characters, ...founding.characters, ...senate.characters, ...rosters.characters] as Record<string, unknown>[]);
   return {
     ...raw,
-    characters: [...raw.characters, ...founding.characters, ...senate.characters, ...rosters.characters]
+    familyLinks: [...((raw as { familyLinks?: readonly unknown[] }).familyLinks ?? []), ...families.familyLinks],
+    characters: [...raw.characters, ...founding.characters, ...senate.characters, ...rosters.characters, ...families.characters]
       .map((character) => withFinerSkills(character as { id: string; name: string; skills: Record<string, unknown> }))
       // Every Roman is a patrician or a plebeian, by his gens.
       .map((character) => ((character as { polityId?: string }).polityId === "rome" && (character as { ordo?: string }).ordo === undefined
@@ -551,7 +554,7 @@ function withFoundingPeople<T extends {
         : character)),
     material: {
       ...raw.material,
-      accounts: [...raw.material.accounts, ...founding.accounts, ...senate.accounts, ...rosters.accounts],
+      accounts: [...raw.material.accounts, ...founding.accounts, ...senate.accounts, ...rosters.accounts, ...families.accounts],
       officeSeats: [...raw.material.officeSeats, ...founding.officeSeats, ...senate.officeSeats, ...rosters.officeSeats],
     },
   };

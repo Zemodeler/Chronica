@@ -32,7 +32,24 @@ export type Validation =
   | { readonly ok: true; readonly draft: MechanicDraft; readonly warrants: readonly DebitWarrant[]; readonly dropped: readonly string[] }
   | { readonly ok: false; readonly reason: string };
 
-export function validateMechanic(draft: MechanicDraft, world: WorldState, refs: ReadableRefs, offices: readonly Office[]): Validation {
+/**
+ * Whether the order named whoever a payment out of the owner's own purse goes
+ * to: his name, a word of it, or the account itself. A rule that pays a third
+ * party every month from a man's purse is a gift he never said he would make.
+ */
+function namesThePayee(orderText: string | null, accountId: string, refs: ReadableRefs, world: WorldState): boolean {
+  if (orderText === null || orderText.trim().length === 0) return false;
+  const text = orderText.toLowerCase();
+  if (text.includes(accountId.toLowerCase())) return true;
+  const owner = world.material.accounts.find((account) => account.id === accountId)?.owner;
+  const name = owner === undefined ? undefined
+    : owner.kind === "character" ? world.characters.find((character) => character.id === owner.id)?.name
+      : owner.kind === "polity" ? world.map.polities.find((polity) => polity.id === owner.id)?.name
+        : refs.accounts.find((account) => account.id === accountId)?.label;
+  return name !== undefined && name.toLowerCase().split(/[^a-z]+/).some((word) => word.length >= 4 && !["the", "of", "and"].includes(word) && text.includes(word));
+}
+
+export function validateMechanic(draft: MechanicDraft, world: WorldState, refs: ReadableRefs, offices: readonly Office[], orderText: string | null = null): Validation {
   const accountIds = new Set(refs.accounts.map((account) => account.id));
   const provinceIds = new Set(refs.provinces.map((province) => province.id));
   const polityIds = new Set(refs.polities.map((polity) => polity.id));
@@ -125,6 +142,13 @@ export function validateMechanic(draft: MechanicDraft, world: WorldState, refs: 
         dropped.push(`an order to ${effect.forceId}: ${refs.owner.id} does not command it`);
         continue;
       }
+    }
+    // Out of his own purse into somebody else's, month after month: only if
+    // the order named who is to be paid (play-test E20).
+    if (effect.op === "money_transfer" && effect.fromAccountId === refs.ownerAccountId && effect.toAccountId !== null && !ownedAccounts.has(effect.toAccountId)
+      && !namesThePayee(orderText, effect.toAccountId, refs, world)) {
+      dropped.push(`a payment from ${effect.fromAccountId} to ${effect.toAccountId}: the order named nobody to be paid`);
+      continue;
     }
     if (effect.op === "money_transfer" && !ownedAccounts.has(effect.fromAccountId)) {
       const warrant = warrantFor(effect.fromAccountId, world, refs, offices);

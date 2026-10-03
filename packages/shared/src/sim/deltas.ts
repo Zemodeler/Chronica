@@ -654,6 +654,12 @@ const SocialEventsSchema = z.object({
               /** How much of it fades a year. Zero is permanent, which is the point of the field. */
               decayPerYearBps: z.number().int().min(0).max(10_000).default(2_000),
               dimensions: RelationDimensionScoresSchema.optional(),
+              /**
+               * The standing tie it makes, read from the subject's side. A man
+               * putting himself under a patron is "patron" from him to the
+               * patron, who takes him or not by rule (`sim/money.ts`, L8).
+               */
+              tie: z.enum(["patron", "client", "friend", "rival", "ally", "enemy"]).optional().describe("A tie it makes, the target being the subject's: patron (asks him to be his patron; he answers by rule), client, friend, rival, ally, enemy."),
             }).strict(),
           )
           .max(8)
@@ -1132,6 +1138,11 @@ const LoanOpenSchema = z.object({
   /** What was agreed, in words. Often the politically expensive part. */
   terms: z.string().trim().min(1).max(300),
   collateralHoldingRef: MaybeRefSchema.default(null),
+  /**
+   * A standing offer being taken (`sim/money.ts`): the engine reads the
+   * lender, sum, rate and term from the offer while it still stands.
+   */
+  offerId: z.string().trim().min(1).max(120).optional().describe("Taking a loan offer listed under TREASURY: its id. The offer's lender and terms apply."),
   reason: ReasonSchema,
 }).strict();
 

@@ -76,6 +76,8 @@ import {
   seatCharacterInOffice,
   vacateOfficesOf,
   reciprocalFamilyLinkKind,
+  marriageBar,
+  familyLinksOf,
   stableHash,
   fitStrengthOf,
   isNavalForce,
@@ -182,6 +184,8 @@ import { journeysOf, onTheWayTo, settledCourse, shoreItMakesFor, turnOnTheRoad, 
 import { WORLD_THREAD_CAP, makeRoomForTheOrder, worldThreadsFull } from "../storyline-cap";
 import { admitCandidacy } from "../candidacy";
 import { benefactionPayer, giveToThePeople } from "./benefaction";
+import { voyageDays } from "../cargoes";
+import { monthlyOutgoingsOf, standingLoanOffer } from "../money";
 
 /**
  * Applies a validated batch of deltas to the world.
@@ -2001,7 +2005,10 @@ function applyOne(
       // an estate's engine-set yield could be rewritten to anything.
       const privatelyHeld = (accountId: string): boolean =>
         world.material.accounts.find((account) => account.id === accountId)?.owner.kind !== "polity";
-      const FROM_SOMETHING = "A person's or an army's income comes from something that yields it -- an estate (holding_create, holding_improve), an office's pay, a venture standing in the world (generic_entity_create with an income effect) -- or is paid to him by somebody (obligation_upsert naming him as recipient).";
+      // Trade first, and as its own act: pointed at an arrangement, the
+      // repair wrote a cargo the model had already opened as a venture into a
+      // second, priced business, and the merchant paid for it twice (E19).
+      const FROM_SOMETHING = "A person's or an army's income comes from something that yields it -- trade or a cargo (trade_venture_open; one already opened in this answer needs nothing more), an estate (holding_create, holding_improve), an office's pay -- or is paid to him by somebody (obligation_upsert naming him as recipient).";
       if (privatelyHeld(beneficiaryId)) reject(`"${delta.label}" would pay a figure into ${beneficiaryId}, which is not a government's treasury. ${FROM_SOMETHING}`, "reference");
       const existingId = delta.incomeSourceRef === null ? null : required(delta.incomeSourceRef, "The income source");
       const existing = existingId === null ? undefined : world.material.incomeSources.find((source) => source.id === existingId);
@@ -4030,6 +4037,19 @@ function applyOne(
       // Goods can be had on credit from the merchants who sell them, against
       // nothing but the man's name.
       const funded = payOrBorrow(world, payerId, terms.price, delta.title, null, context, emitFact);
+      // Between two ports it is a cargo: bought now, sold when it comes in
+      // (`cargoes.ts`), not a trickle every month for ever (play-test L9).
+      // A single cargo is done when it is sold; a regular trade sails again.
+      const bySea = from.id !== to.id && hasPort(world, from.id) && hasPort(world, to.id);
+      const cargo = bySea ? { cost: terms.price, sailedAtStep: atStep, arrivesAtStep: atStep + voyageDays(world, from.id, to.id), voyages: 0, rollsOver: delta.band !== "slight" } : undefined;
+      if (cargo !== undefined) {
+        emitFact({
+          localId: `cargo_${ventureId}`.slice(0, 60), kind: "cargo_sailed",
+          summary: `${delta.title}: a cargo worth ${cargo.cost} sails from ${from.name} for ${to.name}, and should come in within ${cargo.arrivesAtStep - atStep} days.`,
+          affectedRefs: [{ kind: "character", id: ownerId }, { kind: "province", id: from.id }, { kind: "province", id: to.id }],
+          visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 20,
+        });
+      }
       return {
         ...funded,
         material: {
@@ -4046,7 +4066,8 @@ function applyOne(
             nextDueStep: atStep + 30,
             collectionRateBps: 10_000,
             counterpartyPolityId,
-            active: true,
+            // A cargo pays when it is sold, not by the month.
+            active: cargo === undefined,
           }],
           ventures: [...funded.material.ventures, {
             id: ventureId,
@@ -4059,6 +4080,7 @@ function applyOne(
             openedAtStep: atStep,
             interruptedBy: null,
             status: "running",
+            ...(cargo === undefined ? {} : { cargo }),
           }],
         },
       };
@@ -4069,6 +4091,14 @@ function applyOne(
       const venture = world.material.ventures.find((candidate) => candidate.id === ventureId);
       if (venture === undefined) reject(`No venture "${ventureId}" exists to wind up.`, "reference");
       if (venture.status === "closed") return world;
+      // A cargo already at sea still comes in and is sold; the trade is wound
+      // up after it rather than with the ship lost to nobody.
+      if (venture.cargo !== undefined && venture.cargo.arrivesAtStep > atStep) {
+        return {
+          ...world,
+          material: { ...world.material, ventures: world.material.ventures.map((candidate) => (candidate.id === ventureId ? { ...candidate, cargo: { ...venture.cargo!, rollsOver: false } } : candidate)) },
+        };
+      }
       return {
         ...world,
         material: {
@@ -4172,12 +4202,24 @@ function applyOne(
       const borrowerId = required(delta.borrowerAccountRef, "The borrowing account");
       const borrower = world.material.accounts.find((account) => account.id === borrowerId);
       if (borrower === undefined) reject(`No account "${borrowerId}" exists to receive the money.`, "reference");
+      // A standing offer taken by its id (`money.ts`, play-test L8): the
+      // lender, the sum, the rate and the term are the offer's, whatever the
+      // act wrote; an offer that no longer stands lends nothing.
+      const offer = delta.offerId === undefined ? undefined : standingLoanOffer(world, delta.offerId, borrowerId);
+      if (delta.offerId !== undefined && offer === undefined) {
+        reject(`Nobody now offers the loan "${delta.offerId}": an offer lapses once the purse is no longer short, or the lender is no longer willing or able.`);
+      }
+      const taken = offer === undefined ? delta : {
+        ...delta, lenderKind: "character" as const, lenderRef: offer.lenderId, principal: delta.principal > 0 ? Math.min(delta.principal, offer.amount) : offer.amount,
+        interestBps: offer.interestBps, cadenceDays: 30, collateralHoldingRef: offer.collateralHoldingId ?? delta.collateralHoldingRef,
+      };
+      const periods = offer?.periods ?? LOAN_TERM_PERIODS;
 
-      const lenderId = delta.lenderRef === null ? null : required(delta.lenderRef, "The lender");
-      if (delta.lenderKind !== "foreign" && lenderId === null) {
+      const lenderId = taken.lenderRef === null ? null : required(taken.lenderRef, "The lender");
+      if (taken.lenderKind !== "foreign" && lenderId === null) {
         reject("A loan from someone in this world has to say who they are.", "reference");
       }
-      const collateralId = delta.collateralHoldingRef === null ? null : required(delta.collateralHoldingRef, "The collateral");
+      const collateralId = taken.collateralHoldingRef === null ? null : required(taken.collateralHoldingRef, "The collateral");
       if (collateralId !== null && !world.material.holdings.some((holding) => holding.id === collateralId)) {
         reject(`No holding "${collateralId}" exists to pledge against it.`, "reference");
       }
@@ -4186,10 +4228,10 @@ function applyOne(
       // they have to actually have it. Money from outside does not: that is the
       // whole difference between a merchant of ours and a foreign banker.
       let lendingAccountId: string | null = null;
-      let principal = delta.principal;
-      if (delta.lenderKind !== "foreign") {
+      let principal = taken.principal;
+      if (taken.lenderKind !== "foreign") {
         const lenderAccount = world.material.accounts.find(
-          (account) => account.owner.kind === delta.lenderKind && account.owner.id === lenderId,
+          (account) => account.owner.kind === taken.lenderKind && account.owner.id === lenderId,
         );
         // Nobody borrows from themselves. `obligation_upsert` has refused an
         // account paying itself since it bricked a three-year campaign, and
@@ -4214,48 +4256,48 @@ function applyOne(
         lendingAccountId = lenderAccount.id;
       }
 
-      const loanId = mint("loan", delta.localId);
+      const loanId = mint("loan", taken.localId);
       // Servicing goes through an ordinary obligation, so arrears, priority and
       // missed periods all behave as they do for army pay -- a debt crisis is
       // already modelled by whatever models an unpaid army.
       const serviceObligationId = context.ids.next("obligation");
       // Paid back in instalments over its term: interest and a share of the principal (`debts.ts`).
-      const servicing = loanInstalment(principal, delta.interestBps, LOAN_TERM_PERIODS);
+      const servicing = loanInstalment(principal, taken.interestBps, periods);
       const obligation = {
         id: serviceObligationId,
         kind: "debt_service" as const,
-        label: `Repayment of ${delta.terms}`.slice(0, 120),
+        label: `Repayment of ${taken.terms}`.slice(0, 120),
         payerAccountId: borrowerId,
-        ...(delta.lenderKind === "foreign" ? {} : { recipientAccountId: world.material.accounts.find((account) => account.owner.kind === delta.lenderKind && account.owner.id === lenderId)?.id }),
+        ...(taken.lenderKind === "foreign" ? {} : { recipientAccountId: world.material.accounts.find((account) => account.owner.kind === taken.lenderKind && account.owner.id === lenderId)?.id }),
         amount: servicing,
-        cadenceSteps: delta.cadenceDays,
-        nextDueStep: atStep + delta.cadenceDays,
+        cadenceSteps: taken.cadenceDays,
+        nextDueStep: atStep + taken.cadenceDays,
         // Below army pay: a state short of money starves its creditors before
         // it starves its soldiers, and that choice is what causes the crisis.
         priority: 400,
         arrears: 0,
         missedPeriods: 0,
         active: true,
-        remainingPeriods: LOAN_TERM_PERIODS,
+        remainingPeriods: periods,
       };
 
       const loan = {
         id: loanId,
-        lenderKind: delta.lenderKind,
+        lenderKind: taken.lenderKind,
         lenderId,
         borrowerAccountId: borrowerId,
         principal,
         outstanding: principal,
-        interestBps: delta.interestBps,
-        cadenceSteps: delta.cadenceDays,
+        interestBps: taken.interestBps,
+        cadenceSteps: taken.cadenceDays,
         serviceObligationId,
-        terms: delta.terms,
+        terms: taken.terms,
         collateralHoldingId: collateralId,
         status: "active" as const,
         openedAtStep: atStep,
       };
 
-      const lent = moveMoney(world, { from: lendingAccountId, to: borrowerId, amount: principal, kind: "transfer", causeId: loanId, explanation: `Lent: ${delta.terms}` }, context);
+      const lent = moveMoney(world, { from: lendingAccountId, to: borrowerId, amount: principal, kind: "transfer", causeId: loanId, explanation: `Lent: ${taken.terms}` }, context);
       return {
         ...lent,
         material: {
@@ -4592,6 +4634,20 @@ function applyOne(
       }
       if (!person.alive || !related.alive) reject(`${!person.alive ? person.name : related.name} is dead; no new tie can be made with the dead.`);
       if (standing !== undefined) return world;
+      // A marriage is a man and a woman, of age, unmarried, not kin, and
+      // neither a Vestal (`marriageBar`): written with no guard, a Vestal could
+      // be wed and a man given two wives (play-test L10).
+      const barred = delta.relation === "spouse_or_partner" ? marriageBar(world, personId, relatedId) : null;
+      if (barred !== null) reject(`${person.name} cannot marry ${related.name}: ${barred}.`);
+      // A man marrying a daughter of a house asks her father, who answers by
+      // rule (`marriage.ts`); he does not write himself her husband.
+      if (delta.relation === "spouse_or_partner" && context.actorRef.kind === "character" && (context.actorRef.id === personId || context.actorRef.id === relatedId)) {
+        const actorId = context.actorRef.id;
+        const bride = person.gender === "female" ? person : related;
+        const father = familyLinksOf(world, bride.id, atStep).map((view) => (view.kind === "child" ? world.characters.find((character) => character.id === view.counterpartCharacterId) : undefined))
+          .find((parent) => parent !== undefined && parent.alive && parent.gender === "male" && parent.id !== actorId);
+        if (father !== undefined) reject(`${bride.name} is her father's to give: ${person.id === bride.id ? related.name : person.name} must ask ${father.name} [${father.id}] for her, with a "marriage_offer" letter.`);
+      }
       return {
         ...world,
         familyLinks: [...world.familyLinks, {
@@ -5738,7 +5794,7 @@ function applyOne(
       // Settled here, once, and never rewritten. Neither this delta nor any
       // later one can move it: a player who writes "25/75" in his order is
       // telling the world how he rates his chances, not setting them.
-      const odds = plotOdds(paid, { kind: delta.kind, target, sponsor, agent, spend });
+      const odds = plotOdds(paid, { kind: delta.kind, target, sponsor, agent, spend, playerCharacterId: context.playerCharacterId ?? null });
       const plotId = context.ids.next("plot");
 
       // The thread it runs in, so this is several chronicles rather than one
@@ -6373,6 +6429,7 @@ function applyOne(
             score: cause.score,
             decayPerYearBps: cause.decayPerYearBps,
             ...(cause.dimensions === undefined ? {} : { dimensions: cause.dimensions }),
+            ...(cause.tie === undefined ? {} : { socialLinkKind: cause.tie }),
           })),
           observedTraits: draft.observedTraits.map((observed) => ({
             subjectCharacterId: required(observed.subjectCharacterRef, "Whose character this is"),
@@ -6729,6 +6786,8 @@ function carryOutClauses(
 const DEPOSIT_SHARE = 0.25;
 /** What credit from a seller costs a month, in basis points of what is owed. */
 const SELLER_CREDIT_BPS = 100;
+/** Of a private purse, what a buyer keeps back rather than putting it all down (`payOrBorrow`). */
+const PURSE_RESERVE_SHARE = 0.1;
 
 /**
  * Money moving because an act moved it, and the line in the books that says so.
@@ -6893,14 +6952,20 @@ export function payOrBorrow(
 ): WorldState {
   const payer = world.material.accounts.find((account) => account.id === payerId);
   if (payer === undefined) reject(`No account "${payerId}" exists to pay for ${what}.`, "reference");
-  if (payer.balance >= price) {
+  const deposit = Math.ceil(price * DEPOSIT_SHARE);
+  // A man keeps something back for his household: a tenth of his purse, or a
+  // month of what it is bound to pay, whichever is more. Short of the price,
+  // the whole purse went down as the deposit, and a merchant's first cargo
+  // left him without the coins for the next day's bread (play-test E19). A
+  // treasury's reserve is its government's business, and is not kept here.
+  const reserve = payer.owner.kind !== "character" ? 0 : Math.max(0, Math.min(payer.balance - deposit, Math.max(Math.ceil(payer.balance * PURSE_RESERVE_SHARE), monthlyOutgoingsOf(world, payerId))));
+  if (payer.balance - reserve >= price) {
     return moveMoney(world, { from: payerId, to: null, amount: price, kind: "purchase", causeId: pledgedHoldingId ?? payerId, explanation: `Bought: ${what}` }, context);
   }
-  const deposit = Math.ceil(price * DEPOSIT_SHARE);
   if (payer.balance < deposit) {
     reject(`${what} costs ${price}; ${payerId} holds ${payer.balance}, and nobody sells on credit without ${deposit} down.`);
   }
-  const down = payer.balance;
+  const down = Math.max(deposit, Math.min(payer.balance - reserve, price));
   const owed = price - down;
   const loanId = context.ids.next("loan");
   const serviceId = context.ids.next("obligation");
@@ -6908,7 +6973,7 @@ export function payOrBorrow(
   emitFact({
     localId: `credit_${loanId}`.slice(0, 60),
     kind: "bought_on_credit",
-    summary: `${what} was bought for ${price}: ${down} paid down, and ${owed} owed to the seller at interest.`,
+    summary: `${what} was bought for ${price}: ${down} paid down${reserve > 0 ? `, ${payer.balance - down} kept back for the household` : ""}, and ${owed} owed to the seller at interest.`,
     affectedRefs: [{ kind: "account", id: payerId }],
     visibility: "polity",
     discoveryState: "polity",

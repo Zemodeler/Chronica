@@ -133,6 +133,52 @@ describe("what a rule costs", () => {
     const polityOwned = priceMechanic(state, { ...entity, ownerRef: { kind: "polity", id: "rome" } }, "rome", { setup: 0, upkeepPerMonth: 0 });
     expect(Math.round(polityOwned.scale / cheap.scale)).toBe(10);
   });
+
+  // Play-test E20: a rule that only kept a man's regard was charged the floor,
+  // and the floor was his last coins.
+  it("charges no setup floor for a rule that moves no money", () => {
+    const state = withEntity(world(), { id: "toll" });
+    const entity = state.genericEntities.find((candidate) => candidate.id === "toll")!;
+    expect(priceMechanic(state, entity, "rome", { setup: 0, upkeepPerMonth: 0 }, false).setup).toBe(0);
+    const atLilybaeum = withEntity(world(), { id: "regard", ownerRef: HANNO, provinceId: WEST });
+    const regarded = atLilybaeum.genericEntities.find((candidate) => candidate.id === "regard")!;
+    const regard: MechanicDraft = {
+      trigger: { kind: "monthly" }, conditions: [], end: { kind: "never" }, price: { setup: 0, upkeepPerMonth: 0 }, why: "He keeps the man's regard.",
+      effects: [{ op: "relation_shift", subjectCharacterId: "hamilcar", targetCharacterId: HANNO.id, dimension: "respect", direction: "raise", band: "slight" }],
+    };
+    const refs = readableRefsFor(atLilybaeum, HANNO, regarded);
+    const checked = validateMechanic(regard, atLilybaeum, refs, offices);
+    expect(checked.ok).toBe(true);
+    if (!checked.ok) return;
+    const out = attachMechanic({ world: atLilybaeum, entity: regarded, draft: checked.draft, origin: "written", warrants: checked.warrants, refs, ids: createIdFactory("free"), offices, warfare, gameId: "g" });
+    expect(out.ok).toBe(true);
+    if (out.ok) expect(balance(out.world, "hanno-purse")).toBe(balance(atLilybaeum, "hanno-purse"));
+  });
+
+  it("will not take more than half of what a man holds, or set him in debt, unless his order said to pay", () => {
+    const poor = withEntity(world(), { id: "dole" });
+    const scarce: WorldState = { ...poor, material: { ...poor.material, accounts: poor.material.accounts.map((account) => (account.id === "marcus-purse" ? { ...account, balance: 30 } : account)) } };
+    const entity = scarce.genericEntities.find((candidate) => candidate.id === "dole")!;
+    const refs = readableRefsFor(scarce, MARCUS, entity);
+    const checked = validateMechanic(dole("marcus-purse"), scarce, refs, offices);
+    expect(checked.ok).toBe(true);
+    if (!checked.ok) return;
+    const unasked = attachMechanic({ world: scarce, entity, draft: checked.draft, origin: "written", warrants: checked.warrants, refs, ids: createIdFactory("a"), offices, warfare, gameId: "g", orderText: "I keep the poor of the town." });
+    expect(unasked.ok).toBe(false);
+    const asked = attachMechanic({ world: scarce, entity, draft: checked.draft, origin: "written", warrants: checked.warrants, refs, ids: createIdFactory("b"), offices, warfare, gameId: "g", orderText: "I pay for a dole of grain to the poor of the town." });
+    expect(asked.ok).toBe(true);
+  });
+
+  it("drops a payment from his own purse to somebody the order never named, and keeps it when it did", () => {
+    const state = withEntity(world(), { id: "toll", ownerRef: HANNO, provinceId: WEST });
+    const entity = state.genericEntities.find((candidate) => candidate.id === "toll")!;
+    const refs = readableRefsFor(state, HANNO, entity);
+    const tribute: MechanicDraft = { ...dole("hanno-purse"), effects: [{ op: "money_transfer", fromAccountId: "hanno-purse", toAccountId: "hamilcar-purse", amount: { kind: "fixed", amount: 10 } }] };
+    const unnamed = validateMechanic(tribute, state, refs, offices, "I keep up my respects in the town.");
+    expect(unnamed.ok).toBe(false);
+    const named = validateMechanic(tribute, state, refs, offices, "I pay Hamilcar ten a month for his counsel.");
+    expect(named.ok).toBe(true);
+  });
 });
 
 describe("a rule that fires each month", () => {

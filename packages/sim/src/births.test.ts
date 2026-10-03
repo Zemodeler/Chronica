@@ -31,7 +31,8 @@ function married(options: { wifeAge?: number; apart?: boolean } = {}): WorldStat
   })!;
   return {
     ...created.world,
-    familyLinks: [...created.world.familyLinks, {
+    // In place of the queen the scenario gives him (L10), so there is one wife to count births by.
+    familyLinks: [...created.world.familyLinks.filter((link) => !(link.kind === "spouse_or_partner" && (link.characterId === HUSBAND || link.relatedCharacterId === HUSBAND))), {
       id: "family-hieron-marriage", characterId: WIFE, relatedCharacterId: HUSBAND, kind: "spouse_or_partner",
       startedAtStep: 0, endedAtStep: null, visibility: "public", provenanceEventId: null,
     }],
@@ -126,8 +127,16 @@ describe("who cannot have a child", () => {
     expect(birthChance(world, husband, 100, 30)).toBe(0);
   });
 
-  it("anybody unmarried: the opening world has no couples, and bears nobody", () => {
-    const after = tenYears(base());
+  // The opening had no couples at all until the great houses were given
+  // their families (L10); a world with its marriages taken out still bears nobody.
+  it("anybody unmarried: a world with no couples bears nobody", () => {
+    const unwed = base();
+    const after = tenYears({ ...unwed, familyLinks: unwed.familyLinks.filter((link) => link.kind !== "spouse_or_partner") });
     expect(after.facts.some((fact) => fact.kind === "birth")).toBe(false);
+  });
+
+  it("the great houses' couples have heirs", () => {
+    const after = tenYears(base());
+    expect(after.facts.some((fact) => fact.kind === "birth")).toBe(true);
   });
 });

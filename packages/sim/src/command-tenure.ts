@@ -447,26 +447,51 @@ export function keepCommandTenure(input: CommandTenureInput): { world: WorldStat
   function answerFor(characterId: string, polityId: string, sinceStep: number): void {
     const charges = world.answerable.filter((entry) => entry.characterId === characterId && entry.atStep >= sinceStep);
     world = { ...world, answerable: world.answerable.filter((entry) => entry.characterId !== characterId) };
-    const weight = charges.reduce((sum, entry) => sum + entry.weight, 0);
-    if (weight < PROSECUTE_AT) return;
-    const court = chamberThatDecides(world, polityId, "judgment");
-    const accused = world.characters.find((character) => character.id === characterId);
-    if (court === undefined || accused === undefined) return;
-    const prosecutor = world.characters
-      .filter((character) => character.alive && character.id !== characterId && character.polityId === polityId && computeOpinion(character, characterId) <= -10)
-      .sort((a, b) => computeOpinion(a, characterId) - computeOpinion(b, characterId) || b.prestigeBps - a.prestigeBps || a.id.localeCompare(b.id))[0];
-    if (prosecutor === undefined) return;
-    const id = boundedId("prosecution", characterId, day);
-    if (world.material.politicalProcedures.some((procedure) => procedure.id === id)) return;
-    const counts = charges.slice(0, 3).map((entry) => entry.label).join("; ");
-    const sentence = weight >= EXILE_AT ? "exile" : "fine";
-    addProcedure(procedureOf({ id, type: "denunciation", institutionId: court.id, sponsorId: prosecutor.id, subjectId: characterId,
-      label: `${prosecutor.name} prosecutes ${accused.name}: ${counts}`, openedAt: day, deadline: day + TRIAL_DAYS, concerns: ["punishment"], sentence }));
-    tell({
-      kind: "prosecution_brought",
-      summary: `No longer protected by his office, ${accused.name} is prosecuted by ${prosecutor.name} before the ${court.name}: ${counts}. ${sentence === "exile" ? "It is exile they will vote on." : "It is a fine they will vote on."} The vote is in ${TRIAL_DAYS} days [${id}].`.slice(0, 600),
-      affectedRefs: [{ kind: "character", id: characterId }, { kind: "character", id: prosecutor.id }, { kind: "procedure", id }, { kind: "polity", id: polityId }],
-      visibility: "public", discoveryState: "public", knowableInDays: 0, significance: characterId === input.playerCharacterId ? 75 : 45,
-    });
+    const brought = prosecutionOf(world, characterId, polityId, charges, day, input.playerCharacterId ?? null, "No longer protected by his office, ");
+    if (brought === null) return;
+    addProcedure(brought.procedure);
+    tell(brought.fact);
   }
+}
+
+/**
+ * A prosecution for what a man has to answer for, or null: the weight of it
+ * is past `prosecuteAt` (the difficulty's, `PROSECUTE_AT` by default), the
+ * chamber that judges exists, and somebody of his power who thinks ill of him
+ * will bring it. Shared by a magistrate leaving office (`answerFor`) and a
+ * private man weighed each month (`personal-pushback.ts`, play-test L11).
+ */
+export function prosecutionOf(
+  world: WorldState,
+  characterId: string,
+  polityId: string,
+  charges: readonly { readonly label: string; readonly weight: number }[],
+  day: number,
+  playerCharacterId: string | null,
+  lead: string,
+  prosecuteAt: number = PROSECUTE_AT,
+): { readonly procedure: PoliticalProcedure; readonly fact: Omit<FactProposalDraft, "localId"> & { readonly kind: string } } | null {
+  const weight = charges.reduce((sum, entry) => sum + entry.weight, 0);
+  if (weight < prosecuteAt) return null;
+  const court = chamberThatDecides(world, polityId, "judgment");
+  const accused = world.characters.find((character) => character.id === characterId);
+  if (court === undefined || accused === undefined) return null;
+  const prosecutor = world.characters
+    .filter((character) => character.alive && character.id !== characterId && character.polityId === polityId && computeOpinion(character, characterId) <= -10)
+    .sort((a, b) => computeOpinion(a, characterId) - computeOpinion(b, characterId) || b.prestigeBps - a.prestigeBps || a.id.localeCompare(b.id))[0];
+  if (prosecutor === undefined) return null;
+  const id = boundedId("prosecution", characterId, day);
+  if (world.material.politicalProcedures.some((procedure) => procedure.id === id)) return null;
+  const counts = charges.slice(0, 3).map((entry) => entry.label).join("; ");
+  const sentence = weight >= EXILE_AT ? "exile" : "fine";
+  return {
+    procedure: procedureOf({ id, type: "denunciation", institutionId: court.id, sponsorId: prosecutor.id, subjectId: characterId,
+      label: `${prosecutor.name} prosecutes ${accused.name}: ${counts}`, openedAt: day, deadline: day + TRIAL_DAYS, concerns: ["punishment"], sentence }),
+    fact: {
+      kind: "prosecution_brought",
+      summary: `${lead}${accused.name} is prosecuted by ${prosecutor.name} before the ${court.name}: ${counts}. ${sentence === "exile" ? "It is exile they will vote on." : "It is a fine they will vote on."} The vote is in ${TRIAL_DAYS} days [${id}].`.slice(0, 600),
+      affectedRefs: [{ kind: "character", id: characterId }, { kind: "character", id: prosecutor.id }, { kind: "procedure", id }, { kind: "polity", id: polityId }],
+      visibility: "public", discoveryState: "public", knowableInDays: 0, significance: characterId === playerCharacterId ? 75 : 45,
+    },
+  };
 }

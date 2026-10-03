@@ -10,6 +10,7 @@ import { ruleInWords } from "./mechanics/mechanic-words";
 import { forecastInWords, isChamberQuestion, voteDayOf } from "./senate";
 import { commandTenureOf, rulerOf, rulerOfficeOf, sovereignChamberOf } from "./constitutions";
 import { promagistrateInWords } from "./promagistrate";
+import { loanOfferLines } from "./money";
 
 import {
   standingLine,
@@ -161,6 +162,8 @@ export interface WorldSlice {
   readonly economy: readonly { readonly id: string; readonly label: string; readonly balance: number }[];
   readonly monthlyIncome: number;
   readonly monthlyExpenditure: number;
+  /** Loans standing on offer to the actor while his purse is low (`money.ts`), each with the id an order takes it by. */
+  readonly loanOffers: readonly string[];
   /** How hard the power's own lands are being taxed, for whoever can open its treasury. */
   readonly taxBurden: { readonly asked: number; readonly bearable: number; readonly inWords: string } | null;
   /** Coin a month per thousand men, for whoever can open the power's treasury and the scenario names it. */
@@ -1311,6 +1314,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     economy: accounts,
     monthlyIncome,
     monthlyExpenditure,
+    loanOffers: input.actorRef.kind === "character" ? loanOfferLines(world, input.actorRef.id) : [],
     taxBurden,
     soldierPayPerThousand,
     military,
@@ -1398,6 +1402,7 @@ export function renderWorldSlice(slice: WorldSlice): string {
   section("TREASURY", [
     ...slice.economy.map((account) => `${account.label} [${account.id}]: ${account.balance}`),
     `Monthly income ~${slice.monthlyIncome}, monthly expenditure ~${slice.monthlyExpenditure}`,
+    ...slice.loanOffers.map((line) => `Offered: ${line}`),
     ...(slice.taxBurden === null ? [] : [
       `Our lands' taxes: ~${slice.taxBurden.asked}/month asked of ~${slice.taxBurden.bearable} bearable (${slice.taxBurden.inWords}); more is not collected, and past half, order sours.`,
     ]),

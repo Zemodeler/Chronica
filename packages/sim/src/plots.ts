@@ -1,6 +1,7 @@
 import {
   aptitude,
   readDepartments,
+  difficultyRules,
   officeholderPolity,
   INJURIES,
   PLOT_MAX_DAYS,
@@ -116,6 +117,8 @@ export interface PlotOddsInput {
   readonly sponsor: Character;
   readonly agent: Character | null;
   readonly spend: number;
+  /** Whose plots the difficulty's edge touches: his own, and those laid against him. */
+  readonly playerCharacterId?: string | null;
 }
 
 /**
@@ -184,6 +187,12 @@ export function plotOdds(world: WorldState, input: PlotOddsInput): { successOdds
   // better, or worse, whoever's hand it is.
   const layingPower = officeholderPolity(world, input.sponsor.id, input.sponsor.polityId);
   const lift = layingPower === null ? 0 : inCharge.headLift({ kind: "polity", id: layingPower }, "covert");
+  // The difficulty's edge (`world/pushback.ts`): his own plots a little surer,
+  // or less, and those laid against him the other way. Nobody else's.
+  const edge = difficultyRules(world.difficulty).playerEdgeBps;
+  const player = input.playerCharacterId ?? null;
+  if (player !== null && input.sponsor.id === player) odds += edge;
+  if (player !== null && input.target.id === player) odds -= edge;
   const lifted = Math.round(odds * (1 + lift));
 
   return {
