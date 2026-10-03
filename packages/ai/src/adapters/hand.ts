@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { AiOperation } from "@chronica/shared";
 import type { AiAdapter, AiCallResult, AiConversationMessage, AiToolCall, AiToolCallResult, AiToolDefinition } from "../adapter";
@@ -26,6 +26,10 @@ import type { AiAdapter, AiCallResult, AiConversationMessage, AiToolCall, AiTool
  */
 
 export interface HandAdapterOptions {
+  /** Automatic development responder; omit to retain manual file answering. */
+  readonly respond?: (system: string, asked: string, requestKey: string) => Promise<string>;
+  /** Separate automatic answers by model and protocol version. */
+  readonly cacheNamespace?: string;
   /** Where prompts and answers live. */
   readonly dir: string;
   /** How often to look for an answer. */
@@ -46,9 +50,12 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 async function answerFor(options: HandAdapterOptions, operation: AiOperation, system: string, asked: string): Promise<string> {
   const { dir } = options;
   mkdirSync(dir, { recursive: true });
-  const stem = handStem(operation, asked);
+  const stem = handStem(operation, options.respond ? JSON.stringify([options.cacheNamespace, system, asked]) : asked);
   const answerPath = path.join(dir, `${stem}.json`);
-  if (existsSync(answerPath)) return readFileSync(answerPath, "utf8");
+  if (existsSync(answerPath)) {
+    const cached = readFileSync(answerPath, "utf8");
+    try { JSON.parse(cached); return cached; } catch { /* Ignore interrupted/invalid cached answers. */ }
+  }
 
   // Each operation's system prompt once: it is the same for every call, and
   // it is where the answer's schema is.
@@ -60,6 +67,17 @@ async function answerFor(options: HandAdapterOptions, operation: AiOperation, sy
     appendFileSync(path.join(dir, "queue.log"), `${new Date().toISOString()} ${stem}\n`);
   }
   options.onWaiting?.(promptPath);
+
+  if (options.respond) {
+    // Keep the actual system instructions beside each request, including after prompt edits.
+    writeFileSync(path.join(dir, `${stem}.system.txt`), system);
+    const answer = await options.respond(system, asked, answerPath);
+    JSON.parse(answer);
+    const temporary = `${answerPath}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(temporary, answer);
+    renameSync(temporary, answerPath);
+    return answer;
+  }
 
   const startedAt = Date.now();
   for (;;) {
@@ -93,6 +111,10 @@ export function createHandAdapter(options: HandAdapterOptions): AiAdapter {
     async callWithTools(operation, systemPrompt, messages: readonly AiConversationMessage[], tools: readonly AiToolDefinition[]): Promise<AiToolCallResult> {
       const asked = JSON.stringify({ tools: tools.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters })), messages }, null, 2);
       const raw = JSON.parse(await answerFor(options, operation, systemPrompt, asked)) as { content?: unknown; toolCalls?: unknown };
+      if (options.respond && (typeof raw.content !== "string" || !Array.isArray(raw.toolCalls) || raw.toolCalls.some((entry: unknown) => {
+        if (typeof entry !== "object" || entry === null || !("name" in entry) || !("arguments" in entry)) return true;
+        return !tools.some((tool) => tool.name === entry.name) || typeof entry.arguments !== "object" || entry.arguments === null || Array.isArray(entry.arguments);
+      }))) throw new Error("Codex returned an invalid tool step or an unknown tool name.");
       const toolCalls: AiToolCall[] = (Array.isArray(raw.toolCalls) ? raw.toolCalls : [])
         .filter((entry): entry is { name: string; arguments?: Record<string, unknown> } => typeof entry === "object" && entry !== null && typeof (entry as { name?: unknown }).name === "string")
         .map((entry) => {

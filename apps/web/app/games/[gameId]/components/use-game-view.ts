@@ -104,6 +104,7 @@ export interface OpenDecision {
 }
 
 export interface GameView {
+  readonly worldRevision?: string | undefined;
   readonly chronicle: readonly ChronicleEntry[];
   /** The burst that wrote the newest report: what "since your last order" shows. */
   readonly latestBurstId?: string | null;
@@ -128,7 +129,8 @@ export interface Purse {
 interface BurstStatus {
   readonly status: "running" | "committed" | "failed";
   readonly error: string | null;
-  readonly progress: readonly { readonly id: number; readonly stage: string; readonly line: string }[];
+  readonly startedAt: string;
+  readonly progress: readonly { readonly id: number; readonly stage: string; readonly line: string; readonly at: string }[];
   readonly entries: readonly ChronicleEntry[];
   readonly cursor: number;
 }
@@ -146,6 +148,7 @@ export interface GameViewController {
    * Cleared when the next order is given; never part of the record.
    */
   readonly progress: readonly string[];
+  readonly progressSeconds?: readonly number[];
   readonly error: string | null;
   /**
    * What the last order actually cost, in coins ("0.314"), read from this
@@ -173,11 +176,12 @@ export interface GameViewController {
 
 const sleep = (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); });
 
-export function useGameView(gameId: string): GameViewController {
+export function useGameView(gameId: string, initialRevision?: string): GameViewController {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<readonly string[]>([]);
+  const [progressSeconds, setProgressSeconds] = useState<readonly number[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [committed, setCommitted] = useState<GameView>({ chronicle: [], decision: null, running: null });
+  const [committed, setCommitted] = useState<GameView>({ chronicle: [], decision: null, running: null, worldRevision: initialRevision });
   /** Passages of the running burst, in the order they were written. Dropped once the commit is read back. */
   const [pending, setPending] = useState<readonly ChronicleEntry[]>([]);
   /**
@@ -209,6 +213,8 @@ export function useGameView(gameId: string): GameViewController {
       spentBefore.current = null;
     }
     setCommitted({
+      worldRevision: body.worldRevision,
+      latestBurstId: body.latestBurstId ?? null,
       chronicle: (body.chronicle ?? []).map((entry) => ({ ...entry, published: true })),
       decision: body.decision ?? null,
       running: body.running ?? null,
@@ -232,6 +238,7 @@ export function useGameView(gameId: string): GameViewController {
     setBusy(true);
     setError(null);
     setProgress([]);
+    setProgressSeconds([]);
     setPending([]);
     let cursor = 0;
     let failures = 0;
@@ -254,7 +261,10 @@ export function useGameView(gameId: string): GameViewController {
         } else {
           failures = 0;
           cursor = status.cursor;
-          if (status.progress.length > 0) setProgress((lines) => [...lines, ...status.progress.map((line) => line.line)]);
+          if (status.progress.length > 0) {
+            setProgress((lines) => [...lines, ...status.progress.map((line) => line.line)]);
+            setProgressSeconds((times) => [...times, ...status.progress.map((line) => Math.max(0, Math.round((Date.parse(line.at) - Date.parse(status.startedAt)) / 1000)))]);
+          }
           if (status.entries.length > 0) setPending((entries) => [...entries, ...status.entries]);
           // The commit is what makes the passages the record: read it back and
           // let the committed copies replace the ones shown while it ran.
@@ -344,7 +354,7 @@ export function useGameView(gameId: string): GameViewController {
     }).catch(() => undefined);
   }, [gameId]);
 
-  return { view, busy, progress, error, lastTurnCost, send, choose, refresh, markRead };
+  return { view, busy, progress, progressSeconds, error, lastTurnCost, send, choose, refresh, markRead };
 }
 
 /** The wallet is empty, or this save has spent its cap: nothing more can be sent. */

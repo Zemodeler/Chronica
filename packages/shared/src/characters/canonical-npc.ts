@@ -1,3 +1,4 @@
+import { stationOf, withVices } from "./vices";
 import { spreadSubSkills } from "./aptitude";
 import type { Character, CharacterSkills } from "./character";
 import { deriveDefaultMind } from "./mind";
@@ -92,7 +93,10 @@ export function createCanonicalNpc(
       ? { ...account, balance: input.startingMoney! }
       : account),
   };
-  return { world: { ...world, characters: [...world.characters, character], material }, character };
+  // Born with a nature of his own, by his station (`vices.ts`): the engine's
+  // people are not all honourable men.
+  const made = withVices(character, stationOf(character, false, officeId !== null && /:ruler$|king|chief|tyrant/i.test(officeId)));
+  return { world: { ...world, characters: [...world.characters, made], material }, character: made };
 }
 
 /** Add one permanent, directed source-of-truth relationship without duplicates. */

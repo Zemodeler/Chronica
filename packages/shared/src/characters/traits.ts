@@ -93,6 +93,53 @@ export const TRAIT_REGISTRY: Readonly<Record<string, TraitDefinition>> = {
     decisionModifiers: { cruelty: 12 },
     incompatibleTraitIds: ["compassionate"],
   }),
+  // The vices (docs/plans/a-living-world.md §6). Two hand runs found 280
+  // people with one cruel and one deceitful trait between them; a world of the
+  // honourable is a world nothing goes wrong in.
+  greedy: trait({
+    id: "greedy", label: "Greedy", category: "moral",
+    dialogueGuidance: "Thinks first of what a thing is worth to him; takes what passes through his hands.",
+    decisionModifiers: { wealth: 12, honesty: -6 },
+    incompatibleTraitIds: ["compassionate"],
+  }),
+  treacherous: trait({
+    id: "treacherous", label: "Treacherous", category: "moral",
+    dialogueGuidance: "Keeps his word only while it pays; changes sides when the other side looks stronger.",
+    decisionModifiers: { betrayal: 14, honesty: -10 },
+    incompatibleTraitIds: ["dutiful"],
+  }),
+  cowardly: trait({
+    id: "cowardly", label: "Cowardly", category: "temperament",
+    dialogueGuidance: "Avoids danger to himself; finds reasons to be elsewhere when it comes.",
+    decisionModifiers: { risk: -14 },
+    incompatibleTraitIds: ["bold"],
+  }),
+  paranoid: trait({
+    id: "paranoid", label: "Paranoid", category: "temperament",
+    dialogueGuidance: "Sees plots everywhere, trusts no one near him, and strikes first.",
+    decisionModifiers: { trust: -12, caution: 6 },
+  }),
+  envious: trait({
+    id: "envious", label: "Envious", category: "moral",
+    dialogueGuidance: "Resents those who rise above him and works to bring them down.",
+    decisionModifiers: { status: 8, revenge: 6 },
+  }),
+  wrathful: trait({
+    id: "wrathful", label: "Wrathful", category: "temperament",
+    dialogueGuidance: "Quick to anger and slow to cool; answers a slight with force.",
+    decisionModifiers: { revenge: 10, risk: 6 },
+  }),
+  zealous: trait({
+    id: "zealous", label: "Zealous", category: "moral",
+    dialogueGuidance: "Certain the gods are on his side, and harsh to those who are not.",
+    decisionModifiers: { faith: 14 },
+  }),
+  content: trait({
+    id: "content", label: "Content", category: "ambition",
+    dialogueGuidance: "Wants no more than he has, and is wary of those who do.",
+    decisionModifiers: { status: -8, risk: -4 },
+    incompatibleTraitIds: ["ambitious"],
+  }),
 };
 
 /**
@@ -116,12 +163,20 @@ export const TRAIT_REGISTRY: Readonly<Record<string, TraitDefinition>> = {
 const TRAIT_SYNONYMS: Readonly<Record<string, readonly string[]>> = {
   cautious: ["cautious", "careful", "prudent", "wary", "watchful", "guarded", "circumspect", "hesitant", "conservative"],
   bold: ["bold", "brave", "daring", "fearless", "aggressive", "rash", "reckless", "audacious", "martial", "warlike", "courageous"],
-  ambitious: ["ambitious", "aspiring", "climbing", "calculating", "opportunistic", "grasping"],
+  ambitious: ["ambitious", "aspiring", "climbing", "calculating", "opportunistic"],
   dutiful: ["dutiful", "loyal", "faithful", "honourable", "honorable", "steadfast", "reliable", "principled", "devoted"],
   vengeful: ["vengeful", "vindictive", "unforgiving", "spiteful", "bitter", "resentful"],
   sociable: ["sociable", "charismatic", "affable", "gregarious", "popular", "persuasive", "charming", "genial"],
   disciplined: ["disciplined", "methodical", "organised", "organized", "orderly", "systematic", "meticulous", "rigorous", "pragmatic", "administrative"],
-  deceitful: ["deceitful", "duplicitous", "scheming", "treacherous", "cunning", "devious", "secretive", "discreet", "sly"],
+  deceitful: ["deceitful", "duplicitous", "scheming", "cunning", "devious", "secretive", "discreet", "sly"],
+  treacherous: ["treacherous", "faithless", "perfidious", "disloyal", "turncoat", "oathbreaker"],
+  greedy: ["greedy", "avaricious", "venal", "corrupt", "rapacious", "covetous", "grasping"],
+  cowardly: ["cowardly", "craven", "timid", "fearful"],
+  paranoid: ["paranoid", "suspicious", "distrustful", "mistrustful", "jealous"],
+  envious: ["envious", "resentful of rivals"],
+  wrathful: ["wrathful", "irascible", "hot-tempered", "violent", "furious", "choleric"],
+  zealous: ["zealous", "fanatical", "fervent", "bigoted"],
+  content: ["content", "unambitious", "placid", "easygoing"],
   compassionate: ["compassionate", "merciful", "kind", "generous", "humane", "protective", "gentle"],
   cruel: ["cruel", "ruthless", "brutal", "harsh", "merciless", "savage", "callous"],
 };

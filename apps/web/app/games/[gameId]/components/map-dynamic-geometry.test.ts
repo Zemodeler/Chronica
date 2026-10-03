@@ -27,7 +27,7 @@ describe("dynamic map geometry", () => {
     const world = prepareStaticWorldGeometry({ type: "FeatureCollection", features: [
       { type: "Feature", id: "province", geometry: { type: "Polygon", coordinates: [[[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]] }, properties: { kind: "province", name: "Province" } },
     ] });
-    const force: MapForceOverlay = { forceId: "force", provinceId: "province", coordinate: [9, 9], ownerPolityId: "rome", name: "Force", commanderLabel: null, strengthLabel: "100", relation: "friendly", selected: false, movement };
+    const force: MapForceOverlay = { forceId: "force", provinceId: "province", coordinate: [9, 9], ownerPolityId: "rome", name: "Force", commanderLabel: null, strengthLabel: "100", naval: false, relation: "friendly", selected: false, movement };
     expect(resolveForceMapPosition(force, world)?.travelledPath?.at(-1)).toEqual([3, 3]);
     expect(resolveForceMapPosition({ ...force, movement: null }, world)?.x).toBe(9);
     expect(resolveForceMapPosition({ ...force, coordinate: undefined, movement: null }, world)?.x).toBe(1);
@@ -38,7 +38,7 @@ describe("dynamic map geometry", () => {
       { type: "Feature", id: "rome", geometry: { type: "Polygon", coordinates: [[[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]] }, properties: { kind: "province", name: "Rome" } },
       { type: "Feature", id: "carthage", geometry: { type: "Polygon", coordinates: [[[4, 0], [6, 0], [6, 2], [4, 2], [4, 0]]] }, properties: { kind: "province", name: "Carthage" } },
     ] });
-    const force: MapForceOverlay = { forceId: "lost-legion", provinceId: "retired-location", ownerPolityId: "rome", name: "Lost Legion", commanderLabel: null, strengthLabel: "100", relation: "friendly", selected: false, movement: null };
+    const force: MapForceOverlay = { forceId: "lost-legion", provinceId: "retired-location", ownerPolityId: "rome", name: "Lost Legion", commanderLabel: null, strengthLabel: "100", naval: false, relation: "friendly", selected: false, movement: null };
     const overlay = {
       revision: 1,
       polities: [{ polityId: "rome", name: "Rome" }, { polityId: "carthage", name: "Carthage" }],
@@ -61,8 +61,8 @@ describe("resolveMapForcePlacements (docs/19 Phase 3)", () => {
   const world = prepareStaticWorldGeometry({ type: "FeatureCollection", features: [
     { type: "Feature", id: "sicily", geometry: { type: "Polygon", coordinates: [[[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]] }, properties: { kind: "province", name: "Sicily" } },
   ] });
-  const forceA: MapForceOverlay = { forceId: "force-a", provinceId: "sicily", ownerPolityId: "rome", name: "A", commanderLabel: null, strengthLabel: "100", relation: "friendly", selected: false, movement: null };
-  const forceB: MapForceOverlay = { forceId: "force-b", provinceId: "sicily", ownerPolityId: "carthage", name: "B", commanderLabel: null, strengthLabel: "100", relation: "hostile", selected: false, movement: null };
+  const forceA: MapForceOverlay = { forceId: "force-a", provinceId: "sicily", ownerPolityId: "rome", name: "A", commanderLabel: null, strengthLabel: "100", naval: false, relation: "friendly", selected: false, movement: null };
+  const forceB: MapForceOverlay = { forceId: "force-b", provinceId: "sicily", ownerPolityId: "carthage", name: "B", commanderLabel: null, strengthLabel: "100", naval: false, relation: "hostile", selected: false, movement: null };
 
   it("offsets two forces that merely share a province, without any conflict", () => {
     const placements = resolveMapForcePlacements([forceA, forceB], world, null);

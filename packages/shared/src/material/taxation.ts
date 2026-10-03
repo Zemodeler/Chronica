@@ -1,6 +1,7 @@
 import type { WorldState } from "../world/world-state";
 import type { IncomeSource, ProvinceMaterial } from "../material-state";
 import { deriveDefaultProvinceMaterial } from "./province-material";
+import { ownerOf, ownsAndHolds } from "../world/occupation";
 
 /**
  * What a government's own lands can be made to pay.
@@ -91,18 +92,23 @@ export function taxBurdens(world: WorldState): Map<string, TaxBurden> {
 
   const burdens = new Map<string, TaxBurden>();
   for (const [polityId, askedMonthly] of asked) {
-    const bearable = world.map.provinces
-      .filter((province) => province.controllerPolityId === polityId)
-      .reduce((sum, province) => {
-        const material = materialOf(province.id);
-        return material === undefined ? sum : sum + (material.taxCapacity * material.stabilityBps / 10_000) * (TAX_EXTRACTION_BPS / 10_000);
-      }, 0);
+    // What its own land can bear, and how much of its land it still holds.
+    // Occupied ground pays nobody (`world/occupation.ts`): not the occupier,
+    // whose it is not, and not the owner, whose collectors cannot reach it.
+    const capacityOf = (province: (typeof world.map.provinces)[number]): number => {
+      const material = materialOf(province.id);
+      return material === undefined ? 0 : (material.taxCapacity * material.stabilityBps / 10_000) * (TAX_EXTRACTION_BPS / 10_000);
+    };
+    const owned = world.map.provinces.filter((province) => ownerOf(province) === polityId);
+    const bearable = owned.filter((province) => ownsAndHolds(province, polityId)).reduce((sum, province) => sum + capacityOf(province), 0);
+    const ownedCapacity = owned.reduce((sum, province) => sum + capacityOf(province), 0);
+    const held = ownedCapacity <= 0 ? 1 : bearable / ownedCapacity;
     const burden = bearable <= 0 ? Number.POSITIVE_INFINITY : askedMonthly / bearable;
     burdens.set(polityId, {
       polityId,
       bearable: Math.round(bearable),
       asked: Math.round(askedMonthly),
-      collectedShare: askedMonthly <= 0 ? 1 : Math.min(1, bearable / askedMonthly),
+      collectedShare: askedMonthly <= 0 ? held : Math.min(held, bearable / askedMonthly),
       stabilityShiftBps: burden <= CUSTOMARY_TAX_BURDEN
         ? 0
         : -Math.min(MAX_TAX_UNREST_BPS, Math.round((burden - CUSTOMARY_TAX_BURDEN) * TAX_UNREST_BPS_PER_BURDEN)),

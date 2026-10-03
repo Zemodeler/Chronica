@@ -19,6 +19,7 @@ import {
   type SuccessionRule,
   type WorldState,
 } from "@chronica/shared";
+import { newsReach, powersNearThePlayer } from "./far-powers";
 import type { IdFactory } from "./ports";
 
 /**
@@ -52,12 +53,20 @@ import type { IdFactory } from "./ports";
 export const ELECTION_CANVASS_DAYS = 30;
 /** How long an election stays open once called, when whoever called it set no day. */
 export const ELECTION_POLLING_DAYS = 20;
+/** How long before a term ends its successor's election is called. */
+export const ELECTION_LEAD_DAYS = ELECTION_POLLING_DAYS + 10;
+/** How long an interregnum's election takes: an interrex held office five days. */
+export const INTERREGNUM_POLLING_DAYS = 5;
+/** How many people and powers one fact may name (`FactSchema.affectedEntities`). */
+const MAX_FACT_REFS = 16;
 /**
  * A magistracy's term where the office does not state one but its seats plainly
  * ran by terms -- a save made before offices said so.
  */
 export const ELECTED_TERM_DAYS = 365;
 /** Standing below this and a man is not somebody the voters would think of electing unprompted. */
+/** What having served in a lesser magistracy is worth to a candidate, by custom. */
+const SERVED_BELOW_BPS = 600;
 /** What winning an election adds to a man's standing. */
 const ELECTION_STANDING_BPS = 500;
 /** How many of the likeliest candidates are told the seat is theirs to seek. */
@@ -87,16 +96,26 @@ const isOpen = (procedure: PoliticalProcedure): boolean => OPEN_STAGES.has(proce
 
 /** The election itself: a question about one of the office's seats, or one naming the office outright. */
 function isElectionFor(procedure: PoliticalProcedure, office: Office, seatIds: ReadonlySet<string>): boolean {
-  if (procedure.subjectKind !== "office_seat") return false;
+  if (procedure.subjectKind !== "office_seat" || procedure.type === "nomination") return false;
   return procedure.subjectId === null ? labelNamesOffice(procedure.label, office.label) : seatIds.has(procedure.subjectId);
+}
+
+/**
+ * The man a candidacy puts forward: the person it names, or -- for "Gaius
+ * stands for consul", written as a question about the office -- whoever moved
+ * it. Written that way, the player's own candidacy matched nothing, stood open
+ * for ever, and the election was held without him.
+ */
+function candidateOf(procedure: PoliticalProcedure): string | null {
+  return procedure.subjectKind === "character" ? procedure.subjectId : procedure.sponsorCharacterId;
 }
 
 /** A man standing: a nomination or appointment of a person, in words that name the office. */
 function isCandidacyFor(procedure: PoliticalProcedure, office: Office): boolean {
-  return procedure.subjectKind === "character"
-    && procedure.subjectId !== null
-    && (procedure.type === "nomination" || procedure.type === "appointment")
-    && labelNamesOffice(procedure.label, office.label);
+  if (procedure.type !== "nomination" && procedure.type !== "appointment") return false;
+  if (!labelNamesOffice(procedure.label, office.label)) return false;
+  if (procedure.subjectKind === "character") return procedure.subjectId !== null;
+  return procedure.subjectKind === "office_seat" && procedure.type === "nomination";
 }
 
 /** Net declared influence on a question: for, less against, counting only each supporter's latest word. */
@@ -180,8 +199,15 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
     // the named men whose terms still run; a place nobody named wins stays
     // with the implied colleagues, and has no record.
     const college = office.seatCount !== undefined && termDays !== null;
+    // Seats whose term runs out before an election called later could be
+    // counted: their successors are elected ahead -- consuls designate -- and
+    // take the seat the day it ends (`tick.ts`). Called only once the seat
+    // fell vacant, Rome had no consuls for two months in the middle of a war.
+    const fallingDue = (): OfficeSeat[] => (college || termDays === null ? [] : seats().filter((seat) => seat.status === "held"
+      && seat.termExpiresAtStep !== null && seat.designateCharacterId == null
+      && seat.termExpiresAtStep > input.toDay && seat.termExpiresAtStep - input.toDay <= ELECTION_LEAD_DAYS));
     const openPlaces = (): Place[] => {
-      if (!college) return vacantSeats().map((seat) => ({ seatId: seat.id }));
+      if (!college) return [...vacantSeats(), ...fallingDue()].map((seat) => ({ seatId: seat.id }));
       const sitting = seats().filter((seat) => seat.status === "held" && (seat.termExpiresAtStep ?? Number.POSITIVE_INFINITY) > input.toDay).length;
       const count = Math.max(0, office.seatCount! - sitting);
       const onRecord = vacantSeats().slice(0, count).map((seat) => ({ seatId: seat.id }));
@@ -206,9 +232,48 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
         .filter((character) => character.id !== player && character.prestigeBps >= minStanding && !beneath(character) && eligible(character))
         .sort((a, b) => b.prestigeBps - a.prestigeBps || a.id.localeCompare(b.id));
 
+    /**
+     * Custom, where it was not law: the voters preferred a man who had served
+     * them below. The ladder's order was not law in 270, so nobody is barred
+     * for skipping a rung -- but a man who has held a lesser magistracy of his
+     * country stands that much better for a greater one.
+     */
+    const served = (character: Character): number => {
+      if (office.rank === undefined) return 0;
+      return character.officesHeld.some((tenure) => {
+        const held = officesById.get(tenure.officeId);
+        return held !== undefined && held.polityId === office.polityId && isMagistracy(held) && held.rank !== undefined && held.rank < office.rank!;
+      }) ? SERVED_BELOW_BPS : 0;
+    };
+    /**
+     * Places the law kept for an order: one consulship a year a plebeian's,
+     * one censorship a lustrum. Counted with the colleagues whose terms still
+     * run; where the count falls short, the likeliest man of that order takes
+     * the last place from the likeliest man of the other.
+     */
+    const withReservedPlaces = (chosen: readonly string[], ranked: readonly string[]): string[] => {
+      const winners = [...chosen];
+      const ordoOf = (id: string) => world.characters.find((character) => character.id === id)?.ordo;
+      for (const [ordo, needed] of Object.entries(office.ordoSeats ?? {}) as ["patrician" | "plebeian", number][]) {
+        const sitting = seats().filter((seat) => seat.status === "held" && seat.holderCharacterId !== null && !winners.includes(seat.holderCharacterId)
+          && (seat.termExpiresAtStep ?? Number.POSITIVE_INFINITY) > input.toDay && ordoOf(seat.holderCharacterId) === ordo).length;
+        let short = needed - sitting - winners.filter((id) => ordoOf(id) === ordo).length;
+        const pool = [...ranked, ...electable().map((character) => character.id)].filter((id, index, all) => all.indexOf(id) === index && !winners.includes(id) && ordoOf(id) === ordo);
+        while (short > 0 && pool.length > 0) {
+          const out = [...winners].reverse().find((id) => ordoOf(id) !== ordo);
+          if (out === undefined) break;
+          winners[winners.indexOf(out)] = pool.shift()!;
+          short -= 1;
+        }
+      }
+      return winners;
+    };
+
     // ── 1. The opening: a seat nobody has ever held is filled now. ─────────
     for (const seat of vacantSeats().filter((candidate) => candidate.vacancyCause === "never_filled")) {
-      const chosen = electable()[0];
+      const likeliest = electable();
+      const chosenId = withReservedPlaces(likeliest.slice(0, 1).map((character) => character.id), likeliest.map((character) => character.id))[0];
+      const chosen = likeliest.find((character) => character.id === chosenId);
       if (chosen === undefined) continue;
       world = seatCharacterInOffice(world, chosen.id, { office, vacantSeatId: seat.id }, input.toDay, termDays);
       facts.push({
@@ -242,23 +307,21 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
       const stand = (characterId: string, net: number) => {
         const character = world.characters.find((candidate) => candidate.id === characterId);
         if (character === undefined || !eligible(character)) return;
-        standing.set(characterId, Math.max(standing.get(characterId) ?? Number.NEGATIVE_INFINITY, character.prestigeBps + net));
+        standing.set(characterId, Math.max(standing.get(characterId) ?? Number.NEGATIVE_INFINITY, character.prestigeBps + served(character) + net));
       };
       // Whoever called it stands -- unless it is beneath him, when he was only
       // presiding: a former consul calling the quaestors' election is not a
       // candidate for quaestor. A man who puts himself forward still is.
       const caller = world.characters.find((character) => character.id === election.sponsorCharacterId);
       if (caller !== undefined && !beneath(caller)) stand(caller.id, netSupport(world, election.id));
-      for (const candidacy of candidacies) stand(candidacy.subjectId!, netSupport(world, candidacy.id));
+      for (const candidacy of candidacies) { const candidate = candidateOf(candidacy); if (candidate !== null) stand(candidate, netSupport(world, candidacy.id)); }
       for (const character of electable()) {
         if (standing.size >= places.length) break;
-        if (!standing.has(character.id)) standing.set(character.id, character.prestigeBps);
+        if (!standing.has(character.id)) standing.set(character.id, character.prestigeBps + served(character));
       }
 
-      const winners = [...standing.entries()]
-        .sort(([a, scoreA], [b, scoreB]) => scoreB - scoreA || a.localeCompare(b))
-        .slice(0, places.length)
-        .map(([id]) => id);
+      const ranked = [...standing.entries()].sort(([a, scoreA], [b, scoreB]) => scoreB - scoreA || a.localeCompare(b));
+      const winners = withReservedPlaces(ranked.slice(0, places.length).map(([id]) => id), ranked.map(([id]) => id));
       // Rome did not go without a praetor because nobody the world names stood:
       // the places went to men of no note, as most of them always did.
       if (winners.length === 0 && college) {
@@ -280,7 +343,17 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
         continue;
       }
 
+      const designated: string[] = [];
       winners.forEach((winnerId, index) => {
+        // Elected to a seat whose holder's term has not yet run out: he is its
+        // designate, and takes it on the day it does.
+        const ahead = places[index]!.seatId === null ? undefined : world.material.officeSeats.find((seat) => seat.id === places[index]!.seatId && seat.status === "held");
+        if (ahead !== undefined) {
+          designated.push(winnerId);
+          world = { ...world, material: { ...world.material, officeSeats: world.material.officeSeats.map((seat) => (seat.id === ahead.id ? { ...seat, designateCharacterId: winnerId } : seat)) },
+            characters: world.characters.map((character) => (character.id === winnerId ? { ...character, prestigeBps: Math.min(10_000, character.prestigeBps + ELECTION_STANDING_BPS) } : character)) };
+          return;
+        }
         // Rising, he lays down the magistracy he held before: a man holds one.
         // His seat in the Senate and his priesthood go with him.
         const risen = isMagistracy(office) ? vacateMagistraciesOf(world, winnerId, offices, "resignation", input.toDay) : world;
@@ -298,13 +371,19 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
       const verdict = `The ${body} elected ${joinNames(names)}${losers.length > 0 ? `, over ${joinNames(loserNames)}` : ""}.`;
       world = replaceProcedures(world, [
         settle(election, "passed", verdict, input.toDay),
-        ...candidacies.map((candidacy) => settle(candidacy, winners.includes(candidacy.subjectId!) ? "passed" : "failed", verdict, input.toDay)),
+        ...candidacies.map((candidacy) => settle(candidacy, winners.includes(candidateOf(candidacy) ?? "") ? "passed" : "failed", verdict, input.toDay)),
       ]);
       facts.push({
         localId: nextLocalId(),
         kind: "election_held",
-        summary: `${verdict.slice(0, -1)}, ${winners.length > 1 ? `to hold the office of ${office.label}` : `to be ${office.label}`}.`,
-        affectedRefs: [...[...standing.keys()].map((id) => ({ kind: "character" as const, id })), { kind: "polity" as const, id: office.polityId }],
+        summary: `${verdict.slice(0, -1)}, ${winners.length > 1 ? `to hold the office of ${office.label}` : `to be ${office.label}`}${designated.length === 0 ? "" : designated.length === winners.length ? ", taking office when the present term runs out" : `; ${joinNames(designated.map((id) => world.characters.find((character) => character.id === id)?.name ?? id))} when the present term runs out`}.`,
+        // Winners first, then as many of the beaten as a fact can name: a
+        // college of sixteen tribunes stood seventeen men, one over the cap,
+        // and the election that should have filled it crashed the burst.
+        affectedRefs: [
+          ...[...winners, ...losers].slice(0, MAX_FACT_REFS - 1).map((id) => ({ kind: "character" as const, id })),
+          { kind: "polity" as const, id: office.polityId },
+        ],
         visibility: "public",
         discoveryState: "public",
         knowableInDays: 0,
@@ -324,7 +403,12 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
 
     const vacatedAt = collegeDueDay ?? Math.min(...places.map((place) => seats().find((seat) => seat.id === place.seatId)?.termExpiresAtStep ?? input.toDay));
     const likeliest = electable().slice(0, MAX_CANDIDATES_TOLD);
-    const canvassOver = input.toDay >= vacatedAt + ELECTION_CANVASS_DAYS;
+    // A successor elected ahead is elected now: the year will not wait for a canvass.
+    const ahead = places.some((place) => fallingDue().some((seat) => seat.id === place.seatId));
+    // The year ran out with nobody elected to follow: an interregnum, and its
+    // elections are held within days, as Rome's interrex held them.
+    const interregnum = !college && !ahead && isMagistracy(office) && places.some((place) => seats().find((seat) => seat.id === place.seatId)?.vacancyCause === "term_expired");
+    const canvassOver = ahead || interregnum || input.toDay >= vacatedAt + ELECTION_CANVASS_DAYS;
 
     // Somebody has put a man forward, or the canvass is over, or there is
     // nobody of standing to call it: the election is called now. Presided over
@@ -354,7 +438,11 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
         stage: "gathering_support",
         resolutionMechanism: institution === undefined ? "sponsor_discretion" : "vote",
         openedAtStep: input.toDay,
-        deadlineStep: input.toDay + ELECTION_POLLING_DAYS,
+        // Ahead of a term's end, counted before the day the seat falls vacant;
+        // in an interregnum, within days.
+        deadlineStep: ahead
+          ? Math.max(input.toDay + 1, Math.min(input.toDay + ELECTION_POLLING_DAYS, vacatedAt - 1))
+          : interregnum ? input.toDay + INTERREGNUM_POLLING_DAYS : input.toDay + ELECTION_POLLING_DAYS,
         resolvedAtStep: null,
         visibility: "public",
         voteRecordId: null,
@@ -367,7 +455,7 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
       facts.push({
         localId: nextLocalId(),
         kind: "election_called",
-        summary: `The ${body} of ${polityName} is called to elect ${college ? `${places.length === 1 ? "one" : places.length} ${places.length === 1 ? "place" : "places"} as ${office.label}` : places.length > 1 ? `${places.length} ${office.label}s` : `a ${office.label}`} in ${ELECTION_POLLING_DAYS} days [${procedure.id}]. Whoever means to stand, or to back a man, has until then.`,
+        summary: `The ${body} of ${polityName} is called to elect ${college ? `${places.length === 1 ? "one" : places.length} ${places.length === 1 ? "place" : "places"} as ${office.label}` : places.length > 1 ? `${places.length} ${office.label}s` : `a ${office.label}`} in ${(procedure.deadlineStep ?? input.toDay + ELECTION_POLLING_DAYS) - input.toDay} days [${procedure.id}]${ahead ? ", for the term that follows this one" : interregnum ? ": the year ran out with nobody elected, and the state cannot go on without them" : ""}. Whoever means to stand, or to back a man, has until then.`,
         affectedRefs: [{ kind: "polity", id: office.polityId }, { kind: "character", id: sponsor }],
         visibility: "public",
         discoveryState: "public",
@@ -400,7 +488,15 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
   }
 
   world = enrolFormerMagistrates(world, offices, input.toDay, facts, nextLocalId);
-  return { world, facts };
+  // Ninety powers electing on one day is the calendar, not Rome's news: a far
+  // power's elections are told to its own people (`far-powers.ts`).
+  const near = facts.length === 0 ? null : powersNearThePlayer(world, player);
+  const told = facts.map((fact) => {
+    const polityId = (fact.affectedRefs ?? []).find((ref) => ref.kind === "polity")?.id;
+    if (fact.visibility !== "public" || newsReach(near, polityId) === "public") return fact;
+    return { ...fact, visibility: "polity" as const, discoveryState: "polity" as const };
+  });
+  return { world, facts: told };
 }
 
 /**
@@ -418,7 +514,7 @@ function enrolFormerMagistrates(
 ): WorldState {
   let next = world;
   for (const council of offices.filter((office) => office.enrolsFormerMagistrates === true)) {
-    const magistracies = new Set(offices.filter((office) => office.polityId === council.polityId && isMagistracy(office) && office.rank !== undefined).map((office) => office.id));
+    const magistracies = new Set(offices.filter((office) => office.polityId === council.polityId && isMagistracy(office) && office.rank !== undefined && office.rank >= (council.enrolsFromRank ?? 0)).map((office) => office.id));
     const seated = new Set(next.material.officeSeats.filter((seat) => seat.officeId === council.id && seat.status === "held").map((seat) => seat.holderCharacterId));
     for (const character of next.characters) {
       if (!character.alive || character.polityId !== council.polityId || seated.has(character.id)) continue;

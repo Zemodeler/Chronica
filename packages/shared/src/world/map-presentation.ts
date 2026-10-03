@@ -112,7 +112,10 @@ export type MapVisualConfig = z.infer<typeof MapVisualConfigSchema>;
 
 export const MapPoliticalOwnershipSchema = z.object({
   provinceId: EntityIdSchema,
+  /** Who holds it now: its owner, or an army that has occupied it. */
   controllerPolityId: EntityIdSchema.nullable(),
+  /** Whose it is, sent only while somebody else holds it (`world/occupation.ts`): the map paints the owner and stripes the occupier over it. */
+  ownerPolityId: EntityIdSchema.nullable().optional(),
   controlFirmnessBps: BasisPointsSchema,
 }).strict();
 export type MapPoliticalOwnership = z.infer<typeof MapPoliticalOwnershipSchema>;
@@ -186,6 +189,8 @@ export const MapForceOverlaySchema = z.object({
   name: z.string().trim().min(1).max(120),
   commanderLabel: z.string().trim().min(1).max(160).nullable(),
   strengthLabel: z.string().trim().min(1).max(120),
+  /** Whether this force currently has fit ships. */
+  naval: z.boolean().default(false),
   relation: z.enum(["friendly", "hostile", "neutral", "unknown"]),
   /** The standard it carries (`Force.standardId`); absent, the client shows its power's first. */
   flagAssetId: EntityIdSchema.optional(),

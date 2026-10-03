@@ -1,7 +1,7 @@
 import "server-only";
 
 import { WorldRevisionConflictError, commitBurst, factRowOf, failBurst, findRunningBurst, getWorldView, instantSortKeyOf, startBurst } from "@chronica/db";
-import { inTheSameRegion, lettersAwaitingYou, whoMayBeReached, type Office, type WorldDelta, type WorldState } from "@chronica/shared";
+import { inTheSameRegion, lettersAwaitingYou, offeredAgreementKinds, peaceOfferMetadata, whoMayBeReached, type Office, type WorldDelta, type WorldState } from "@chronica/shared";
 import { applyDeltas, createIdFactory, materializeFacts } from "@chronica/sim";
 import { livenessAt } from "./burst-status";
 import { resolveContext } from "./simulation-service";
@@ -151,7 +151,8 @@ export async function answerLetter(gameId: string, answer: LetterAnswer): Promis
       deltas.push({
         op: "diplomatic_message_send",
         localId: "reply",
-        kind: "letter",
+        kind: offeredAgreementKinds(peaceOfferMetadata(message)).includes("peace") ? "peace_offer" : "letter",
+        ...(offeredAgreementKinds(peaceOfferMetadata(message)).includes("peace") ? { proposes: ["peace" as const] } : {}),
         fromPolityId,
         fromCharacterRef: characterId,
         toPolityId: message.fromPolityId,
@@ -189,7 +190,7 @@ async function withLetterBurst(
   gameId: string,
   write: (world: WorldState, characterId: string, offices: readonly Office[]) => LetterAct | LetterOutcome,
 ): Promise<LetterOutcome> {
-  const context = await resolveContext(gameId);
+  const context = await resolveContext(gameId, true);
   if (context === null) return refuse(401, "Sign in to your game first.");
   const { db, close, userId, characterId } = context;
   try {
@@ -253,6 +254,7 @@ async function withLetterBurst(
           title: act.title.slice(0, 200),
           body: act.body,
           factIds: materialized.facts.map((fact) => fact.id),
+          storylineIds: result.world.storylines.filter((storyline) => act.subjectIds.length > 1 && act.subjectIds.every((id) => storyline.participantIds.includes(id))).map((storyline) => storyline.id),
           subjects: act.subjectIds.map((id) => ({ kind: "character" as const, id })),
           tags: [],
           changes: [],

@@ -1,3 +1,4 @@
+import { carryOutMilitaryReform } from "./military-reform";
 import {
   allOffices,
   boundedId,
@@ -11,7 +12,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
-import { amend } from "./constitutions";
+import { amend, type ChangeVia } from "./constitutions";
 import { carryOutDepartment } from "./departments";
 
 /**
@@ -45,6 +46,20 @@ export function carryOutEnactment(
   const facts: FactProposalDraft[] = [];
   let next = world;
   const said: string[] = [];
+
+  if (enactment.budget != null) {
+    const budget = enactment.budget;
+    const account = next.material.accounts.find((candidate) => candidate.id === budget.accountId);
+    if (account?.owner.kind === "polity" && account.owner.id === enactment.polityId) {
+      next = { ...next, genericEntities: [...next.genericEntities, {
+        id: ids.next("entity"), kind: "budget_authorization", label: budget.purpose.slice(0, 160),
+        ownerRef: { kind: "polity", id: enactment.polityId },
+        attributes: { procedureId, accountId: budget.accountId, authorizedAmount: budget.amount },
+        linkedEntityIds: [budget.accountId], createdAtStep: atStep, provenanceEventIds: [], provinceId: null, effects: [],
+      }] };
+      said.push(budget.amount === null ? `a dedicated budget is established from ${account.id} for ${budget.purpose}` : `${budget.amount} is authorised from ${account.id} for ${budget.purpose}`);
+    }
+  }
 
   // A law that goes on doing something. It has no one place to stand, so it
   // acts over the whole of the power's ground.
@@ -153,6 +168,13 @@ export function carryOutEnactment(
     said.push(...carried.said);
   }
 
+  // Its armies remade: doctrines, recruitment, terms of service, a body redrawn.
+  if (enactment.military != null) {
+    const carried = carryOutMilitaryReform(next, enactment.polityId, enactment.military, atStep, procedure?.sponsorCharacterId ?? null, procedureId);
+    next = carried.world;
+    said.push(...carried.said);
+  }
+
   // A council that did not exist, with one bloc of members to begin with.
   // Who sits in it, and how they vote, is the world's to fill in.
   if (enactment.body !== null) {
@@ -218,15 +240,33 @@ export function carryOutEnactment(
   // The constitution itself, changed as parts: a form recast, a chamber
   // founded or done away with, a throne made elective.
   if (enactment.constitution != null) {
-    const amended = amend(next, enactment.polityId, enactment.constitution, { offices: scenarioOffices, successionRules: scenarioSuccessionRules }, atStep, ids, title, procedure?.sponsorCharacterId ?? null);
+    const record = procedure?.voteRecordId == null ? undefined : next.material.voteRecords.find((candidate) => candidate.id === procedure.voteRecordId);
+    const via: ChangeVia | undefined = procedure === undefined ? undefined : {
+      procedureId: procedure.id,
+      bodyName: next.material.institutions.find((institution) => institution.id === procedure.institutionId)?.name ?? null,
+      vote: record === undefined ? null : { yes: record.yesWeight, no: record.noWeight },
+    };
+    const amended = amend(next, enactment.polityId, enactment.constitution, { offices: scenarioOffices, successionRules: scenarioSuccessionRules }, atStep, ids, title, procedure?.sponsorCharacterId ?? null, via);
     next = amended.world;
     facts.push(...amended.facts);
     said.push(...amended.said);
   }
 
+  const voted = procedure?.voteRecordId == null ? undefined : next.material.voteRecords.find((candidate) => candidate.id === procedure.voteRecordId);
   next = {
     ...next,
-    enactments: next.enactments.map((candidate) => (candidate.procedureId === enactment.procedureId && candidate.enactedAtStep === null ? { ...candidate, enactedAtStep: atStep } : candidate)),
+    enactments: next.enactments.map((candidate) => (candidate.procedureId === enactment.procedureId && candidate.enactedAtStep === null ? {
+      ...candidate,
+      enactedAtStep: atStep,
+      record: {
+        title: title.slice(0, 200),
+        bodyName: next.material.institutions.find((institution) => institution.id === procedure?.institutionId)?.name ?? null,
+        sponsorCharacterId: procedure?.sponsorCharacterId ?? null,
+        decidedAtStep: procedure?.resolvedAtStep ?? atStep,
+        vote: voted === undefined ? null : { yes: voted.yesWeight, no: voted.noWeight },
+        said: said.join("; ").slice(0, 600),
+      },
+    } : candidate)),
   };
   if (said.length > 0) {
     facts.push({

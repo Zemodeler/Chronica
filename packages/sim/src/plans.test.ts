@@ -53,7 +53,7 @@ describe("laying a plan", () => {
   it("laid again under the same want, keeps what is done and replaces what is not", () => {
     const first = laid();
     const stepId = plansOf(first.world).find((entry) => entry.id === first.ambitionId)!.steps[0]!.id;
-    const done = takeSteps(first.world, HIERON, [stepId], true).world;
+    const done = takeSteps(first.world, HIERON, [stepId]).world;
     const again = layPlan(at(done, 30), HIERON, { ambition: "take messana", kind: "office", steps: [{ act: "Bribe a gate-keeper", inDays: 15, when: null }] }, createIdFactory("t2"));
     expect(again.ambitionId).toBe(first.ambitionId);
     const steps = plansOf(again.world).find((entry) => entry.id === first.ambitionId)!.steps;
@@ -95,7 +95,7 @@ describe("when it is time", () => {
   it("for a step that waits on something, is when that happens", () => {
     const first = laid();
     const stepId = plansOf(first.world).find((entry) => entry.id === first.ambitionId)!.steps[0]!.id;
-    const envoysSent = takeSteps(at(first.world, 10), HIERON, [stepId], true).world;
+    const envoysSent = takeSteps(at(first.world, 10), HIERON, [stepId]).world;
     // The calendar alone does not wake him for the assault: it waits on the army.
     expect(dueSteps(at(envoysSent, 85), clock)).toEqual([]);
     const arrived: WorldState = {
@@ -160,10 +160,10 @@ describe("a step not taken by its day", () => {
     const { world, ambitionId } = laid();
     const settled = settleOverdueSteps(at(world, 25), clock, (prefix) => prefix).world;
     const stepId = plansOf(settled).find((entry) => entry.id === ambitionId)!.steps[0]!.id;
-    expect(takeSteps(settled, HIERON, [stepId], false).taken).toBe(0);
-    expect(takeSteps(settled, HIERON, [stepId], true).taken).toBe(1);
+    expect(takeSteps(settled, HIERON, []).taken).toBe(0);
+    expect(takeSteps(settled, HIERON, [stepId]).taken).toBe(1);
     // Nobody takes another man's step.
-    expect(takeSteps(settled, "hanno-carthage", [stepId], true).taken).toBe(0);
+    expect(takeSteps(settled, "hanno-carthage", [stepId]).taken).toBe(0);
   });
 });
 
@@ -246,7 +246,7 @@ describe("a burst", () => {
       if (!section.includes("of their plan to")) return JSON.stringify({ actors: [] });
       stepId = next;
       days.push(Number(/in (\d+) day/.exec(section)?.[1] ?? -1));
-      return JSON.stringify({ actors: [{ actorRef: { kind: "character", id: HIERON }, reasoning: "Time to send the envoys.", proposal: { narrativeSummary: "Envoys go to Messana.", deltas: [ENVOYS], facts: [fact("envoys", "Syracusan envoys demanded that the Mamertines submit.")] }, stepsTaken: [next] }] });
+      return JSON.stringify({ actors: [{ actorRef: { kind: "character", id: HIERON }, reasoning: "Time to send the envoys.", proposal: { narrativeSummary: "Envoys go to Messana.", deltas: [ENVOYS], facts: [fact("envoys", "Syracusan envoys demanded that the Mamertines submit.")] }, serves: [{ ref: next, acts: [0] }] }] });
     });
 
     // A king with an office is in the ambient cast from the first look. The
@@ -285,7 +285,7 @@ describe("a burst", () => {
         return JSON.stringify({ actors: [{ actorRef: { kind: "character", id: HIERON }, reasoning: "Messana.", proposal: { narrativeSummary: "Hieron resolves.", deltas: [], facts: [fact("resolve", "Hieron resolved to bring Messana under Syracuse.")] }, plan: TAKE_MESSANA }] });
       }
       if (!section.includes("of their plan to")) return JSON.stringify({ actors: [] });
-      return JSON.stringify({ actors: [{ actorRef: { kind: "character", id: HIERON }, reasoning: "Wait for reports.", proposal: { narrativeSummary: "Hieron reviews.", deltas: [], facts: [fact("review", "Hieron renewed discreet inquiries about Messana.")] }, stepsTaken: [next] }] });
+      return JSON.stringify({ actors: [{ actorRef: { kind: "character", id: HIERON }, reasoning: "Wait for reports.", proposal: { narrativeSummary: "Hieron reviews.", deltas: [], facts: [fact("review", "Hieron renewed discreet inquiries about Messana.")] }, serves: [{ ref: next, acts: [0] }] }] });
     });
     const result = await runSimulationBurst({
       world: opening(), clock, offices, warfare: definition.warfare, burstId: "idle", gameId: "game-plans",

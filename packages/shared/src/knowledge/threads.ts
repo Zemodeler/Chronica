@@ -41,6 +41,7 @@ export interface ThreadEntry {
   readonly sortKey: number;
   readonly read: boolean;
   readonly storylineIds: readonly string[];
+  readonly factIds?: readonly string[];
   readonly subjects: readonly { readonly kind: string; readonly id: string }[];
 }
 
@@ -90,7 +91,8 @@ export function threadsYouSee(input: ThreadsInput): Readonly<Record<string, Thre
   const notes: Record<string, ThreadNote> = {};
   for (const storyline of world.storylines) {
     if (!knowsStoryline(world, characterId, storyline, governs, station.polityId)) continue;
-    const own = entries.filter((entry) => entry.storylineIds.includes(storyline.id)).sort((a, b) => a.sortKey - b.sortKey);
+    const own = entries.filter((entry) => entry.storylineIds.includes(storyline.id)
+      || entry.factIds?.some((id) => storyline.causalFactIds.includes(id))).sort((a, b) => a.sortKey - b.sortKey);
     const followed = input.followedIds.has(storyline.id);
     // A thread with nothing told of it is a thread the player has no way to
     // have heard of, unless they are in it or chose to follow it.

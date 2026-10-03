@@ -80,7 +80,7 @@ export function validateMechanic(draft: MechanicDraft, world: WorldState, refs: 
         return predicate.polityId === predicate.otherPolityId ? "a war needs two powers" : null;
       case "force_strength_above": return forceIds.has(predicate.forceId) ? null : `"${predicate.forceId}" is not an army this rule may read`;
       case "in_months": return null;
-      case "letter_answered": return exists.polity(predicate.fromPolityId) && exists.polity(predicate.toPolityId) ? null : "a letter names a power that does not exist";
+      case "letter_answered": return exists.polity(predicate.fromPolityId) && exists.polity(predicate.toPolityId) && (predicate.messageId === undefined || world.diplomacy.some((message) => message.id === predicate.messageId)) ? null : "a letter names a power that does not exist";
     }
   };
 

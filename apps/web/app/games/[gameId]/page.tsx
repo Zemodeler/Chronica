@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { cache } from "react";
 import { notFound, redirect } from "next/navigation";
 import { gameRepository } from "../../../lib/game-repository";
 import { ageAtScenarioStart, getCharacterPanelData, getScenarioTimelineStartYear } from "../../../lib/character-service";
@@ -7,13 +8,16 @@ import { roomStyleFor } from "./components/office-objects";
 import type { CharacterPanelProps } from "./components/character-panel";
 import { unopenableSave } from "../../../lib/save-errors";
 
+// Metadata and the page share this read during one request. No cross-player cache.
+const readWorld = cache((gameId: string) => gameRepository.getWorld(gameId));
+
 export async function generateMetadata({
   params,
 }: {
   params: Promise<{ gameId: string }>;
 }): Promise<Metadata> {
   const { gameId } = await params;
-  const world = await gameRepository.getWorld(gameId).catch((error: unknown) => {
+  const world = await readWorld(gameId).catch((error: unknown) => {
     if (unopenableSave(error) === null) throw error;
     return null;
   });
@@ -46,7 +50,7 @@ export default async function GamePage({
       redirect(`/games/${encodeURIComponent(gameId)}/declare`);
     }
     loaded = await Promise.all([
-      gameRepository.getWorld(gameId),
+      readWorld(gameId),
       getCharacterPanelData(gameId),
       getScenarioTimelineStartYear(gameId),
     ]);

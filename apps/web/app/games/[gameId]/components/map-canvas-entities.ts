@@ -3,7 +3,8 @@ import type { StaticWorldGeometry } from "./world-geometry";
 import { leadersOf, politicalColourWithAlpha } from "./political-geometry";
 import { resolveMapForcePlacements } from "./map-dynamic-geometry";
 import { deriveForceConflictStatuses } from "./map-conflict-state";
-import { FALLBACK_FORCE_FLAG, FORCES_VISIBLE_FROM_SCALE, armyStandardBounds, armyStandardWidthForZoom, fannedStandardCentre, type ForceFlagAsset } from "./army-standard";
+import { FORCES_VISIBLE_FROM_SCALE, armyStandardBounds, armyStandardWidthForZoom, fannedStandardCentre, type ForceFlagAsset } from "./army-standard";
+import { standardFor } from "../../../../lib/army-standards";
 import { labelFontFamily } from "./map-fonts";
 import { ATLAS, TOKENS } from "../../../../lib/palette";
 
@@ -317,7 +318,7 @@ export function drawForces(
     const { x, y } = fannedStandardCentre(placement, armyStandardWidth);
     if (x < visibleRect.minX || x > visibleRect.maxX || y < visibleRect.minY || y > visibleRect.maxY) continue;
 
-    const asset = forceFlagUrls.get(force.forceId) ?? FALLBACK_FORCE_FLAG;
+    const asset = forceFlagUrls.get(force.forceId) ?? standardFor(force.ownerPolityId, force.naval ? "navy" : "army", force.flagAssetId);
     const bounds = armyStandardBounds(asset, x, y, armyStandardWidth);
     const conflict = conflictByForceId.get(force.forceId);
 

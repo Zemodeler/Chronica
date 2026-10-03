@@ -16,13 +16,19 @@ describe("Punic Wars built-in scenario", () => {
 
   it("keeps the four key actors and their historical capitals in authoritative state", () => {
     expect(punicWarsScenario.initialWorld.map.polities.filter((polity) => ["rome", "carthage", "syracuse", "mamertines"].includes(polity.id))).toHaveLength(4);
-    // Five armies -- the four powers' own, and the Campanian legion holding
-    // Rhegium against the Republic -- plus the ships that decide who can cross
-    // to Sicily at all. The consul's army is half allies, as a consular army was.
+    // Five armies in the west -- the four powers' own, and the Campanian legion
+    // holding Rhegium against the Republic -- three in the Hellenistic east,
+    // and the ships that decide who can cross to Sicily at all. Only the
+    // Campanians and the Mamertines are foot and nothing else now (v42). The
+    // consul's army is half allies, as a consular army was, drawn up as a
+    // legion and an ala.
     const forces = punicWarsScenario.initialWorld.material.forces;
-    expect(forces.filter((force) => force.personnel.every((category) => category.categoryId === "infantry"))).toHaveLength(5);
-    expect(forces.find((force) => force.id === "roman-field-army")!.personnel.map((category) => category.label)).toEqual(["Legionaries", "Allied infantry"]);
-    expect(forces.filter((force) => force.personnel.some((category) => category.categoryId === "warship"))).toHaveLength(3);
+    expect(forces.filter((force) => force.personnel.every((category) => category.categoryId === "infantry")).map((force) => force.id).sort()).toEqual(["campanian-legion", "mamertine-garrison"]);
+    expect(forces.find((force) => force.id === "roman-field-army")!.personnel.map((category) => category.label)).toEqual([
+      "Hastati of Legio I", "Principes of Legio I", "Triarii of Legio I", "Velites of Legio I", "Equites of Legio I",
+      "Allied cohorts of the first Ala of the allies", "Extraordinarii of the first Ala of the allies", "Allied horse of the first Ala of the allies",
+    ]);
+    expect(forces.filter((force) => force.personnel.some((category) => category.categoryId === "warship"))).toHaveLength(4);
   });
 
   it("makes Sicily an island", () => {
@@ -283,12 +289,10 @@ describe("the Punic Wars map as authoritative world state", () => {
     // otherwise controls, which is precisely what it did -- and what the
     // Mamertines did at Messana.
     for (const province of provinces) for (const settlement of province.settlements) held.add(settlement.controllerPolityId);
-    // One polity is declared without territory on purpose: the Cenomani
-    // province was merged away, but the people remain nameable. Every other
-    // polity must actually hold something, or it is a name the world can
-    // neither show nor act on.
+    // Brixia now gives the Cenomani their historical seat as well. Every
+    // declared power holds a city or ground it can actually act on.
     const landless = world.map.polities.filter((polity) => !held.has(polity.id)).map((polity) => polity.id);
-    expect(landless.sort()).toEqual(["cenomani"]);
+    expect(landless).toEqual([]);
   });
 
   it("draws no border to a province that does not exist", () => {

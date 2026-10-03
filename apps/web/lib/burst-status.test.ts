@@ -81,6 +81,7 @@ describe("a burst answered by hand", () => {
   it("is never judged stuck for want of progress, only dead for want of a heartbeat", () => {
     expect(noProgressAllowedMs({ CHRONICA_AI_MODE: "hand" })).toBeGreaterThan(365 * 24 * 60 * 60_000);
     expect(noProgressAllowedMs({})).toBe(BURST_NO_PROGRESS_MS);
+    expect(noProgressAllowedMs({}, true)).toBeGreaterThan(365 * 24 * 60 * 60_000);
     const { progressAfter } = livenessAt(new Date("2026-09-28T12:00:00Z"), noProgressAllowedMs({ CHRONICA_AI_MODE: "hand" }));
     expect(Number.isNaN(progressAfter.getTime())).toBe(false);
   });

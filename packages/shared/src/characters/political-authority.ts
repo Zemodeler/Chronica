@@ -106,6 +106,20 @@ function checkRequirement(
       const statuses = (params.statuses as readonly string[] | undefined) ?? ["free"];
       return statuses.includes(character.legalStatus) ? null : `${character.name} is not of the standing the law requires (${statuses.join(" or ")}).`;
     }
+    case "ordo": {
+      const ordo = params.ordo as string | undefined;
+      return ordo === undefined || character.ordo === ordo ? null : `${character.name} cannot hold it: it is for ${ordo === "plebeian" ? "plebeians" : "patricians"}.`;
+    }
+    case "min_campaigns": {
+      // A man with no record of service is taken to have served the years a
+      // man of his age would have: the world began in the middle of everyone's
+      // life. A man with one has what it says, the years before it included.
+      const wanted = (params.campaigns as number | undefined) ?? 10;
+      const served = character.service === undefined
+        ? Math.max(0, Math.min(10, currentAgeYears(character, world.elapsedStep ?? 0) - 18))
+        : character.service.campaigns + character.service.priorCampaigns;
+      return served >= wanted ? null : `${character.name} has served ${served} campaigns, and the law asks ${wanted} before office.`;
+    }
     case "gender": {
       const gender = params.gender as string | undefined;
       return gender === undefined || character.gender === gender ? null : `${character.name} cannot hold it: it is for ${gender === "female" ? "women" : "men"}.`;
@@ -124,7 +138,7 @@ function checkRequirement(
 }
 
 /** The requirements a waiver can set aside: the ladder, never the man. */
-const LADDER_REQUIREMENTS = new Set<EligibilityRequirement["kind"]>(["min_age", "held_office", "not_held_within_years", "min_prestige"]);
+const LADDER_REQUIREMENTS = new Set<EligibilityRequirement["kind"]>(["min_age", "held_office", "not_held_within_years", "min_prestige", "min_campaigns"]);
 
 /** Resolves every named requirement against `characterId`. Missing requirement ids fail closed. */
 export function resolveEligibility(

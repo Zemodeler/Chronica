@@ -179,6 +179,7 @@ const ENGINE_OWNED: readonly { readonly kinds: RegExp; readonly op: WorldDelta["
   { kinds: /^(siege|siege_laid|siege_begun|siege_opened|siege_started|besieged|city_besieged|investment)$/, op: "siege_lay" },
   { kinds: /^(battle|battle_fought|battle_won|battle_lost|engagement|pitched_battle|clash|skirmish|defeat_in_battle|victory_in_battle)$/, op: "force_engage" },
   { kinds: /^(province_taken|province_captured|province_conquered|province_control_change|city_taken|city_captured|city_fell|city_falls|city_surrendered|conquest)$/, op: "province_control_set", also: "settlement_control_set" },
+  { kinds: /^(capital_relocated|capital_restored|capital_designated|capital_moved)$/, op: "capital_set" },
   { kinds: /^(force_moved|force_movement|army_moved|army_marched|army_arrived|fleet_moved|fleet_movement|fleet_arrived|troop_movement|march|march_begun|crossing|crossing_begun)$/, op: "force_modify" },
 ];
 
@@ -189,7 +190,34 @@ export interface FactsAndTheirActs {
   readonly acts: readonly WorldDelta[];
   /** What was left out, and why, for the audit. */
   readonly dropped: readonly string[];
+  /**
+   * What was said with nothing behind it, kept as what it is: somebody's
+   * report, not the world's (`asClaim`). A camp that says the city fell is
+   * news of the camp; that the city fell is the engine's to say.
+   */
+  readonly claims: readonly FactProposal[];
 }
+
+/**
+ * A fact nothing stands behind, as a report of it: its own kind, marked, its
+ * weight capped, its words said as said. Never a thing the Chronicle must
+ * tell, and never read as the event -- the engine's record is where the event
+ * is, when it comes.
+ */
+export function asClaim(fact: FactProposal): FactProposal {
+  const said = fact.summary.trim();
+  return {
+    ...fact,
+    kind: `claim_${fact.kind}`.slice(0, 80),
+    // A name keeps its capital; only "The", "A", "His" and their kind lose it.
+    summary: /^(it was said|word came|it was reported)/i.test(said) ? said
+      : `It was said that ${/^(The|A|An|His|Her|Their|Its|Our|Some|Many)\b/.test(said) ? `${said.charAt(0).toLowerCase()}${said.slice(1)}` : said}`.slice(0, 600),
+    significance: Math.min(fact.significance, 30),
+  };
+}
+
+/** Whether a fact is a report of something rather than the thing (`asClaim`). */
+export const isClaim = (kind: string): boolean => kind.startsWith("claim_");
 
 export function actsBehindFacts(
   facts: readonly FactProposal[],
@@ -201,6 +229,7 @@ export function actsBehindFacts(
   const kept: FactProposal[] = [];
   const acts: WorldDelta[] = [];
   const dropped: string[] = [];
+  const claims: FactProposal[] = [];
   const mentions = (delta: WorldDelta, id: string): boolean => JSON.stringify(delta).includes(`"${id}"`);
   for (const fact of facts) {
     const owned = ENGINE_OWNED.find((entry) => entry.kinds.test(fact.kind.trim().toLowerCase()));
@@ -222,7 +251,8 @@ export function actsBehindFacts(
       dropped.push(`"${fact.kind}" is the engine's to tell: made into the siege it describes, for ${forces[0]!.name}.`);
       continue;
     }
-    dropped.push(`"${fact.kind}" ("${fact.summary.slice(0, 80)}") asserted what only the engine makes true, with no "${owned.op}" behind it; left out.`);
+    dropped.push(`"${fact.kind}" ("${fact.summary.slice(0, 80)}") asserted what only the engine makes true, with no "${owned.op}" behind it; kept as a report.`);
+    claims.push(asClaim(fact));
   }
-  return { facts: kept, acts, dropped };
+  return { facts: kept, acts, dropped, claims };
 }

@@ -48,6 +48,22 @@ const RequiredResourceSchema = z
   .object({ accountId: EntityIdSchema, minAmount: z.number().int().positive() })
   .strict();
 
+/**
+ * What a conditional promise waits on, as something the world can be read
+ * for: "if the Carthaginians attack you, I will send men" waits on an attack
+ * by Carthage, not on a refusal, a letter or a day passing (E08). `of` is the
+ * person or power whose act it is: who attacks, who is at war with the
+ * beneficiary, who puts the question, who writes.
+ */
+export const PromiseTriggerSchema = z
+  .object({
+    kind: z.enum(["attack_by", "war_with", "question_put", "letter_from"]),
+    of: EntityIdSchema,
+  })
+  .strict()
+  .meta({ id: "PromiseTrigger" });
+export type PromiseTrigger = z.infer<typeof PromiseTriggerSchema>;
+
 export const CommitmentSchema = z
   .object({
     id: EntityIdSchema,
@@ -63,6 +79,8 @@ export const CommitmentSchema = z
      * made before this was kept: read from the words (`promiseFormOf`).
      */
     form: z.enum(["do", "refrain"]).optional(),
+    /** What it waits on, when it waits on something (`PromiseTrigger`). Absent: judged by its kind (`occasionCame`). */
+    trigger: PromiseTriggerSchema.nullable().optional(),
     /** Authority the promisor must hold to keep this at all -- an office they must currently occupy. */
     requiredOfficeId: EntityIdSchema.nullable().default(null),
     /** Resource the promisor must actually have on hand to keep this. */
@@ -118,6 +136,8 @@ export interface CreateCommitmentInput {
   readonly actionKind: CommitmentActionKind;
   readonly description: string;
   readonly conditions?: string;
+  readonly form?: "do" | "refrain" | undefined;
+  readonly trigger?: PromiseTrigger | null;
   readonly requiredOfficeId?: string | null;
   readonly requiredResource?: { accountId: string; minAmount: number } | null;
   readonly visibility: z.infer<typeof VisibilitySchema>;
@@ -148,6 +168,8 @@ export function createCommitment(
     actionKind: input.actionKind,
     description: input.description,
     conditions: input.conditions ?? "",
+    ...(input.form === undefined ? {} : { form: input.form }),
+    ...(input.trigger == null ? {} : { trigger: input.trigger }),
     requiredOfficeId,
     requiredResource,
     visibility: input.visibility,

@@ -99,7 +99,8 @@ describe("the walls of a city", () => {
 describe("a relief", () => {
   it("strong enough makes the besiegers draw off without a battle", () => {
     const pressed = run(besieged(), 5, 5).world;
-    const { world, facts, battles } = run(arrive(pressed, relief(12_000)), 10, 10);
+    // Half as many again as the consul's 8 860 (a legion and an ala since v42).
+    const { world, facts, battles } = run(arrive(pressed, relief(14_000)), 10, 10);
     expect(world.sieges[0]!.status).toBe("lifted");
     expect(facts.some((fact) => fact.kind === "siege_lifted" && /came up to its relief/.test(fact.summary))).toBe(true);
     expect(battles).toHaveLength(0);

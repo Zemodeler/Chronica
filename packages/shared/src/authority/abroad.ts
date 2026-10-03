@@ -73,7 +73,7 @@ export interface TreatyPower {
   /** In a war: the allies drawn into it on each side by foedus. */
   readonly sides: { readonly yours: readonly string[]; readonly theirs: readonly string[] } | null;
   readonly regard: { readonly inWords: string; readonly why: string; readonly at: TreatyMoment } | null;
-  readonly letters: readonly { readonly id: string; readonly kindLabel: string; readonly subject: string; readonly replyByLabel: string | null }[];
+  readonly letters: readonly { readonly id: string; readonly kindLabel: string; readonly subject: string; readonly replyByLabel: string | null; readonly previousRejection?: { readonly terms: string; readonly reason: string; readonly subject: string } | null }[];
   /** What everybody knows of its dealings with third powers. */
   readonly elsewhere: readonly { readonly key: string; readonly kind: PolityAgreementKind; readonly kindLabel: string; readonly withLabel: string; readonly since: TreatyMoment }[];
 }
@@ -259,7 +259,7 @@ export function readAbroad(
       ended: [...power.ended].sort((a, b) => (b.ended?.at.days ?? 0) - (a.ended?.at.days ?? 0)),
       sides,
       regard: regardOf.get(id) ?? null,
-      letters: letters.filter((letter) => letter.fromPolityId === id).map((letter) => ({ id: letter.id, kindLabel: letter.kindLabel, subject: letter.subject, replyByLabel: letter.replyByLabel })),
+      letters: letters.filter((letter) => letter.fromPolityId === id).map((letter) => ({ id: letter.id, kindLabel: letter.kindLabel, subject: letter.subject, replyByLabel: letter.replyByLabel, previousRejection: letter.previousRejection ?? null })),
       elsewhere: active
         .filter((agreement) => agreementIsOpen(agreement))
         .flatMap((agreement) => {

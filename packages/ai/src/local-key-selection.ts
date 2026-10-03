@@ -1,7 +1,7 @@
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-export type LocalAiProvider = "openai" | "anthropic";
+export type LocalAiProvider = "openai" | "anthropic" | "codex";
 
 export type LocalAiProviderConfiguration = Readonly<{
   available: boolean;
@@ -11,6 +11,7 @@ export type LocalAiProviderConfiguration = Readonly<{
   anthropicConfigured: boolean;
   openAiModels: readonly string[];
   anthropicModels: readonly string[];
+  codexModels: readonly string[];
 }>;
 
 const LOCAL_SETTINGS_FILE = ".chronica.local-ai.json";
@@ -29,26 +30,38 @@ export function getLocalAiProviderConfiguration(): LocalAiProviderConfiguration 
   const anthropicConfigured = Boolean(process.env.ANTHROPIC_API_KEY?.trim());
   const openAiModels = modelsForProvider("openai");
   const anthropicModels = modelsForProvider("anthropic");
+  const codexModels = modelsForProvider("codex");
   const preferredProvider = readSelectedProvider() ?? defaultProviderForCurrentAdapter();
-  const activeProvider = preferredProvider === "openai" && openAiConfigured
+  const activeProvider = preferredProvider === "codex" ? "codex" : preferredProvider === "openai" && openAiConfigured
     ? "openai"
     : preferredProvider === "anthropic" && anthropicConfigured
       ? "anthropic"
-      : openAiConfigured ? "openai" : "anthropic";
+      : openAiConfigured ? "openai" : anthropicConfigured ? "anthropic" : preferredProvider;
   const selectedModel = readSelectedConfiguration()?.activeModel;
-  const activeModels = activeProvider === "openai" ? openAiModels : anthropicModels;
+  const activeModels = activeProvider === "codex" ? codexModels : activeProvider === "openai" ? openAiModels : anthropicModels;
   return {
-    available: openAiConfigured || anthropicConfigured,
+    available: true,
     activeProvider,
     activeModel: selectedModel !== undefined && activeModels.includes(selectedModel) ? selectedModel : activeModels[0]!,
     openAiConfigured,
     anthropicConfigured,
     openAiModels,
     anthropicModels,
+    codexModels,
   };
 }
 
 export function selectLocalAiConfiguration(provider: LocalAiProvider, model: string): void {
+  validateLocalAiConfiguration(provider, model);
+  const settingsFile = settingsFilePath();
+  const temporaryFile = `${settingsFile}.${process.pid}.tmp`;
+  writeFileSync(temporaryFile, `${JSON.stringify({ activeProvider: provider, activeModel: model }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  renameSync(temporaryFile, settingsFile);
+  cachedSelection = null;
+}
+
+/** Validate before installation/sign-in so invalid browser submissions have no side effects. */
+export function validateLocalAiConfiguration(provider: LocalAiProvider, model: string): void {
   const configuration = getLocalAiProviderConfiguration();
   if (!configuration.available) {
     throw new Error("No configured local AI provider is available to select.");
@@ -62,17 +75,9 @@ export function selectLocalAiConfiguration(provider: LocalAiProvider, model: str
   if (!modelsForProvider(provider).includes(model)) {
     throw new Error("The selected local AI model is not available for this provider.");
   }
-
-  const settingsFile = settingsFilePath();
-  const temporaryFile = `${settingsFile}.${process.pid}.tmp`;
-  writeFileSync(temporaryFile, `${JSON.stringify({ activeProvider: provider, activeModel: model }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-  renameSync(temporaryFile, settingsFile);
-  // The reader below caches; a selection the developer just made must not wait
-  // for that window to lapse.
-  cachedSelection = null;
 }
 
-export function getConfiguredApiKey(provider: LocalAiProvider): string | undefined {
+export function getConfiguredApiKey(provider: "openai" | "anthropic"): string | undefined {
   return process.env[primaryKeyName(provider)]?.trim() || undefined;
 }
 
@@ -94,10 +99,10 @@ function isLocalDevelopment(): boolean {
 
 function defaultProviderForCurrentAdapter(): LocalAiProvider {
   const mode = process.env.CHRONICA_AI_MODE ?? "openai";
-  return mode === "local" ? "anthropic" : "openai";
+  return mode === "hand" ? "codex" : mode === "local" ? "anthropic" : "openai";
 }
 
-function primaryKeyName(provider: LocalAiProvider): "OPENAI_API_KEY" | "ANTHROPIC_API_KEY" {
+function primaryKeyName(provider: "openai" | "anthropic"): "OPENAI_API_KEY" | "ANTHROPIC_API_KEY" {
   return provider === "openai" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
 }
 
@@ -124,7 +129,7 @@ function readSelectedConfigurationFromDisk(): { activeProvider: LocalAiProvider;
   try {
     const parsed: unknown = JSON.parse(readFileSync(settingsFilePath(), "utf8"));
     if (typeof parsed === "object" && parsed !== null && "activeProvider" in parsed) {
-      if (parsed.activeProvider === "openai" || parsed.activeProvider === "anthropic") {
+      if (parsed.activeProvider === "openai" || parsed.activeProvider === "anthropic" || parsed.activeProvider === "codex") {
         if ("activeModel" in parsed && typeof parsed.activeModel === "string") {
           return { activeProvider: parsed.activeProvider, activeModel: parsed.activeModel };
         }
@@ -142,6 +147,11 @@ function readSelectedProvider(): LocalAiProvider | null {
 }
 
 function modelsForProvider(provider: LocalAiProvider): readonly string[] {
+  if (provider === "codex") {
+    const configured = process.env.CHRONICA_LOCAL_CODEX_MODELS?.split(",").map((model) => model.trim()).filter(Boolean);
+    if (configured?.length) return [...new Set(configured)];
+    return [...new Set([process.env.CHRONICA_HAND_MODEL?.trim() || "gpt-6-luna", "gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol", "gpt-6-astra"])];
+  }
   const configured = provider === "openai" ? process.env.CHRONICA_LOCAL_OPENAI_MODELS : process.env.CHRONICA_LOCAL_ANTHROPIC_MODELS;
   const models = configured?.split(",").map((model) => model.trim()).filter(Boolean);
   if (models && models.length > 0) return [...new Set(models)];
@@ -159,6 +169,7 @@ function unavailableConfiguration(): LocalAiProviderConfiguration {
     anthropicConfigured: false,
     openAiModels: [],
     anthropicModels: [],
+    codexModels: [],
   };
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyDiplomaticAnswerToStance, deriveDiplomaticEscalations, type DiplomaticMessage, type PolityStance } from "./diplomacy";
+import { peaceOfferMetadata, previousPeaceRejection, applyDiplomaticAnswerToStance, deriveDiplomaticEscalations, type DiplomaticMessage, type PolityStance } from "./diplomacy";
 
 // Regression: a rejected ultimatum used to have nothing tracking it -- the
 // offended power's only reaction was whatever the Game Master happened to
@@ -170,5 +170,24 @@ describe("the men a letter passes between", () => {
   it("is read the kinder from a sociable writer", () => {
     const warmth = (traits: string[]) => applyDiplomaticAnswerToStance([], accepted, 1, { writer: hand(50, traits) }).find((stance) => stance.polityId === "rome")?.trustScore ?? 0;
     expect(warmth(["sociable"])).toBeGreaterThan(warmth([]));
+  });
+});
+
+// Tray and model letters share the same treaty classification.
+describe("peace offer metadata", () => {
+  it("recognizes explicit peace and conditional surrender proposals", () => {
+    for (const terms of ["We offer you peace in exchange for surrender.", "I will surrender Rhegium if the soldiers receive safe conduct."]) {
+      expect(peaceOfferMetadata({ kind: "letter", proposes: [], terms })).toEqual({ kind: "peace_offer", proposes: ["peace"] });
+    }
+  });
+  it("leaves ordinary letters and negated offers alone", () => {
+    for (const terms of ["I hope the peace lasts.", "We will not offer peace.", "I refuse to surrender if you execute the men.", "We cannot negotiate peace."]) {
+      expect(peaceOfferMetadata({ kind: "letter", terms })).toEqual({ kind: "letter", proposes: [] });
+    }
+  });
+  it("does not say an unanswered counteroffer was rejected", () => {
+    const pending = message({ id: "pending", kind: "peace_offer", fromPolityId: "rome", toPolityId: "rhegium", sentAtStep: 34 });
+    const renewed = message({ id: "renewed", kind: "peace_offer", fromPolityId: "rhegium", toPolityId: "rome", sentAtStep: 37 });
+    expect(previousPeaceRejection([pending, renewed], renewed)).toBeUndefined();
   });
 });

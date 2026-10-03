@@ -23,6 +23,7 @@ export interface OpenReservationInput {
   readonly currencyId: string;
   readonly amount: number;
   readonly purposeId: string;
+  readonly purposeKind?: MoneyReservation["purposeKind"];
   readonly atStep: number;
 }
 
@@ -38,7 +39,7 @@ export function openReservation(
     currencyId: input.currencyId,
     reservedAmount: input.amount,
     remainingAmount: input.amount,
-    purposeKind: "project",
+    purposeKind: input.purposeKind ?? "project",
     purposeId: input.purposeId,
     status: "active",
     createdAtStep: input.atStep,
@@ -59,4 +60,27 @@ export function spendFromReservation(reservation: MoneyReservation, amount: numb
 export function releaseMoneyReservation(reservation: MoneyReservation, atStep: number, outcome: "released" | "cancelled" = "released"): MoneyReservation {
   if (reservation.status !== "active") return reservation;
   return { ...reservation, status: outcome, closedAtStep: atStep };
+}
+
+/** Payments causally attached to this order part, including immediate contracts. */
+export function spentForOrderPart(world: import("./world-state").WorldState, part: import("./orders").OrderPart): number {
+  const record = world.orders.find((order) => order.parts.includes(part));
+  const index = record?.parts.indexOf(part) ?? -1;
+  const source = record === undefined ? null : `${record.id}-p${index}`;
+  const causes = new Set(part.workRefs.map((ref) => ref.id));
+  // A bare payment names no work: the part's own "paid" goal is what ties it.
+  const paidTo = new Set(part.goals.flatMap((goal) => goal.kind === "paid" ? [goal.toAccountId] : []));
+  const since = record?.givenAtStep ?? 0;
+  return world.material.transactions.filter((transaction) => transaction.sourceAccountId === part.spend?.payerAccountId
+    && ((source !== null && transaction.sourceActionId === source) || (transaction.sourceActionId == null && causes.has(transaction.cause.id))
+      || (transaction.sourceActionId == null && transaction.atStep >= since && transaction.destinationAccountId != null && paidTo.has(transaction.destinationAccountId))))
+    .reduce((sum, transaction) => sum + transaction.amount, 0);
+}
+
+/** The same funding test used by project payments and the active-work reader. */
+export function projectFundingAvailable(world: import("./world-state").WorldState, project: import("./project").Project): number {
+  const accountId = project.fundingAccountId ?? world.material.accounts.find((account) => account.owner.kind === project.sponsorEntityRef.kind && account.owner.id === project.sponsorEntityRef.id)?.id;
+  if (accountId === undefined) return 0;
+  const reservation = world.material.reservations.find((candidate) => candidate.id === project.reservationId && candidate.status === "active" && candidate.accountId === accountId);
+  return availableBalance(world.material, accountId) + (reservation?.remainingAmount ?? 0);
 }

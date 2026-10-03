@@ -1,4 +1,4 @@
-import type { WorldDelta, WorldState } from "@chronica/shared";
+import { peaceOfferMetadata, type WorldDelta, type WorldState } from "@chronica/shared";
 
 /**
  * Kinds of message a man writes as himself. The rest -- an alliance offered,
@@ -51,7 +51,7 @@ export function isOwnBusiness(
     // answer is theirs to decide.
     // A letter over some other power's name is a forgery, not a letter.
     case "diplomatic_message_send":
-      return PERSONAL_LETTERS.has(delta.kind) && isActor(delta.fromCharacterRef)
+      return PERSONAL_LETTERS.has(peaceOfferMetadata(delta).kind) && peaceOfferMetadata(delta).proposes.length === 0 && isActor(delta.fromCharacterRef)
         && id(delta.fromPolityId) === world.characters.find((character) => character.id === actorId)?.polityId;
     // Answering a letter written to him by name: his own, when it is the kind
     // a man writes as himself and offers nothing a power would have to keep.
@@ -59,8 +59,8 @@ export function isOwnBusiness(
     // judged as his answering for the republic.
     case "diplomatic_message_answer": {
       const letter = world.diplomacy.find((candidate) => candidate.id === id(delta.messageRef));
-      return letter !== undefined && letter.toCharacterId === actorId && PERSONAL_LETTERS.has(letter.kind)
-        && (letter.proposes ?? []).length === 0 && (letter.clauses ?? []).length === 0 && letter.onRefusal == null;
+      return letter !== undefined && letter.toCharacterId === actorId && PERSONAL_LETTERS.has(peaceOfferMetadata(letter).kind)
+        && peaceOfferMetadata(letter).proposes.length === 0 && (letter.clauses ?? []).length === 0 && letter.onRefusal == null;
     }
     // A school, a shrine, a company: his, and kept out of his own purse.
     case "generic_entity_create":
@@ -82,6 +82,20 @@ export function isOwnBusiness(
     case "legal_status_set": {
       const person = world.characters.find((candidate) => candidate.id === id(delta.characterRef));
       return person?.legalStatus === "enslaved" && person.ownerCharacterId === actorId;
+    }
+    // An officer drilling his own formation: the centurion's maniple, the
+    // tribune's legion. Only that, and only his own -- the rest of the army
+    // is its commander's to order.
+    case "force_modify": {
+      if (delta.formationRef === undefined) return false;
+      const said = Object.entries(delta).filter(([key, value]) => value !== undefined && !["op", "forceRef", "formationRef", "drilling", "reason"].includes(key));
+      if (said.length > 0) return false;
+      const force = world.material.forces.find((candidate) => candidate.id === id(delta.forceRef));
+      const formationId = id(delta.formationRef);
+      const formation = force?.formations?.find((candidate) => candidate.id === formationId);
+      if (force === undefined || formation === undefined) return false;
+      return (force.posts ?? []).some((post) => post.characterId === actorId
+        && (post.formationId === formation.id || (post.unitIndex === null && force.formations?.find((candidate) => candidate.id === post.formationId)?.bodyId === formation.bodyId)));
     }
     default:
       return false;

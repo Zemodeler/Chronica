@@ -111,10 +111,16 @@ describe("a man in the ranks", () => {
     expect(world.characters.find((character) => character.id === PLAYER)?.locationProvinceId).toBe(army.locationId);
   });
 
-  it("still gives a man whose role names a command his command", () => {
+  it("puts a centurion in the legion as its officer, not over men of his own", () => {
+    // A centurion led a century of the consul's army; he did not bring one.
     const world = materializePlayerCharacter(opening(), PLAYER, declared("A veteran centurion of the Roman legions"), government);
+    expect(world.material.forces.some((force) => force.commanderCharacterId === PLAYER)).toBe(false);
+    expect(world.material.forces.some((force) => force.memberCharacterIds.includes(PLAYER))).toBe(true);
+  });
+
+  it("still gives a man whose role names a band of his own its command", () => {
+    const world = materializePlayerCharacter(opening(), PLAYER, declared("A captain of mercenaries with a company of his own"), government);
     expect(world.material.forces.some((force) => force.commanderCharacterId === PLAYER)).toBe(true);
-    expect(world.material.forces.some((force) => force.memberCharacterIds.includes(PLAYER))).toBe(false);
   });
 
   it("lets him see his own army as his business, but not reach its chest", () => {

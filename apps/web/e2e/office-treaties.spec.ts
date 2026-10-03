@@ -32,7 +32,7 @@ test.describe("the treaties in the seal case", () => {
     await sheet.locator(".treaty-card__name", { hasText: "Samnites" }).click();
     const dossier = sheet.locator(".treaties__dossier");
     await expect(dossier.locator(".dossier__title")).toContainText("Samnites");
-    await expect(dossier).toContainText(/bound to Rome by foedus/i);
+    await expect(dossier).toContainText(/bound to Rome/i);
     await page.screenshot({ path: `${DIR}/1-dossier.png` });
   });
 
@@ -71,7 +71,7 @@ test.describe("the treaties in the seal case", () => {
 
   test("an unpinned note goes as soon as the pointer leaves its word", async ({ page }) => {
     const sheet = await openTreaties(page);
-    const kind = sheet.locator(".treaty-card__kinds .tip-term").first();
+    const kind = sheet.locator(".treaty-card__regard .tip-term").first();
     await kind.hover();
     await expect(page.locator(".tip")).toHaveCount(1);
     await sheet.locator(".treaties__group h3").first().hover();

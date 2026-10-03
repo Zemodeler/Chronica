@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { PUNIC_IDS, PUNIC_WARS_MAP_ASSET_ID as PUNIC_WARS_MAP_ASSET_ID_IN_DB } from "@chronica/db";
-import { isGeoJsonMapDocument, type GeoJsonMap, type WorldState } from "@chronica/shared";
+import { PUNIC_IDS, punicWarsScenario, PUNIC_WARS_MAP_ASSET_ID as PUNIC_WARS_MAP_ASSET_ID_IN_DB } from "@chronica/db";
+import { isGeoJsonMapDocument, reconcileCapitals, type GeoJsonMap, type WorldState } from "@chronica/shared";
 import { NUMIDIAN_DECISION_MAP_ASSET_ID, PUNIC_WARS_MAP_ASSET_ID, builtInScenarioMap, keptMapDocument, mapVersion, mapWireDocument } from "./built-in-scenario-maps";
 
 describe("built-in scenario maps", () => {
@@ -41,6 +41,18 @@ describe("the map as it is downloaded", { timeout: 60_000 }, () => {
     expect(keptMapDocument(first.version)).toBe(first.body);
   });
 
+  it("draws a provisional capital created on surviving countryside and refreshes the map version", () => {
+    const world = structuredClone(punicWarsScenario.initialWorld);
+    world.map.provinces = world.map.provinces.map((province) => ({ ...province, settlements: province.settlements.map((city) => city.controllerPolityId === "carthage" ? { ...city, controllerPolityId: "rome" } : city) }));
+    const relocated = reconcileCapitals(world);
+    const seatId = relocated.map.polities.find((polity) => polity.id === "carthage")!.capitalSettlementId;
+    expect(seatId).not.toBeNull();
+    expect(mapVersion(PUNIC_WARS_MAP_ASSET_ID, relocated)).not.toBe(mapVersion(PUNIC_WARS_MAP_ASSET_ID, world));
+    const document = JSON.parse(mapWireDocument(PUNIC_WARS_MAP_ASSET_ID, relocated)!.body) as GeoJsonMap;
+    expect(document.features.find((feature) => feature.id === seatId)).toMatchObject({ properties: { kind: "settlement", type: "town" }, geometry: { type: "Point" } });
+    expect(isGeoJsonMapDocument(document)).toBe(true);
+  });
+
   it("changes its version, and only its version, when a province is renamed", () => {
     const before = mapVersion(PUNIC_WARS_MAP_ASSET_ID, names());
     const renamed = mapVersion(PUNIC_WARS_MAP_ASSET_ID, names({ id: PUNIC_IDS.rome, name: "Latium Vetus" }));
@@ -49,6 +61,16 @@ describe("the map as it is downloaded", { timeout: 60_000 }, () => {
     expect(mapVersion(null, names())).toBeUndefined();
     const doc = JSON.parse(mapWireDocument(PUNIC_WARS_MAP_ASSET_ID, names({ id: PUNIC_IDS.rome, name: "Latium Vetus" }))!.body) as GeoJsonMap;
     expect(doc.features.find((feature) => feature.id === PUNIC_IDS.rome)?.properties).toMatchObject({ name: "Latium Vetus" });
+  });
+
+  it("uses the saved settlement name for existing map markers", () => {
+    const world = structuredClone(punicWarsScenario.initialWorld);
+    const city = world.map.provinces.flatMap((province) => province.settlements).find((city) => city.id === "settlement-gaul-aedui-market")!;
+    const before = mapVersion(PUNIC_WARS_MAP_ASSET_ID, world);
+    city.name = "Saved city name";
+    expect(mapVersion(PUNIC_WARS_MAP_ASSET_ID, world)).not.toBe(before);
+    const document = JSON.parse(mapWireDocument(PUNIC_WARS_MAP_ASSET_ID, world)!.body) as GeoJsonMap;
+    expect(document.features.find((feature) => feature.id === city.id)?.properties.name).toBe(city.name);
   });
 
   it("is a map the client accepts, on a 1e-4 degree grid, with borders still shared and rings closed", () => {

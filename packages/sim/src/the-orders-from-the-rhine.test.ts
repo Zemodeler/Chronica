@@ -112,22 +112,21 @@ function order(actor: string, written: readonly unknown[], state: WorldState = w
   return result;
 }
 
-describe("Quintus stands for tribune in a Rome that had only consuls", () => {
-  // Seated by the consul, who may fill his government's posts. A man who
-  // seats himself with nobody behind him is not obeyed (see the next block).
-  it("makes the office and seats him in it, instead of refusing out of his sight", () => {
+describe("Quintus is made a military tribune", () => {
+  // Rome has military tribunes: sixteen elected in the tribes, and the rest
+  // named by the consuls. The consul names him; a man who seats himself with
+  // nobody behind him is not obeyed (see the next block).
+  it("seats him among the tribunes, instead of refusing out of his sight", () => {
     const result = order("gaius-genucius", [{
       op: "office_seat_set", officeId: "roman-military-tribune", officeLabel: "Military Tribune",
-      holderCharacterRef: "quintus-agrippinus", reason: "Elected tribune for the Samnite war.",
+      holderCharacterRef: "quintus-agrippinus", reason: "Named tribune for the Samnite war.",
     }]);
 
     expect(result.rejected).toEqual([]);
-    const office = result.world.offices.find((candidate) => candidate.label === "Military Tribune")!;
-    expect(office.polityId).toBe("rome");
-    expect(result.world.material.officeSeats.some((seat) => seat.officeId === office.id && seat.holderCharacterId === "quintus-agrippinus")).toBe(true);
+    expect(result.world.material.officeSeats.some((seat) => seat.officeId === "roman-military-tribune" && seat.holderCharacterId === "quintus-agrippinus")).toBe(true);
   });
 
-  it("does not open a second tribunate when the world already made one", () => {
+  it("does not open a second tribunate beside the one Rome has", () => {
     const first = order("gaius-genucius", [{
       op: "office_seat_set", officeId: "tribune-a", officeLabel: "Military Tribune", holderCharacterRef: "quintus-agrippinus", reason: "One.",
     }]);
@@ -135,7 +134,9 @@ describe("Quintus stands for tribune in a Rome that had only consuls", () => {
       op: "office_seat_set", officeId: "tribune-b", officeLabel: "Military Tribune", holderCharacterRef: "marcus-metellus", reason: "Another.",
     }], first.world);
 
-    expect(second.world.offices.filter((office) => office.label === "Military Tribune")).toHaveLength(1);
+    expect(second.world.offices.filter((office) => /military tribune/i.test(office.label))).toHaveLength(0);
+    const tribunes = second.world.material.officeSeats.filter((seat) => seat.officeId === "roman-military-tribune" && seat.status === "held").map((seat) => seat.holderCharacterId);
+    expect(tribunes).toEqual(expect.arrayContaining(["quintus-agrippinus", "marcus-metellus"]));
   });
 });
 

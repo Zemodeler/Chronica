@@ -75,27 +75,33 @@ export function TreatiesSheet({ abroad, onWriteTo, onOpenLetters }: {
             </section>
           );
         })}
-        {ended.length > 0 && (
-          <details className="treaties__group treaties__group--ended">
-            <summary><h3>{groupTitle("ended", polityLabel)}<span className="treaties__count"> · {ended.length}</span></h3></summary>
-            <ul>
-              {ended.map((power) => <PowerCard key={power.polityId} power={power} chosen={chosen?.polityId === power.polityId} onChoose={() => setChosenId(power.polityId)} ask={ask} />)}
-            </ul>
-          </details>
-        )}
-        {abroad.between.length > 0 && (
-          <details className="treaties__group treaties__group--between">
-            <summary><h3>Between other powers<span className="treaties__count"> · {abroad.between.length}</span></h3></summary>
-            <ul className="treaties__between">
-              {abroad.between.map((entry) => (
-                <li key={entry.key} className={entry.kind === "war" ? "is-war" : undefined}>
-                  <span><KindTip kind={entry.kind} ask={ask} /></span>
-                  <strong>{entry.betweenLabel}</strong>
-                  <em>since <MomentTip moment={entry.since} /></em>
-                </li>
-              ))}
-            </ul>
-          </details>
+        {(ended.length > 0 || abroad.between.length > 0) && (
+          <p className="treaties__more">
+            {ended.length > 0 && (
+              <Tip label="Treaties that have ended" note={() => (
+                <TipCard kicker="Treaties that have ended" title={`${ended.length} ${ended.length === 1 ? "power" : "powers"}`}>
+                  <ul className="treaties__list">
+                    {ended.map((power) => <li key={power.polityId}><button type="button" className="word-button" onClick={() => setChosenId(power.polityId)}>{power.label}</button></li>)}
+                  </ul>
+                </TipCard>
+              )}>Ended · {ended.length}</Tip>
+            )}
+            {abroad.between.length > 0 && (
+              <Tip label="Between other powers" note={() => (
+                <TipCard kicker="Between other powers" title={`${abroad.between.length} ${abroad.between.length === 1 ? "dealing" : "dealings"}`}>
+                  <ul className="treaties__between">
+                    {abroad.between.map((entry) => (
+                      <li key={entry.key} className={entry.kind === "war" ? "is-war" : undefined}>
+                        <span><KindTip kind={entry.kind} ask={ask} /></span>
+                        <strong>{entry.betweenLabel}</strong>
+                        <em>since <MomentTip moment={entry.since} /></em>
+                      </li>
+                    ))}
+                  </ul>
+                </TipCard>
+              )}>Between others · {abroad.between.length}</Tip>
+            )}
+          </p>
         )}
       </nav>
 
@@ -110,6 +116,17 @@ interface Ask {
   readonly abroad: Abroad;
   readonly polityLabel: string;
   readonly byLabel: ReadonlyMap<string, TreatyPower>;
+}
+
+function postureWord(posture: TreatyPosture): string {
+  switch (posture) {
+    case "war": return "at war";
+    case "answer_to": return "overlord";
+    case "bound_to_us": return "bound";
+    case "equals": return "equals";
+    case "none": return "no treaty";
+    case "ended": return "ended";
+  }
 }
 
 function PowerCard({ power, chosen, onChoose, ask }: {
@@ -127,11 +144,13 @@ function PowerCard({ power, chosen, onChoose, ask }: {
         {power.label}
         {power.letters.length > 0 && <span className="seal-dot"><span className="visually-hidden"> (a letter waits on your answer)</span></span>}
       </button>
-      {power.regard !== null && <span className="treaty-card__regard"><RegardTip power={power} ask={ask} /></span>}
-      <span className="treaty-card__kinds">
-        {kinds.map((kind, index) => <span key={kind}>{index > 0 && ", "}<KindTip kind={kind} ask={ask} /></span>)}
-        {through !== null && <em> through {through}</em>}
-        {soon?.until != null && <em className="treaty-card__soon"> · ends in <MomentTip moment={soon.until} words={spanInWords(soon.until.days)} /></em>}
+      <span className="treaty-card__regard">
+        <Tip label={`${power.label}: what stands`} note={() => (
+          <TipCard kicker={postureLine(power, ask.polityLabel)} title={power.label}>
+            {kinds.length > 0 && <p>{kinds.map((kind, index) => <span key={kind}>{index > 0 && ", "}<KindTip kind={kind} ask={ask} /></span>)}{through !== null && <> through <PowerName label={through} ask={ask} /></>}.</p>}
+            {soon?.until != null && <p>Ends in <MomentTip moment={soon.until} words={spanInWords(soon.until.days)} />.</p>}
+          </TipCard>
+        )}>{postureWord(power.posture)}</Tip>
       </span>
     </li>
   );
@@ -148,9 +167,7 @@ function Dossier({ power, ask, onWriteTo, onOpenLetters }: {
       <header className="dossier__header">
         <p className="dossier__kicker">{postureLine(power, ask.polityLabel)}</p>
         <h3 className="dossier__title"><PowerTip power={power} ask={ask} /></h3>
-        {power.regard !== null && (
-          <p className="dossier__regard">{ask.polityLabel}&rsquo;s government holds them <RegardTip power={power} ask={ask} />.</p>
-        )}
+        {power.regard !== null && <p className="dossier__regard"><RegardTip power={power} ask={ask} /></p>}
       </header>
 
       {power.letters.length > 0 && (
@@ -159,7 +176,8 @@ function Dossier({ power, ask, onWriteTo, onOpenLetters }: {
           <ul>
             {power.letters.map((letter) => (
               <li key={letter.id}>
-                <strong>{letter.kindLabel}</strong>: {letter.subject}
+                {letter.subject}
+                {letter.previousRejection != null && <p><strong>Your earlier peace terms were rejected.</strong> {letter.previousRejection.reason}</p>}
                 {letter.replyByLabel !== null && <em> Answer by <Era text={letter.replyByLabel} />.</em>}
               </li>
             ))}
@@ -176,17 +194,20 @@ function Dossier({ power, ask, onWriteTo, onOpenLetters }: {
       )}
 
       {power.ended.length > 0 && (
-        <section className="dossier__section dossier__history">
-          <h4>Before</h4>
-          <ol>
-            {power.ended.map((line) => (
-              <li key={line.key}>
-                <span className="dossier__years"><MomentTip moment={line.since} short />–{line.ended !== null && <MomentTip moment={line.ended.at} short />}</span>
-                <span><KindTip kind={line.kind} ask={ask} />{line.ended?.reason != null && <>. {line.ended.reason}</>}</span>
-              </li>
-            ))}
-          </ol>
-        </section>
+        <p className="dossier__history">
+          <Tip label="Before" note={() => (
+            <TipCard kicker="Treaties that have ended" title={`Before (${power.ended.length})`}>
+              <ol className="treaties__list">
+                {power.ended.map((line) => (
+                  <li key={line.key}>
+                    <span className="dossier__years"><MomentTip moment={line.since} short />–{line.ended !== null && <MomentTip moment={line.ended.at} short />}</span>{" "}
+                    <KindTip kind={line.kind} ask={ask} />{line.ended?.reason != null && <>. {line.ended.reason}</>}
+                  </li>
+                ))}
+              </ol>
+            </TipCard>
+          )}>Before ({power.ended.length})</Tip>
+        </p>
       )}
 
       {power.lines.length === 0 && power.ended.length === 0 && power.letters.length === 0 && (
@@ -206,30 +227,19 @@ function LineEntry({ line, power, ask }: { readonly line: TreatyLine; readonly p
   return (
     <div className={line.kind === "war" ? "treaty-line is-war" : "treaty-line"}>
       <p className="treaty-line__head">
-        <KindTip kind={line.kind} ask={ask} capital />
+        <KindTip kind={line.kind} ask={ask} capital line={line} power={power} />
         <span> · since <MomentTip moment={line.since} /></span>
         {line.until !== null && <span> · until <MomentTip moment={line.until} /></span>}
-        {line.throughLabel !== null && <span> · through <PowerName label={line.throughLabel} ask={ask} /></span>}
         {line.secret && <span> · <SecretTip ask={ask} power={power} /></span>}
       </p>
       <p className="treaty-line__summary">{line.summary}.</p>
-      <blockquote className="treaty-line__terms">{line.terms}</blockquote>
-      {line.kind === "war" && power.sides !== null && (power.sides.yours.length > 0 || power.sides.theirs.length > 0) && (
-        <p className="treaty-line__sides">
-          {power.sides.yours.length > 0 && <span>Beside {line.throughLabel ?? ask.polityLabel}: <Names labels={power.sides.yours} ask={ask} />. </span>}
-          {power.sides.theirs.length > 0 && <span>Beside {power.label}: <Names labels={power.sides.theirs} ask={ask} />.</span>}
-        </p>
-      )}
-      {line.letter !== null && (
-        <p className="treaty-line__source">Made by <LetterTip line={line} />.</p>
-      )}
     </div>
   );
 }
 
 /* ─── The notes ─────────────────────────────────────────────────────── */
 
-function KindTip({ kind, ask, capital = false }: { readonly kind: PolityAgreementKind; readonly ask: Ask; readonly capital?: boolean }) {
+function KindTip({ kind, ask, capital = false, line, power }: { readonly kind: PolityAgreementKind; readonly ask: Ask; readonly capital?: boolean; readonly line?: TreatyLine; readonly power?: TreatyPower }) {
   const entry = ask.abroad.glossary[kind];
   if (entry === undefined) return <>{kind}</>;
   const words = capital ? capitalise(entry.label) : entry.label;
@@ -237,6 +247,19 @@ function KindTip({ kind, ask, capital = false }: { readonly kind: PolityAgreemen
     <Tip label={`What a ${entry.label} is`} note={() => (
       <TipCard kicker="A kind of treaty" title={capitalise(entry.label)}>
         <p>{entry.explained}</p>
+        {line !== undefined && (
+          <>
+            {line.terms.length > 0 && <p className="tip__rule"><em>{line.terms}</em></p>}
+            {line.throughLabel !== null && <p>Through <PowerName label={line.throughLabel} ask={ask} />.</p>}
+            {line.kind === "war" && power?.sides != null && (power.sides.yours.length > 0 || power.sides.theirs.length > 0) && (
+              <p>
+                {power.sides.yours.length > 0 && <span>Beside {line.throughLabel ?? ask.polityLabel}: <Names labels={power.sides.yours} ask={ask} />. </span>}
+                {power.sides.theirs.length > 0 && <span>Beside {power.label}: <Names labels={power.sides.theirs} ask={ask} />.</span>}
+              </p>
+            )}
+            {line.letter !== null && <p>Made by <LetterTip line={line} />.</p>}
+          </>
+        )}
       </TipCard>
     )}>{words}</Tip>
   );

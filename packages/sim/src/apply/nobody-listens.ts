@@ -1,4 +1,4 @@
-import { allOffices, deriveRelationDimension, familyLinksOf, stableHash, type Office, type WorldDelta, type WorldState } from "@chronica/shared";
+import { allOffices, deriveRelationDimension, familyLinksOf, stableHash, type ChamberPower, type GovernmentInstitution, type Office, type WorldDelta, type WorldState } from "@chronica/shared";
 
 /**
  * An order nobody is obliged to carry out does not happen.
@@ -100,8 +100,12 @@ export function nobodyListens(
         return world.map.provinces.find((province) => province.settlements.some((settlement) => settlement.id === capital))?.id;
       };
       const capital = capitalOf(office?.polityId ?? actor.polityId ?? undefined);
-      const armedThere = capital !== undefined && world.material.forces.some((force) => force.locationId === capital && leads(force.id)
-        && force.personnel.some((category) => category.fit > 0));
+      // Enough men to hold the city against whoever else is in it: a retinue
+      // at the gates is a riot, not a coup. Sulla came with six legions.
+      const menThere = (mine: boolean) => world.material.forces
+        .filter((force) => force.locationId === capital && leads(force.id) === mine)
+        .reduce((sum, force) => sum + force.personnel.reduce((men, category) => men + category.fit, 0), 0);
+      const armedThere = capital !== undefined && menThere(true) >= SEIZING_MEN && menThere(true) > menThere(false);
       if (armedThere) return null;
       const title = office?.label ?? delta.officeLabel ?? "the office";
       const named = holderId === actorId ? `himself ${title}` : `${name(holderId)} ${title}`;
@@ -118,6 +122,36 @@ export function nobodyListens(
       if (procedure.sponsorCharacterId === actorId && procedure.resolutionMechanism === "sponsor_discretion") return null;
       const body = world.material.institutions.find((institution) => institution.id === procedure.institutionId)?.name ?? "those whose business it was";
       return `${who} declared "${procedure.label}" ${delta.outcome}. ${body[0]!.toUpperCase()}${body.slice(1)} had not decided it, and did not consider it decided.`;
+    }
+    // War and peace are the government's to make. A senator with no office
+    // declared war on Carthage twice, made peace and annexed a kingdom, and
+    // each time the whole Republic was bound and the only trace was a private
+    // note. Where a chamber decides it, the act is laid before it instead
+    // (`layBeforeTheChamber`); where nobody but the ruler does, it is words.
+    case "agreement_open":
+    case "agreement_close": {
+      // A commander in the field may buy passage or agree a truce with whoever
+      // is in front of him; war, peace and alliances are the government's.
+      const kind = delta.op === "agreement_open" ? delta.kind : world.polityAgreements.find((candidate) => candidate.id === (resolve(delta.agreementRef) ?? delta.agreementRef))?.kind;
+      if (kind === undefined || !SOVEREIGN_AGREEMENTS.has(kind)) return null;
+      // The treaty an accepted letter already made, written out again beside
+      // the answer: whether it binds was settled by the letter (`bindTheAcceptance`).
+      if (delta.op === "agreement_open" && delta.sourceMessageRef != null) {
+        const source = world.diplomacy.find((message) => message.id === (resolve(delta.sourceMessageRef!) ?? delta.sourceMessageRef));
+        if (source !== undefined && source.answer === "accepted") return null;
+      }
+      const polityId = delta.op === "agreement_open"
+        ? [resolve(delta.polityId) ?? delta.polityId, resolve(delta.otherPolityId) ?? delta.otherPolityId].find((id) => id === actor.polityId)
+        : (() => {
+          const agreement = world.polityAgreements.find((candidate) => candidate.id === (resolve(delta.agreementRef) ?? delta.agreementRef));
+          return [agreement?.polityId, agreement?.otherPolityId].find((id) => id === actor.polityId);
+        })();
+      if (polityId === undefined) return null;
+      const chamber = chamberThatDecides(world, polityId, "war");
+      const what = delta.op === "agreement_open" ? (delta.kind === "war" ? "war" : `a ${delta.kind.replace(/_/g, " ")}`) : "an end to the treaty";
+      return chamber === undefined
+        ? `${who} proclaimed ${what} in the name of ${polity(polityId)}. Only its ruler makes war and peace, and the ruler had said nothing of the kind.`
+        : `${who} proclaimed ${what} in the name of ${polity(polityId)}. Only the ${chamber.name} could decide it, and nobody acted on his word alone.`;
     }
     // Men follow their own general, even where he has no right to lead them.
     // Only an order to the men is an order, though: their morale, rations and
@@ -205,9 +239,14 @@ function abroadPolityOf(delta: WorldDelta, world: WorldState, resolve: (ref: str
   }
 }
 
+/** Fewest men who can take a government's seat by force, and then only as the strongest in its city. */
+const SEIZING_MEN = 1_000;
+
 /** The fields of `force_modify` that tell the men to do something, rather than say what befell them. */
 const COMMANDING_FIELDS = [
   "locationId", "positionId", "commanderCharacterRef", "controllerCharacterRef", "polityId", "name", "payObligationRef", "authorizedStrengthDelta", "outlaw",
+  // A new way of fighting is taught by the men's own officers, on their general's word.
+  "doctrine",
 ] as const;
 
 /** Below this, a province's people are restless enough to follow whoever raises a banner. */
@@ -370,4 +409,18 @@ export function fleesHisMaster(delta: WorldDelta, world: WorldState, actorId: st
   if (actor === undefined || actor.legalStatus !== "enslaved" || delta.moveToProvinceId === actor.locationProvinceId) return null;
   const owner = world.characters.find((character) => character.id === actor.ownerCharacterId)?.name ?? "his master";
   return `${actor.name} has run away from ${owner}. A runaway slave is hunted, and anybody who shelters him answers for it.`;
+}
+
+/** The agreements only a government makes: war and peace, and the treaties that bind it to another power. */
+export const SOVEREIGN_AGREEMENTS: ReadonlySet<string> = new Set(["war", "peace", "alliance", "non_aggression", "tributary", "protectorate", "foedus"]);
+
+/**
+ * The chamber of a government that decides a question of this kind: one that
+ * binds (not one that only advises) and holds the power -- a chamber that names
+ * no powers holds them all. Undefined where the ruler alone decides it.
+ */
+export function chamberThatDecides(world: WorldState, polityId: string, power: ChamberPower): GovernmentInstitution | undefined {
+  const binding = world.material.institutions.filter((institution) => institution.polityId === polityId && institution.advisory !== true
+    && (institution.powers === undefined || institution.powers.includes(power)));
+  return binding.find((institution) => institution.powers?.includes(power) === true) ?? binding[0];
 }

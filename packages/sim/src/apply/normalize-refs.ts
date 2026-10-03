@@ -85,14 +85,19 @@ export function accountOf(world: WorldState, holderId: string): string | null {
   return accounts.length === 1 ? accounts[0]!.id : null;
 }
 
-/** Where an act's own words say it happens: the provinces its reason and label name. */
+/**
+ * Where an act's own words say it happens: the provinces its reason and label
+ * name, less those named as where it starts. "Legio II marches from Rome to
+ * the Praetuttian coast" once sent the legion to Rome, where it already stood.
+ */
 function placesSaidIn(delta: WorldDelta, index: PlaceIndex): Set<string> {
   const record = delta as Record<string, unknown>;
   const said = ["reason", "label", "summary", "title", "duties"]
     .map((key) => record[key])
     .filter((value): value is string => typeof value === "string")
-    .join(" ");
-  return said.length === 0 ? new Set() : provincesNamedIn(index, said);
+    .join(". ")
+    .replace(/\b(from|leaves?|leaving|left|out of|departs?|departing|quits?|quitting)\s+[^,.;:]*?(?=\s+(?:to|toward|towards|for|by|over|across|and|via|through)\b|[,.;:]|$)/gi, " ");
+  return said.trim().length === 0 ? new Set() : provincesNamedIn(index, said);
 }
 
 /** Fields naming where an act goes, as against where it comes from. */
@@ -156,7 +161,9 @@ export function normalizeRefs(
   const elsewhere = (): Set<string> => {
     if (stands !== null) return stands;
     const record = delta as Record<string, unknown>;
-    const forceRef = typeof record.forceRef === "string" ? record.forceRef : null;
+    // A march is a project whose army is named in what it comes to.
+    const outcome = record.completionOutcome as Record<string, unknown> | null | undefined;
+    const forceRef = typeof record.forceRef === "string" ? record.forceRef : typeof outcome?.forceRef === "string" ? outcome.forceRef : null;
     const force = forceRef === null ? undefined : world.material.forces.find((candidate) => candidate.id === (resolve(forceRef) ?? forceRef));
     stands = new Set([
       ...(force === undefined ? [] : [force.locationId]),

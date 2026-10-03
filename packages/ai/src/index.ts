@@ -21,6 +21,7 @@ export {
   getSelectedLocalAiProvider,
   getSelectedLocalAiModel,
   selectLocalAiConfiguration,
+  validateLocalAiConfiguration,
   type LocalAiProvider,
   type LocalAiProviderConfiguration,
 } from "./local-key-selection";
@@ -33,6 +34,8 @@ import { createMockAdapter, type MockToolStep } from "./adapters/mock";
 import { getSelectedLocalAiProvider } from "./local-key-selection";
 import path from "node:path";
 import { createHandAdapter } from "./adapters/hand";
+import { answerWithHandCodex, handCodexModel } from "./adapters/hand-codex";
+export { prepareHandCodex, answerWithHandCodex, handCodexModel } from "./adapters/hand-codex";
 
 interface MockScriptFile {
   /** Returned verbatim by the plain (non-tool) `call`, e.g. for character declaration. */
@@ -78,17 +81,26 @@ function readMockScriptFromEnvFile(): MockScriptFile | undefined {
  */
 export function createAiAdapter(): AiAdapter {
   const mode = process.env.CHRONICA_AI_MODE ?? "openai";
-  if (mode === "hand") {
+  const localProvider = mode === "mock" ? null : getSelectedLocalAiProvider();
+  const manualHand = mode === "hand" && process.env.CHRONICA_HAND_RESPONDER === "manual";
+  if (localProvider === "codex" || (mode === "hand" && (manualHand || localProvider === null))) {
+    if (process.env.NODE_ENV === "production" && process.env.CHRONICA_HAND_RESPONDER !== "manual") {
+      throw new Error("Automatic hand mode is available only on a local development server.");
+    }
     const dir = path.resolve(process.env.CHRONICA_HAND_DIR ?? "eval-out/hand");
     const timeout = Number(process.env.CHRONICA_HAND_TIMEOUT_MS ?? "");
+    const model = handCodexModel();
     return createHandAdapter({
       dir,
+      ...(manualHand ? {} : {
+        respond: (system, asked, requestKey) => answerWithHandCodex(system, asked, requestKey, model),
+        cacheNamespace: `codex-v1:${model}:high`,
+      }),
       ...(Number.isFinite(timeout) && timeout > 0 ? { timeoutMs: timeout } : {}),
       onWaiting: (promptPath) => console.log(`[ai] waiting for an answer to ${promptPath}`),
     });
   }
   if (mode !== "mock") {
-    const localProvider = getSelectedLocalAiProvider();
     if (localProvider === "openai") return createOpenAiLocalAdapter();
     if (localProvider === "anthropic") return createAnthropicLocalAdapter();
   }

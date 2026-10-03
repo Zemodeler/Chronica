@@ -153,6 +153,12 @@ export const CasualtyResultSchema = z
   .object({
     forceId: EntityIdSchema,
     categoryId: EntityIdSchema,
+    /**
+     * The formation that bore it, where the army is drawn up in formations:
+     * the hastati of Legio II, not "infantry". Absent, the loss is shared
+     * among the army's rows of that kind of troops by strength, as before.
+     */
+    formationId: EntityIdSchema.optional(),
     /** Permanent. Never recovered. */
     dead: z.number().int().nonnegative(),
     /** Permanent. The people are gone, not resting. */

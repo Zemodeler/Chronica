@@ -179,10 +179,10 @@
     opacity: 1;
     translate: 0 0;
     transition:
-      opacity .28s var(--ease),
-      translate .28s var(--ease),
-      overlay .28s allow-discrete,
-      display .28s allow-discrete;
+      opacity .12s var(--ease),
+      translate .12s var(--ease),
+      overlay .12s allow-discrete,
+      display .12s allow-discrete;
   }
   .sheet[open] { display: flex; flex-direction: column; }
   .sheet--right { right: 2.5vw; left: auto; }
@@ -222,6 +222,20 @@
   }
 
   .sheet__frame { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+  .sheet__workspace { display: flex; min-height: 0; flex: 1; overflow: hidden; }
+  .sheet__frame { min-width: 0; }
+  .sheet--with-reference { width: min(calc(var(--sheet-width, 34rem) + 23rem), calc(100vw - 4rem)); }
+  .sheet__navigation { display: flex; flex-wrap: wrap; gap: .5rem 1.2rem; padding: .65rem 1.6rem; border-bottom: 1px solid var(--rule); }
+  .sheet__navigation button { font-size: var(--step--1); }
+  .entity-link { display: inline; min-height: 0; padding: 0; border: 0; border-bottom: 1px dotted var(--edge); border-radius: 0; background: none; box-shadow: none; color: var(--fg); font: inherit; text-align: inherit; vertical-align: baseline; }
+  .entity-link:hover { color: var(--edge); }
+  .entity-reference { display: flex; flex-direction: column; flex: 0 0 22rem; min-height: 0; min-width: 0; max-width: 100%; background: var(--papyrus); color: var(--ink); border-left: 1px solid var(--bronze-deep); }
+  .entity-reference__header { display: flex; align-items: baseline; gap: 1rem; padding: 1rem 1.25rem; border-bottom: 1px solid var(--rule); }
+  .entity-reference__header > span { flex: 1; color: var(--fg-muted); font-style: italic; }
+  .entity-reference__body { padding: 1.25rem; overflow-y: auto; overscroll-behavior: contain; }
+  .entity-reference .tip__title { font-size: var(--step-2); }
+  .entity-reference__body > .tip__card > .tip__kicker { display: none; }
+  .entity-reference__write { margin-top: 1rem; }
   .sheet__header {
     display: flex;
     align-items: baseline;
@@ -361,6 +375,7 @@
   .note__compared > div { display: grid; grid-template-columns: 5.5rem 1fr; gap: .6rem; }
   .note__compared dt { color: var(--fg-muted); }
   .note__compared dd { margin: 0; }
+  .note__more { margin-top: .35rem; font-size: var(--step--1); }
   .note__people { display: grid; gap: .1rem; }
   .note__people span { color: var(--fg-muted); }
 

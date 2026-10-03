@@ -34,13 +34,29 @@ export function builtInScenarioMap(mapAssetId: string | null): GeoJsonMap | unde
 function namedByTheWorld(map: GeoJsonMap | undefined, world: Pick<WorldState, "map">): GeoJsonMap | undefined {
   if (map === undefined) return undefined;
   const names = new Map(world.map.provinces.map((province) => [province.id, province.name]));
+  const settlementNames = new Map(world.map.provinces.flatMap((province) => (province.settlements ?? []).map((city) => [city.id, city.name] as const)));
+  const existing = new Set(map.features.map((feature) => feature.id));
+  const provinceFeatures = new Map(map.features.filter((feature) => feature.properties.kind === "province").map((feature) => [feature.id, feature]));
+  const additions: GeoJsonMap["features"][number][] = [];
+  for (const province of world.map.provinces) {
+    for (const settlement of province.settlements ?? []) {
+      if (existing.has(settlement.id)) continue;
+      const geometry = provinceFeatures.get(province.id)?.geometry;
+      const fallback = geometry?.type === "MultiPolygon" ? geometry.coordinates[0]?.[0]?.[0]
+        : geometry?.type === "Polygon" ? geometry.coordinates[0]?.[0] : undefined;
+      const coordinates: [number, number] | undefined = province.geo ? [province.geo.longitude, province.geo.latitude] : fallback;
+      if (coordinates === undefined) continue;
+      additions.push({ type: "Feature", id: settlement.id, geometry: { type: "Point", coordinates },
+        properties: { kind: "settlement", name: settlement.name, provinceId: province.id, type: settlement.kind === "fortress" ? "fort" : settlement.kind } });
+    }
+  }
   return {
     ...map,
-    features: map.features.map((feature) => {
-      if (feature.properties.kind !== "province") return feature;
-      const name = names.get(feature.id);
+    features: [...map.features.map((feature) => {
+      const name = feature.properties.kind === "province" ? names.get(feature.id)
+        : feature.properties.kind === "settlement" ? settlementNames.get(feature.id) : undefined;
       return name === undefined || name === feature.properties.name ? feature : { ...feature, properties: { ...feature.properties, name } };
-    }),
+    }), ...additions],
   };
 }
 
@@ -64,7 +80,10 @@ export function mapVersion(mapAssetId: string | null, world: Pick<WorldState, "m
     for (let index = 0; index < text.length; index++) hash = Math.imul(hash ^ text.charCodeAt(index), 0x01000193);
   };
   mix(contentOf(mapAssetId));
-  for (const province of world.map.provinces) mix(`${province.id}\t${province.name}\n`);
+  for (const province of world.map.provinces) {
+    mix(`${province.id}\t${province.name}\n`);
+    for (const settlement of province.settlements ?? []) mix(`${settlement.id}\t${settlement.name}\t${settlement.kind}\n`);
+  }
   return `${mapAssetId.slice(-4)}-${(hash >>> 0).toString(36)}`;
 }
 

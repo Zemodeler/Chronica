@@ -91,7 +91,8 @@ describe("a refused change gets one corrected attempt", () => {
     const result = await runSimulationBurst(input(port));
 
     const morale = result.world.material.forces.find((force) => force.id === "legio-i")!.moraleBps;
-    expect(morale).toBe(before.material.forces.find((force) => force.id === "legio-i")!.moraleBps + 100);
+    // Read by its size (`bandedShift`): a small encouragement is 500.
+    expect(morale).toBe(Math.min(10_000, before.material.forces.find((force) => force.id === "legio-i")!.moraleBps + 500));
   });
 
   it("does not ask when nothing was refused over how it was written", async () => {

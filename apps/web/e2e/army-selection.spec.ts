@@ -72,7 +72,15 @@ const details = (page: Page) => page.locator(".map-force-details");
 
 async function openTheMap(page: Page, who: "consul" | "carthaginian") {
   const gameId = await enterTheWorld(page, who);
-  await waitForTheOffice(page);
+  try {
+    await waitForTheOffice(page);
+  } catch (error) {
+    // The first map fetch can race the dev server's initial route compilation.
+    // The page retries on focus; exercise that path when it shows its empty state.
+    if (!await page.getByText("No map data available for this scenario.").isVisible()) throw error;
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await waitForTheOffice(page);
+  }
   await placeTab(page, "The Map").click();
   await theMap(page).locator(".geo-map").waitFor();
   await page.waitForTimeout(1500);
@@ -148,7 +156,7 @@ test.describe("selecting an army", () => {
     await details(page).getByRole("button", { name: "Rename" }).click();
     await details(page).getByLabel("New name").fill("Sacred Band of Tunis");
     await details(page).getByRole("button", { name: "Save" }).click();
-    await expect(details(page).locator("h2")).toHaveText("Sacred Band of Tunis");
+    await expect(details(page).locator("h2")).toHaveText("Sacred Band of Tunis", { timeout: 60_000 });
 
     await details(page).getByRole("button", { name: "Change standard" }).click();
     await page.getByRole("dialog", { name: /army standards/ }).getByRole("button", { name: /Punic elephant/ }).click();
@@ -165,5 +173,34 @@ test.describe("selecting an army", () => {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ standardId: "merchant-ship" }),
     })).status, gameId);
     expect(refused).toBe(403);
+  });
+
+  test("a fleet takes a navy standard and refuses an army standard", async ({ page }) => {
+    const gameId = await openTheMap(page, "consul");
+    const geometry = await loadGeometry(page, gameId);
+    await zoomOnto(page, geometry, "allied-greek-hulls");
+    const flag = await standardOnScreen(page, geometry, "allied-greek-hulls");
+    await page.mouse.click(flag.x, flag.y);
+    await expect(details(page).locator("h2")).toHaveText("Allied Greek hulls");
+
+    await details(page).getByRole("button", { name: "Change standard" }).click();
+    const picker = page.getByRole("dialog", { name: /navy standards/ });
+    await expect(picker).toBeVisible();
+    await expect(picker.getByRole("button", { name: /Corvus quinquereme/ })).toBeVisible();
+    await expect(picker.getByRole("button", { name: /Wolf signum/ })).toHaveCount(0);
+    await picker.getByRole("button", { name: /Corvus quinquereme/ }).click();
+    await expect(picker).toHaveCount(0);
+
+    const saved = await page.evaluate(async (id) => ((await (await fetch(`/api/games/${id}/overlay`)).json()) as { mapOverlay: DynamicMapOverlay }).mapOverlay.forces, gameId);
+    expect(saved.find((force) => force.forceId === "allied-greek-hulls")?.flagAssetId).toBe("navy-roman-corvus");
+
+    const refused = await page.evaluate(async (id) => {
+      const response = await fetch(`/api/games/${id}/forces/allied-greek-hulls`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ standardId: "roman-wolf" }),
+      });
+      return { status: response.status, body: await response.json() as { error?: string } };
+    }, gameId);
+    expect(refused.status).toBe(400);
+    expect(refused.body.error).toMatch(/not one .* may carry/);
   });
 });

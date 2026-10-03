@@ -1,10 +1,15 @@
 "use client";
 
+import { ConflictingReports } from "./office-insights";
+
 import { useRef, useState, useEffect, useCallback, useMemo, type FormEvent } from "react";
 import type { AwaitingLetter, Correspondence, DirectoryEntry, DirectoryGroup } from "@chronica/shared";
+import { useWindowState } from "../../../components/ui/window-workspace";
+import type { DirectoryView } from "../../../../lib/directory-service";
 import { Sheet, type SheetSide } from "../../../components/ui/sheet";
 import { Era } from "../../../components/ui/era";
 import { Explains, Name, useGlossary } from "./notes";
+import { Tip, TipCard } from "../../../components/ui/tip";
 import type { EntityKey, EntityNote } from "@chronica/shared";
 
 interface ContactView {
@@ -27,6 +32,8 @@ interface MessageView {
 
 interface ChatPanelProps {
   readonly gameId: string;
+  readonly directory?: DirectoryView | undefined;
+  readonly initialContacts?: readonly ContactView[] | undefined;
   readonly playerCharacterId: string;
   /** Opened from the Office, so the panel no longer owns the answer to whether it is. */
   readonly open: boolean;
@@ -74,28 +81,28 @@ type Reply = "accepted" | "refused" | "countered";
  * the way a history records an exchange, not as chat bubbles. A
  * correspondence reads as the letters themselves, dated.
  */
-export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSessionConsumed, searchSeed, onWorldChanged }: ChatPanelProps) {
+export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSessionConsumed, searchSeed, onWorldChanged, directory, initialContacts }: ChatPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const [contacts, setContacts] = useState<readonly ContactView[]>([]);
+  const [contacts, setContacts] = useState<readonly ContactView[]>(initialContacts ?? []);
   // Whether the people have been read yet. "Nobody yet" was shown while they
   // loaded, and a save full of correspondents looked empty (R60).
-  const [directoryState, setDirectoryState] = useState<"loading" | "ready" | "failed">("loading");
-  const [groups, setGroups] = useState<readonly DirectoryGroup[]>([]);
-  const [letters, setLetters] = useState<readonly AwaitingLetter[]>([]);
-  const [correspondence, setCorrespondence] = useState<readonly Correspondence[]>([]);
-  const [letterBody, setLetterBody] = useState("");
-  const [reply, setReply] = useState<Reply>("countered");
-  const [agreementKind, setAgreementKind] = useState("");
+  const [directoryState, setDirectoryState] = useState<"loading" | "ready" | "failed">(directory === undefined ? "loading" : "ready");
+  const [groups, setGroups] = useState<readonly DirectoryGroup[]>(directory?.groups ?? []);
+  const [letters, setLetters] = useState<readonly AwaitingLetter[]>(directory?.letters ?? []);
+  const [correspondence, setCorrespondence] = useState<readonly Correspondence[]>(directory?.correspondence ?? []);
+  const [focus, setFocus] = useWindowState<Focus>("letters:focus", { kind: "none" });
+  const [letterBody, setLetterBody] = useWindowState(`letters:draft:${focus.kind === "none" ? "new" : focus.id}`, "");
+  const [reply, setReply] = useWindowState<Reply>("letters:reply", "countered");
+  const [agreementKind, setAgreementKind] = useWindowState("letters:agreement", "");
   const [posting, setPosting] = useState(false);
   /** Why the last letter did not go. The words stay on the page. */
   const [letterError, setLetterError] = useState<string | null>(null);
   const [letterSent, setLetterSent] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useWindowState("letters:search", "");
   useEffect(() => { if (searchSeed) setSearch(searchSeed); }, [searchSeed]);
-  const [focus, setFocus] = useState<Focus>({ kind: "none" });
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [activeSessionId, setActiveSessionId] = useWindowState<string | null>("letters:session", null);
   const [messages, setMessages] = useState<readonly MessageView[]>([]);
-  const [messageBody, setMessageBody] = useState("");
+  const [messageBody, setMessageBody] = useWindowState(`letters:spoken-draft:${activeSessionId ?? "new"}`, "");
   const [sending, setSending] = useState(false);
   /** Why the last thing said did not reach them. The words stay in the box. */
   const [sayError, setSayError] = useState<string | null>(null);
@@ -196,16 +203,24 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
   }, [openSessionId]);
 
   useEffect(() => {
-    if (open) { void fetchContacts(); void fetchDirectory(); }
+    if (directory !== undefined) {
+      setGroups(directory.groups); setLetters(directory.letters); setCorrespondence(directory.correspondence); setDirectoryState("ready");
+    }
+    if (initialContacts !== undefined) setContacts(initialContacts);
+  }, [directory, initialContacts]);
+
+  useEffect(() => {
+    if (open) {
+      if (initialContacts === undefined) void fetchContacts();
+      if (directory === undefined) void fetchDirectory();
+      if (activeSessionId !== null) void fetchMessages(activeSessionId);
+    }
     // Deliberately keyed on `open` alone: the fetchers are re-created every
     // render and re-running them while the panel is already open would be a
     // second identical request.
   }, [open]);
 
   function closePanel() {
-    setActiveSessionId(null);
-    setMessages([]);
-    setFocus({ kind: "none" });
     onClose();
   }
 
@@ -217,7 +232,6 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
   }
 
   function freshPage() {
-    setLetterBody("");
     setLetterError(null);
     setLetterSent(null);
     setReply("countered");
@@ -257,7 +271,7 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
       if (!res.ok) { setLetterError(data.error ?? "The letter did not go. Your words are still here; try again."); return; }
       setLetterBody("");
       setLetterSent(`Your letter is on its way to ${correspondentName}. They will answer when the world next moves.`);
-      await Promise.all([fetchDirectory(), onWorldChanged?.()]);
+      void Promise.allSettled([fetchDirectory(), onWorldChanged?.()]);
     } catch {
       setLetterError("The letter did not go. Your words are still here; try again.");
     } finally {
@@ -280,8 +294,9 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
       const data = await res.json().catch(() => ({})) as { error?: string };
       if (!res.ok) { setLetterError(data.error ?? "The answer did not go. Your words are still here; try again."); return; }
       const sender = { id: letter.fromCharacterId, name: personById.get(letter.fromCharacterId)?.name ?? letter.fromLabel.split(",")[0]! };
-      await Promise.all([fetchDirectory(), onWorldChanged?.()]);
+      setLetterBody("");
       choosePerson(sender);
+      void Promise.allSettled([fetchDirectory(), onWorldChanged?.()]);
       setLetterSent(reply === "countered"
         ? `Your answer is on its way. ${sender.name} will write back when the world next moves.`
         : `Your answer is sent: you have ${reply === "accepted" ? "accepted" : "refused"} it.`);
@@ -433,6 +448,7 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
   return (
     <>
       <Sheet label="your letters" title="Letters" width="reading" side={side} open={open} onClose={closePanel} className="sheet--wide sheet--letters">
+        <ConflictingReports />
         <div className="letters">
           <nav className="letters__people" aria-label="People you can reach">
             <div className="letters__search">
@@ -446,9 +462,9 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
 
             <div className="letters__scroll">
               {wanted.length > 0 && <AskAfter wanted={wanted} />}
-              {letters.length > 0 && wanted.length === 0 && (
+              {wanted.length === 0 && (letters.length > 0 || correspondence.length > 0 || gatherings.length > 0) && (
                 <section className="letters__group">
-                  <h3><Explains k="rule:letter">Waiting on your answer</Explains></h3>
+                  <h3><Explains k="rule:letter">Letters</Explains></h3>
                   <ul className="letters__list">
                     {letters.map((entry) => (
                       <li key={entry.id}>
@@ -458,15 +474,7 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
                         </button>
                       </li>
                     ))}
-                  </ul>
-                </section>
-              )}
-
-              {correspondence.length > 0 && wanted.length === 0 && (
-                <section className="letters__group">
-                  <h3>Letters</h3>
-                  <ul className="letters__list">
-                    {correspondence.map((entry) => {
+                    {[...correspondence].sort((x, y) => Number(y.waitingOn === "you") - Number(x.waitingOn === "you")).map((entry) => {
                       const last = entry.pages.at(-1);
                       const state = entry.waitingOn === "you" ? "Waiting on your answer"
                         : entry.waitingOn === "them" ? "Awaiting their answer"
@@ -481,19 +489,11 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
                         </li>
                       );
                     })}
-                  </ul>
-                </section>
-              )}
-
-              {gatherings.length > 0 && wanted.length === 0 && (
-                <section className="letters__group">
-                  <h3>Gatherings</h3>
-                  <ul className="letters__list">
                     {gatherings.map((contact) => (
                       <li key={contact.sessionId}>
                         <button type="button" className="letters__person" aria-current={activeSessionId === contact.sessionId ? "true" : undefined} onClick={() => { setFocus({ kind: "none" }); void openSession(contact.sessionId); }}>
                           <strong>{contact.knownName}</strong>
-                          <span>{contact.roleLabel}</span>
+                          <span>Gathering: {contact.roleLabel}</span>
                           {contact.unread > 0 && <span className="badge">{contact.unread}</span>}
                         </button>
                       </li>
@@ -535,6 +535,14 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
                 <h3>{letter.kindLabel}</h3>
                 <p className="letters__from">From {letter.fromLabel}{letter.replyByLabel !== null && <>, wanting an answer by <Era text={letter.replyByLabel} /></>}.</p>
                 <p className="letters__subject">{letter.subject}</p>
+                {letter.previousRejection != null && (
+                  <section aria-label="Earlier peace terms rejected">
+                    <p><strong>Your earlier peace terms were rejected.</strong></p>
+                    <blockquote className="letters__terms">{letter.previousRejection.reason}</blockquote>
+                    <p className="mirror__note"><Tip label="The terms they rejected" note={() => <TipCard kicker="Your earlier offer" title="The terms they rejected"><blockquote className="letters__terms">{letter.previousRejection!.terms}</blockquote></TipCard>}>The terms they rejected</Tip></p>
+                    <p>This is a new offer with different terms. Accepting it agrees to the terms below.</p>
+                  </section>
+                )}
                 <blockquote className="letters__terms">{letter.terms}</blockquote>
                 <p className="mirror__note">{letter.toYou ? "It is addressed to you." : "It is addressed to your government."}</p>
                 <form className="letters-form" onSubmit={(event) => { void sendAnswer(event); }}>
@@ -560,7 +568,10 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
                     placeholder={reply === "countered" ? `What you write back to ${letter.fromLabel}…` : reply === "accepted" ? "On what understanding you accept…" : "Why you will not…"} />
                   {letterError !== null && <p className="letters-form__error" role="alert">{letterError}</p>}
                   <p className="mirror__note">
-                    {reply === "countered" ? "It goes out now, and they will answer it when the world next moves." : "Your answer goes out now, and holds from the day it is sent."}
+                    {reply === "countered" ? letter.offers.some((offer) => offer.kind === "peace")
+                      ? "Your terms travel to them for an answer. Peace takes effect only when both sides agree."
+                      : "It goes out now, and they will answer it when the world next moves."
+                      : "Your answer goes out now, and holds from the day it is sent."}
                   </p>
                   <div className="letters-form__actions letters-form__actions--start">
                     <button type="submit" className="btn btn--primary" disabled={posting || !letterBody.trim() || (reply === "accepted" && letter.offers.length > 1 && agreementKind === "")}>
@@ -587,7 +598,7 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
                       {focused.opinionLabel !== null && <><dt>What you think of them</dt><dd>{focused.opinionLabel}</dd></>}
                       {focused.how === "public" && <><dt>Known</dt><dd>By repute; you have never dealt with them.</dd></>}
                     </dl>
-                    <p className="letters__reach-line">{focused.reach === "letter" ? "Not here: written to, and answering when the world next moves" : focused.reachLabel}.</p>
+                    {focused.reach === "letter" && <p className="letters__reach-line">Not here: written to, and answering when the world next moves.</p>}
                     {focused.ladder.length > 0 && (
                       <div className="letters-form">
                         <p className="mirror__note">They owe you no answer. To be heard in person:</p>
@@ -650,6 +661,7 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
                       </header>
                       {/* A subject the tray took from the letter's first words would only say them twice. */}
                       {page.subject !== null && !page.body.startsWith(page.subject.replace(/…$/, "")) && <p className="letters__page-subject">{page.subject}</p>}
+                      {page.previousRejection != null && <p><strong>Your earlier peace terms were rejected.</strong> {page.previousRejection.reason}</p>}
                       <p>{page.body}</p>
                       {page.awaiting && page.fromYou && <p className="letters__page-note">Not yet answered. The answer comes when the world next moves.</p>}
                       {page.lapsed != null && <p className="letters__page-note">{page.lapsed}.</p>}

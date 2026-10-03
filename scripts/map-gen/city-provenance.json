@@ -1,0 +1,3046 @@
+{
+  "epoch": "270 BCE",
+  "policy": "Use documented ancient place names, or documented modern archaeological site names where the ancient name is unknown. Never invent assembly/market town names. Historical cities and archaeological settlements are distinguished from game-designated administrative seats: assigning a capital or a site to a game polity is not proof of an attested historical capital or contemporary ethnic affiliation. Gazetteer period intervals do not establish continuous occupation in 270 BCE; dating uncertainties are recorded per entry. Preserve real site coordinates; province and polity boundaries are game approximations. Some existing scenario polities cannot be supplied with securely attested 270 BCE cities; their named archaeological seats remain explicitly uncertain abstractions.",
+  "additions": [
+    {
+      "settlementId": "settlement-aigion",
+      "name": "Aigion",
+      "provinceId": "gre-lcgui",
+      "basis": "league-seat",
+      "source": "https://pleiades.stoa.org/places/570049",
+      "nameEvidence": null,
+      "chronology": null,
+      "chronologyNote": null,
+      "capitalNote": null,
+      "politicalAttribution": null
+    },
+    {
+      "settlementId": "settlement-thermon",
+      "name": "Thermon",
+      "provinceId": "gre-n0ku9",
+      "basis": "league-seat",
+      "source": "https://warwick.ac.uk/fac/arts/classics/intranets/students/modules/greekreligion/database/template-copyz/",
+      "nameEvidence": null,
+      "chronology": null,
+      "chronologyNote": null,
+      "capitalNote": null,
+      "politicalAttribution": null
+    },
+    {
+      "settlementId": "settlement-arcadian-league-assembly",
+      "name": "Mantineia",
+      "provinceId": "gre-j5j4g",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/570459",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-arcadian-league-market",
+      "name": "Tegea",
+      "provinceId": "gre-3coj0",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/570707",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-argos",
+      "name": "Argos",
+      "provinceId": "gre-tc154",
+      "basis": "city-state-seat",
+      "source": "https://pleiades.stoa.org/places",
+      "nameEvidence": null,
+      "chronology": null,
+      "chronologyNote": null,
+      "capitalNote": null,
+      "politicalAttribution": null
+    },
+    {
+      "settlementId": "settlement-balearic-islanders-assembly",
+      "name": "Puig de sa Morisca",
+      "provinceId": "bal-gqoej",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/173312608",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-balearic-islanders-market",
+      "name": "S’Illot",
+      "provinceId": "bal-lnsvo",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/655808604",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-belgica-eburones-assembly",
+      "name": "Wange",
+      "provinceId": "gal-toilc",
+      "basis": "modeled-seat",
+      "source": "https://oar.onroerenderfgoed.be/publicaties/ROEV/4402/ROEV4402-001.pdf",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Excavated Iron Age settlement localities in the middle Scheldt/Meuse region. Ancient settlement names and continuous occupation in 270 BCE are not established.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-belgica-eburones-market",
+      "name": "Jandrain-Jandrenouille",
+      "provinceId": "gal-toilc",
+      "basis": "historical-settlement",
+      "source": "https://oar.onroerenderfgoed.be/publicaties/ROEV/4402/ROEV4402-001.pdf",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Excavated Iron Age settlement localities in the middle Scheldt/Meuse region. Ancient settlement names and continuous occupation in 270 BCE are not established.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-belgica-menapii-assembly",
+      "name": "Kooigembos",
+      "provinceId": "gal-gd2d8",
+      "basis": "modeled-seat",
+      "source": "https://oar.onroerenderfgoed.be/publicaties/OAOE/137/OAOE137-001.pdf",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Real Iron Age settlement sites; modern archaeological toponyms. A single Menapian capital and exact-year occupation are not attested.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-belgica-menapii-market",
+      "name": "Aalter-Langevoorde",
+      "provinceId": "gal-b050c",
+      "basis": "historical-settlement",
+      "source": "https://oar.onroerenderfgoed.be/publicaties/OAOE/137/OAOE137-001.pdf",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Real Iron Age settlement sites; modern archaeological toponyms. A single Menapian capital and exact-year occupation are not attested.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-belgica-nervii-assembly",
+      "name": "Kesselberg",
+      "provinceId": "gal-toilc",
+      "basis": "modeled-seat",
+      "source": "https://www.onroerenderfgoed.be/nieuws/archeologisch-onderzoek-op-de-kesselberg",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Kesselberg is an Iron Age defended site. Blicquy is an excavated multi-period locality; polity attribution and 270 BCE occupation remain uncertain.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-belgica-nervii-market",
+      "name": "Blicquy",
+      "provinceId": "gal-2lr5o",
+      "basis": "historical-settlement",
+      "source": "https://www.onroerenderfgoed.be/nieuws/archeologisch-onderzoek-op-de-kesselberg",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Kesselberg is an Iron Age defended site. Blicquy is an excavated multi-period locality; polity attribution and 270 BCE occupation remain uncertain.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-boii-middle-danube-assembly",
+      "name": "Braunsberg",
+      "provinceId": "pan-righd",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/128369",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-boii-middle-danube-market",
+      "name": "Lovosice",
+      "provinceId": "ger-eiybi",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/118816",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Scholarly gazetteer locates this ancient settlement. Its broad chronology overlaps the scenario; exact-year occupation and political affiliation are not independently established here.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-britain-caledonian-communities-assembly",
+      "name": "Culduthel",
+      "provinceId": "bri-ui4cp",
+      "basis": "modeled-seat",
+      "source": "https://portal.historicenvironment.scot/apex/f?p=1505%3A300%3A%3A%3A%3AVIEWTYPE%2CVIEWREF%3Adesignation%2CSM13754",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Culduthel occupation radiocarbon-dated 360 BCE–340 CE. Dun Deardail is an excavated Iron Age hillfort; use modern site names, not invented Caledonian city names.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-britain-caledonian-communities-market",
+      "name": "Dun Deardail",
+      "provinceId": "bri-ujixk",
+      "basis": "historical-settlement",
+      "source": "https://scarf.scot/regional/higharf/iron-age/7-2-dating-evidence/7-2-2-radiocarbon-dating/",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Culduthel occupation radiocarbon-dated 360 BCE–340 CE. Dun Deardail is an excavated Iron Age hillfort; use modern site names, not invented Caledonian city names.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-britain-eastern-britons-assembly",
+      "name": "Wandlebury",
+      "provinceId": "bri-zxvcs",
+      "basis": "modeled-seat",
+      "source": "https://www.arch.cam.ac.uk/news/cambridgeshire-first-complete-geophysical-survey-iron-age-hillfort-begins-wandlebury",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Middle Iron Age hillforts. Modern site labels; no surviving contemporary ancient names or documented single capital.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-britain-eastern-britons-market",
+      "name": "Warham Camp",
+      "provinceId": "bri-7r0a5",
+      "basis": "historical-settlement",
+      "source": "https://historicengland.org.uk/listing/the-list/list-entry/1018015",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Middle Iron Age hillforts. Modern site labels; no surviving contemporary ancient names or documented single capital.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-britain-midland-britons-assembly",
+      "name": "Old Oswestry",
+      "provinceId": "bri-xkvdr",
+      "basis": "modeled-seat",
+      "source": "https://www.english-heritage.org.uk/visit/places/old-oswestry-hillfort/history/",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Iron Age defended settlements. Old Oswestry has occupation circa 1000 BCE–43 CE. The Wrekin is an Iron Age hillfort, not Roman Viroconium.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-britain-midland-britons-market",
+      "name": "The Wrekin",
+      "provinceId": "bri-a6zqr",
+      "basis": "historical-settlement",
+      "source": "https://historicengland.org.uk/listing/the-list/list-entry/1021275",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Iron Age defended settlements. Old Oswestry has occupation circa 1000 BCE–43 CE. The Wrekin is an Iron Age hillfort, not Roman Viroconium.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-britain-welsh-communities-assembly",
+      "name": "Castell Henllys",
+      "provinceId": "bri-d8mdu",
+      "basis": "modeled-seat",
+      "source": "https://www.pembrokeshirecoast.wales/castell-henllys/about-castell-henllys/",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Excavated Iron Age hillfort settlements. Use modern archaeological labels; no claim that these Welsh names are attested in 270 BCE.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-britain-welsh-communities-market",
+      "name": "Moel y Gaer",
+      "provinceId": "bri-nsf6s",
+      "basis": "historical-settlement",
+      "source": "https://hillforts.arch.ox.ac.uk/records/WA1165.html",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Excavated Iron Age hillfort settlements. Use modern archaeological labels; no claim that these Welsh names are attested in 270 BCE.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-canarian-peoples-assembly",
+      "name": "Cueva de los Guanches",
+      "provinceId": "mau-37iyp",
+      "basis": "modeled-seat",
+      "source": "https://www.museosdetenerife.org/assets/downloads/publication-315d38d5b1.pdf",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Actual archaeological localities used in published early-colonisation discussions. Proposed first-millennium BCE dates are disputed; neither a 270 BCE town nor a capital is securely established. Retained as explicitly uncertain scenario seats, not established history.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-canarian-peoples-market",
+      "name": "Buenavista",
+      "provinceId": "mau-jale5",
+      "basis": "historical-settlement",
+      "source": "https://www.museosdetenerife.org/assets/downloads/publication-315d38d5b1.pdf",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Actual archaeological localities used in published early-colonisation discussions. Proposed first-millennium BCE dates are disputed; neither a 270 BCE town nor a capital is securely established. Retained as explicitly uncertain scenario seats, not established history.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-carpathian-communities-assembly",
+      "name": "Sajópetri",
+      "provinceId": "pan-ka5wr",
+      "basis": "modeled-seat",
+      "source": "https://archeodatabase.hnm.hu/en/node/27372",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Excavated La Tène settlement localities; modern toponyms. The scenario polity is a regional grouping, not an attested central state.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-carpathian-communities-market",
+      "name": "Polgár",
+      "provinceId": "pan-rsl84",
+      "basis": "historical-settlement",
+      "source": "https://archeodatabase.hnm.hu/",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Excavated La Tène settlement localities; modern toponyms. The scenario polity is a regional grouping, not an attested central state.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-knossos",
+      "name": "Knossos",
+      "provinceId": "cre-vkw42",
+      "basis": "modeled-seat",
+      "source": "https://odysseus.culture.gr/h/3/eh352.jsp?obj_id=2369",
+      "nameEvidence": null,
+      "chronology": null,
+      "chronologyNote": null,
+      "capitalNote": null,
+      "politicalAttribution": null
+    },
+    {
+      "settlementId": "settlement-delos",
+      "name": "Delos",
+      "provinceId": "ion-cjx21",
+      "basis": "modeled-seat",
+      "source": "https://whc.unesco.org/en/list/530",
+      "nameEvidence": null,
+      "chronology": null,
+      "chronologyNote": null,
+      "capitalNote": null,
+      "politicalAttribution": null
+    },
+    {
+      "settlementId": "settlement-czechoslovakia-cotini-assembly",
+      "name": "Liptovská Mara",
+      "provinceId": "ger-oq5kh",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/128443",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-czechoslovakia-cotini-market",
+      "name": "Púchov",
+      "provinceId": "ger-7n0ej",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/128499",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-elis-assembly",
+      "name": "Elis",
+      "provinceId": "gre-1q5sn",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/570220",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-elis-market",
+      "name": "Hypana",
+      "provinceId": "gre-1lwrp",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/570301",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Scholarly gazetteer locates this ancient settlement. Its broad chronology overlaps the scenario; exact-year occupation and political affiliation are not independently established here.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-ambracia",
+      "name": "Ambracia",
+      "provinceId": "epi-05cw7",
+      "basis": "historical-capital",
+      "source": "https://efaart.gr/en/mnimeia_ambracia-en/",
+      "nameEvidence": null,
+      "chronology": null,
+      "chronologyNote": null,
+      "capitalNote": null,
+      "politicalAttribution": null
+    },
+    {
+      "settlementId": "settlement-dodona",
+      "name": "Dodona",
+      "provinceId": "epi-av3bo",
+      "basis": "historical-settlement",
+      "source": "https://odysseus.culture.gr/h/3/eh351.jsp?obj_id=2365",
+      "nameEvidence": null,
+      "chronology": null,
+      "chronologyNote": null,
+      "capitalNote": null,
+      "politicalAttribution": null
+    },
+    {
+      "settlementId": "settlement-gaetuli-assembly",
+      "name": "Volubilis",
+      "provinceId": "mau-umj6e",
+      "basis": "modeled-seat",
+      "source": "https://whc.unesco.org/en/list/836",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "UNESCO dates the Mauritanian settlement to the third century BCE. Exact foundation by 270 BCE is uncertain. Attribution to the game Gaetuli grouping is a scenario abstraction, not an attested Gaetulian capital.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaetuli-market",
+      "name": "Banasa",
+      "provinceId": "mau-75qt3",
+      "basis": "historical-settlement",
+      "source": "https://www.persee.fr/doc/antaf_0066-4871_1984_num_20_1_1100",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pre-Roman indigenous occupation is documented. This is not the Roman colony Iulia Valentia founded in 33–25 BCE. The ancient name at 270 BCE and affiliation to the game Gaetuli grouping are uncertain.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-aedui-assembly",
+      "name": "Cabilonnum",
+      "provinceId": "gal-95zls",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/177485",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-aedui-market",
+      "name": "Petit-Chauvort",
+      "provinceId": "gal-ttxlg",
+      "basis": "historical-settlement",
+      "source": "https://www.culture.gouv.fr/thematiques/musees/Les-musees-en-France/les-collections-des-musees-de-france/decouvrir-les-collections/archeologie-de-la-saone",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Excavated settlement on the Saône with a fourth/third-century BCE occupation phase. Modern archaeological site name; not an attested ancient capital.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-allobroges-assembly",
+      "name": "Vienna",
+      "provinceId": "gal-i0wii",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/167719",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-allobroges-market",
+      "name": "Genava",
+      "provinceId": "alp-a2zly",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/177528",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-aquitani-assembly",
+      "name": "Lactora",
+      "provinceId": "gal-pulkn",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/246459",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-aquitani-market",
+      "name": "Ussubium",
+      "provinceId": "gal-xyh11",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/138635",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-armorican-confederacy-assembly",
+      "name": "Paule",
+      "provinceId": "gal-1oaxi",
+      "basis": "modeled-seat",
+      "source": "https://journals.openedition.org/racf/5129",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Paule is a settlement occupied circa 550–15 BCE. Inguiniel-Kerven Teignouse is an excavated Iron Age settlement; modern site labels, no attested confederate capital.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-armorican-confederacy-market",
+      "name": "Kerven Teignouse",
+      "provinceId": "gal-02guv",
+      "basis": "historical-settlement",
+      "source": "https://www.culture.gouv.fr/regions/drac-bretagne/archeologie",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Paule is a settlement occupied circa 550–15 BCE. Inguiniel-Kerven Teignouse is an excavated Iron Age settlement; modern site labels, no attested confederate capital.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-arverni-assembly",
+      "name": "Gannat",
+      "provinceId": "gal-zk9bv",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/138368",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-arverni-market",
+      "name": "Artonne",
+      "provinceId": "gal-zk9bv",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/138195",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-belgae-assembly",
+      "name": "Bucy-le-Long",
+      "provinceId": "gal-icil6",
+      "basis": "modeled-seat",
+      "source": "https://oar.onroerenderfgoed.be/publicaties/ROEV/4402/ROEV4402-001.pdf",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Excavated Iron Age localities. Exact-year occupation and state-capital status are not established; no later Roman Durocortorum is backdated.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-belgae-market",
+      "name": "Dourges",
+      "provinceId": "gal-mr93t",
+      "basis": "historical-settlement",
+      "source": "https://oar.onroerenderfgoed.be/publicaties/ROEV/4402/ROEV4402-001.pdf",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Excavated Iron Age localities. Exact-year occupation and state-capital status are not established; no later Roman Durocortorum is backdated.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-bituriges-assembly",
+      "name": "Avaricum",
+      "provinceId": "gal-2z35h",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/138207",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-bituriges-market",
+      "name": "Cenabum",
+      "provinceId": "gal-f9ibi",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/138281",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-cadurci-assembly",
+      "name": "Césarines",
+      "provinceId": "gal-v8dkl",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/138283",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-cadurci-market",
+      "name": "Grotte des Tuilières",
+      "provinceId": "gal-3a1as",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/138380",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-lemovices-assembly",
+      "name": "Bridiers",
+      "provinceId": "gal-944gk",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/138237",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-lemovices-market",
+      "name": "Motte-Chalard",
+      "provinceId": "gal-39bco",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/138473",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-petrocorii-assembly",
+      "name": "Saint-Martial-de-Ribérac",
+      "provinceId": "gal-eplxr",
+      "basis": "modeled-seat",
+      "source": "https://www.persee.fr/doc/aquit_0758-9670_1997_num_15_1_1248",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Real excavated Iron Age habitat localities in Périgord. Ancient names unknown. La Tène evidence is compatible in broad period, not a verified 270 BCE capital.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-petrocorii-market",
+      "name": "Les Cébades",
+      "provinceId": "gal-xe2h8",
+      "basis": "historical-settlement",
+      "source": "https://www.culture.gouv.fr/mc/content/download/211308/file/R-Bibliographie-2016.pdf?inLanguage=fre-FR&version=1",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Real excavated Iron Age habitat localities in Périgord. Ancient names unknown. La Tène evidence is compatible in broad period, not a verified 270 BCE capital.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-pictones-assembly",
+      "name": "Limonum",
+      "provinceId": "gal-w1jqx",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/138422",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Attested pre-Roman place names or indigenous sites; exact establishment as urban centres in 270 BCE is uncertain. Neither is presented as a documented contemporary polity capital.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-pictones-market",
+      "name": "Brioux",
+      "provinceId": "gal-6qv6h",
+      "basis": "historical-settlement",
+      "source": "https://brioux-sur-boutonne.fr/decouvrez/culture-tourisme/histoire-brioux",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Attested pre-Roman place names or indigenous sites; exact establishment as urban centres in 270 BCE is uncertain. Neither is presented as a documented contemporary polity capital.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-salyens-assembly",
+      "name": "Avennio",
+      "provinceId": "gal-m5coo",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/148004",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-salyens-market",
+      "name": "Vasio",
+      "provinceId": "gal-broev",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/148228",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-santones-assembly",
+      "name": "Barzan",
+      "provinceId": "gal-xanux",
+      "basis": "modeled-seat",
+      "source": "https://www.fa-barzan.com/wp-content/uploads/2024/03/Dossier-pedagogique-2023-2024.pdf",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Actual indigenous/pre-Roman sites in Saintonge. Use modern locality names, not Roman Mediolanum Santonum or the uncertain identification Novioregum. Continuous 270 BCE occupation is not established by this catalogue.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-santones-market",
+      "name": "Pons",
+      "provinceId": "gal-5y8xw",
+      "basis": "historical-settlement",
+      "source": "https://www.culture.gouv.fr/regions/drac-nouvelle-aquitaine/archeologie",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Actual indigenous/pre-Roman sites in Saintonge. Use modern locality names, not Roman Mediolanum Santonum or the uncertain identification Novioregum. Continuous 270 BCE occupation is not established by this catalogue.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-sequana-peoples-assembly",
+      "name": "Nanterre",
+      "provinceId": "gal-ajy1h",
+      "basis": "modeled-seat",
+      "source": "https://www.nanterre.fr/histoire-de-la-ville",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Real Iron Age settlement localities. Nanterre has early-third-century BCE funerary evidence, but its late oppidum is not projected backwards as a city of 270 BCE; exact occupation and polity attribution remain uncertain.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-sequana-peoples-market",
+      "name": "Les Mureaux",
+      "provinceId": "gal-tity3",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/109185",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Real Iron Age settlement localities. Nanterre has early-third-century BCE funerary evidence, but its late oppidum is not projected backwards as a city of 270 BCE; exact occupation and polity attribution remain uncertain.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-sequani-assembly",
+      "name": "Vesontio",
+      "provinceId": "alp-kdwow",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/177657",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-sequani-market",
+      "name": "Mathay",
+      "provinceId": "alp-fg7lo",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/177576",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-treveri-assembly",
+      "name": "Bundenbach-Altburg",
+      "provinceId": "ger-88bhe",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/108836",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-gaul-treveri-market",
+      "name": "Wederath",
+      "provinceId": "gal-iqp26",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/108802",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Modern locality of an Iron Age cemetery and later Roman Belginum. The pre-Roman settlement location and continuous occupation in 270 BCE are uncertain; Roman vicus development is not backdated.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-enserune",
+      "name": "Ensérune",
+      "provinceId": "gal-9q3w5",
+      "basis": "modeled-seat",
+      "source": "https://www.enserune.fr/decouvrir/histoire-de-l-oppidum-d-enserune",
+      "nameEvidence": null,
+      "chronology": null,
+      "chronologyNote": null,
+      "capitalNote": null,
+      "politicalAttribution": null
+    },
+    {
+      "settlementId": "settlement-germania-bructeri-assembly",
+      "name": "Sünninghausen",
+      "provinceId": "ger-ej54i",
+      "basis": "modeled-seat",
+      "source": "https://100jahre100funde.lwl.org/de/100-fundeepochen/eisenzeit/040-paukenfibel/",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Excavated pre-Roman Iron Age settlement sites; modern toponyms. Bructerian attribution follows the game geography, not an attested 270 BCE ethnic identification.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-germania-bructeri-market",
+      "name": "Saerbeck-Südhoek",
+      "provinceId": "ger-zfza1",
+      "basis": "historical-settlement",
+      "source": "https://www.lwl-archaeologie.de/media/filer_public/6a/8e/6a8e9bc0-aaff-4fd6-9d31-3e2c79ebaa6c/ng_2006_23-11-2009_mit_titel.pdf",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Excavated pre-Roman Iron Age settlement sites; modern toponyms. Bructerian attribution follows the game geography, not an attested 270 BCE ethnic identification.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-germania-chatti-assembly",
+      "name": "Dünsberg",
+      "provinceId": "ger-mzdvd",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/108940",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-germania-chatti-market",
+      "name": "Amöneburg",
+      "provinceId": "ger-h18cl",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/118564",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-germania-chauci-assembly",
+      "name": "Huntebrück-Wührden",
+      "provinceId": "ger-qp658",
+      "basis": "modeled-seat",
+      "source": "https://digital.lb-oldenburg.de/download/pdf/198831.pdf",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Excavated pre-Roman Iron Age settlements. Modern site names; the Chauci grouping is the game attribution and neither town is an attested Chaucan capital.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-germania-chauci-market",
+      "name": "Flögeln-Dölle",
+      "provinceId": "ger-7cncq",
+      "basis": "historical-settlement",
+      "source": "https://nihk.de/skn-downloads",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Excavated pre-Roman Iron Age settlements. Modern site names; the Chauci grouping is the game attribution and neither town is an attested Chaucan capital.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-germania-cherusci-assembly",
+      "name": "Bantorf",
+      "provinceId": "ger-l0s7h",
+      "basis": "modeled-seat",
+      "source": "https://www.archaeofirm.de/archaeologische-flaechenuntersuchungen-in-bantorf/",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Excavated pre-Roman Iron Age settlement sites; modern names and no claim of an attested Cheruscan capital.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-germania-cherusci-market",
+      "name": "Minden-Päpinghausen",
+      "provinceId": "ger-6tk2b",
+      "basis": "historical-settlement",
+      "source": "https://www2.lwl.org/de/LWL/portal/presse/pressemitteilungen/mitteilung/64272/",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Excavated pre-Roman Iron Age settlement sites; modern names and no claim of an attested Cheruscan capital.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-germania-cimbri-assembly",
+      "name": "Archsum-Melenknop",
+      "provinceId": "ger-1wqb6",
+      "basis": "modeled-seat",
+      "source": "https://www.nordfriiskinstituut.eu/futuur/en/nordfrieslandlexikon/eisenzeit/",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Excavated pre-Roman Iron Age farm settlements on Sylt and Föhr. Modern site names, not the later earthwork Archsumburg; Cimbrian political identity in 270 BCE remains uncertain.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-germania-cimbri-market",
+      "name": "Greenspötj",
+      "provinceId": "ger-u2ijx",
+      "basis": "historical-settlement",
+      "source": "https://www.nordfriiskinstituut.eu/futuur/en/nordfrieslandlexikon/eisenzeit/",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Excavated pre-Roman Iron Age farm settlements on Sylt and Föhr. Modern site names, not the later earthwork Archsumburg; Cimbrian political identity in 270 BCE remains uncertain.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-germania-hermunduri-assembly",
+      "name": "Jüchsen-Widderstatt",
+      "provinceId": "ger-0h5ov",
+      "basis": "modeled-seat",
+      "source": "https://www.gw.uni-jena.de/11480/studium",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Excavated pre-Roman Iron Age settlement localities; modern names. Hermunduri are a later-attested people; scenario ownership is not an asserted 270 BCE ethnic attribution.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-germania-hermunduri-market",
+      "name": "Rodau",
+      "provinceId": "ger-zaq5p",
+      "basis": "historical-settlement",
+      "source": "https://www.archaeologie.sachsen.de/entdeckung-im-vogtland-10318.html",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Excavated pre-Roman Iron Age settlement localities; modern names. Hermunduri are a later-attested people; scenario ownership is not an asserted 270 BCE ethnic attribution.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-germania-semnones-assembly",
+      "name": "Schenkendorf",
+      "provinceId": "ger-246ny",
+      "basis": "modeled-seat",
+      "source": "https://bldam-brandenburg.de/schaufenster/eisenzeitliche-und-slawische-siedlungsspuren-in-schenkendorf/",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Pre-Roman Iron Age settlement sites (Schenkendorf period circa 600–9 BCE); modern locality names. Semnonian capital status is a game choice.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-germania-semnones-market",
+      "name": "Veerßen",
+      "provinceId": "ger-gt8op",
+      "basis": "historical-settlement",
+      "source": "https://www.kulturwissenschaften.uni-hamburg.de/vfg/pdfs/nikulka-et-al.pdf",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Pre-Roman Iron Age settlement sites (Schenkendorf period circa 600–9 BCE); modern locality names. Semnonian capital status is a game choice.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-germania-ubii-assembly",
+      "name": "Niederzier-Hambach",
+      "provinceId": "gal-pf853",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/109210",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-germania-ubii-market",
+      "name": "Bergisch Gladbach",
+      "provinceId": "ger-xvx1j",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/108807",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-helvetian-peoples-assembly",
+      "name": "Eburodunum",
+      "provinceId": "alp-3ll2t",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/177514",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-helvetian-peoples-market",
+      "name": "Bern-Engehalbinsel",
+      "provinceId": "alp-c2e3b",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/177471",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-iberia-astures-assembly",
+      "name": "Chao Sanmartín",
+      "provinceId": "ibe-gd1fq",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/924090585",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-iberia-astures-market",
+      "name": "Pendia",
+      "provinceId": "ibe-v7myt",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/518860820",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-iberia-cantabri-assembly",
+      "name": "Monte Bernorio",
+      "provinceId": "ibe-mtnyo",
+      "basis": "modeled-seat",
+      "source": "https://libreria.cultura.gob.es/libro/monte-bernorio-aguilar-de-campoo-palencia_4212/",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Actual Iron Age fortified settlement sites; ancient names unknown. Do not identify either with a textually attested Cantabrian city without evidence.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-iberia-cantabri-market",
+      "name": "La Ulaña",
+      "provinceId": "ibe-yvwuv",
+      "basis": "historical-settlement",
+      "source": "https://www.ubu.es/noticias/la-ulana-el-mayor-oppidum-de-la-edad-del-hierro-de-la-peninsula-iberica",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Actual Iron Age fortified settlement sites; ancient names unknown. Do not identify either with a textually attested Cantabrian city without evidence.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-iberia-carpetani-assembly",
+      "name": "Toletum",
+      "provinceId": "ibe-pzghj",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/266066",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-iberia-carpetani-market",
+      "name": "Cerro de las Cabezas",
+      "provinceId": "ibe-i5prh",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/265861",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-iberia-edetani-assembly",
+      "name": "Edeta",
+      "provinceId": "ibe-dohi1",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/265887",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-iberia-edetani-market",
+      "name": "Arse",
+      "provinceId": "ibe-nsomj",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/266021",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-iberia-gallaeci-assembly",
+      "name": "Elviña",
+      "provinceId": "ibe-zkx45",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/236461",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-iberia-gallaeci-market",
+      "name": "Borneiro",
+      "provinceId": "ibe-1dm39",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/428715902",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-iberia-ilergetes-assembly",
+      "name": "Ilerda",
+      "provinceId": "ibe-roaoi",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/246431",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-iberia-ilergetes-market",
+      "name": "Molí d’Espígol",
+      "provinceId": "ibe-32450",
+      "basis": "historical-settlement",
+      "source": "https://patrimoni.gencat.cat/ca/coleccio/moli-despigol",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Documented Iberian settlement flourishing in the fourth and third centuries BCE, abandoned around 200 BCE. Ancient name unknown; identifying it with Athanagia is a hypothesis.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-iberia-lusitani-assembly",
+      "name": "Castrejón de Capote",
+      "provinceId": "tur-scif2",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/256085",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-iberia-lusitani-market",
+      "name": "Tamusia",
+      "provinceId": "ibe-uxjaw",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/256464",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-iberia-turdetani-assembly",
+      "name": "Obulco",
+      "provinceId": "tur-mkvfb",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/265982",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-iberia-turdetani-market",
+      "name": "Torreparedones",
+      "provinceId": "tur-jdv09",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/265938",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-iberia-vaccei-assembly",
+      "name": "Pintia",
+      "provinceId": "ibe-bsyac",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/236601",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Scholarly gazetteer locates this ancient settlement. Its broad chronology overlaps the scenario; exact-year occupation and political affiliation are not independently established here.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-iberia-vaccei-market",
+      "name": "Cauca",
+      "provinceId": "ibe-hpoa3",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/236419",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-iberia-vascones-assembly",
+      "name": "Calagurris",
+      "provinceId": "ibe-utfgk",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/246279",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-iberia-vascones-market",
+      "name": "La Hoya",
+      "provinceId": "ibe-fh83h",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/653596356",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-illyria-ardiaei-assembly",
+      "name": "Rhizon",
+      "provinceId": "ill-ebxfz",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/197471",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-illyria-ardiaei-market",
+      "name": "Meteon",
+      "provinceId": "ill-4d12z",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/481914",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-illyria-autariatae-assembly",
+      "name": "Kale-Krševica",
+      "provinceId": "moe-nop14",
+      "basis": "modeled-seat",
+      "source": "https://rai.ai.ac.rs/handle/123456789/2399",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Krševica is an excavated Classical/early Hellenistic settlement. Gradina na Jelici has prehistoric remains but its principal defended town is Late Antique; use is uncertain, not an attested Autariatan capital.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-illyria-autariatae-market",
+      "name": "Velika Humska Čuka",
+      "provinceId": "moe-veq1g",
+      "basis": "historical-settlement",
+      "source": "https://ai.ac.rs/en/velika-humska-cuka/",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Excavated multi-period fortified settlement with documented Iron Age phases. Modern site name; occupation in 270 BCE and Autariatan affiliation are uncertain.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-illyria-dalmatae-assembly",
+      "name": "Daorson",
+      "provinceId": "ill-5kv2t",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/197421",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-illyria-dalmatae-market",
+      "name": "Delminium",
+      "provinceId": "ill-grl5p",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/197244",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-illyria-dardani-assembly",
+      "name": "Gadime-Gradina",
+      "provinceId": "moe-0n7wp",
+      "basis": "modeled-seat",
+      "source": "https://www.mkrs-ks.org/repository/docs/drafti_i_guides_-anglisht_final.pdf",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Real fortified archaeological sites with prehistoric occupation. Exact 270 BCE occupation and capital rank are uncertain; use modern locality names.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-illyria-dardani-market",
+      "name": "Veletin",
+      "provinceId": "moe-6w43z",
+      "basis": "historical-settlement",
+      "source": "https://www.mkrs-ks.org/repository/docs/drafti_i_guides_-anglisht_final.pdf",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Real fortified archaeological sites with prehistoric occupation. Exact 270 BCE occupation and capital rank are uncertain; use modern locality names.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-illyria-histri-liburni-assembly",
+      "name": "Nesactium",
+      "provinceId": "ill-r9dld",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/197405",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Scholarly gazetteer locates this ancient settlement. Its broad chronology overlaps the scenario; exact-year occupation and political affiliation are not independently established here.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-illyria-histri-liburni-market",
+      "name": "Aenona",
+      "provinceId": "ill-a4v08",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/197094",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-illyria-paeonian-communities-assembly",
+      "name": "Bylazora",
+      "provinceId": "mac-tb9gp",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/491557",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-illyria-paeonian-communities-market",
+      "name": "Stuberra",
+      "provinceId": "mac-0hdnx",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/482008",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-illyria-taulantii-assembly",
+      "name": "Antipatreia",
+      "provinceId": "epi-9gxva",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/481724",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-illyria-taulantii-market",
+      "name": "Akrolissos",
+      "provinceId": "ill-f9jdb",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/481709",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-ionian-islands-assembly",
+      "name": "Corcyra",
+      "provinceId": "epi-6hjg5",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/530834",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-ionian-islands-market",
+      "name": "Pale",
+      "provinceId": "gre-hlqtv",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/531036",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-ireland-ulster-communities-assembly",
+      "name": "Emain Macha",
+      "provinceId": "hib-qvbuw",
+      "basis": "modeled-seat",
+      "source": "https://www.worldheritageireland.ie/tentative-list/royal-sites-of-ireland/",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Navan/Emain Macha is a real prehistoric ceremonial complex. Rath na Rí is part of the same complex; medieval traditional names are not asserted to be contemporary Iron Age city names. The division into two settlements is a game abstraction.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-ireland-ulster-communities-market",
+      "name": "Haughey’s Fort",
+      "provinceId": "hib-qvbuw",
+      "basis": "historical-settlement",
+      "source": "https://excavations.ie/report/1990/Armagh/0000942/",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Distinct excavated hillfort west of Navan, principally Late Bronze Age. Excavator reports Iron Age material suggesting some contemporaneity with Navan. Continuous occupation at 270 BCE is not established; explicitly uncertain scenario settlement.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-low-countries-chamavi-assembly",
+      "name": "Looërenk",
+      "provinceId": "gal-qcxfv",
+      "basis": "modeled-seat",
+      "source": "https://archisarchief.cultureelerfgoed.nl/Archis2/Archeorapporten/21/AR24474/ZAP_63.pdf",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Excavated settlements with Bronze/Iron Age occupation. Modern archaeological labels; ancient village names and Chamavian ethnic affiliation in 270 BCE are unknown.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-low-countries-chamavi-market",
+      "name": "Colmschate",
+      "provinceId": "gal-qcxfv",
+      "basis": "historical-settlement",
+      "source": "https://archisarchief.cultureelerfgoed.nl/Archis2/Archeorapporten/21/AR24474/ZAP_63.pdf",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Excavated settlements with Bronze/Iron Age occupation. Modern archaeological labels; ancient village names and Chamavian ethnic affiliation in 270 BCE are unknown.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-low-countries-frisiavones-assembly",
+      "name": "Spijkenisse-Schiekamp",
+      "provinceId": "gal-uox1s",
+      "basis": "modeled-seat",
+      "source": "https://geodata.zuid-holland.nl/geoserver/ogc/features/v1/collections/cultuur%3ACHS_2016_ARCHEOLOGIE_PROVINCIAAL_BELANG/items?f=text%2Fhtml&limit=50&startIndex=100",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Actual early/middle Iron Age occupation sites. Modern archaeological locality names; Frisiavonian attribution and exact-year occupation uncertain.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-low-countries-frisiavones-market",
+      "name": "Vlaardingen-Broekpolder",
+      "provinceId": "gal-g3m6f",
+      "basis": "historical-settlement",
+      "source": "https://archisarchief.cultureelerfgoed.nl/Archis2/Archeorapporten/15/AR21010/A10-037-I%20Lange%20Nieuwstraat%20te%20Schiedam.pdf",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Actual early/middle Iron Age occupation sites. Modern archaeological locality names; Frisiavonian attribution and exact-year occupation uncertain.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-low-countries-frisii-assembly",
+      "name": "Ezinge",
+      "provinceId": "gal-q65or",
+      "basis": "modeled-seat",
+      "source": "https://archisarchief.cultureelerfgoed.nl/Archis3/Zaakdocumenten/245/2454416/afm/56936109-afm-1475224088345-2014_77_BureauVoorArcheologie_Winsum_VanSwinderenweg24.pdf",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Actual Iron Age settlements. Ezinge-centre occupation starts in the fourth century BCE; generic terp-building dates alone are not used to date its first settlement. Modern locality names.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-low-countries-frisii-market",
+      "name": "Hijken-Noorderveld",
+      "provinceId": "gal-1aaut",
+      "basis": "historical-settlement",
+      "source": "https://www.cultureelerfgoed.nl/binaries/cultureelerfgoed/documenten/publicaties/2006/01/01/uit-balans/uit-balans-2006.pdf",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Actual Iron Age settlements. Ezinge-centre occupation starts in the fourth century BCE; generic terp-building dates alone are not used to date its first settlement. Modern locality names.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-low-countries-rhine-delta-assembly",
+      "name": "De Geer",
+      "provinceId": "gal-hemq6",
+      "basis": "modeled-seat",
+      "source": "https://verhaalvanutrecht.nl/verhalen/de-geer-van-ijzertijdboeren-tot-merovingers",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Real Iron Age settlement sites; Velsen means the indigenous settlement evidence, not the Roman fort Flevum. Modern toponyms; exact 270 BCE occupation is not individually verified.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-low-countries-rhine-delta-market",
+      "name": "Velsen",
+      "provinceId": "gal-sacum",
+      "basis": "historical-settlement",
+      "source": "https://www.cultureelerfgoed.nl/onderwerpen/b/bronnen-en-kaarten/overzicht/archeologische-kaart-ijsselmeergebied",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Real Iron Age settlement sites; Velsen means the indigenous settlement evidence, not the Roman fort Flevum. Modern toponyms; exact 270 BCE occupation is not individually verified.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-low-countries-tubantes-assembly",
+      "name": "Lingen-Baccum",
+      "provinceId": "ger-1dano",
+      "basis": "modeled-seat",
+      "source": "https://denkmalpflege.niedersachsen.de/aktuelles/nachrichten/ausgrabung-einer-germanischen-siedlung-in-lingen-baccum-208946.html",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Baccum pottery dates settlement circa 300 BCE onward. Noordmeerse Es has Iron Age occupation finds. Modern toponyms; Tubantian polity membership is a scenario assignment.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-low-countries-tubantes-market",
+      "name": "Noordmeerse Es",
+      "provinceId": "gal-wetd4",
+      "basis": "historical-settlement",
+      "source": "https://www.canonvannederland.nl/nl/overijssel/salland/den-ham-vroomshoop/gevonden-voorwerpen",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Baccum pottery dates settlement circa 300 BCE onward. Noordmeerse Es has Iron Age occupation finds. Modern toponyms; Tubantian polity membership is a scenario assignment.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-lusitanians-assembly",
+      "name": "Olisipo",
+      "provinceId": "lus-au32t",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/256338",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-lusitanians-market",
+      "name": "Lacobriga",
+      "provinceId": "tur-n95kx",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/256246",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-megalopolis",
+      "name": "Megalopolis",
+      "provinceId": "gre-y6y6w",
+      "basis": "city-state-seat",
+      "source": "https://digi.ub.uni-heidelberg.de/diglit/gardner1892a/0017",
+      "nameEvidence": null,
+      "chronology": null,
+      "chronologyNote": null,
+      "capitalNote": null,
+      "politicalAttribution": null
+    },
+    {
+      "settlementId": "settlement-messene",
+      "name": "Messene",
+      "provinceId": "gre-9hgmr",
+      "basis": "city-state-seat",
+      "source": "https://www.efamess.gr/en/pois/teichi-archaias-messinis-kai-arkadiki-pyli/",
+      "nameEvidence": null,
+      "chronology": null,
+      "chronologyNote": null,
+      "capitalNote": null,
+      "politicalAttribution": null
+    },
+    {
+      "settlementId": "settlement-noric-communities-assembly",
+      "name": "Dürrnberg",
+      "provinceId": "alp-icien",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/187366",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-noric-communities-market",
+      "name": "Gurina",
+      "provinceId": "alp-51qw1",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/187403",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-pannonii-assembly",
+      "name": "Szalacska",
+      "provinceId": "pan-0psqf",
+      "basis": "modeled-seat",
+      "source": "https://archeodatabase.hnm.hu/hu/node/60553",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Real multi-period hillfort/settlement sites with Iron Age occupation. Their urban development and membership of a Pannonian central state in 270 BCE are not established.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-pannonii-market",
+      "name": "Regöly",
+      "provinceId": "pan-2lxb5",
+      "basis": "historical-settlement",
+      "source": "https://archeodatabase.hnm.hu/",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Real multi-period hillfort/settlement sites with Iron Age occupation. Their urban development and membership of a Pannonian central state in 270 BCE are not established.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-phocian-league-assembly",
+      "name": "Lilaia",
+      "provinceId": "gre-8fjjt",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/540915",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Scholarly gazetteer locates this ancient settlement. Its broad chronology overlaps the scenario; exact-year occupation and political affiliation are not independently established here.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-phocian-league-market",
+      "name": "Daulis",
+      "provinceId": "gre-rq9xx",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/540723",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-raeti-assembly",
+      "name": "Vadena",
+      "provinceId": "alp-amzfc",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/187605",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-raeti-market",
+      "name": "Montesei di Serso",
+      "provinceId": "alp-73hgv",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/109976883",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-salassi-assembly",
+      "name": "Bois de Montagnoulaz",
+      "provinceId": "alp-ze6mq",
+      "basis": "modeled-seat",
+      "source": "https://www.regione.vda.it/cultura/patrimonio/siti_archeologici/montagnoulaz/default_i.aspx",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Montagnoulaz has a seventh/sixth-century BCE fortified village followed by later occupations; continuity in 270 BCE is uncertain. Saint-Martin-de-Corléans is a real megalithic/occupation site, not a securely identified Salassian city; no fictional Cordela or Roman Augusta Praetoria is used.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-salassi-market",
+      "name": "Saint-Martin-de-Corléans",
+      "provinceId": "alp-chcrn",
+      "basis": "historical-settlement",
+      "source": "https://www.regione.vda.it/cultura/patrimonio/siti_archeologici/st_martin/archeologia/default_i.asp",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Montagnoulaz has a seventh/sixth-century BCE fortified village followed by later occupations; continuity in 270 BCE is uncertain. Saint-Martin-de-Corléans is a real megalithic/occupation site, not a securely identified Salassian city; no fictional Cordela or Roman Augusta Praetoria is used.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-sparta",
+      "name": "Sparta",
+      "provinceId": "gre-5jl3x",
+      "basis": "city-state-seat",
+      "source": "https://www.visitgreece.gr/en/mainland/Peloponnes/sparta",
+      "nameEvidence": null,
+      "chronology": null,
+      "chronologyNote": null,
+      "capitalNote": null,
+      "politicalAttribution": null
+    },
+    {
+      "settlementId": "settlement-taurini-assembly",
+      "name": "Vercellae",
+      "provinceId": "cis-oj373",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/383815",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-taurini-market",
+      "name": "Segusio",
+      "provinceId": "cis-7m5du",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/167919",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-thrace-bessi-assembly",
+      "name": "Philippopolis",
+      "provinceId": "moe-d8dzm",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/216927",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-thrace-bessi-market",
+      "name": "Vălkosel",
+      "provinceId": "thr-8olh7",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/501656",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-thrace-crobyzi-assembly",
+      "name": "Bizone",
+      "provinceId": "moe-sejvy",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/216734",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-thrace-crobyzi-market",
+      "name": "Krounoi",
+      "provinceId": "moe-qghib",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/216793",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-thrace-dacian-highland-communities-assembly",
+      "name": "Moreşti",
+      "provinceId": "dac-if67t",
+      "basis": "modeled-seat",
+      "source": "https://opac.elte.hu/Record/opac-EUL01-001071811",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Actual excavated La Tène settlement localities; no first-century BCE Dacian citadel is backdated. The site cultures are not evidence of a united Dacian state in 270 BCE.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-thrace-dacian-highland-communities-market",
+      "name": "Ciumeşti",
+      "provinceId": "pan-x3h8v",
+      "basis": "historical-settlement",
+      "source": "https://biblioteca-digitala.ro/?pub=3659-asezarea-si-necropola-celtica-de-la-ciumesti",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Actual excavated La Tène settlement localities; no first-century BCE Dacian citadel is backdated. The site cultures are not evidence of a united Dacian state in 270 BCE.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-thrace-dentheletae-assembly",
+      "name": "Panagyurishte",
+      "provinceId": "moe-nnem3",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/216917",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Real archaeological locality names with ancient occupation/finds. Neither settlement is a documented 270 BCE Dentheletan capital; precise occupation and political attribution uncertain.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-thrace-dentheletae-market",
+      "name": "Belchin",
+      "provinceId": "moe-wzbut",
+      "basis": "historical-settlement",
+      "source": "https://www.tsarimaligrad.com/",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Real archaeological locality names with ancient occupation/finds. Neither settlement is a documented 270 BCE Dentheletan capital; precise occupation and political attribution uncertain.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-thrace-eastern-carpathian-communities-assembly",
+      "name": "Cotnari-Cătălina",
+      "provinceId": "dac-mzolv",
+      "basis": "modeled-seat",
+      "source": "https://ran.cimec.ro/",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Real fortified Getic settlements, dated in archaeological publications to the sixth/fifth through third centuries BCE. Ancient names unknown; no later Sarmizegetusa or Piatra Neamţ fortress is backdated.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-thrace-eastern-carpathian-communities-market",
+      "name": "Stânceşti",
+      "provinceId": "dac-jhlxg",
+      "basis": "historical-settlement",
+      "source": "https://ran.cimec.ro/",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "period-compatible",
+      "chronologyNote": "Real fortified Getic settlements, dated in archaeological publications to the sixth/fifth through third centuries BCE. Ancient names unknown; no later Sarmizegetusa or Piatra Neamţ fortress is backdated.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-thrace-getae-assembly",
+      "name": "Piscul Crăsanilor",
+      "provinceId": "dac-gdegv",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/216933",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-thrace-getae-market",
+      "name": "Popeşti",
+      "provinceId": "dac-3od09",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/216941",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-thrace-maedi-assembly",
+      "name": "Scaptopara",
+      "provinceId": "moe-bsq71",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/481983",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-thrace-maedi-market",
+      "name": "Stob",
+      "provinceId": "moe-bsq71",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/482004",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-thrace-moesi-assembly",
+      "name": "Vratsa",
+      "provinceId": "moe-vouv8",
+      "basis": "modeled-seat",
+      "source": "https://www.vratsamuseum.com/",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Real archaeological localities in Triballian territory. Ancient names are unknown; Vratsa has fourth-century BCE elite remains, but a settlement capital in the precise opening year is uncertain.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-thrace-moesi-market",
+      "name": "Borovan",
+      "provinceId": "moe-v47mi",
+      "basis": "historical-settlement",
+      "source": "https://www.vratsamuseum.com/",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Real archaeological localities in Triballian territory. Ancient names are unknown; Vratsa has fourth-century BCE elite remains, but a settlement capital in the precise opening year is uncertain.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-thrace-odrysians-assembly",
+      "name": "Seuthopolis",
+      "provinceId": "moe-nsz6k",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/216981",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-thrace-odrysians-market",
+      "name": "Kabyle",
+      "provinceId": "moe-5opqb",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/216859",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-thrace-scordisci-assembly",
+      "name": "Szeged-Kiskundorozsma",
+      "provinceId": "ill-p0e2n",
+      "basis": "modeled-seat",
+      "source": "https://moraferencmuzeum.hu/",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Actual excavated La Tène localities in the game territory. Scordiscian ownership and settlement occupation in 270 BCE are uncertain. Singidunum is deliberately not moved hundreds of kilometres into the current polity territory.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-thrace-scordisci-market",
+      "name": "Szöreg",
+      "provinceId": "ill-p0e2n",
+      "basis": "historical-settlement",
+      "source": "https://moraferencmuzeum.hu/",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Actual excavated La Tène localities in the game territory. Scordiscian ownership and settlement occupation in 270 BCE are uncertain. Singidunum is deliberately not moved hundreds of kilometres into the current polity territory.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-thrace-serdi-assembly",
+      "name": "Serdica",
+      "provinceId": "moe-x0eos",
+      "basis": "modeled-seat",
+      "source": "https://www.sofiahistorymuseum.bg/en/",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Actual archaeological places in the Sofia basin. Use Serdica as the attested ancient name, but do not claim Roman urban institutions or a documented 270 BCE capital; precise indigenous settlement chronology uncertain.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-thrace-serdi-market",
+      "name": "Pernik",
+      "provinceId": "moe-wzbut",
+      "basis": "historical-settlement",
+      "source": "https://museumpernik.com/",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Actual archaeological places in the Sofia basin. Use Serdica as the attested ancient name, but do not claim Roman urban institutions or a documented 270 BCE capital; precise indigenous settlement chronology uncertain.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-thracian-communities-assembly",
+      "name": "Doriskos",
+      "provinceId": "thr-ylywm",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/501402",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-thracian-communities-market",
+      "name": "Kypsela",
+      "provinceId": "thr-0qb30",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/501489",
+      "nameEvidence": "ancient-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-zagros-tribes-assembly",
+      "name": "Grai Darki",
+      "provinceId": "ana-a8m3o",
+      "basis": "modeled-seat",
+      "source": "https://pleiades.stoa.org/places/874489",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-zagros-tribes-market",
+      "name": "Deir Situn",
+      "provinceId": "ana-a8m3o",
+      "basis": "historical-settlement",
+      "source": "https://pleiades.stoa.org/places/874552",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Pleiades records this settlement in a period overlapping 270 BCE. Period intervals are broad, not proof of continuous occupation or of the name being used in this exact year.",
+      "capitalNote": "Game administrative seat; no claim of an attested single capital for this polity.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-brixia",
+      "name": "Brixia",
+      "provinceId": "cis-ddn96",
+      "basis": "historical-capital",
+      "source": "https://comune.brescia.it/it/vivere/2983701",
+      "nameEvidence": null,
+      "chronology": null,
+      "chronologyNote": null,
+      "capitalNote": null,
+      "politicalAttribution": null
+    },
+    {
+      "settlementId": "settlement-stratos",
+      "name": "Stratos",
+      "provinceId": "gre-26vjh",
+      "basis": "modeled-seat",
+      "source": "https://portal.westerngreece2021.gr/index.php/en/component/content/article?Itemid=586&id=149&poi_id=21787",
+      "nameEvidence": null,
+      "chronology": null,
+      "chronologyNote": null,
+      "capitalNote": null,
+      "politicalAttribution": null
+    },
+    {
+      "settlementId": "settlement-thebes-boeotia",
+      "name": "Thebes",
+      "provinceId": "gre-wubp7",
+      "basis": "modeled-seat",
+      "source": "https://www.mthv.gr/en/the-museum/general-info/",
+      "nameEvidence": null,
+      "chronology": null,
+      "chronologyNote": null,
+      "capitalNote": null,
+      "politicalAttribution": null
+    },
+    {
+      "settlementId": "settlement-kydonia",
+      "name": "Kydonia",
+      "provinceId": "cre-qjksx",
+      "basis": "modeled-seat",
+      "source": "https://www.ancientkydonia.gr/en/project/plateia-agias-aikaterinis/",
+      "nameEvidence": null,
+      "chronology": null,
+      "chronologyNote": null,
+      "capitalNote": null,
+      "politicalAttribution": null
+    },
+    {
+      "settlementId": "settlement-manching",
+      "name": "Manching",
+      "provinceId": "ger-pncxy",
+      "basis": "modeled-seat",
+      "source": "https://publications.dainst.org/journals/efb/article/view/1595",
+      "nameEvidence": null,
+      "chronology": null,
+      "chronologyNote": null,
+      "capitalNote": null,
+      "politicalAttribution": null
+    }
+  ],
+  "seats": [
+    {
+      "polityId": "acarnania",
+      "settlementId": "settlement-stratos",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "achaean-league",
+      "settlementId": "settlement-aigion",
+      "basis": "league-seat"
+    },
+    {
+      "polityId": "aeolis-communities",
+      "settlementId": "settlement-mytilene",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "aetolian-league",
+      "settlementId": "settlement-thermon",
+      "basis": "league-seat"
+    },
+    {
+      "polityId": "apulian-cities",
+      "settlementId": "settlement-arpi",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "arcadian-league",
+      "settlementId": "settlement-arcadian-league-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "argos",
+      "settlementId": "settlement-argos",
+      "basis": "city-state-seat"
+    },
+    {
+      "polityId": "armenia",
+      "settlementId": "settlement-armavir",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "athens",
+      "settlementId": "settlement-athens",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "atropatene",
+      "settlementId": "settlement-ganzak",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "balearic-islanders",
+      "settlementId": "settlement-balearic-islanders-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "belgica-eburones",
+      "settlementId": "settlement-belgica-eburones-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "belgica-menapii",
+      "settlementId": "settlement-belgica-menapii-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "belgica-nervii",
+      "settlementId": "settlement-belgica-nervii-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "bithynia",
+      "settlementId": "settlement-astacus",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "boeotian-league",
+      "settlementId": "settlement-thebes-boeotia",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "boii",
+      "settlementId": "settlement-bononia",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "boii-middle-danube",
+      "settlementId": "settlement-boii-middle-danube-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "britain-caledonian-communities",
+      "settlementId": "settlement-britain-caledonian-communities-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "britain-eastern-britons",
+      "settlementId": "settlement-britain-eastern-britons-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "britain-midland-britons",
+      "settlementId": "settlement-britain-midland-britons-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "britain-northern-britons",
+      "settlementId": "settlement-traprain-law",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "britain-southwestern-britons",
+      "settlementId": "settlement-maiden-castle",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "britain-thames-britons",
+      "settlementId": "settlement-danebury",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "britain-welsh-communities",
+      "settlementId": "settlement-britain-welsh-communities-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "bruttians",
+      "settlementId": "settlement-consentia",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "canarian-peoples",
+      "settlementId": "settlement-canarian-peoples-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "cappadocia",
+      "settlementId": "settlement-mazaca",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "carpathian-communities",
+      "settlementId": "settlement-carpathian-communities-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "carthage",
+      "settlementId": "settlement-carthage",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "caspian-peoples",
+      "settlementId": "settlement-cadusian-rasht",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "caucasian-albania",
+      "settlementId": "settlement-kabalaka",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "caucasian-iberia",
+      "settlementId": "settlement-mtskheta-armaztsikhe",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "cenomani",
+      "settlementId": "settlement-brixia",
+      "basis": "historical-capital"
+    },
+    {
+      "polityId": "colchis",
+      "settlementId": "settlement-phasis",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "cretan-cities-east",
+      "settlementId": "settlement-knossos",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "cretan-cities-west",
+      "settlementId": "settlement-kydonia",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "cycladic-islanders",
+      "settlementId": "settlement-delos",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "cyrene",
+      "settlementId": "settlement-cyrene",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "czechoslovakia-cotini",
+      "settlementId": "settlement-czechoslovakia-cotini-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "elis",
+      "settlementId": "settlement-elis-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "epirus",
+      "settlementId": "settlement-ambracia",
+      "basis": "historical-capital"
+    },
+    {
+      "polityId": "etruscan-cities",
+      "settlementId": "settlement-volsinii",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "euxine-greek-cities",
+      "settlementId": "settlement-sinope",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "gaetuli",
+      "settlementId": "settlement-gaetuli-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "galatians-tectosages",
+      "settlementId": "settlement-ancyra",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "galatians-tolistobogii",
+      "settlementId": "settlement-pessinus",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "galatians-trocmi",
+      "settlementId": "settlement-tavium",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "garamantes",
+      "settlementId": "settlement-garama",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "gaul-aedui",
+      "settlementId": "settlement-gaul-aedui-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "gaul-allobroges",
+      "settlementId": "settlement-gaul-allobroges-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "gaul-aquitani",
+      "settlementId": "settlement-gaul-aquitani-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "gaul-armorican-confederacy",
+      "settlementId": "settlement-gaul-armorican-confederacy-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "gaul-arverni",
+      "settlementId": "settlement-gaul-arverni-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "gaul-belgae",
+      "settlementId": "settlement-gaul-belgae-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "gaul-bituriges",
+      "settlementId": "settlement-gaul-bituriges-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "gaul-cadurci",
+      "settlementId": "settlement-gaul-cadurci-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "gaul-lemovices",
+      "settlementId": "settlement-gaul-lemovices-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "gaul-petrocorii",
+      "settlementId": "settlement-gaul-petrocorii-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "gaul-pictones",
+      "settlementId": "settlement-gaul-pictones-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "gaul-salyens",
+      "settlementId": "settlement-gaul-salyens-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "gaul-santones",
+      "settlementId": "settlement-gaul-santones-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "gaul-sequana-peoples",
+      "settlementId": "settlement-gaul-sequana-peoples-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "gaul-sequani",
+      "settlementId": "settlement-gaul-sequani-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "gaul-treveri",
+      "settlementId": "settlement-gaul-treveri-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "gaul-volcae",
+      "settlementId": "settlement-enserune",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "germania-bructeri",
+      "settlementId": "settlement-germania-bructeri-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "germania-chatti",
+      "settlementId": "settlement-germania-chatti-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "germania-chauci",
+      "settlementId": "settlement-germania-chauci-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "germania-cherusci",
+      "settlementId": "settlement-germania-cherusci-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "germania-cimbri",
+      "settlementId": "settlement-germania-cimbri-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "germania-hermunduri",
+      "settlementId": "settlement-germania-hermunduri-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "germania-semnones",
+      "settlementId": "settlement-germania-semnones-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "germania-ubii",
+      "settlementId": "settlement-germania-ubii-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "germania-vindelici",
+      "settlementId": "settlement-manching",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "gerrha",
+      "settlementId": "settlement-gerrha",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "hejaz-tribes",
+      "settlementId": "settlement-macoraba",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "hellespont-propontic-cities",
+      "settlementId": "settlement-cyzicus",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "helvetian-peoples",
+      "settlementId": "settlement-helvetian-peoples-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "heraclea-pontica",
+      "settlementId": "settlement-heraclea-pontica",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "iberia-astures",
+      "settlementId": "settlement-iberia-astures-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "iberia-cantabri",
+      "settlementId": "settlement-iberia-cantabri-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "iberia-carpetani",
+      "settlementId": "settlement-iberia-carpetani-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "iberia-celtiberi",
+      "settlementId": "settlement-numantia",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "iberia-contestani",
+      "settlementId": "settlement-mastia",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "iberia-edetani",
+      "settlementId": "settlement-iberia-edetani-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "iberia-gallaeci",
+      "settlementId": "settlement-iberia-gallaeci-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "iberia-ilergetes",
+      "settlementId": "settlement-iberia-ilergetes-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "iberia-lusitani",
+      "settlementId": "settlement-iberia-lusitani-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "iberia-turdetani",
+      "settlementId": "settlement-iberia-turdetani-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "iberia-vaccei",
+      "settlementId": "settlement-iberia-vaccei-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "iberia-vascones",
+      "settlementId": "settlement-iberia-vascones-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "illyria-ardiaei",
+      "settlementId": "settlement-illyria-ardiaei-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "illyria-autariatae",
+      "settlementId": "settlement-illyria-autariatae-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "illyria-dalmatae",
+      "settlementId": "settlement-illyria-dalmatae-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "illyria-dardani",
+      "settlementId": "settlement-illyria-dardani-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "illyria-histri-liburni",
+      "settlementId": "settlement-illyria-histri-liburni-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "illyria-paeonian-communities",
+      "settlementId": "settlement-illyria-paeonian-communities-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "illyria-taulantii",
+      "settlementId": "settlement-illyria-taulantii-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "insubres",
+      "settlementId": "settlement-mediolanum",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "ionia-communities",
+      "settlementId": "settlement-miletus",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "ionian-islands",
+      "settlementId": "settlement-ionian-islands-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "ireland-ulster-communities",
+      "settlementId": "settlement-ireland-ulster-communities-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "ituraeans",
+      "settlementId": "settlement-chalcis-libanum",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "judea",
+      "settlementId": "settlement-jerusalem",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "kush",
+      "settlementId": "settlement-meroe",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "ligurians",
+      "settlementId": "settlement-genua",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "lihyan",
+      "settlementId": "settlement-dedan",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "low-countries-chamavi",
+      "settlementId": "settlement-low-countries-chamavi-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "low-countries-frisiavones",
+      "settlementId": "settlement-low-countries-frisiavones-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "low-countries-frisii",
+      "settlementId": "settlement-low-countries-frisii-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "low-countries-rhine-delta",
+      "settlementId": "settlement-low-countries-rhine-delta-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "low-countries-tubantes",
+      "settlementId": "settlement-low-countries-tubantes-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "lucanians",
+      "settlementId": "settlement-grumentum",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "lusitanians",
+      "settlementId": "settlement-lusitanians-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "macedon",
+      "settlementId": "settlement-pella",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "makran-tribes",
+      "settlementId": "settlement-pura",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "mamertines",
+      "settlementId": "settlement-messana",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "marsh-peoples",
+      "settlementId": "settlement-bit-yakin",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "marsi-paeligni",
+      "settlementId": "settlement-corfinium",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "massalia",
+      "settlementId": "settlement-massalia",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "mauretanian-peoples",
+      "settlementId": "settlement-volubilis",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "megalopolis",
+      "settlementId": "settlement-megalopolis",
+      "basis": "city-state-seat"
+    },
+    {
+      "polityId": "messapians",
+      "settlementId": "settlement-brundisium",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "messenia",
+      "settlementId": "settlement-messene",
+      "basis": "city-state-seat"
+    },
+    {
+      "polityId": "minaeans",
+      "settlementId": "settlement-najran",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "nabataeans",
+      "settlementId": "settlement-petra",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "najd-tribes",
+      "settlementId": "settlement-faw",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "noric-communities",
+      "settlementId": "settlement-noric-communities-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "numidian-kingdoms",
+      "settlementId": "settlement-cirta",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "pannonii",
+      "settlementId": "settlement-pannonii-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "paphlagonia",
+      "settlementId": "settlement-gangra",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "pergamon",
+      "settlementId": "settlement-pergamon",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "phocian-league",
+      "settlementId": "settlement-phocian-league-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "picentes",
+      "settlementId": "settlement-asculum",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "pisidia-isauria",
+      "settlementId": "settlement-selge",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "pontus",
+      "settlementId": "settlement-amaseia",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "ptolemaic-egypt",
+      "settlementId": "settlement-alexandria",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "qedar",
+      "settlementId": "settlement-dumat",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "raeti",
+      "settlementId": "settlement-raeti-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "rhegium-campanians",
+      "settlementId": "settlement-rhegium",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "rhodes",
+      "settlementId": "settlement-rhodes",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "rome",
+      "settlementId": "settlement-rome",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "saba",
+      "settlementId": "settlement-saada",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "salassi",
+      "settlementId": "settlement-salassi-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "samnites",
+      "settlementId": "settlement-bovianum",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "scenitae-arabs",
+      "settlementId": "settlement-ain-al-tamr",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "seleucid-empire",
+      "settlementId": "settlement-antioch-orontes",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "sparta",
+      "settlementId": "settlement-sparta",
+      "basis": "city-state-seat"
+    },
+    {
+      "polityId": "syracuse",
+      "settlementId": "settlement-syracuse",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "taurini",
+      "settlementId": "settlement-taurini-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "thrace-bessi",
+      "settlementId": "settlement-thrace-bessi-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "thrace-crobyzi",
+      "settlementId": "settlement-thrace-crobyzi-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "thrace-dacian-highland-communities",
+      "settlementId": "settlement-thrace-dacian-highland-communities-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "thrace-dentheletae",
+      "settlementId": "settlement-thrace-dentheletae-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "thrace-eastern-carpathian-communities",
+      "settlementId": "settlement-thrace-eastern-carpathian-communities-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "thrace-getae",
+      "settlementId": "settlement-thrace-getae-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "thrace-maedi",
+      "settlementId": "settlement-thrace-maedi-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "thrace-moesi",
+      "settlementId": "settlement-thrace-moesi-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "thrace-odrysians",
+      "settlementId": "settlement-thrace-odrysians-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "thrace-scordisci",
+      "settlementId": "settlement-thrace-scordisci-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "thrace-serdi",
+      "settlementId": "settlement-thrace-serdi-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "thracian-communities",
+      "settlementId": "settlement-thracian-communities-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "umbrians",
+      "settlementId": "settlement-iguvium",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "veneti",
+      "settlementId": "settlement-patavium",
+      "basis": "existing-scenario-site"
+    },
+    {
+      "polityId": "zagros-tribes",
+      "settlementId": "settlement-zagros-tribes-assembly",
+      "basis": "modeled-seat"
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 import { groundToRetake, readDepartments, warsOf, type PolityOutlook, type WorldState } from "@chronica/shared";
+import { readBoard, type NeighbourReading } from "./board";
 
 /**
  * A government's aims, kept true to its own condition (VISION §11).
@@ -13,8 +14,8 @@ import { groundToRetake, readDepartments, warsOf, type PolityOutlook, type World
  * wrote besides is left as it was; only the engine's own lines come and go.
  */
 
-const MARK = /^(the empty treasury|the loss of |enemy armies on its soil|a long peace|put its finances in order|take back |drive the enemy from |enlarge its dominion)/i;
-const AT_WAR = /^(the war with |press the war with )/;
+const MARK = /^(the empty treasury|the loss of |enemy armies on its soil|a long peace|put its finances in order|take back |drive the enemy from |enlarge its dominion|a stronger neighbour, |ground we claim, held by |press our claim on |find friends against )/i;
+const AT_WAR = /^(the war with |press the war with |send its men to )/;
 const ENGINE_OBJECTIVE = /^(Put its finances in order|Take back what was lost to |Hold what it has, and grow where it can|Keep what it has)/;
 
 /** A peace this long, under a ruler this bold, starts to look like a chance being wasted. */
@@ -42,18 +43,35 @@ export function aimsFromState(world: WorldState, atStep: number): PolityOutlook[
       .map((agreement) => agreement.endedAtStep ?? (agreement.status === "active" ? atStep : agreement.sinceStep)));
     const longPeace = enemies.length === 0 && atStep - (Number.isFinite(lastWarEnded) ? lastWarEnded : 0) >= LONG_PEACE_DAYS;
 
-    const concerns: PolityOutlook["concerns"] = [
+    const concerns: PolityOutlook["concerns"][number][] = [
       ...(broke ? [{ label: "the empty treasury", level: "high" as const }] : []),
       ...lost.slice(0, 2).map((entry) => ({ label: `the loss of ${entry.name} to ${name(entry.holderId)}`.slice(0, 160), level: "high" as const })),
       ...(onOurSoil ? [{ label: "enemy armies on its soil", level: "high" as const }] : []),
       ...(longPeace && bold ? [{ label: "a long peace, and nothing won by it", level: "low" as const }] : []),
     ];
-    const intentions = [
+    const intentions: string[] = [
       ...(broke ? ["put its finances in order: taxes, loans, or an end to spending"] : []),
       ...lost.slice(0, 2).map((entry) => `take back ${entry.name} from ${name(entry.holderId)}`.slice(0, 200)),
       ...(onOurSoil ? ["drive the enemy from its own ground"] : []),
       ...(longPeace && bold ? ["enlarge its dominion where a neighbour is weak"] : []),
     ];
+    // What its board says (`board.ts`): the neighbour it has most to fear,
+    // the ground it claims in another's hands, and the chance to press that
+    // claim while the holder looks the other way. Without these, 162 of 168
+    // powers wanted nothing, and nobody asked from one of them had a reason
+    // to do anything at all.
+    const reading = readBoard(world).get(polity.id);
+    const hostile = (neighbour: NeighbourReading): boolean => neighbour.relation === "war" || neighbour.trust <= -30;
+    const free = (neighbour: NeighbourReading): boolean => neighbour.relation !== "leads_us" && neighbour.relation !== "follows_us" && neighbour.relation !== "ally" && neighbour.relation !== "protects_us" && neighbour.relation !== "we_protect";
+    const threat = reading?.neighbours.find((neighbour) => hostile(neighbour) && free(neighbour) && neighbour.ratio < 0.67);
+    const claimed = reading?.neighbours.find((neighbour) => neighbour.claimed.length > 0 && free(neighbour));
+    const opening = reading === undefined || reading.leaderId !== null ? undefined : reading.neighbours.find((neighbour) =>
+      free(neighbour) && neighbour.relation !== "war" && (neighbour.claimed.length > 0 || neighbour.trust <= -30) && neighbour.ratio >= 1.2 && neighbour.distractions.length > 0);
+    if (threat !== undefined) concerns.push({ label: `a stronger neighbour, ${threat.name}, that wishes it no good`.slice(0, 160), level: threat.theirMenNear > 0 ? "high" : "medium" });
+    if (claimed !== undefined) concerns.push({ label: `ground we claim, held by ${claimed.name}`.slice(0, 160), level: "medium" });
+    if (opening !== undefined && (bold || (ruler?.mind.riskTolerance ?? 50) >= 50)) intentions.push(`press our claim on ${opening.name} while ${opening.distractions[0]}`.slice(0, 200));
+    else if (threat !== undefined) intentions.push(`find friends against ${threat.name}`.slice(0, 200));
+
     const objective = lost[0] !== undefined ? `Take back what was lost to ${name(lost[0].holderId)}` : broke ? "Put its finances in order" : null;
     const target = Math.max(0, Math.min(100, (ruler?.mind.riskTolerance ?? 50) - (broke ? 15 : 0) + (lost.length > 0 ? 10 : 0) - (onOurSoil ? 5 : 0)));
 
@@ -64,7 +82,7 @@ export function aimsFromState(world: WorldState, atStep: number): PolityOutlook[
       // one nobody had written any for -- is given its own once it has
       // something to want: a war, an empty chest, lost ground. Not before: a
       // power with aims is a power whose people are asked more often.
-      if (!concerns.some((concern) => concern.level === "high") && enemies.length === 0) continue;
+      if (concerns.length === 0 && intentions.length === 0 && enemies.length === 0) continue;
       outlooks.push({
         polityId: polity.id,
         primaryObjective: objective ?? (bold ? "Hold what it has, and grow where it can" : "Keep what it has"),

@@ -7,3 +7,6 @@ export * from "./troop-categories";
 export * from "./passage";
 export * from "./seasons";
 export * from "./retreat";
+export * from "./establishment";
+export * from "./formation";
+export * from "./service";

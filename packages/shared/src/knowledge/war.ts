@@ -42,7 +42,7 @@ export function warInWords(world: WorldState, ownPolityId: string, enemyPolityId
   if (standing.parts.length === 1 && standing.parts[0] === "not at war") return null;
   const ours = world.material.forces.filter((force) => force.polityId === ownPolityId).reduce((sum, force) => sum + fitOf(force), 0);
   const theirs = world.material.forces.filter((force) => force.polityId === enemyPolityId).reduce((sum, force) => sum + fitOf(force), 0);
-  const landOf = (polityId: string): number => world.map.provinces.filter((province) => province.controllerPolityId === polityId).length;
+  const landOf = (polityId: string): number => world.map.provinces.filter((province) => (province.controllerPolityId === polityId || province.settlements.some((city) => city.controllerPolityId === polityId))).length;
 
   // The score, with the enemy's men as the viewer counts them. A total defeat
   // for want of an army is not something the viewer can know from here.

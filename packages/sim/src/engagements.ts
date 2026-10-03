@@ -48,6 +48,8 @@ import type { IdFactory } from "./ports";
  * takes it.
  */
 
+/** Days of skirmishing between one line in the record and the next. */
+const SKIRMISH_TOLD_EVERY = 7;
 /** A side weaker than this share of the other falls back rather than stand, with no order needed. */
 const WITHDRAWS_BELOW = 1 / 3;
 /** At most this many rounds are walked in one tick; a long jump is rare, and an engagement that long is a siege. */
@@ -504,10 +506,15 @@ export function fightRound(input: FightInput, engagementId: string, day: number,
     if (wouldRefuse) world = refusalCosts(world, defenders);
     const first = engagement.rounds === 0;
     const refused = engagement.seeking === "battle";
-    facts.push(fact("skirmish", "skirmish", refused
-      ? `${names(attacking)} offered battle at ${where}; ${names(defenders)} kept to ${defenders.length === 1 ? "its" : "their"} camp, and the day went in skirmishing over water and forage.`
-      : `${names(attacking)} harried ${names(defenders)} at ${where}, cutting up foragers and outposts without bringing on a battle.`,
-    [...attacking, ...defenders], first ? 55 : 25));
+    // Told the first day and then once a week: a day like the last is not news,
+    // and twenty-one of them in a turn buried everything else in it.
+    if (first || engagement.rounds % SKIRMISH_TOLD_EVERY === 0) {
+      const lasting = first ? "" : ` So it has gone for ${engagement.rounds + 1} days.`;
+      facts.push(fact("skirmish", "skirmish", refused
+        ? `${names(attacking)} offered battle at ${where}; ${names(defenders)} kept to ${defenders.length === 1 ? "its" : "their"} camp, and the day went in skirmishing over water and forage.${lasting}`
+        : `${names(attacking)} harried ${names(defenders)} at ${where}, cutting up foragers and outposts without bringing on a battle.${lasting}`,
+      [...attacking, ...defenders], first ? 55 : 25));
+    }
   }
 
   // Decided, if either side has been driven from the field.

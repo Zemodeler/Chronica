@@ -1,3 +1,4 @@
+import { serveInArmy } from "../warfare/service";
 import { boundedId } from "../determinism";
 import type { WorldState } from "../world/world-state";
 import type { CharacterKnowledgebase } from "./knowledgebase";
@@ -7,6 +8,8 @@ import { mindShapedBy } from "./mind-drift";
 import { canonicalTraitIds } from "./traits";
 import { spreadSubSkills } from "./aptitude";
 import { faithNamed } from "../world/faith";
+import { declaredOrdo } from "./ordo";
+import { difficultyRules } from "../world/pushback";
 
 // Placing a declared player character into the world.
 //
@@ -77,7 +80,84 @@ export function findOfficeForRole(
 ): Office | undefined {
   if (polityId === null) return undefined;
   if (labelTokens(role).size === 0) return undefined;
-  return offices.find((office) => office.polityId === polityId && labelNamesOffice(role, office.label));
+  return officesTheRoleHolds(offices.filter((office) => office.polityId === polityId), role)[0];
+}
+
+/**
+ * The words of a role in the order they were said, possessives marked so they
+ * name nobody's office: "the consul's staff" is the consul's, not his.
+ */
+function orderedWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/(\w+)['’]s\b/g, "$1_of")
+    .replace(/\bex-/g, "former ")
+    .replace(/[^a-z0-9_\s]/g, " ")
+    .split(/\s+/)
+    .filter((word) => word.length > 0);
+}
+
+/** Words that, said before an office, mean he is not it: he was it once, or he serves the man who is. */
+const PAST_WORDS = new Set(["former", "formerly", "once", "onetime", "retired", "late", "sometime", "erstwhile"]);
+const SERVING_WORDS = new Set([
+  "under", "serving", "beneath", "aide", "staff", "scribe", "lictor", "clerk", "servant", "slave", "freedman", "client",
+  "agent", "secretary", "assistant", "messenger", "guard", "bodyguard", "son", "daughter", "wife", "brother", "nephew",
+  "cousin", "father", "kinsman", "friend", "attached",
+]);
+
+/**
+ * Where in the role an office is named as what he *is*, or undefined.
+ *
+ * "Legate on the consul's staff" and "legionary in the consul's army" made the
+ * player consul -- and put Blasio out of his chair -- because every word of
+ * "Roman consul" appears in them. An office counts only when its words are
+ * said plainly: not as somebody's ("the consul's"), not as a past ("former
+ * consul"), and not after a word saying he serves another or holds a lower
+ * rank ("a centurion under the consul").
+ */
+function officeNamedAt(role: string, officeLabel: string): number | undefined {
+  const officeTokens = [...labelTokens(officeLabel)];
+  if (officeTokens.length === 0) return undefined;
+  const words = orderedWords(role);
+  const positions = officeTokens.map((token) => words.indexOf(token));
+  if (positions.some((position) => position < 0)) return undefined;
+  const at = Math.min(...positions);
+  const own = new Set(officeTokens);
+  const before = words.slice(0, at).filter((word) => !own.has(word));
+  if (before.slice(-2).some((word) => PAST_WORDS.has(word))) return undefined;
+  if (before.some((word) => SERVING_WORDS.has(word) || ((COMMAND_ROLE_WORDS.includes(word) || RANKS_ROLE_WORDS.includes(word))))) return undefined;
+  return at;
+}
+
+/** The offices a role says he holds, the one named first leading. */
+function officesTheRoleHolds(offices: readonly Office[], role: string): Office[] {
+  return offices
+    .flatMap((office) => {
+      const at = officeNamedAt(role, office.label);
+      return at === undefined ? [] : [{ office, at }];
+    })
+    .sort((a, b) => a.at - b.at)
+    .map(({ office }) => office);
+}
+
+/**
+ * The offices a role says he held once: "former consul", "a senator of
+ * consular rank". Read so a declared career has a past, and the ladder does
+ * not take a consular for a beginner.
+ */
+const RANK_ADJECTIVES: Readonly<Record<string, string>> = {
+  consular: "consul", praetorian: "praetor", quaestorian: "quaestor", aedilician: "aedile", censorian: "censor", tribunician: "tribune",
+};
+export function officesTheRoleOnceHeld(offices: readonly Office[], text: string): Office[] {
+  const words = orderedWords(text);
+  return offices.filter((office) => {
+    const tokens = [...labelTokens(office.label)];
+    if (tokens.length === 0) return false;
+    const head = words.findIndex((word, index) => tokens.includes(word) && words.slice(Math.max(0, index - 2), index).some((before) => PAST_WORDS.has(before)));
+    if (head >= 0 && tokens.every((token) => words.includes(token))) return true;
+    // "Of consular rank": the adjective names the office alone, and only a single-word office.
+    return tokens.length === 1 && words.some((word) => RANK_ADJECTIVES[word] === tokens[0]);
+  });
 }
 
 /**
@@ -103,10 +183,7 @@ export function findOfficeSeatForRole(
   const roleTokens = labelTokens(role);
   if (roleTokens.size === 0) return undefined;
 
-  for (const office of scenarioGovernment.offices) {
-    if (office.polityId !== polityId) continue;
-    if (!labelNamesOffice(role, office.label)) continue;
-
+  for (const office of officesTheRoleHolds(scenarioGovernment.offices.filter((candidate) => candidate.polityId === polityId), role)) {
     const seats = world.material.officeSeats.filter((seat) => seat.officeId === office.id);
     const vacant = seats.find((seat) => seat.status !== "held" && seat.holderCharacterId === null);
     if (vacant !== undefined) return { office, vacantSeatId: vacant.id };
@@ -145,8 +222,29 @@ const COMMAND_ROLE_WORDS = [
 const RANKS_ROLE_WORDS = [
   "soldier", "legionary", "legionnaire", "ranker", "hoplite", "spearman", "infantryman",
   "archer", "slinger", "horseman", "cavalryman", "trooper", "rower", "oarsman", "sailor",
-  "marine", "mercenary", "veteran", "recruit", "conscript", "warrior", "levy",
+  "marine", "mercenary", "veteran", "recruit", "conscript", "warrior", "levy", "cavalry",
 ];
+
+/**
+ * Ranks that are posts in an army somebody else commands.
+ *
+ * A military tribune, a centurion, a prefect of the allies, a legate on a
+ * consul's staff: each was an officer of a legion led by a magistrate, and
+ * commanded what that magistrate gave him. They used to be handed a private
+ * retinue of four hundred men at their own charge -- enough, standing in
+ * Rome, to seat a consul by force. Now they serve in an army of their power,
+ * and take command of one only where it has lost its general.
+ */
+const OFFICER_ROLE_WORDS = ["legate", "prefect", "tribune", "centurion", "optio", "decurion", "signifer", "lochagos", "taxiarch", "chiliarch"];
+
+/** A tribune of the plebs is a magistrate of the people, not an officer: he commands no men and serves in no legion. */
+const isPeoplesTribune = (tokens: ReadonlySet<string>): boolean =>
+  tokens.has("tribune") && (tokens.has("plebs") || tokens.has("plebeian") || tokens.has("people"));
+
+/** Whether the role's soldiering is an officer's post and nothing grander: no general, captain or chief. */
+const onlyAnOfficer = (tokens: ReadonlySet<string>): boolean =>
+  [...tokens].some((token) => OFFICER_ROLE_WORDS.includes(token))
+  && ![...tokens].some((token) => COMMAND_ROLE_WORDS.includes(token) && !OFFICER_ROLE_WORDS.includes(token));
 
 /**
  * The army a man in the ranks serves in: one of his own power's, the one where
@@ -161,9 +259,12 @@ export function findEnlistmentForRole(
   provinceId: string | null,
 ): string | undefined {
   if (polityId === null) return undefined;
-  const tokens = [...labelTokens(role)];
-  if (tokens.some((token) => COMMAND_ROLE_WORDS.includes(token))) return undefined;
-  if (!tokens.some((token) => RANKS_ROLE_WORDS.includes(token))) return undefined;
+  const said = labelTokens(role);
+  const tokens = [...said];
+  if (isPeoplesTribune(said)) return undefined;
+  const officer = onlyAnOfficer(said);
+  if (!officer && tokens.some((token) => COMMAND_ROLE_WORDS.includes(token))) return undefined;
+  if (!officer && !tokens.some((token) => RANKS_ROLE_WORDS.includes(token))) return undefined;
   const strength = (force: WorldState["material"]["forces"][number]) => force.personnel.reduce((sum, category) => sum + category.fit, 0);
   return world.material.forces
     .filter((force) => force.polityId === polityId && strength(force) > 0)
@@ -199,12 +300,16 @@ export function findPolityForRole(
       // trader" is a man of Carthage, and nothing that compares whole words
       // will ever say so.
       const hits = nameWords.filter((word) => [...words].some((said) => said.startsWith(word.slice(0, 5)) || word.startsWith(said.slice(0, 5)))).length;
-      return { id: polity.id, hits, length: nameWords.length };
+      // A word said whole outweighs a shared stem: a Roman "Pontifex maximus"
+      // shares "ponti" with Heraclea Pontica, and on a tie of one hit apiece
+      // the alphabet made him a Greek of the Black Sea.
+      const exact = nameWords.filter((word) => words.has(word)).length;
+      return { id: polity.id, hits, exact, length: nameWords.length };
     })
     .filter((entry) => entry.hits > 0)
     // The fullest match wins, then the most specific name: "Roman Republic"
     // beats a power merely called "Rome" on a description that says both.
-    .sort((a, b) => b.hits - a.hits || a.length - b.length || a.id.localeCompare(b.id));
+    .sort((a, b) => b.hits - a.hits || b.exact - a.exact || a.length - b.length || a.id.localeCompare(b.id));
   return scored[0]?.id;
 }
 
@@ -233,13 +338,17 @@ export function findCommandForRole(
   if (![...tokens].some((token) => commandWords.includes(token))) return undefined;
   // A tribune of the plebs is a magistrate of the people, not an officer: he
   // commands no men, and was handed four hundred of them.
-  if (tokens.has("tribune") && (tokens.has("plebs") || tokens.has("plebeian") || tokens.has("people")) && ![...tokens].some((token) => token !== "tribune" && commandWords.includes(token))) return undefined;
+  if (isPeoplesTribune(tokens) && ![...tokens].some((token) => token !== "tribune" && commandWords.includes(token))) return undefined;
 
   const living = new Set(world.characters.filter((character) => character.alive).map((character) => character.id));
   const orphaned = world.material.forces
     .filter((force) => force.polityId === polityId && !living.has(force.commanderCharacterId))
     .sort((a, b) => Number(b.locationId === provinceId) - Number(a.locationId === provinceId) || a.id.localeCompare(b.id))[0];
-  return orphaned === undefined ? { kind: "new" } : { kind: "existing", forceId: orphaned.id };
+  if (orphaned !== undefined) return { kind: "existing", forceId: orphaned.id };
+  // An officer serves in his power's army (`findEnlistmentForRole`); only a
+  // power with no army at all leaves him the men he brings himself.
+  const hasArmy = world.material.forces.some((force) => force.polityId === polityId && force.personnel.some((category) => category.fit > 0));
+  return onlyAnOfficer(tokens) && hasArmy ? undefined : { kind: "new" };
 }
 
 /**
@@ -257,6 +366,39 @@ export function materializePlayerCharacter(
   scenarioGovernment: ScenarioGovernmentRules | undefined,
 ): WorldState {
   if (world.characters.some((character) => character.id === actorCharacterId)) return world;
+  return withDifficultyAdvantages(materializeAsDeclared(world, actorCharacterId, knowledgebase, scenarioGovernment), actorCharacterId);
+}
+
+/**
+ * The player's own advantages, as the difficulty chosen at game creation
+ * gives them (`world/pushback.ts`): a fuller or leaner purse and a little
+ * standing either way. Applied once, on the day he enters the world.
+ */
+function withDifficultyAdvantages(world: WorldState, actorCharacterId: string): WorldState {
+  const rules = difficultyRules(world.difficulty);
+  if (rules.purseShare === 1 && rules.standingBps === 0) return world;
+  const player = world.characters.find((character) => character.id === actorCharacterId);
+  if (player === undefined) return world;
+  return {
+    ...world,
+    characters: world.characters.map((character) => (character.id === actorCharacterId
+      ? { ...character, prestigeBps: Math.max(0, Math.min(10_000, character.prestigeBps + rules.standingBps)) }
+      : character)),
+    material: {
+      ...world.material,
+      accounts: world.material.accounts.map((account) => (account.id === player.personalAccountId
+        ? { ...account, balance: Math.max(0, Math.round(account.balance * rules.purseShare)) }
+        : account)),
+    },
+  };
+}
+
+function materializeAsDeclared(
+  world: WorldState,
+  actorCharacterId: string,
+  knowledgebase: CharacterKnowledgebase | null,
+  scenarioGovernment: ScenarioGovernmentRules | undefined,
+): WorldState {
   if (!knowledgebase || knowledgebase.characterId !== actorCharacterId) {
     throw new Error("The submitted player's character is not present in world state and has no confirmed knowledgebase.");
   }
@@ -355,10 +497,11 @@ export function materializePlayerCharacter(
     alive: true,
     diedAtStep: null,
     disqualifyingStatuses: [],
-    officesHeld: [],
+    officesHeld: careerBehind(world, scenarioGovernment?.offices ?? [], declaredPolityId, officeId, knowledgebase),
     eligibilityWaivers: [],
     legalStatus,
     gender: knowledgebase.gender ?? "male",
+    ...ordoOf(world, scenarioGovernment?.offices ?? [], declaredPolityId, matched?.office, knowledgebase),
     ownerCharacterId: null,
     peculium: false,
     birthStep: null,
@@ -435,7 +578,7 @@ export function materializePlayerCharacter(
       ? { ...character, officeId: officeSeats.find((seat) => seat.holderCharacterId === character.id && seat.status === "held")?.officeId ?? null }
       : character));
 
-  return {
+  const made: WorldState = {
     ...world,
     ...(believes === null ? {} : { faiths: believes.world.faiths }),
     characters: [...characters, playerCharacter],
@@ -464,6 +607,80 @@ export function materializePlayerCharacter(
         }],
     },
   };
+  if (enlistedIn === undefined) return made;
+  // A man in the ranks stands somewhere in them (`warfare/service.ts`): a
+  // formation, a unit, a rank, a named officer over him and named men beside
+  // him -- where his power keeps an establishment to say what those are. A
+  // man of thirty at Rome had campaigns behind him before the world began.
+  return serveInArmy(made, {
+    characterId: actorCharacterId,
+    forceId: enlistedIn,
+    role: knowledgebase.role,
+    atStep: world.elapsedStep,
+    nameTheChain: true,
+    priorCampaigns: Math.max(0, Math.min(12, playerCharacter.ageYearsAtStart - 18)),
+  });
+}
+
+/**
+ * The offices a declared man has already held: what he says he once was, and
+ * the rungs beneath any office he holds or held, since he could not have
+ * reached it without them.
+ *
+ * Every declared man used to arrive with no past at all, so a declared aedile
+ * had never been quaestor and a "senator of consular rank" could never stand
+ * for the praetorship he had held: the ladder took him for a beginner forever.
+ */
+function careerBehind(
+  world: WorldState,
+  offices: readonly Office[],
+  polityId: string | null,
+  officeId: string | null,
+  knowledgebase: CharacterKnowledgebase,
+): { officeId: string; lastHeldAtStep: number }[] {
+  const own = offices.filter((office) => office.polityId === polityId);
+  const said = [knowledgebase.role, knowledgebase.biography, ...knowledgebase.notableEvents].join(". ");
+  const held = new Set(officesTheRoleOnceHeld(own, said).map((office) => office.id));
+  const rungsBelow = (id: string): string[] => {
+    const office = offices.find((candidate) => candidate.id === id);
+    return (office?.eligibilityRequirementIds ?? []).flatMap((requirementId) => {
+      const requirement = world.material.eligibilityRequirements.find((candidate) => candidate.id === requirementId);
+      const rung = requirement?.kind === "held_office" ? requirement.params.officeId : undefined;
+      return typeof rung === "string" ? [rung] : [];
+    });
+  };
+  const queue = [...(officeId === null ? [] : [officeId]), ...held];
+  while (queue.length > 0) {
+    for (const rung of rungsBelow(queue.shift()!)) {
+      if (held.has(rung)) continue;
+      held.add(rung);
+      queue.push(rung);
+    }
+  }
+  return [...held].sort().map((id) => ({ officeId: id, lastHeldAtStep: world.elapsedStep }));
+}
+
+/**
+ * His order, where his power has orders at all (Rome): what the office he
+ * holds requires -- a declared tribune of the plebs is a plebeian, as a
+ * patrician who wanted the office had first to pass to the plebs -- else what
+ * he says of himself, else what his name says.
+ */
+function ordoOf(
+  world: WorldState,
+  offices: readonly Office[],
+  polityId: string | null,
+  office: Office | undefined,
+  knowledgebase: CharacterKnowledgebase,
+): { ordo?: "patrician" | "plebeian" } {
+  const requirementOf = (candidate: Office) => candidate.eligibilityRequirementIds
+    .map((id) => world.material.eligibilityRequirements.find((requirement) => requirement.id === id))
+    .find((requirement) => requirement?.kind === "ordo");
+  const ordered = offices.some((candidate) => candidate.polityId === polityId && (candidate.ordoSeats !== undefined || requirementOf(candidate) !== undefined));
+  if (!ordered) return {};
+  const required = office === undefined ? undefined : requirementOf(office)?.params.ordo;
+  if (required === "patrician" || required === "plebeian") return { ordo: required };
+  return { ordo: declaredOrdo(`${knowledgebase.socioEconomicClass} ${knowledgebase.role}`, knowledgebase.canonicalName) };
 }
 
 /** The most traits a declaration gives him: what is said of a man before anybody has met him. */
@@ -479,7 +696,12 @@ export function declaredStanding(
   knowledgebase: Pick<CharacterKnowledgebase, "socioEconomicClass" | "role" | "legalStatus">,
   office: Pick<Office, "rank"> | undefined,
 ): number {
-  const said = `${knowledgebase.socioEconomicClass} ${knowledgebase.role}`.toLowerCase();
+  // What he is, not whom he serves: "a centurion under the consul" was given
+  // a consul's standing for the word.
+  const words = orderedWords(knowledgebase.role);
+  const serving = words.findIndex((word, index) => index > 0 && SERVING_WORDS.has(word));
+  const ownRole = (serving < 0 ? words : words.slice(0, serving)).filter((word) => !word.endsWith("_of")).join(" ");
+  const said = `${knowledgebase.socioEconomicClass} ${ownRole}`.toLowerCase();
   const byStation: readonly [RegExp, number][] = [
     [/\b(king|queen|tyrant|dictator|prince|suffete|consul|basileus|monarch|chief(tain)?)\b/, 7_000],
     [/\b(senator|senatorial|patrician|noble|aristocra\w*|magnate|elder|oligarch\w*|consular)\b/, 5_500],

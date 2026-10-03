@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo, useRef, type PointerEvent } from "react";
-import { applyMapOverlayDelta, DynamicMapOverlaySchema, isGeoJsonMapDocument, MapOverlayDeltaSchema, type GeoJsonMap, type DynamicMapOverlay, type MatterFocus, type RoomStates, MAP_CHANGE_KINDS } from "@chronica/shared";
+import { applyMapOverlayDelta, DynamicMapOverlaySchema, isGeoJsonMapDocument, MapOverlayDeltaSchema, type GeoJsonMap, type DynamicMapOverlay, type AgendaDestination, type MatterFocus, type RoomStates, MAP_CHANGE_KINDS } from "@chronica/shared";
 import type { RoomContents } from "../../../../lib/room-service";
 
 // A map document never changes at its version, so each version is downloaded
@@ -32,10 +32,14 @@ import { Era } from "../../../components/ui/era";
 import { ForcesPanel } from "./forces-panel";
 import { StandingPanel } from "./standing-panel";
 import { MapOrderBar } from "./map-order-bar";
-import { CalendarLine } from "./calendar-line";
+import { CalendarLine, AgendaPanel } from "./calendar-line";
 import { LookupBox } from "./lookup-box";
 import { GlossaryProvider, ThreadMarks, type ThreadsView } from "./notes";
-import { TipRoot } from "../../../components/ui/tip";
+import { OfficeInsightsProvider } from "./office-insights";
+import { Tip, TipCard, TipRoot } from "../../../components/ui/tip";
+import { WindowWorkspace } from "../../../components/ui/window-workspace";
+import { EntityReference } from "./entity-reference";
+import { OrdersPanel } from "./orders-panel";
 import { unreadCount, useGameView } from "./use-game-view";
 import { standardFor, standardsForPolity, type ArmyStandard } from "../../../../lib/army-standards";
 
@@ -173,7 +177,12 @@ export function GameShell({
    * record of what happened while you were away are both in there.
    */
   const [place, setPlace] = useState<"map" | "office">("office");
-  const [surface, setSurface] = useState<OfficeSurface | null>(null);
+  const [surface, setSurface] = useState<OfficeSurface | "orders" | "agenda" | null>(null);
+  const [mapRequested, setMapRequested] = useState(false);
+  useEffect(() => { if (place === "map") setMapRequested(true); }, [place]);
+  const [referenceKeys, setReferenceKeys] = useState<readonly string[]>([]);
+  const [roomError, setRoomError] = useState(false);
+  const [deskDraft, setDeskDraft] = useState<string | null>(null);
   /**
    * What is actually in this player's room.
    *
@@ -186,13 +195,16 @@ export function GameShell({
    * the strongbox or the arms rack is a render rather than a round trip.
    */
   const [room, setRoom] = useState<RoomContents | null>(null);
-  const controller = useGameView(gameId);
+  const controller = useGameView(gameId, initialOverlayStamp);
   const zoomBand = deriveZoomBand(viewport.scale);
 
   /** Set only when the mirror opens the record about the player; any other way in reads it whole. */
   const [chronicleFocus, setChronicleFocus] = useState<ChronicleFocus | null>(null);
+  /** Where a link from the agenda sent the player: a tab and a thing to open on it. Cleared by any ordinary opening. */
+  const [arrival, setArrival] = useState<{ readonly surface: OfficeSurface; readonly tab?: string | undefined; readonly key?: string | undefined; readonly nonce: number } | null>(null);
   const openSurface = useCallback((next: OfficeSurface) => {
     setChronicleFocus(null);
+    setArrival(null);
     lastPickedUp.current = next;
     // Opening the record no longer marks it read: the Chronicle marks each
     // entry as the player reads it, so what is new stays marked until then.
@@ -245,18 +257,31 @@ export function GameShell({
     setChronicleFocus({ filter: focus, entryId: null });
   }, [openSurface]);
 
+  // The agenda's way to the sheet an item belongs to, at the page and the row.
+  const goTo = useCallback((to: AgendaDestination) => {
+    setPlace("office");
+    if (to.surface === "chronicle") {
+      openSurface("chronicle");
+      setChronicleFocus({ filter: to.focus, entryId: null });
+      return;
+    }
+    openSurface(to.surface);
+    setArrival({ surface: to.surface, tab: "tab" in to ? to.tab : undefined, key: "key" in to ? to.key : undefined, nonce: Date.now() });
+  }, [openSurface]);
+
   /** Bumped to read the room again when the player changed something in it: a thread followed. */
   const [roomRevision, setRoomRevision] = useState(0);
+  const roomStamp = controller.view.worldRevision ?? controller.view.latestBurstId ?? controller.view.dateLabel;
   useEffect(() => {
     let live = true;
     void fetch(`/api/games/${encodeURIComponent(gameId)}/room`, { cache: "no-store" })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((contents: typeof room) => { if (live && contents !== null) setRoom(contents); })
-      .catch(() => undefined);
+      .then((response) => { if (!response.ok) throw new Error("Room unavailable"); return response.json(); })
+      .then((contents: typeof room) => { if (live && contents !== null) { setRoom(contents); setRoomError(false); } })
+      .catch(() => { if (live) setRoomError(true); });
     return () => { live = false; };
     // Re-read when simulated time has moved: a man given a legion should find
     // an arms rack in his room next time he walks in.
-  }, [gameId, controller.view.chronicle.length, roomRevision]);
+  }, [gameId, roomStamp, roomRevision]);
 
   // Somebody has come to find the player. The wiring for this has been
   // plumbed through the shell since the chat panel was written and nothing
@@ -319,7 +344,7 @@ export function GameShell({
   const politicsKey = useMemo(
     () => overlay === null
       ? ""
-      : `${overlay.polities.map((p) => `${p.polityId}:${p.name}`).sort().join("|")}#${overlay.provinces.map((p) => `${p.provinceId}:${p.controllerPolityId ?? ""}`).sort().join("|")}#${overlay.politicalRelations.map((r) => `${r.memberPolityId}>${r.leaderPolityId}`).sort().join("|")}`,
+      : `${overlay.polities.map((p) => `${p.polityId}:${p.name}`).sort().join("|")}#${overlay.provinces.map((p) => `${p.provinceId}:${p.controllerPolityId ?? ""}${p.ownerPolityId == null ? "" : `/${p.ownerPolityId}`}`).sort().join("|")}#${overlay.politicalRelations.map((r) => `${r.memberPolityId}>${r.leaderPolityId}`).sort().join("|")}`,
     [overlay],
   );
   const politicalInput = useMemo<PoliticalOverlayInput | null>(
@@ -362,8 +387,8 @@ export function GameShell({
   const detailImageRef = useRef<ImageBitmap | null>(null);
   const requestRedraw = useCallback(() => mapViewportRef.current?.requestRedraw(), []);
 
-  useEffect(() => loadMapBitmap(baseImageUrl, baseImageRef, requestRedraw), [baseImageUrl, requestRedraw]);
-  useEffect(() => loadMapBitmap(detailImageUrl, detailImageRef, requestRedraw), [detailImageUrl, requestRedraw]);
+  useEffect(() => loadMapBitmap(mapRequested ? baseImageUrl : undefined, baseImageRef, requestRedraw), [mapRequested, baseImageUrl, requestRedraw]);
+  useEffect(() => loadMapBitmap(mapRequested ? detailImageUrl : undefined, detailImageRef, requestRedraw), [mapRequested, detailImageUrl, requestRedraw]);
   const reliefRef = useRef<ReliefLayer | null>(null);
   useEffect(() => {
     if (!reliefUrl) return;
@@ -421,7 +446,7 @@ export function GameShell({
   // good. Refocusing the window asks again only if that fetch has not
   // succeeded yet; a loaded map is never replaced by an equal one.
   useEffect(() => {
-    if (mapVersion === undefined) return;
+    if (!mapRequested || mapVersion === undefined) return;
     const key = mapCacheKey(gameId, mapVersion);
     const kept = _geoJsonCache.get(key);
     if (kept !== undefined) { setGeoJson(kept); return; }
@@ -447,7 +472,7 @@ export function GameShell({
       cancelled = true;
       window.removeEventListener("focus", load);
     };
-  }, [gameId, mapVersion]);
+  }, [gameId, mapVersion, mapRequested]);
 
   // What each army carries, read from its record. A change the player makes is
   // saved to the world first and only then shown, so a reload shows the same.
@@ -628,14 +653,19 @@ export function GameShell({
   );
   const purse = controller.view.coins;
   const coinChip = (
-    <a
-      className="shell-coin-chip"
-      href="/account"
-      data-empty={purse?.available === "0" ? "true" : undefined}
-      title={purse?.spent != null && purse.cap != null ? `This save has spent ${purse.spent} of its ${purse.cap} coins.` : undefined}
-    >
-      {purse === undefined ? "—" : purse.available} coins<span className="visually-hidden">, open the wallet</span>
-    </a>
+    <span className="shell-coin">
+      <a className="shell-coin-chip" href="/account" data-empty={purse?.available === "0" ? "true" : undefined}>
+        {purse === undefined ? "—" : purse.available} coins<span className="visually-hidden">, open the wallet</span>
+      </a>
+      {/* A note cannot sit inside the link, so it is the link's neighbour. */}
+      {purse?.spent != null && purse.cap != null && (
+        <TipRoot>
+          <Tip label="The coins this save has spent" className="shell-coin__info" note={() => <TipCard title="Coins">This save has spent {purse.spent} of its {purse.cap} coins.</TipCard>}>
+            <span aria-hidden="true">i</span><span className="visually-hidden">What this save has spent</span>
+          </Tip>
+        </TipRoot>
+      )}
+    </span>
   );
   const leave = (
     <div className="shell-top-bar-left">
@@ -644,25 +674,25 @@ export function GameShell({
     </div>
   );
 
-  if (!geoJson) {
-    return (
-      <div className="game" data-culture={roomStyle}>
-        <header className="shell-top-bar">
-          {leave}
-          <span />
-          <div className="shell-top-bar-right">{dateChip}{coinChip}</div>
-        </header>
-        <div className="game-shell">
-          <div className="game-shell-map">
-            <p className="game-shell-empty quiet">No map data available for this scenario.</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
+    <OfficeInsightsProvider insights={room?.sheets?.insights}>
     <GlossaryProvider glossary={room?.sheets?.glossary ?? {}} threads={threadsView}>
+    <WindowWorkspace scope={gameId} reference={{
+      open: (key) => setReferenceKeys((keys) => keys.at(-1) === key ? keys : [...keys, key]),
+      content: referenceKeys.length === 0 ? null : <EntityReference onWrite={orderingCharacterId ? (name) => { setDeskDraft(`Regarding ${name}: `); openSurface("council"); } : undefined} entityKey={referenceKeys.at(-1)!} onClose={() => setReferenceKeys([])} onBack={referenceKeys.length > 1 ? () => setReferenceKeys((keys) => keys.slice(0, -1)) : undefined} />,
+      navigation: <>
+        {orderingCharacterId && <button type="button" className="word-button" onClick={() => openSurface("council")}>Writing desk</button>}
+        <button type="button" className="word-button" onClick={() => setSurface("orders")}>Orders under way</button>
+        {playerCharacterId && <button type="button" className="word-button" onClick={() => openSurface("people")}>Letters</button>}
+        <button type="button" className="word-button" onClick={() => openSurface("chronicle")}>Chronicle</button>
+        {room?.forces && <button type="button" className="word-button" onClick={() => openSurface("forces")}>Forces</button>}
+        {room?.standing && <button type="button" className="word-button" onClick={() => openSurface("standing")}>Your standing</button>}
+        {room?.books && <button type="button" className="word-button" onClick={() => openSurface("books")}>Public books</button>}
+        {room?.purse && <button type="button" className="word-button" onClick={() => openSurface("purse")}>Your purse</button>}
+        <button type="button" className="word-button" onClick={() => setSurface("agenda")}>Matters in hand</button>
+      </>,
+    }}>
     <div className="game" data-culture={roomStyle}>
       <header className="shell-top-bar">
         <div className="shell-top-bar-start">
@@ -694,7 +724,7 @@ export function GameShell({
           {dateChip}
           {/* The notes here live outside any sheet, so they get a root of their own. */}
           <TipRoot>
-            <CalendarLine items={room?.sheets?.calendar ?? []} matters={room?.sheets?.matters ?? null} onOpenChronicle={openChronicleAt} />
+            <CalendarLine items={room?.sheets?.calendar ?? []} matters={room?.sheets?.matters ?? null} agenda={room?.sheets?.agenda ?? null} onGo={goTo} onOpen={() => setSurface("agenda")} />
             <ThreadMarks />
           </TipRoot>
           {coinChip}
@@ -710,6 +740,7 @@ export function GameShell({
           data-selected-province={selectedProvinceId ?? undefined}
           inert={place !== "map"}
         >
+          {!geoJson && place === "map" && <p className="game-shell-empty quiet" role="status">{mapVersion === undefined ? "No map is recorded for this scenario." : "Unfolding the map…"}</p>}
           <MapViewport ref={mapViewportRef} transform={viewport} onTransformChange={setViewport} onDrawCanvas={onDrawCanvas} onPanStart={clearMapHover}>
             {world && political && (
               <GeoMap
@@ -786,11 +817,15 @@ export function GameShell({
               put it over the Office. */}
           {place === "map" && orderingCharacterId && <MapOrderBar controller={controller} onGoToDesk={goToDesk} />}
         </div>
+        {place === "office" && <div className="office-room-status">
+          {roomError ? <p role="alert">The room’s records could not be read. <button type="button" className="word-button" onClick={() => setRoomRevision((n) => n + 1)}>Try again</button></p> : room === null ? <p role="status">Sending for your records…</p> : null}
+          <button type="button" className="word-button" onClick={() => setSurface("orders")}>Orders under way{room?.sheets?.underWay.length ? ` (${room.sheets.underWay.length})` : ""}</button>
+        </div>}
         {place === "office" && <Office things={things} style={roomStyle} onOpen={openSurface} onLeave={() => setPlace("map")} />}
       </div>
 
       {characterPanel && (
-        <CharacterPanel {...characterPanel} mirror={room?.sheets?.self ?? null} story={room?.sheets?.story ?? null} promises={room?.sheets?.promises ?? []} peers={room?.sheets?.peers ?? null} onOpenChronicle={openChronicleAboutMe} gameId={gameId} open={surface === "self"} onClose={closeSurface} side={sheetSideFor(roomStyle, "self")} />
+        <CharacterPanel {...characterPanel} mirror={room?.sheets?.self ?? null} story={room?.sheets?.story ?? null} promises={room?.sheets?.promises ?? []} peers={room?.sheets?.peers ?? null} onOpenChronicle={openChronicleAboutMe} onOpenBooks={() => openSurface("purse")} gameId={gameId} open={surface === "self"} onClose={closeSurface} side={sheetSideFor(roomStyle, "self")} />
       )}
       {playerCharacterId && (
         <ChatPanel
@@ -801,36 +836,65 @@ export function GameShell({
           side={sheetSideFor(roomStyle, "people")}
           openSessionId={openChatSessionId}
           searchSeed={lettersSeed}
+          directory={room?.sheets?.directory}
+          initialContacts={room?.sheets?.contacts}
           onWorldChanged={controller.refresh}
           onOpenSessionConsumed={() => setOpenChatSessionId(null)}
         />
       )}
       {surface === "council" && orderingCharacterId && (
-        <CouncilPanel gameId={gameId} controller={controller} underWay={room?.sheets?.underWay ?? []} onClose={closeSurface} onOpenChronicle={() => openSurface("chronicle")} />
+        <CouncilPanel key={arrival?.surface === "council" ? arrival.nonce : "council"} gameId={gameId} controller={controller} draft={deskDraft} onDraftTaken={() => setDeskDraft(null)} underWay={room?.sheets?.underWay ?? []} standingOrders={room?.sheets?.standingOrders ?? null} focusKey={arrival?.surface === "council" ? arrival.key : undefined} onClose={closeSurface} onOpenChronicle={() => openSurface("chronicle")} />
       )}
+      {surface === "orders" && <OrdersPanel items={room?.sheets?.underWay ?? []} record={controller.view.chronicle} orderHistory={room?.sheets?.orderHistory ?? []} loading={room === null} onClose={closeSurface} onDraft={(text) => { setDeskDraft(text); openSurface("council"); }} onOpenEntry={openChronicleEntry} />}
+      {surface === "agenda" && <AgendaPanel agenda={room?.sheets?.agenda ?? null} onGo={(to) => {
+        if (to.surface === "council" && to.key !== undefined && !to.key.startsWith("contingency:") && !to.key.startsWith("stage:")) { setSurface("orders"); return; }
+        goTo(to);
+      }} onClose={closeSurface} />}
       {surface === "chronicle" && <ChroniclePanel controller={controller} onClose={closeSurface} side={sheetSideFor(roomStyle, "chronicle")} focus={chronicleFocus} />}
       {(surface === "books" || surface === "purse") && (
         <BooksPanel
+          key={arrival?.surface === surface ? arrival.nonce : surface}
           which={surface === "purse" ? "own" : "kept"}
           books={room?.sheets?.[surface === "purse" ? "own" : "kept"] ?? null}
+          administration={surface === "books" ? room?.sheets?.administration ?? null : null}
+          focus={arrival?.surface === "books" && arrival.tab !== undefined ? { tab: arrival.tab, key: arrival.key } : undefined}
           onClose={closeSurface}
           side={sheetSideFor(roomStyle, surface)}
         />
       )}
       {surface === "forces" && (
-        <ForcesPanel muster={room?.sheets?.forces ?? null} onClose={closeSurface} side={sheetSideFor(roomStyle, "forces")} />
+        <ForcesPanel
+          muster={room?.sheets?.forces ?? null}
+          service={room?.sheets?.service ?? null}
+          gameId={gameId}
+          onChanged={() => setRoomRevision((n) => n + 1)}
+          onClose={closeSurface}
+          side={sheetSideFor(roomStyle, "forces")}
+        />
       )}
       {surface === "standing" && (
         <StandingPanel
+          key={arrival?.surface === "standing" ? arrival.nonce : "standing"}
           standing={room?.sheets?.standing ?? null}
           state={room?.sheets?.state ?? null}
+          constitution={room?.sheets?.constitution ?? null}
+          laws={room?.sheets?.laws ?? null}
+          peace={room?.sheets?.peace ?? null}
+          gameId={gameId}
+          onChanged={() => setRoomRevision((n) => n + 1)}
+          focus={arrival?.surface === "standing" && arrival.tab !== undefined ? { tab: arrival.tab, key: arrival.key } : undefined}
           onClose={closeSurface}
           side={sheetSideFor(roomStyle, "standing")}
           onWriteTo={orderingCharacterId ? writeTo : undefined}
           onOpenLetters={playerCharacterId ? () => openSurface("people") : undefined}
         />
       )}
+      {surface === null && referenceKeys.length > 0 && <Sheet label="linked reference" title="Reference" width="narrow" side="right" reference={false} onClose={() => setReferenceKeys([])}>
+        <EntityReference onWrite={orderingCharacterId ? (name) => { setDeskDraft(`Regarding ${name}: `); openSurface("council"); } : undefined} entityKey={referenceKeys.at(-1)!} onClose={() => setReferenceKeys([])} onBack={referenceKeys.length > 1 ? () => setReferenceKeys((keys) => keys.slice(0, -1)) : undefined} />
+      </Sheet>}
     </div>
+    </WindowWorkspace>
     </GlossaryProvider>
+    </OfficeInsightsProvider>
   );
 }

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { GovernmentFormSchema } from "../political-parts";
+import { CommandTenureSchema, GovernmentFormSchema } from "../political-parts";
 import { BasisPointsSchema, ElapsedStepSchema, EntityIdSchema } from "../material-state";
 import { AdministrationRecordSchema, ClaimRecordSchema, ControlRecordSchema, OccupationRecordSchema } from "./authority-records";
 
@@ -95,6 +95,13 @@ export const ProvinceSchema = z
     settlements: z.array(SettlementSchema),
     /** Null where no polity holds it -- unclaimed ground is a real state. */
     controllerPolityId: EntityIdSchema.nullable(),
+    /**
+     * Whose it is, while somebody else holds it (`world/occupation.ts`).
+     * Absent or null, the holder owns it. Set when an army takes it in a war
+     * with its owner; cleared when the owner takes it back or a peace settles
+     * it. An occupied province pays its taxes and levies to nobody.
+     */
+    ownerPolityId: EntityIdSchema.nullable().optional(),
     /** How firmly it is held. Control is a degree, not a flag. */
     controlFirmnessBps: BasisPointsSchema,
     /**
@@ -158,6 +165,10 @@ export const PolitySchema = z
     id: EntityIdSchema,
     name: z.string().trim().min(1).max(120),
     capitalSettlementId: EntityIdSchema.nullable(),
+    /** The seat lost in a particular war; only that war permits automatic restoration. */
+    displacedCapital: z.object({ settlementId: EntityIdSchema, warIds: z.array(EntityIdSchema) }).strict().nullable().optional(),
+    /** Former seats require an order unless restored by their recorded wartime rule. */
+    formerCapitalSettlementIds: z.array(EntityIdSchema).optional(),
     /**
      * How far this power acts as one thing.
      *
@@ -191,6 +202,16 @@ export const PolitySchema = z
      * force (`sim/constitutions.ts`). Null is read from its cohesion.
      */
     governmentForm: GovernmentFormSchema.nullable().optional(),
+    /** How long its commanders hold their armies, where the scenario knows better than the form. */
+    commandTenure: CommandTenureSchema.nullable().optional(),
+    /**
+     * The office its constitution reads as the head of state, where the
+     * scenario says so. Without it the head is the highest-ranked office
+     * anybody holds as the world opens -- which, once the lesser magistracies
+     * had men in them, made Rome's censors (rank 5) its rulers over its
+     * consuls (rank 4).
+     */
+    headOfficeId: EntityIdSchema.nullable().optional(),
     /**
      * The day it ceased to be, and how: given up to a victor by surrender
      * ("absorbed", into `absorbedByPolityId`), or gone with nothing left to it
@@ -244,6 +265,8 @@ export type PolityRelation = z.infer<typeof PolityRelationSchema>;
 
 export const ProvinceGraphSchema = z
   .object({
+    /** One-time additive settlement catalogue migration; never reassign captured seats. */
+    settlementCatalogueVersion: z.number().int().nonnegative().optional(),
     provinces: z.array(ProvinceSchema),
     edges: z.array(ProvinceEdgeSchema),
     polities: z.array(PolitySchema),

@@ -13,7 +13,9 @@ export function lapseAilments(world: WorldState, toDay: number): { world: WorldS
   let changed = false;
   const characters = world.characters.map((character) => {
     if (!character.alive) return character;
-    const ailing = character.disqualifyingStatuses.filter(isAilment);
+    // Staffed characters made before the field was written carry none; a save holds them.
+    const statuses = character.disqualifyingStatuses ?? [];
+    const ailing = statuses.filter(isAilment);
     if (ailing.length === 0 && (character.ailmentsUntil ?? []).length === 0) return character;
     const until = new Map((character.ailmentsUntil ?? []).map((entry) => [entry.status, entry.untilStep]));
     const passed = ailing.filter((status) => (until.get(status) ?? toDay) <= toDay);
@@ -32,7 +34,7 @@ export function lapseAilments(world: WorldState, toDay: number): { world: WorldS
     const scarred = passed.reduce((marked, status) => scarredBy(marked, status, toDay), character);
     return {
       ...scarred,
-      disqualifyingStatuses: character.disqualifyingStatuses.filter((status) => !passed.includes(status)),
+      disqualifyingStatuses: statuses.filter((status) => !passed.includes(status)),
       ailmentsUntil: (character.ailmentsUntil ?? []).filter((entry) => !passed.includes(entry.status)),
     };
   });

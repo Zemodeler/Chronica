@@ -3,7 +3,7 @@ import { aConfirmedCharacter, enterTheWorld, placeTab, waitForTheOffice } from "
 import { seededWorlds } from "./paths";
 
 /**
- * Notes across the Office: Matters in hand behind the date, a note for every
+ * Notes across the Office: the agenda behind the date, a note for every
  * name, why notes behind judgement words, threads that can be followed, and
  * what the words mean, said in the note where each is met.
  *
@@ -18,34 +18,26 @@ async function inTheOffice(page: Page, who: "consul" | "citizen" = "consul") {
 }
 
 test.describe("notes in the Office", () => {
-  test("the date opens Matters in hand, which pins and has notes of its own", async ({ page }) => {
+  test("the date opens matters in hand as a document", async ({ page }) => {
     await inTheOffice(page);
-    await page.locator(".calendar-line__next").hover();
-    const notes = page.locator(".tip");
-    await expect(notes.first()).toContainText("Matters in hand");
-    await expect(notes.first()).toHaveClass(/is-locked/, { timeout: 3_000 });
-    await expect(notes.first().locator(".matters h3").first()).toBeVisible();
-
-    const inner = notes.first().locator(".matters .tip-term").first();
-    await inner.hover();
-    await expect(notes).toHaveCount(2);
-    await expect(notes.nth(1)).toHaveClass(/is-locked/, { timeout: 3_000 });
+    await page.locator(".calendar-line__next").click();
+    const agenda = page.getByRole("dialog", { name: "matters in hand", exact: true });
+    await expect(agenda).toBeVisible();
+    await agenda.getByRole("tab", { name: "Ongoing", exact: true }).click();
+    await expect(agenda.locator(".matters")).toBeVisible();
     await page.screenshot({ path: `${DIR}/1-matters-nested.png` });
-
     await page.keyboard.press("Escape");
-    await expect(notes).toHaveCount(1);
-    await page.mouse.move(5, 500);
-    await expect(notes).toHaveCount(0, { timeout: 3_000 });
+    await expect(agenda).toHaveCount(0);
   });
 
-  test("a thread can be followed from Matters in hand, and shows beside the date", async ({ page }) => {
+  test("a thread can be followed from the agenda, and shows beside the date", async ({ page }) => {
     await inTheOffice(page);
     // A click pins a note at once; holding still is the first test's business.
     await page.locator(".calendar-line__next").click();
-    const matters = page.locator(".tip").first();
-    await expect(matters).toHaveClass(/is-locked/);
+    const matters = page.getByRole("dialog", { name: "matters in hand", exact: true });
+    await matters.getByRole("tab", { name: "Ongoing", exact: true }).click();
     await matters.locator(".matters .tip-term", { hasText: "Rhegium and the Campanian Legion" }).click();
-    const note = page.locator(".tip").nth(1);
+    const note = page.locator(".tip").first();
     await expect(note).toHaveClass(/is-locked/);
     await expect(note).toContainText(/growing|brewing|at a crisis/i);
     // Its history is the Chronicle's; never the narrator's plan for it.
@@ -74,9 +66,11 @@ test.describe("notes in the Office", () => {
     await page.locator('[data-object="standing"]').click({ timeout: 60_000 });
     const sheet = page.getByRole("dialog", { name: /your standing/i });
     await sheet.getByRole("tab", { name: /the state/i }).click();
-    await sheet.locator(".standing__offices .tip-term", { hasText: "Manius Curius Dentatus" }).first().hover();
-    const note = page.locator(".tip").first();
-    await expect(note).toContainText("Compared with you");
+    await sheet.locator(".office-ledger__name .entity-link", { hasText: "Roman senator" }).click();
+    await sheet.locator(".entity-reference .entity-link", { hasText: "Manius Curius Dentatus" }).first().click();
+    const note = sheet.locator(".entity-reference");
+    await note.locator(".tip-term", { hasText: "More" }).click();
+    await expect(page.locator(".tip").first()).toContainText("Compared with you");
     await expect(note.locator(".tip__source")).toContainText(/rolls of office/);
     await page.screenshot({ path: `${DIR}/3-person.png` });
   });
@@ -84,6 +78,7 @@ test.describe("notes in the Office", () => {
   test("the men's mood says why, and what pay does to it", async ({ page }) => {
     await inTheOffice(page);
     await page.locator('[data-object="forces"]').click({ timeout: 60_000 });
+    await page.getByRole("dialog", { name: "your forces", exact: true }).getByRole("button", { name: /Roman field army/ }).click();
     await page.locator("dialog .muster__condition .tip-term").first().hover();
     const why = page.locator(".tip").first();
     await expect(why.locator(".why li").first()).toBeVisible();
@@ -95,12 +90,19 @@ test.describe("notes in the Office", () => {
     await inTheOffice(page);
     await page.locator('[data-object="standing"]').click({ timeout: 60_000 });
     const sheet = page.getByRole("dialog", { name: /your standing/i });
+    const constitution = sheet.getByRole("tab", { name: /constitution/i });
+    if (await constitution.count()) {
+      await constitution.click();
+      await expect(sheet.locator("h3", { hasText: /is governed/ })).toBeVisible();
+    } else {
+      await sheet.getByRole("tab", { name: /the state/i }).click();
+      await expect(sheet.getByRole("heading", { name: "Magistracies", exact: true })).toBeVisible();
+    }
     await sheet.getByRole("tab", { name: /the state/i }).click();
-    await expect(sheet.locator("h3", { hasText: /is governed/ })).toBeVisible();
-    await expect(sheet.locator(".standing__offices li.is-yours").first()).toContainText("(you)");
+    await expect(sheet.locator(".office-ledger__name", { hasText: "Roman consul" })).toContainText("you");
     await page.screenshot({ path: `${DIR}/5-governed.png` });
-    await sheet.locator(".standing__offices .tip-term", { hasText: "Roman consul" }).first().click();
-    await expect(page.locator(".tip").first().locator(".tip__explained")).toContainText("A magistracy");
+    await sheet.locator(".office-ledger__name .entity-link", { hasText: "Roman consul" }).click();
+    await expect(sheet.locator(".entity-reference")).toContainText("What it may do");
   });
 
   test("the lookup finds a name and a word, on the Map as in the Office", async ({ page }) => {
@@ -123,19 +125,18 @@ test.describe("notes in the Office", () => {
   test("a war says how it goes, and a nested note has a trail back", async ({ page }) => {
     await inTheOffice(page);
     await page.locator(".calendar-line__next").click();
-    const matters = page.locator(".tip").first();
-    await expect(matters).toHaveClass(/is-locked/);
-    await matters.locator(".matters li small", { hasText: "The war is" }).locator(".tip-term").first().click();
-    const war = page.locator(".tip").nth(1);
+    const matters = page.getByRole("dialog", { name: "matters in hand", exact: true });
+    await matters.getByRole("tab", { name: "Ongoing", exact: true }).click();
+    // A war row opens to say how the war goes.
+    await matters.locator(".agenda__item", { has: page.locator(".agenda__status", { hasText: "At war" }) }).first().locator(".agenda__head").click();
+    await matters.locator(".agenda__context", { hasText: "The war is" }).locator(".tip-term").first().click();
+    const war = page.locator(".tip").first();
     await expect(war).toContainText("How the war goes");
     await expect(war.locator(".why li").first()).toBeVisible();
-    await expect(war.locator(".tip__trail")).toContainText("Matters in hand");
     await page.screenshot({ path: `${DIR}/6-war.png` });
-    // Back along the trail: the note above goes, Matters in hand stays.
-    await war.locator(".tip__crumb", { hasText: "Matters in hand" }).click();
-    await expect(page.locator(".tip")).toHaveCount(1);
-    await page.mouse.move(1100, 150);
-    await expect(page.locator(".tip")).toHaveCount(1);
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".tip")).toHaveCount(0);
+    await expect(matters).toBeVisible();
   });
 
   test("an elected office says who could be next", async ({ page }) => {
@@ -143,10 +144,23 @@ test.describe("notes in the Office", () => {
     await page.locator('[data-object="standing"]').click({ timeout: 60_000 });
     const sheet = page.getByRole("dialog", { name: /your standing/i });
     await sheet.getByRole("tab", { name: /the state/i }).click();
-    await sheet.locator(".standing__offices .tip-term", { hasText: "Roman consul" }).first().click();
-    const note = page.locator(".tip").first();
+    await sheet.locator(".office-ledger__name .entity-link", { hasText: "Roman consul" }).first().click();
+    const note = sheet.locator(".entity-reference");
     await expect(note).toContainText("Who could be next");
     await page.screenshot({ path: `${DIR}/7-next.png` });
+  });
+
+  test("an office is one ledger line, and a chamber's note names the offices it fills and its voting blocs", async ({ page }) => {
+    await inTheOffice(page);
+    await page.locator('[data-object="standing"]').click();
+    const sheet = page.getByRole("dialog", { name: /your standing/i });
+    await sheet.getByRole("tab", { name: /the state/i }).click();
+    await expect(sheet.locator(".office-inspector")).toHaveCount(0);
+    await sheet.locator(".office-ledger__name .tip-term", { hasText: "Centuriate Assembly" }).click();
+    const note = page.locator(".tip.is-locked");
+    await expect(note).toContainText("Roman consul");
+    await expect(note).toContainText("98 voting weight");
+    await page.screenshot({ path: `${DIR}/10-chamber-note.png` });
   });
 
   test("the letter tray can ask after anyone the player could know of", async ({ page }) => {
@@ -157,10 +171,10 @@ test.describe("notes in the Office", () => {
     // The tray's people and the room's notes are both fetched; wait for them.
     await expect(tray.locator(".letters__person").first()).toBeVisible({ timeout: 60_000 });
     await tray.locator("#letters-search").fill("rheg");
-    const asked = tray.locator(".letters__ask .tip-term").first();
+    const asked = tray.locator(".letters__ask .entity-link").first();
     await expect(asked).toBeVisible({ timeout: 30_000 });
     await asked.click();
-    await expect(page.locator(".tip").first()).toContainText(/Rhegium/);
+    await expect(tray.locator(".entity-reference")).toContainText(/Rhegium/);
     await page.screenshot({ path: `${DIR}/8-ask-after.png` });
   });
 });

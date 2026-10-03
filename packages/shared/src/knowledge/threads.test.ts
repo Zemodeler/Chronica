@@ -31,6 +31,11 @@ const threads = (state: WorldState, characterId: string, entries: ThreadEntry[],
   threadsYouSee({ world: state, characterId, offices, entries, followedIds: new Set(followed) });
 
 describe("threads of history", () => {
+  it("includes published entries linked through the thread's causal facts when the Chronicle omitted its storyline tag", () => {
+    const state = withStoryline(world(), { id: "peace", title: "Peace", participantIds: [CONSUL], visibility: "public", causalFactIds: ["peace-refused"] });
+    const note = threads(state, CONSUL, [{ ...entry("e1", []), factIds: ["peace-refused"] }, { ...entry("e2", []), factIds: ["unrelated"] }])["peace"]!;
+    expect(note.history.map((line) => line.entryId)).toEqual(["e1"]);
+  });
   it("tells a public thread from the Chronicle, never from the narrator's own notes", () => {
     const state = withStoryline(world(), { id: "straits", title: "The straits", participantIds: [KING], visibility: "public" });
     const note = threads(state, CONSUL, [entry("e1", ["straits"]), entry("e2", ["straits"], false)])["straits"]!;

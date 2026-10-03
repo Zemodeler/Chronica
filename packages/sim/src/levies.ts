@@ -1,10 +1,13 @@
 import {
+  ownsAndHolds,
   applyRecruitmentToMaterial,
   boundedId,
   ensureProvinceMaterial,
   LEVY_REACH_KM,
   kmFrom,
+  polityLever,
   type ForcePersonnelCategory,
+  type WarfareContext,
   type WorldState,
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
@@ -72,13 +75,34 @@ export function levyCost(men: number): number {
   return Math.ceil((Math.max(0, men) * LEVY_COST_PER_THOUSAND) / 1_000);
 }
 
+/** The doctrines and establishments of a world, for the levers a levy reads. */
+function warfareContextOf(world: WorldState): WarfareContext {
+  return { establishments: world.establishments, doctrines: world.doctrines, today: world.elapsedStep };
+}
+
+/**
+ * What a power pays per thousand men levied: the bounty and the kit, more
+ * where the state arms them (`equipment: "state"`), and moved by `levy_cost`.
+ */
+export function levyCostPerThousand(world: WorldState, polityId: string): number {
+  const establishment = world.establishments.find((candidate) => candidate.polityId === polityId);
+  const armed = establishment?.equipment === "state" ? 1.3 : 1;
+  return Math.max(1, Math.round(LEVY_COST_PER_THOUSAND * armed * Math.max(0.5, 1 + polityLever(warfareContextOf(world), polityId, "levy_cost"))));
+}
+
+/** How many men a day a power's muster brings in, moved by `muster_speed`. */
+export function musterRateFor(world: WorldState, polityId: string): number {
+  return Math.max(50, Math.round(MEN_MUSTERED_PER_DAY * Math.max(0.25, 1 + polityLever(warfareContextOf(world), polityId, "muster_speed"))));
+}
+
 /** The provinces a power raises men from, in the order it draws on them: its own, never an ally's. */
 function poolsFor(world: WorldState, polityId: string, provinceId: string): string[] {
   const here = world.map.provinces.find((province) => province.id === provinceId)?.controllerPolityId ?? null;
   // How far a power sends for men: past this, a levy is a province's own.
   const reach = kmFrom(world, provinceId, { budgetKm: LEVY_REACH_KM });
   const own = world.map.provinces
-    .filter((province) => province.id !== provinceId && province.controllerPolityId === polityId)
+    // Its own people, on ground it holds: an occupied province sends nobody.
+    .filter((province) => province.id !== provinceId && ownsAndHolds(province, polityId))
     .map((province) => ({ id: province.id, km: reach.get(province.id) ?? Infinity }))
     .filter((entry) => entry.km <= LEVY_REACH_KM)
     .sort((a, b) => a.km - b.km || a.id.localeCompare(b.id))
@@ -96,14 +120,19 @@ export function raiseLevy(given: WorldState, request: LevyRequest): Levy {
   // Whether anybody is counted anywhere: a levy with nowhere of its own to
   // draw on raises nobody, but a world that reckons no people is no limit.
   const counted = world.material.provinceMaterial.some((row) => row.population > 0);
-  const manpower = counted ? rows.reduce((sum, row) => sum + (row?.availableManpower ?? 0), 0) : Infinity;
+  // Whom a power calls (`manpower_basis`) is in how full its provinces' rolls
+  // fill (`provinceTargetsFrom`), not in the levy: a levy takes the men there are.
+  const availableIn = (row: { readonly availableManpower: number } | undefined): number => row?.availableManpower ?? 0;
+  const manpower = counted ? rows.reduce((sum, row) => sum + availableIn(row), 0) : Infinity;
+  // Arming men at the state's charge costs the state more than letting them arm themselves.
+  const perThousand = levyCostPerThousand(world, request.polityId);
 
   const payer = !request.pays
     ? undefined
     : request.payerAccountId !== null
       ? world.material.accounts.find((account) => account.id === request.payerAccountId)
       : world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === request.polityId && account.status === "active");
-  const affordable = payer === undefined ? Infinity : Math.floor((payer.balance * 1_000) / LEVY_COST_PER_THOUSAND);
+  const affordable = payer === undefined ? Infinity : Math.floor((payer.balance * 1_000) / perThousand);
   const men = Math.min(asked, manpower, affordable);
 
   // Drawn from each pool in turn, as far as it goes.
@@ -113,7 +142,7 @@ export function raiseLevy(given: WorldState, request: LevyRequest): Levy {
     for (const [index, id] of pools.entries()) {
       const row = rows[index];
       if (row === undefined || owed <= 0) continue;
-      const draw = Math.min(owed, row.availableManpower);
+      const draw = Math.min(owed, availableIn(row));
       if (draw <= 0) continue;
       taken.set(id, draw);
       owed -= draw;
@@ -130,7 +159,7 @@ export function raiseLevy(given: WorldState, request: LevyRequest): Levy {
     };
   }
 
-  const cost = payer === undefined ? 0 : levyCost(men);
+  const cost = payer === undefined ? 0 : Math.ceil((Math.max(0, men) * perThousand) / 1_000);
   if (payer !== undefined && cost > 0) {
     world = {
       ...world,
@@ -164,11 +193,11 @@ export function raiseLevy(given: WorldState, request: LevyRequest): Levy {
  * The men of a levy as they come in: the first thousand at the standard the
  * day it is called, the rest in bands over the days a muster that size takes.
  */
-export function mustering(categoryId: string, label: string, men: number, atStep: number, idPrefix: string): ForcePersonnelCategory {
+export function mustering(categoryId: string, label: string, men: number, atStep: number, idPrefix: string, perDay: number = MEN_MUSTERED_PER_DAY): ForcePersonnelCategory {
   const now = Math.min(men, MUSTER_AT_ONCE);
   const later = men - now;
   if (later <= 0) return { categoryId, label, fit: now, unavailable: [] };
-  const days = Math.ceil(later / MEN_MUSTERED_PER_DAY);
+  const days = Math.ceil(later / Math.max(1, perDay));
   const bands = Math.min(MUSTER_BANDS, later);
   const unavailable = Array.from({ length: bands }, (_, index) => {
     const share = index === bands - 1 ? later - Math.floor(later / bands) * (bands - 1) : Math.floor(later / bands);

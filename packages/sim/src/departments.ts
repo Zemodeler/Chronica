@@ -481,6 +481,19 @@ const AUDIT_CEILING = 0.9;
  * thief's wits and his way with people; better under a good head of audits,
  * worse the farther away the thief was working.
  */
+/** Who of the department takes up an audit its auditor could not finish: its head, then its other officers, never the accused. */
+function standIn(world: WorldState, department: WorldState["departments"][number] | undefined, audit: WorldState["audits"][number]): WorldState["characters"][number] | undefined {
+  if (department === undefined) return undefined;
+  const offices = [...(department.headOfficeId === null ? [] : [department.headOfficeId]), ...department.officeIds];
+  for (const officeId of offices) {
+    const seat = world.material.officeSeats.find((candidate) => candidate.officeId === officeId && candidate.status === "held"
+      && candidate.holderCharacterId !== audit.auditorCharacterId && candidate.holderCharacterId !== audit.scope.id && candidate.holderCharacterId !== audit.alsoHouseholdId);
+    const holder = seat === undefined ? undefined : world.characters.find((character) => character.id === seat.holderCharacterId && character.alive);
+    if (holder !== undefined) return holder;
+  }
+  return undefined;
+}
+
 export function resolveAudits(world: WorldState, toDay: number): { world: WorldState; facts: FactProposalDraft[] } {
   const due = world.audits.filter((audit) => audit.status === "under_way" && audit.dueAtStep <= toDay);
   if (due.length === 0) return { world, facts: [] };
@@ -490,19 +503,37 @@ export function resolveAudits(world: WorldState, toDay: number): { world: WorldS
   const settled = new Map<string, "found" | "cleared">();
   const audits = world.audits.map((audit) => {
     if (!due.includes(audit)) return audit;
-    const auditor = world.characters.find((character) => character.id === audit.auditorCharacterId);
     const department = audit.departmentId === null ? undefined : world.departments.find((candidate) => candidate.id === audit.departmentId);
     const householdOf = (id: string): string => `${world.characters.find((character) => character.id === id)?.name ?? "a man"}'s estates`;
-    const books = department === undefined ? householdOf(audit.scope.id)
-      : audit.alsoHouseholdId == null ? department.name : `${department.name} and ${householdOf(audit.alsoHouseholdId)}`;
     const told = [...new Set([audit.orderedByCharacterId, audit.auditorCharacterId])].map((id) => ({ kind: "character" as const, id }));
-    if (auditor === undefined || !auditor.alive) return { ...audit, status: "cleared" as const };
+    // A man who died with the books half read is not the books read. Somebody
+    // of the department takes them up where there is somebody; where there is
+    // not, the inquiry stopped, and says so -- it has cleared nobody (E09).
+    const named = world.characters.find((character) => character.id === audit.auditorCharacterId && character.alive);
+    const auditor = named ?? standIn(world, department, audit);
+    if (auditor === undefined) {
+      facts.push({
+        localId: `audit_${audit.id}`.slice(0, 60),
+        kind: "audit_interrupted",
+        summary: `The inquiry into the books of ${department?.name ?? householdOf(audit.scope.id)} stopped: ${world.characters.find((character) => character.id === audit.auditorCharacterId)?.name ?? "the man sent"} could not finish it, and there was nobody to take it up. Nothing was found, and nobody was cleared.`.slice(0, 400),
+        affectedRefs: told, visibility: "private", discoveryState: "private", knowableInDays: 0, knownToRefs: told, significance: 45,
+      });
+      return { ...audit, status: "interrupted" as const, reviewed: [] };
+    }
+    // What could be gone through. A household's books are there to be read
+    // while the house stands: a man's accounts, his steward's hand. Asked for
+    // and not there, they were not gone through, and the finding says so.
+    const householdReadable = (id: string): boolean => world.material.accounts.some((account) => account.owner.kind === "character" && account.owner.id === id);
+    const reviewed = [audit.scope, ...(audit.alsoHouseholdId == null || !householdReadable(audit.alsoHouseholdId) ? [] : [{ kind: "household" as const, id: audit.alsoHouseholdId }])];
+    const missed = audit.alsoHouseholdId != null && !householdReadable(audit.alsoHouseholdId) ? householdOf(audit.alsoHouseholdId) : null;
+    const books = department === undefined ? householdOf(audit.scope.id)
+      : audit.alsoHouseholdId == null || missed !== null ? department.name : `${department.name} and ${householdOf(audit.alsoHouseholdId)}`;
     const eye = (aptitude(auditor, "taxation") + aptitude(auditor, "espionage")) / 2;
     const lift = audit.scope.kind === "polity" ? reader.headLift(audit.scope, "audit") : 0;
     const found: string[] = [];
     diversions = diversions.map((row) => {
       const inTheseBooks = (row.scope.id === audit.scope.id && row.departmentId === audit.departmentId)
-        || (audit.alsoHouseholdId != null && (row.byCharacterId === audit.alsoHouseholdId || row.scope.id === audit.alsoHouseholdId));
+        || (missed === null && audit.alsoHouseholdId != null && (row.byCharacterId === audit.alsoHouseholdId || row.scope.id === audit.alsoHouseholdId));
       if (row.foundAtStep !== null || !inTheseBooks) return row;
       const thief = world.characters.find((character) => character.id === row.byCharacterId);
       if (thief === undefined) return row;
@@ -514,28 +545,37 @@ export function resolveAudits(world: WorldState, toDay: number): { world: WorldS
       found.push(`${thief.name} kept back ${row.amount}`);
       return { ...row, foundAtStep: toDay };
     });
+    const status = found.length > 0 ? "found" as const : missed !== null ? "incomplete" as const : "no_discrepancy" as const;
+    const by = auditor.id === audit.auditorCharacterId ? auditor.name : `${auditor.name}, taking it up after ${world.characters.find((character) => character.id === audit.auditorCharacterId)?.name ?? "the man first sent"},`;
     facts.push({
       localId: `audit_${audit.id}`.slice(0, 60),
-      kind: found.length > 0 ? "peculation_found" : "audit_cleared",
+      kind: found.length > 0 ? "peculation_found" : status === "incomplete" ? "audit_incomplete" : "audit_no_discrepancy",
+      // What an inquiry that found nothing can say is that it found nothing:
+      // "the books were in order" is a stronger thing than looking once.
       summary: found.length > 0
-        ? `${auditor.name} went through the books of ${books} and found that ${found.join(", and ")}.`.slice(0, 400)
-        : `${auditor.name} went through the books of ${books} and found them in order.`,
+        ? `${by} went through the books of ${books} and found that ${found.join(", and ")}.`.slice(0, 400)
+        : missed !== null
+          ? `${by} went through the books of ${books} and found no discrepancy there; ${missed} could not be gone through, so the inquiry is incomplete.`.slice(0, 400)
+          : `${by} went through the books of ${books} and found no discrepancy.`.slice(0, 400),
       affectedRefs: told,
       visibility: "private",
       discoveryState: "private",
       knowableInDays: 0,
       knownToRefs: told,
-      significance: found.length > 0 ? 60 : 25,
+      significance: found.length > 0 ? 60 : status === "incomplete" ? 35 : 25,
     });
-    // The charge it answers is settled by what it found: cleared books end the
-    // accusation, and the man it named no longer lives under it. What was
-    // found makes it heavier. Without this a cleared audit left the charge
-    // standing at full weight for ever (R30, R33).
-    // A man who went through his own books has reassured himself, not cleared
-    // his name (R32): only an audit by somebody else settles the charge.
-    const ownBooks = audit.auditorCharacterId === audit.scope.id || audit.auditorCharacterId === audit.alsoHouseholdId;
-    if (audit.allegationPressureId != null && (!ownBooks || found.length > 0)) settled.set(audit.allegationPressureId, found.length > 0 ? "found" : "cleared");
-    return { ...audit, status: found.length > 0 ? "found" as const : "cleared" as const };
+    // The charge it answers is settled by what it found: a whole inquiry that
+    // found nothing ends the accusation, and what was found makes it heavier.
+    // Without this a cleared audit left the charge standing at full weight for
+    // ever (R30, R33). A man who went through his own books has reassured
+    // himself, not cleared his name (R32), and an inquiry that could not read
+    // everything it was asked to has cleared nobody (E09).
+    const ownBooks = auditor.id === audit.scope.id || auditor.id === audit.alsoHouseholdId;
+    if (audit.allegationPressureId != null) {
+      if (found.length > 0) settled.set(audit.allegationPressureId, "found");
+      else if (status === "no_discrepancy" && !ownBooks) settled.set(audit.allegationPressureId, "cleared");
+    }
+    return { ...audit, auditorCharacterId: auditor.id, status, reviewed };
   });
   const characterPressures = settled.size === 0 ? world.characterPressures : world.characterPressures.map((pressure) => {
     const verdict = settled.get(pressure.id);

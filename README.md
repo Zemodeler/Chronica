@@ -24,3 +24,15 @@ The documentation intentionally describes the current direction, not a chronolog
 ## Run locally
 
 On macOS or Linux, run `./hosted.sh`. On Windows, run `hosted.bat`. Each launcher installs the locked dependencies when needed and starts the website at http://localhost:3000. Stop the server with `Ctrl-C`.
+
+### Develop using your Codex allowance
+
+In the browser, open **Account → Local AI provider → Switch**, select **Codex allowance**, choose a model (GPT-6 Luna by default), and save. Chronica installs the CLI and reuses your login or opens ChatGPT sign-in before saving the choice. The selection applies to all games on this local server and persists across restarts. You can switch back to a configured OpenAI or Anthropic API provider in the same dialog. This setting is restricted to developer/admin accounts on local development servers.
+
+Run `npm run dev:hand` (optionally `-- --model gpt-6-luna`), or set `CHRONICA_AI_MODE=hand` in the root `.env.local` and start the server normally. Chronica automatically downloads its own pinned Codex CLI on first startup and reuses an existing ChatGPT CLI login when available. Otherwise it opens ChatGPT sign-in. Sign in once; subsequent starts reuse that login. No global CLI installation or API key is needed. The existing Node/npm and database requirements still apply.
+
+Requests are answered automatically by `gpt-6-luna`, with a fresh session for each request. To select another available Codex model, set `CHRONICA_HAND_MODEL`. This consumes your shared Codex allowance. Errors or exhausted limits never fall back to a paid API. The server logs installation, sign-in, readiness, and pending prompt paths.
+
+The CLI and any new subscription login live under `.cache/chronica-codex` in the server's working directory. Existing ChatGPT CLI logins are reused from `CODEX_HOME` or `~/.codex` without copying credentials or changing that configuration. Prompts and answers live in `CHRONICA_HAND_DIR` (default `eval-out/hand`). Identical requests replay from disk. System instructions and model selection are included in automatic cache keys. Delete the answer directory to obtain fresh answers. Automatic hand mode is development-only.
+
+For manually authored fixtures, set `CHRONICA_HAND_RESPONDER=manual`. Evaluation scripts retain their manual default unless explicitly configured otherwise.

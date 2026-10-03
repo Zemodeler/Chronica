@@ -33,6 +33,7 @@ export interface StateReading {
   } | null;
   /** Each office once, with how it is filled and who holds its seats now. */
   readonly offices: readonly StateOffice[];
+  readonly institutions: readonly StateInstitution[];
   readonly business: readonly {
     readonly key: string;
     readonly label: string;
@@ -50,6 +51,10 @@ export interface StateOffice {
   /** The office's id, and its note's key. */
   readonly key: string;
   readonly officeLabel: string;
+  readonly kind: "magistracy" | "membership" | "priesthood";
+  readonly fillingInstitutionId: string | null;
+  /** Vacancies explicitly recorded; unmodelled college members are not vacancies. */
+  readonly recordedVacancies: number;
   /** "Election by the Centuriate Assembly". */
   readonly filledLabel: string | null;
   /** "a year", "18 months". Null for an office held for life or at pleasure. */
@@ -66,7 +71,17 @@ export interface StateOffice {
   readonly yours: boolean;
 }
 
-const EMPTY: StateReading = { polityLabel: null, legitimacy: null, government: null, offices: [], business: [], factions: [], abroad: EMPTY_ABROAD };
+export interface StateInstitution {
+  readonly key: string;
+  readonly name: string;
+  readonly franchise: string | null;
+  readonly advisory: boolean;
+  readonly powers: readonly string[];
+  readonly fillsOfficeIds: readonly string[];
+  readonly votingBlocs: readonly { readonly name: string; readonly weight: number }[];
+}
+
+const EMPTY: StateReading = { polityLabel: null, legitimacy: null, government: null, offices: [], institutions: [], business: [], factions: [], abroad: EMPTY_ABROAD };
 const OPEN_STAGES = new Set(["proposed", "gathering_support", "deliberating", "voting_or_deciding"]);
 
 function legitimacyInWords(bps: number): string {
@@ -101,7 +116,15 @@ export function readTheState(
   };
 
   const constitution = world.constitutions.find((candidate) => candidate.polityId === polityId);
-  const ownOffices = allOffices(world, offices).filter((office) => office.polityId === polityId);
+  const everyOffice = allOffices(world, offices);
+  const builtIds = new Set(everyOffice.filter((office) => office.id.includes(":")).map((office) => office.id));
+  // A template power's scenario ruler, council and priesthood are reformed into its constitution's (`sim/constitutions.ts`):
+  // the old office is the same chair under an older id, and listing both read as a throne nobody held.
+  const shadowed = (office: Office): boolean => {
+    const key = office.id.startsWith(`${polityId}-`) ? office.id.slice(polityId.length + 1) : null;
+    return key !== null && !key.includes(":") && builtIds.has(`${polityId}:${key}`);
+  };
+  const ownOffices = everyOffice.filter((office) => office.polityId === polityId && !shadowed(office));
   const ruler = constitution?.rulerOfficeId == null ? undefined : ownOffices.find((office) => office.id === constitution.rulerOfficeId);
   const sovereign = constitution?.sovereignInstitutionId == null ? undefined : world.material.institutions.find((institution) => institution.id === constitution.sovereignInstitutionId);
   const government = constitution === undefined ? null : {
@@ -128,6 +151,9 @@ export function readTheState(
       return {
         key: office.id,
         officeLabel: office.label,
+        kind: office.kind ?? "magistracy",
+        fillingInstitutionId: rules.get(office.successionRuleId)?.institutionId ?? null,
+        recordedVacancies: seats.filter((seat) => seat.status !== "held" && seat.holderCharacterId === null).length,
         filledLabel: rules.get(office.successionRuleId)?.label ?? null,
         termLabel: office.termDays == null ? null : termWords(office.termDays),
         // An office the world has named no seat for, a dictatorship between
@@ -171,7 +197,18 @@ export function readTheState(
     }))
     .sort((a, b) => b.members - a.members || a.name.localeCompare(b.name));
 
-  return { polityLabel: polityName(polityId), legitimacy, government, offices: officeList, business, factions, abroad: readAbroad(world, characterId, offices, clock) };
+  const institutions: StateInstitution[] = world.material.institutions
+    .filter((institution) => institution.polityId === polityId)
+    .map((institution) => ({
+      key: institution.id,
+      name: institution.name,
+      franchise: institution.franchise ?? null,
+      advisory: institution.advisory ?? false,
+      powers: institution.powers ?? [],
+      fillsOfficeIds: officeList.filter((office) => office.fillingInstitutionId === institution.id).map((office) => office.key),
+      votingBlocs: institution.votingBlocs.map((bloc) => ({ name: bloc.name, weight: bloc.weight })),
+    }));
+  return { polityLabel: polityName(polityId), legitimacy, government, offices: officeList, institutions, business, factions, abroad: readAbroad(world, characterId, offices, clock) };
 }
 
 function termWords(days: number): string {

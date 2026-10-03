@@ -17,7 +17,7 @@ const order = (id: string, recipient = "quintus-fabius", issuer = "marcus-atiliu
   claimedAuthorityGrantId: null,
   authorityCheck: { authorized: true, grant: null, standing: null, reason: "the consul" },
   instruction: "March the second legion to Messana", standing: "binding",
-  status: "issued", recipientDecisionReason: null, issuedAtStep: 0, decidedAtStep: null, consequenceFactRefs: [],
+  status: "issued", recipientDecisionReason: null, issuedAtStep: 0, decidedAtStep: null, consequenceFactRefs: [], servesRef: null,
 });
 
 /** Quintus, who hates Marcus, has no sense of duty, and no conscience to speak of. */

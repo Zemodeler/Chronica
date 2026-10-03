@@ -17,6 +17,7 @@ export type ModelMode = "hand" | "live";
 export function chooseModel(args: readonly string[], handDir: string): ModelMode {
   if (args.includes("--live")) return "live";
   process.env.CHRONICA_AI_MODE = "hand";
+  process.env.CHRONICA_HAND_RESPONDER ??= "manual";
   process.env.CHRONICA_HAND_DIR ??= handDir;
   console.log(`Model: answered by hand, from ${process.env.CHRONICA_HAND_DIR}. Pass --live to use the provider instead.`);
   return "hand";

@@ -15,9 +15,21 @@ import { stableHash } from "../determinism";
  * Illyrian and Thracian names of common inscriptions, the Libyan names of the
  * Dougga dedication -- and belongs to nobody the histories remember.
  */
-export type Culture = "italic" | "etruscan" | "greek" | "celtic" | "germanic" | "iberian" | "illyrian" | "thracian" | "libyan" | "anatolian" | "iranian" | "arabian" | "sabaean" | "judaean" | "mesopotamian" | "nubian";
+export type Culture = "roman" | "punic" | "italic" | "etruscan" | "greek" | "celtic" | "germanic" | "iberian" | "illyrian" | "thracian" | "libyan" | "anatolian" | "iranian" | "arabian" | "sabaean" | "judaean" | "mesopotamian" | "nubian";
 
 export const POOLS: Readonly<Record<Culture, { readonly first: readonly string[]; readonly second?: readonly string[] }>> = {
+  // A Roman citizen's praenomen and the name of his gens -- plebeian gentes,
+  // for the men a world makes in the ranks and the lesser magistracies; the
+  // great patrician houses are the scenario's own people.
+  roman: {
+    first: ["Gaius", "Lucius", "Marcus", "Publius", "Quintus", "Titus", "Gnaeus", "Aulus", "Spurius", "Sextus", "Decimus", "Manius", "Numerius", "Servius", "Tiberius", "Kaeso"],
+    second: ["Aelius", "Antonius", "Appuleius", "Atilius", "Caecilius", "Calpurnius", "Canuleius", "Curtius", "Duilius", "Fannius", "Flaminius", "Fulvius", "Hostilius", "Junius", "Laetorius", "Licinius", "Livius", "Maenius", "Marcius", "Minucius", "Mucius", "Numitorius", "Ogulnius", "Otacilius", "Petronius", "Plautius", "Poetelius", "Pomponius", "Popillius", "Publilius", "Rutilius", "Sicinius", "Terentius", "Titinius", "Trebonius", "Vettius", "Villius", "Volumnius"],
+  },
+  // Carthage named its sons for its gods: Hanno, Hamilcar ("Melqart's
+  // brother"), Hasdrubal ("Baal is my help"), Bodashtart ("in Astarte's hand").
+  punic: {
+    first: ["Hanno", "Hamilcar", "Hasdrubal", "Himilco", "Bomilcar", "Mago", "Adherbal", "Bodashtart", "Abdmelqart", "Gisco", "Carthalo", "Bostar", "Maharbal", "Hannibal", "Azrubaal", "Eshmunazar", "Baalyaton", "Milkpilles", "Arish", "Bodmelqart", "Abdeshmun", "Hiempsal", "Muttumbaal", "Safot"],
+  },
   italic: {
     first: ["Statius", "Numerius", "Ovius", "Paquius", "Herius", "Minius", "Trebius", "Salvius", "Pacius", "Marius", "Vibius", "Novius", "Seppius"],
     second: ["Egnatius", "Papius", "Pontius", "Staius", "Decitius", "Obellius", "Calavius", "Magius", "Vettius", "Herennius", "Lucilius", "Ninnius", "Aufidius"],
@@ -79,8 +91,11 @@ export const POOLS: Readonly<Record<Culture, { readonly first: readonly string[]
 };
 
 const ETRUSCAN = new Set(["etruscan-cities"]);
-const ITALIC = new Set(["umbrians", "picentes", "marsi-paeligni", "samnites", "lucanians", "bruttians", "apulian-cities", "messapians", "veneti"]);
+const ITALIC = new Set(["umbrians", "picentes", "marsi-paeligni", "samnites", "lucanians", "bruttians", "apulian-cities", "messapians", "veneti",
+  // Campanians, who spoke Oscan: the Mamertines of Messana and the legion that took Rhegium.
+  "mamertines", "rhegium-campanians"]);
 const GREEK = new Set([
+  "syracuse",
   "acarnania", "achaean-league", "aeolis-communities", "aetolian-league", "arcadian-league", "argos", "athens", "boeotian-league", "cretan-cities-east",
   "cretan-cities-west", "cycladic-islanders", "cyrene", "elis", "epirus", "ionia-communities", "ionian-islands", "macedon", "massalia", "megalopolis",
   "messenia", "phocian-league", "rhodes", "sparta",
@@ -97,6 +112,8 @@ const NUBIAN = new Set(["kush"]);
 const LIBYAN = new Set(["gaetuli", "garamantes", "mauretanian-peoples", "numidian-kingdoms", "canarian-peoples"]);
 
 export function cultureOf(polityId: string): Culture {
+  if (polityId === "rome") return "roman";
+  if (polityId === "carthage") return "punic";
   if (ETRUSCAN.has(polityId)) return "etruscan";
   if (ITALIC.has(polityId)) return "italic";
   if (GREEK.has(polityId)) return "greek";

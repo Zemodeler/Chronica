@@ -1,11 +1,14 @@
 import {
+  takenBy,
   SIEGE_BASE_DAYS,
+  reconcileCapitals,
   SIEGE_WORKS,
   type SiegeWorkKind,
   siegeRatio,
   siegeWalls,
   sameConfederation,
   warfareWith,
+  forceLever,
   type ScenarioWarfareRules,
   SIEGE_HUNGER_AFTER_DAYS,
   SIEGE_HUNGER_BPS_PER_DAY,
@@ -110,6 +113,8 @@ function losses(force: Force, share: number, day: number, cause: string): Force 
 }
 
 /** The garrison marching out under arms, on terms, to its own side's nearest ground. */
+const ordinal = (n: number): string => { const names = ["zeroth", "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"]; if (n < names.length) return names[n]!; const tail = n % 100 >= 11 && n % 100 <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[n % 10] ?? "th"; return `${n}${tail}`; };
+
 export function marchOut(world: WorldState, forces: readonly Force[], garrison: readonly Force[], siege: Siege, besieger: Force): Force[] {
   if (garrison.length === 0) return [...forces];
   const to = retreatRoute(world, garrison[0]!, siege.provinceId, new Set([besieger.polityId]));
@@ -181,6 +186,7 @@ export function pressSieges(given: WorldState, toDay: number, options: PressSieg
   const polityName = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
   let forces = world.material.forces;
   let provinces = world.map.provinces;
+  const sacked: { provinceId: string; place: string; takerPolityId: string; loserPolityId: string; forceName: string; commanderId: string; commanderName: string }[] = [];
 
   const yielded: string[] = [];
   const sieges = world.sieges.map((siege): Siege => {
@@ -256,7 +262,9 @@ export function pressSieges(given: WorldState, toDay: number, options: PressSieg
     const sprung = works.filter((work) => work.status === "sprung").length - siege.works.filter((work) => work.status === "sprung").length;
     const ready = (kind: SiegeWorkKind): boolean => works.some((work) => work.kind === kind && work.status === "ready");
     const worksFactor = (ready("rams") ? RAMS_FACTOR : 1) * (ready("towers") ? TOWERS_FACTOR : 1) * (ready("lines") ? LINES_FACTOR : 1);
-    let pressureBps = Math.min(10_000, siege.pressureBps + sprung * MINE_BPS + Math.round((days * ratio * worksFactor * (1 - 0.5 * openness) * 10_000) / SIEGE_BASE_DAYS));
+    // An army that knows how to take a city (`siege_craft`) takes it sooner.
+    const craft = Math.max(0.5, 1 + forceLever({ establishments: world.establishments, doctrines: world.doctrines, today: toDay }, besieger, "siege_craft"));
+    let pressureBps = Math.min(10_000, siege.pressureBps + sprung * MINE_BPS + Math.round((days * ratio * worksFactor * craft * (1 - 0.5 * openness) * 10_000) / SIEGE_BASE_DAYS));
 
     // The siege's days, each with its chances: a sortie to burn the works, a
     // traitor at a gate once the city is hungry enough to breed one.
@@ -294,7 +302,12 @@ export function pressSieges(given: WorldState, toDay: number, options: PressSieg
     const hisSiege = player !== null && (besieger.commanderCharacterId === player || besieger.controllerCharacterId === player);
     const moment = pressureBps < 10_000 && pressureBps >= TERMS_AT && !told.includes("terms") ? "terms" as const
       : pressureBps < 10_000 && pressureBps >= BREACH_AT && !told.includes("breach") ? "breach" as const : null;
-    if (moment !== null) {
+    // With no soldiers left on the walls there is nobody to hold a breach or
+    // to bargain for a march out: the townsmen give the city up.
+    if (moment !== null && defenders === 0) {
+      tell("undefended", "siege_event", `The walls of ${place} were breached, and with no garrison left to hold the breach its townsmen gave the city up to ${besieger.name}.`, 70);
+      pressureBps = 10_000;
+    } else if (moment !== null) {
       const chief = besiegerChief === undefined ? [] : [{ kind: "character" as const, id: besiegerChief.id }];
       const question = moment === "breach"
         ? `A breach has opened in the walls of ${place}. ${besiegerChief?.name ?? "The besieging commander"} must choose whether to storm it or keep the city closed and wait.`
@@ -328,8 +341,15 @@ export function pressSieges(given: WorldState, toDay: number, options: PressSieg
           ? { ...city, controllerPolityId: siege.besiegerPolityId }
           : city));
         const allTaken = settlements.every((city) => city.controllerPolityId === siege.besiegerPolityId);
-        return { ...candidate, settlements, ...(allTaken ? { controllerPolityId: siege.besiegerPolityId, controlFirmnessBps: Math.min(candidate.controlFirmnessBps, 3_000), lostBy: { polityId: siege.defenderPolityId, atStep: toDay } } : {}) };
+        // Taken in a war, the province is occupied, not owned: the peace decides whose it is.
+        return { ...candidate, settlements, ...(allTaken ? { ...takenBy(candidate, siege.besiegerPolityId, world.polityAgreements), controlFirmnessBps: Math.min(candidate.controlFirmnessBps, 3_000), lostBy: { polityId: siege.defenderPolityId, atStep: toDay } } : {}) };
       });
+      // A cruel or wrathful commander sacks a city that did not yield on
+      // terms: its men killed, its women and children sold (`sackCities`).
+      const commander = world.characters.find((character) => character.id === besieger.commanderCharacterId);
+      if (!told.includes("terms_accepted") && commander !== undefined && (commander.traits.includes("cruel") || commander.traits.includes("wrathful"))) {
+        sacked.push({ provinceId: siege.provinceId, place, takerPolityId: siege.besiegerPolityId, loserPolityId: siege.defenderPolityId, forceName: besieger.name, commanderId: commander.id, commanderName: commander.name });
+      }
       // A garrison that marched out on terms is not taken with the city.
       const stillInside = garrison.filter((force) => forces.some((candidate) => candidate.id === force.id && candidate.locationId === siege.provinceId));
       yielded.push(...stillInside.map((force) => force.id));
@@ -348,7 +368,7 @@ export function pressSieges(given: WorldState, toDay: number, options: PressSieg
     facts.push({
       localId: `siege_report_${siege.id}_${toDay}`.slice(0, 60),
       kind: "siege_progress",
-      summary: `The siege of ${place} by ${besieger.name} entered its ${weeks === 1 ? "first" : `${weeks}th`} week: ${howItGoes(pressureBps)}${defenders > 0 ? `, and ${left} of the garrison remain on the walls` : ""}.`,
+      summary: `The siege of ${place} by ${besieger.name} entered its ${ordinal(weeks)} week: ${howItGoes(pressureBps)}${defenders > 0 ? `, and ${left} of the garrison remain on the walls` : ""}.`,
       affectedRefs: refs,
       visibility: "public",
       discoveryState: "public",
@@ -361,5 +381,68 @@ export function pressSieges(given: WorldState, toDay: number, options: PressSieg
   // A garrison that laid down its arms is disbanded properly: its chest and
   // what it paid go with it (`disbandForces`).
   const pressed: WorldState = { ...world, sieges, map: { ...world.map, provinces }, material: { ...world.material, forces: [...forces, ...world.material.forces.filter((force) => yielded.includes(force.id))] } };
-  return { world: disbandForces(pressed, new Set(yielded), null), facts, battles };
+  const after = sackCities(reconcileCapitals(disbandForces(pressed, new Set(yielded), null)), sacked, toDay);
+  return { world: after.world, facts: [...facts, ...after.facts], battles };
+}
+
+/** Of a sacked city's people, this share killed or sold. */
+const SACK_LOSS = 0.15;
+/** What a sack does to the province's order and its bread, in basis points. */
+const SACK_STABILITY_BPS = 3_000;
+const SACK_FOOD_BPS = 2_000;
+/** How much the powers around the sacker fear it the more. */
+const SACK_ALARM = 15;
+
+/**
+ * Cities sacked by the men who took them (docs/plans/a-living-world.md §6).
+ * Played out, not told: the province loses a share of its people, its order
+ * and its bread; what was carried off goes to the taker's chest; and every
+ * power around the taker fears it the more (`world.alarm`).
+ */
+function sackCities(world: WorldState, sacked: readonly { provinceId: string; place: string; takerPolityId: string; loserPolityId: string; forceName: string; commanderId: string; commanderName: string }[], toDay: number): { world: WorldState; facts: FactProposalDraft[] } {
+  if (sacked.length === 0) return { world, facts: [] };
+  const facts: FactProposalDraft[] = [];
+  let next = world;
+  for (const sack of sacked) {
+    const row = next.material.provinceMaterial.find((candidate) => candidate.provinceId === sack.provinceId);
+    const lost = row === undefined ? 0 : Math.round(row.population * SACK_LOSS);
+    const loot = row === undefined ? 0 : Math.round(row.taxCapacity * 4);
+    const chest = next.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === sack.takerPolityId && account.status === "active");
+    // The powers across the taker's borders, from one pass over the edges.
+    const holder = new Map(next.map.provinces.map((province) => [province.id, province.controllerPolityId]));
+    const aroundSet = new Set<string>();
+    for (const edge of next.map.edges) {
+      const a = holder.get(edge.from) ?? null;
+      const b = holder.get(edge.to) ?? null;
+      if (a === sack.takerPolityId && b !== null && b !== a) aroundSet.add(b);
+      if (b === sack.takerPolityId && a !== null && a !== b) aroundSet.add(a);
+    }
+    const around = [...aroundSet];
+    const alarm = [...next.alarm];
+    for (const id of around) {
+      const index = alarm.findIndex((entry) => entry.polityId === id && entry.towardPolityId === sack.takerPolityId);
+      const why = `${sack.place} was sacked by its men`;
+      if (index === -1) alarm.push({ polityId: id, towardPolityId: sack.takerPolityId, level: SACK_ALARM, why, updatedAtStep: toDay });
+      else alarm[index] = { ...alarm[index]!, level: Math.min(100, alarm[index]!.level + SACK_ALARM), why, updatedAtStep: toDay };
+    }
+    next = {
+      ...next,
+      alarm: alarm.slice(0, 2_000),
+      material: {
+        ...next.material,
+        provinceMaterial: next.material.provinceMaterial.map((candidate) => (candidate.provinceId === sack.provinceId
+          ? { ...candidate, population: Math.max(0, candidate.population - lost), availableManpower: Math.max(0, candidate.availableManpower - Math.round(lost / 4)), stabilityBps: Math.max(0, candidate.stabilityBps - SACK_STABILITY_BPS), foodSecurityBps: Math.max(0, candidate.foodSecurityBps - SACK_FOOD_BPS), warDamageBps: Math.min(10_000, candidate.warDamageBps + 2_500) }
+          : candidate)),
+        accounts: chest === undefined ? next.material.accounts : next.material.accounts.map((account) => (account.id === chest.id ? { ...account, balance: account.balance + loot } : account)),
+      },
+    };
+    facts.push({
+      localId: `sacked_${sack.provinceId}_${toDay}`.slice(0, 60),
+      kind: "city_sacked",
+      summary: `${sack.commanderName} let ${sack.forceName} loose on ${sack.place}: some ${lost.toLocaleString("en-GB")} of its people were put to the sword or sold${loot > 0 ? `, and ${loot} in plunder went to ${next.map.polities.find((polity) => polity.id === sack.takerPolityId)?.name ?? sack.takerPolityId}` : ""}.`.slice(0, 400),
+      affectedRefs: [{ kind: "province", id: sack.provinceId }, { kind: "character", id: sack.commanderId }, { kind: "polity", id: sack.takerPolityId }, { kind: "polity", id: sack.loserPolityId }],
+      visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 80,
+    });
+  }
+  return { world: next, facts };
 }

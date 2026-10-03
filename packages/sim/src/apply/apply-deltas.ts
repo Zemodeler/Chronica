@@ -1,5 +1,11 @@
+import { hiringGroups } from "./action-groups";
 import {
+  takenBy,
+  openPeaceTable,
+  ownerOf,
+  settleOccupations,
   SIEGE_WORKS,
+  reconcileCapitals,
   type SiegeWorkKind,
   DELTA_AUTHORITY_DOMAIN,
   adjustPolityLegitimacy,
@@ -14,7 +20,12 @@ import {
   alliesLedBy,
   sameConfederation,
   applyDiplomaticAnswerToStance,
+  diplomaticAnswerChangesTrust,
+  diplomaticSituationKey,
+  redundantDiplomaticOffer,
+  sameNegotiation,
   offeredAgreementKinds,
+  peaceOfferMetadata,
   isDelivered,
   newsDaysBetween,
   whereTheyHear,
@@ -23,6 +34,7 @@ import {
   passagePlanFor,
   disbandForces,
   normalizeName,
+  spelledAlike,
   threatWaitsOnAttack,
   termsAddedIn,
   describePassagePlan,
@@ -41,6 +53,7 @@ import {
   ENDED_BY_WAR,
   crossingAdmitted,
   allOffices,
+  computeOpinion,
   allTroopCategories,
   isPlotOpen,
   type Settlement,
@@ -50,6 +63,7 @@ import {
   labelFromCategoryId,
   mintTroopCategory,
   warfareWith,
+  forceLever,
   TRAIT_REGISTRY,
   canonicalTraitIds,
   clampWealth,
@@ -104,6 +118,7 @@ import {
   type OrderAttempt,
   type OrderStanding,
   type ScenarioWarfareRules,
+  type PolityAgreementKind,
   type WorldDelta,
   type WorldState,
   estateTerms,
@@ -116,18 +131,24 @@ import {
   clampStandingShift,
   TAX_EXTRACTION_BPS,
   CUSTOMARY_TAX_BURDEN,
+  hireFloorPerMonth,
+  nearestShore,
 } from "@chronica/shared";
+import { findInvariantViolations } from "../invariants";
 import { resolveEngagement, type BattleAccount } from "../battle";
+import { assaultSiege } from "../siege-decisions";
 import { fightRound, openEngagement } from "../engagements";
 import { GrainRefused, breadWhereItStands, sendConvoy } from "../grain";
 import { handOverForcesOf, killCharacter, mattersEnough } from "../mortality";
 import { carryOutEnactment } from "../enact";
+import { commandChanges } from "../command-changes";
 import { endPolity } from "../polity-end";
 import { LOAN_TERM_PERIODS, loanInstalment } from "../debts";
 import { endObligationsOfEndedAgreements } from "../treaties";
 import { trespassOf } from "../trespass";
-import { fleesHisMaster, listensAnyway, nobodyListens, nobodyRises, notHisToSpend } from "./nobody-listens";
+import { SOVEREIGN_AGREEMENTS, chamberThatDecides, fleesHisMaster, listensAnyway, nobodyListens, nobodyRises, notHisToSpend } from "./nobody-listens";
 import { isOwnBusiness } from "./own-business";
+import { sacrilegeOf, whoseToGive } from "./whose-to-give";
 import { endContract } from "../contracts";
 import { accountOf, normalizeRefs, peopleNamedButNeverMade } from "./normalize-refs";
 import { arrangementNetIncome, recruitSkillBiasIn } from "../standing-effects";
@@ -143,7 +164,9 @@ import { INTENT_LIFETIME_DAYS } from "../intents";
 import { watchReading } from "../watch";
 import type { ApplyContext, ApplyResult, AppliedDelta, AssumedDetail, AuthorityBreach, RejectedDelta } from "./context";
 import { fillGaps } from "./fill-gaps";
-import { mustering, raiseLevy } from "../levies";
+import { musterRateFor, mustering, raiseLevy } from "../levies";
+import { bandedShift, practiseInArmy } from "./army-practice";
+import { restedCeilingOf } from "../campaign";
 import { enemyFleetOff, perilsOfTheRoad } from "../crossings";
 import { diplomaticAnswererOf } from "../letters";
 
@@ -306,6 +329,8 @@ function scopeOf(delta: WorldDelta, world: WorldState, resolve: (ref: string) =>
       return { kind: "province", id: delta.provinceId };
     case "settlement_control_set":
       return { kind: "settlement", id: delta.settlementId };
+    case "capital_set":
+      return { kind: "polity", id: resolve(delta.polityRef) ?? delta.polityRef };
     case "political_procedure_open":
       return delta.institutionRef === null
         ? polityFallback
@@ -542,6 +567,7 @@ const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   agreement_close: "negotiate",
   province_control_set: "command",
   settlement_control_set: "command",
+  capital_set: "override",
   // "punish", because that is the power a plot arrogates: deciding that a man
   // has forfeited something, without a court and without a hearing. Nobody's
   // office grants it, so every plot is recorded as a breach by the man who
@@ -718,7 +744,43 @@ function actorIsAnswerableFor(delta: WorldDelta, scope: AuthorityScope, world: W
   return scopePolityId === actorPolityId;
 }
 
-export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], context: ApplyContext): ApplyResult {
+export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], given: ApplyContext): ApplyResult {
+  const context: ApplyContext = given.batchStart === undefined ? { ...given, batchStart: world } : given;
+  const groups = hiringGroups(deltas, context.atomicGroups);
+  if (groups.length === 0) return applyUngroupedDeltas(world, deltas, context);
+  let result: ApplyResult = { world, applied: [], rejected: [], breaches: [], factProposals: [], battleAccounts: [], assignedIds: new Map(context.assignedIds ?? []), assumptions: [] };
+  const visited = new Set<WorldDelta>();
+  for (const delta of deltas) {
+    if (visited.has(delta)) continue;
+    const group = groups.find((candidate) => candidate.includes(delta)) ?? [delta];
+    group.forEach((candidate) => visited.add(candidate));
+    const hires = group.filter((candidate) => candidate.op === "service_contract_open" && candidate.company !== null);
+    const redundant = group.filter((candidate) => candidate.op === "force_create" && hires.some((hire) => hire.op === "service_contract_open" && hire.company?.categoryId === candidate.categoryId && hire.company?.strength === candidate.authorizedStrength && /hir|charter|mercenar|contract/i.test(`${candidate.name} ${candidate.reason}`)));
+    let tried = applyUngroupedDeltas(result.world, group.filter((candidate) => !redundant.includes(candidate)), { ...context, atomicGroups: undefined, assignedIds: result.assignedIds });
+    if (tried.rejected.length === 0) for (const duplicate of redundant) {
+      if (duplicate.op !== "force_create") continue;
+      const hire = hires.find((candidate) => candidate.op === "service_contract_open" && candidate.company?.categoryId === duplicate.categoryId && candidate.company?.strength === duplicate.authorizedStrength);
+      if (hire?.op !== "service_contract_open") continue;
+      const contract = tried.world.material.contracts.find((candidate) => candidate.id === tried.assignedIds.get(hire.localId));
+      if (contract?.forceId != null) {
+        (tried.assignedIds as Map<string, string>).set(duplicate.localId, contract.forceId);
+        const carriedHire = tried.applied.find((act) => act.written === hire);
+        if (carriedHire !== undefined) tried = { ...tried, applied: [...tried.applied, { ...carriedHire, delta: duplicate, written: duplicate }] };
+      }
+    }
+    if (group.length > 1 && tried.rejected.length > 0) {
+      const failure = tried.rejected[0]!;
+      result = { ...result, rejected: [...result.rejected, ...group.map((written) => ({ delta: written, written, reason: `Hiring was not completed: ${failure.reason}`, kind: failure.kind, ofTheOrder: context.orderDeltas?.has(written) === true }))] };
+    } else result = { world: tried.world, assignedIds: tried.assignedIds,
+      applied: [...result.applied, ...tried.applied], rejected: [...result.rejected, ...tried.rejected], breaches: [...result.breaches, ...tried.breaches],
+      factProposals: [...result.factProposals, ...tried.factProposals], battleAccounts: [...result.battleAccounts, ...tried.battleAccounts], assumptions: [...result.assumptions, ...tried.assumptions] };
+  }
+  return result;
+}
+
+function applyUngroupedDeltas(world: WorldState, deltas: readonly WorldDelta[], given: ApplyContext): ApplyResult {
+  // The world as the answer found it, for what must not count what the same answer did.
+  const context: ApplyContext = given.batchStart === undefined ? { ...given, batchStart: world } : given;
   const assignedIds = new Map<string, string>(context.assignedIds ?? []);
   const applied: AppliedDelta[] = [];
   const rejected: RejectedDelta[] = [];
@@ -730,6 +792,7 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
   const resolve = (ref: string): string | undefined => resolveRef(ref, assignedIds);
   let current = world;
   let violations = new Set(findWorldReferenceViolations(world));
+  let invariants = new Set(findInvariantViolations(world));
 
   const authorityIndex: AuthorityIndex = buildAuthorityIndex(
     { officeSeats: world.material.officeSeats, forces: world.material.forces, accounts: world.material.accounts },
@@ -818,6 +881,18 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
         delta = filled.delta;
         assumed = filled.assumed;
       }
+      // An army a man raises by his own order answers to him, whoever he puts
+      // at its head. Legio II, raised on the consul's order "under Lucius
+      // Papirius", was Papirius's to command and to keep: the consul who raised
+      // it could not give it an order a season later.
+      if (ofTheOrder && delta.op === "force_create" && context.actorRef.kind === "character") {
+        const actorId = context.actorRef.id;
+        const raiser = current.characters.find((character) => character.id === actorId);
+        const forPolity = resolve(delta.polityId) ?? delta.polityId;
+        if (raiser !== undefined && raiser.alive && raiser.polityId === forPolity && delta.controllerCharacterRef !== actorId) {
+          delta = { ...delta, controllerCharacterRef: actorId };
+        }
+      }
     } catch {
       current = previous;
       restoreHandles(assignedIds, previousHandles);
@@ -854,7 +929,7 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
       const them = resolve(delta.otherPolityId) ?? delta.otherPolityId;
       if (atWar(current.polityAgreements, us, them) && !warStanding(current, us, them).dictates && !warStanding(current, them, us).dictates) {
         const theirs = current.map.polities.find((polity) => polity.id === them)?.name ?? them;
-        rejected.push({ delta, reason: `Peace with ${theirs} is not the order's to declare: the war is not won. It is asked for and bargained over with their envoy, or sent to them as terms.`, kind: "world", ofTheOrder });
+        rejected.push({ delta, written, reason: `Peace with ${theirs} is not the order's to declare: the war is not won. It is asked for and bargained over with their envoy, or sent to them as terms.`, kind: "world", ofTheOrder });
         current = previous;
         restoreHandles(assignedIds, previousHandles);
         continue;
@@ -878,7 +953,7 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
       if (delta.op === "character_intent_set" && context.playerCharacterId != null && !ofTheOrder
         && (resolve(delta.actorCharacterRef) ?? delta.actorCharacterRef) === context.playerCharacterId
         && (context.actsForTheWorld === true || context.actorRef.id !== context.playerCharacterId)) {
-        rejected.push({ delta, reason: "What the ruler intends is his own to say: the world may press on him, tempt him or threaten him, but not decide his mind for him.", kind: "world", ofTheOrder });
+        rejected.push({ delta, written, reason: "What the ruler intends is his own to say: the world may press on him, tempt him or threaten him, but not decide his mind for him.", kind: "world", ofTheOrder });
         current = previous;
         restoreHandles(assignedIds, previousHandles);
         continue;
@@ -887,7 +962,7 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
       if (context.actsForTheWorld === true && !ofTheOrder && context.playerCharacterId != null && scope.kind === "account" && !warranted) {
         const account = current.material.accounts.find((candidate) => candidate.id === scope.id);
         if (account?.owner.kind === "character" && account.owner.id === context.playerCharacterId) {
-          rejected.push({ delta, reason: `${account.id} is the player's own purse, and the world does not spend it for him: take it from somebody else, or leave it to his order.`, kind: "reference", ofTheOrder });
+          rejected.push({ delta, written, reason: `${account.id} is the player's own purse, and the world does not spend it for him: take it from somebody else, or leave it to his order.`, kind: "reference", ofTheOrder });
           current = previous;
           restoreHandles(assignedIds, previousHandles);
           continue;
@@ -897,7 +972,7 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
       // grant over a purse would otherwise say it is his to spend.
       const unfree = context.actorRef.kind === "character" ? notHisToSpend(delta, current, context.actorRef.id, resolve) : null;
       if (unfree !== null) {
-        rejected.push({ delta, reason: unfree, kind: "ignored", ofTheOrder });
+        rejected.push({ delta, written, reason: unfree, kind: "ignored", ofTheOrder });
         continue;
       }
       const flight = context.actorRef.kind === "character" ? fleesHisMaster(delta, current, context.actorRef.id) : null;
@@ -928,6 +1003,22 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
         // motion to its own Senate.
         (granted, wanted) => granted.kind === "polity" && polityOfScope(wanted, current, context.offices) === granted.id,
       );
+      // A colleague's army and an elected seat are not the government's to
+      // hand about, however wide its grant (`whose-to-give.ts`).
+      if (answerable && context.actorRef.kind === "character") {
+        const judged = whoseToGive(delta, current, context.actorRef.id, authority, context.offices, context.successionRules, resolve);
+        authority = judged.authority;
+        // Not unlawful but done: not done at all. A motion nobody could put,
+        // an act a tribune forbade.
+        if (judged.forbidden !== undefined) {
+          rejected.push({ delta, written, reason: judged.forbidden, kind: "ignored", ofTheOrder });
+          continue;
+        }
+      }
+      // Carried by the chamber whose question it was: the vote is the authority.
+      if (context.sanctionedDeltas?.has(written) === true && !authority.authorized) {
+        authority = { ...authority, authorized: true, reason: "Carried by the vote it waited on." };
+      }
       // An act outside one's authority happens only if the men, money or
       // ground it needs answer to the actor. Otherwise nobody moves.
       if (context.actorRef.kind === "character") {
@@ -939,7 +1030,25 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
         // Nobody had to -- but somebody might, for the man's sake or their own.
         const willing = unheard === null || delta.op === "polity_create" ? null : listensAnyway(delta, current, context.actorRef.id, resolve, context.offices);
         if (unheard !== null && willing === null) {
-          rejected.push({ delta, reason: unheard, kind: "ignored", ofTheOrder });
+          // War and peace not his to make are put to the chamber that makes
+          // them, with him moving it. The act waits on the vote and is done
+          // the day it carries (`advanceStages`, `sanctionedDeltas`).
+          const motion = ofTheOrder && context.actorRef.kind === "character" ? layBeforeTheChamber(delta, current, context.actorRef.id, resolve) : null;
+          if (motion !== null) {
+            // Put by the magistrate who moves it, where the actor may not put a question himself.
+            const mover = motion.op === "political_procedure_open" ? motion.sponsorCharacterRef : context.actorRef.id;
+            const moved = applyUngroupedDeltas(current, [motion], { ...context, atomicGroups: undefined, assignedIds, orderDeltas: new Set([motion]), actorRef: { kind: "character", id: mover } });
+            if (moved.applied.length > 0) {
+              current = moved.world;
+              for (const [handle, id] of moved.assignedIds) assignedIds.set(handle, id);
+              applied.push(...moved.applied);
+              factProposals.push(...moved.factProposals);
+              breaches.push(...moved.breaches);
+              rejected.push({ delta, written, reason: `${unheard} He moved it in the chamber instead, and it waits on the vote.`, kind: "ignored", ofTheOrder });
+              continue;
+            }
+          }
+          rejected.push({ delta, written, reason: unheard, kind: "ignored", ofTheOrder });
           continue;
         }
         if (willing !== null) {
@@ -957,9 +1066,18 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
       }
       const beforeAct = current;
       current = recordUnrecordedMoney(beforeAct, applyOne(current, delta, context, assignedIds, resolve, emitFact, emitAccount), delta, context);
+      current = reconcileCapitals(current);
+      // A tribune's person is sacrosanct.
+      const sacrilege = context.actorRef.kind === "character" ? sacrilegeOf(delta, beforeAct, current, context.actorRef.id, context.offices, () => context.ids.next("cause")) : null;
+      if (sacrilege !== null) {
+        current = sacrilege.world;
+        emitFact(sacrilege.fact);
+      }
+      // Whoever an army was taken from is told (a man giving his own away needs no telling).
+      for (const told of commandChanges(beforeAct, current, ofTheOrder && context.actorRef.kind === "character" ? new Set([context.actorRef.id]) : new Set())) emitFact(told);
     } catch (error) {
       if (error instanceof DeltaRejection) {
-        rejected.push({ delta, reason: error.message, kind: error.kind, ofTheOrder });
+        rejected.push({ delta, written, reason: error.message, kind: error.kind, ofTheOrder });
         current = previous;
         restoreHandles(assignedIds, previousHandles);
         continue;
@@ -973,6 +1091,7 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
       // should cost is the delta that carried it.
       rejected.push({
         delta,
+        written,
         reason: `The engine could not carry out "${delta.op}": ${error instanceof Error ? error.message : String(error)}.`,
         kind: "reference",
         ofTheOrder,
@@ -985,18 +1104,37 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
     const afterViolations = findWorldReferenceViolations(current);
     const introduced = afterViolations.filter((violation) => !violations.has(violation));
     if (introduced.length > 0) {
-      rejected.push({ delta, reason: `Would leave a reference to something that does not exist: ${introduced[0]}.`, kind: "reference", ofTheOrder });
+      rejected.push({ delta, written, reason: `Would leave a reference to something that does not exist: ${introduced[0]}.`, kind: "reference", ofTheOrder });
       current = previous;
       restoreHandles(assignedIds, previousHandles);
       continue;
     }
     violations = new Set(afterViolations);
+    // And nothing it leaves may contradict another record (`invariants.ts`):
+    // a second voyage on a fleet already sailing, a man in two armies, a
+    // person made twice.
+    const afterInvariants = findInvariantViolations(current);
+    const broken = afterInvariants.filter((violation) => !invariants.has(violation));
+    if (broken.length > 0) {
+      rejected.push({ delta, written, reason: `It would leave the world at odds with itself: ${broken[0]}.`, kind: "world", ofTheOrder });
+      current = previous;
+      restoreHandles(assignedIds, previousHandles);
+      continue;
+    }
+    invariants = new Set(afterInvariants);
 
-    applied.push({ delta, authority, ofTheOrder });
-    if (assumed.length > 0) assumptions.push({ delta, assumed, ofTheOrder });
-    factProposals.push(...emitted);
+    const changed = delta.op !== "diplomatic_message_send" || current.diplomacy.length > previous.diplomacy.length;
+    applied.push({ delta, written, authority, ofTheOrder, changed });
+    if (changed && assumed.length > 0) assumptions.push({ delta, assumed, ofTheOrder });
+    if (changed) factProposals.push(...emitted);
     battleAccounts.push(...emittedAccounts);
-    if (answerable && !authority.authorized) breaches.push({ delta, reason: authority.reason });
+    if (changed && answerable && !authority.authorized) breaches.push({ delta, reason: authority.reason });
+    // A letter over the government's name from a man who cannot bind it is
+    // delivered, and read as what it is: accepted, it waits on ratification.
+    if (changed && answerable && !authority.authorized && delta.op === "diplomatic_message_send") {
+      const sent = new Set(previous.diplomacy.map((message) => message.id));
+      current = { ...current, diplomacy: current.diplomacy.map((message) => (sent.has(message.id) ? message : { ...message, withoutAuthority: true })) };
+    }
   }
 
   // One structural check at the end rather than per delta: the per-delta guard
@@ -1123,6 +1261,90 @@ const AGAINST = /\b(?:not|refuses?|rejects?|declines?|fails?|won't|doesn't|don't
 const FOR = /\b(?:passes|pass|approves?|grants?|agrees?|accepts?|carries|supports?|votes? for|gives?)\b/i;
 
 /**
+ * The agreement an accepted letter opens: its kind, its parties the right way
+ * round, its clauses. Shared by the acceptance and by a ratification carried
+ * later (`ratification.ts`).
+ */
+export function acceptedAgreementDelta(replied: WorldState, message: WorldState["diplomacy"][number], kind: PolityAgreementKind, bound: string | null): WorldDelta {
+  // Which power is bound is the whole of the terms for these; the power that
+  // accepts an offer to be taken in is the one taken in.
+  const ordered = ["tributary", "protectorate", "foedus", "military_access"].includes(kind);
+  const [first, second] = ordered && bound === message.fromPolityId
+    ? [message.fromPolityId, message.toPolityId]
+    : [message.toPolityId, message.fromPolityId];
+  return {
+    op: "agreement_open",
+    localId: `accepted_${message.id}`.slice(0, 60),
+    kind,
+    polityId: first,
+    otherPolityId: second,
+    terms: message.terms.slice(0, 600),
+    forDays: message.forDays ?? null,
+    sourceMessageRef: message.id,
+    visibility: message.visibility === "private" ? "polity" : "public",
+    reason: `${polityName(replied, message.toPolityId)} accepted "${message.subject}".`.slice(0, 240),
+    // The terms it offered are the treaty's clauses, carried out now.
+    ...(message.clauses === undefined ? {} : { clauses: message.clauses as NonNullable<Extract<WorldDelta, { op: "agreement_open" }>["clauses"]> }),
+  };
+}
+
+/**
+ * War, peace or a treaty ended, by a man whose office does not make them, as
+ * the motion he can make instead: put to the chamber of his own power that
+ * decides it, with him moving it. Null where no chamber decides it -- a king's
+ * war is the king's -- or the act is not his own power's.
+ */
+export function layBeforeTheChamber(delta: WorldDelta, world: WorldState, actorId: string, resolve: (ref: string) => string | undefined): WorldDelta | null {
+  if (delta.op !== "agreement_open" && delta.op !== "agreement_close") return null;
+  const kind = delta.op === "agreement_open" ? delta.kind : world.polityAgreements.find((candidate) => candidate.id === (resolve(delta.agreementRef) ?? delta.agreementRef))?.kind;
+  if (kind === undefined || !SOVEREIGN_AGREEMENTS.has(kind)) return null;
+  const actor = world.characters.find((character) => character.id === actorId);
+  if (actor === undefined || actor.polityId === null) return null;
+  const ours = actor.polityId;
+  let other: string | undefined;
+  let what: string;
+  if (delta.op === "agreement_open") {
+    const sides = [resolve(delta.polityId) ?? delta.polityId, resolve(delta.otherPolityId) ?? delta.otherPolityId];
+    if (!sides.includes(ours)) return null;
+    other = sides.find((id) => id !== ours);
+    what = delta.kind === "war" ? "war on" : `${delta.kind.replace(/_/g, " ")} with`;
+  } else {
+    const agreement = world.polityAgreements.find((candidate) => candidate.id === (resolve(delta.agreementRef) ?? delta.agreementRef));
+    if (agreement === undefined || (agreement.polityId !== ours && agreement.otherPolityId !== ours)) return null;
+    other = agreement.polityId === ours ? agreement.otherPolityId : agreement.polityId;
+    what = `an end to the ${agreement.kind.replace(/_/g, " ")} with`;
+  }
+  const chamber = chamberThatDecides(world, ours, "war");
+  if (chamber === undefined || other === undefined) return null;
+  const otherName = world.map.polities.find((polity) => polity.id === other)?.name ?? other;
+  // Only a magistrate who may convene the chamber puts a question to it: a
+  // private man asks the friendliest of them to put it for him.
+  const conveners = chamber.convenedByOfficeIds ?? [];
+  const holds = (characterId: string): boolean => world.material.officeSeats.some((seat) => seat.holderCharacterId === characterId && seat.status === "held" && conveners.includes(seat.officeId));
+  const mover = conveners.length === 0 || holds(actorId) ? actor : world.characters
+    .filter((character) => character.alive && character.id !== actorId && holds(character.id))
+    .sort((a, b) => computeOpinion(b, actorId) - computeOpinion(a, actorId) || b.prestigeBps - a.prestigeBps || a.id.localeCompare(b.id))[0];
+  if (mover === undefined) return null;
+  const war = delta.op === "agreement_open" && delta.kind === "war";
+  return {
+    op: "political_procedure_open",
+    localId: `motion_${"localId" in delta ? delta.localId : delta.op}`.slice(0, 60),
+    type: war || delta.op === "agreement_close" ? "council_deliberation" : "treaty_ratification",
+    institutionRef: chamber.id,
+    sponsorCharacterRef: mover.id,
+    subjectKind: "polity",
+    subjectRef: other,
+    label: `Motion of ${actor.name}${mover.id === actorId ? "" : `, put by ${mover.name}`}: ${what} ${otherName}`.slice(0, 200),
+    resolutionMechanism: "vote",
+    deadlineInDays: 10,
+    visibility: "public",
+    enacts: null,
+    concerns: [war || delta.op === "agreement_close" ? "war" : "peace"],
+    reason: `${actor.name} holds no office that makes ${war ? "war" : "treaties"}, and moved it in the ${chamber.name}.`.slice(0, 240),
+  } as WorldDelta;
+}
+
+/**
  * An act the order made conditional on a question still undecided, made to
  * wait for it.
  *
@@ -1232,6 +1454,26 @@ export function awaitingTheQuestion(
  * way for that army except one already bound where it is now sent (`keepTo`),
  * and the men's turning back is said.
  */
+/**
+ * Whether a force is on a journey the man it answers to set going, and the
+ * one now sending it elsewhere is somebody else -- its own hired captain, say.
+ * The transport hired to carry Legio I was on its way to the shore when its
+ * captain sailed it off toward Rhegium on his own account, the sailing was
+ * called off, and the crossing failed for want of it. Its master may turn it.
+ */
+/** Days a commander other than the player holds a course he set before he may turn it. */
+const SETTLED_COURSE_DAYS = 14;
+
+function keptToItsWork(world: WorldState, forceId: string, actorId: string, to: string): boolean {
+  const force = world.material.forces.find((candidate) => candidate.id === forceId);
+  if (force === undefined || force.controllerCharacterId === null || force.controllerCharacterId === actorId) return false;
+  const master = force.controllerCharacterId;
+  return world.projects.some((project) => project.status === "in_progress"
+    && project.sponsorEntityRef?.kind === "character" && project.sponsorEntityRef.id === master
+    && project.completionOutcome?.kind === "force_move" && project.completionOutcome.provinceId !== to
+    && (project.completionOutcome.forceId === forceId || (project.completionOutcome.fleetIds ?? []).includes(forceId)));
+}
+
 function callOffMarches(world: WorldState, forceId: string, keepTo: string | null, emitFact: (fact: FactProposalDraft) => void): WorldState {
   const overridden = world.projects.filter((project) =>
     project.status === "in_progress"
@@ -1246,12 +1488,18 @@ function callOffMarches(world: WorldState, forceId: string, keepTo: string | nul
     emitFact({
       localId: `called_off_${project.id}`.slice(0, 60),
       kind: "march_called_off",
-      summary: `${force?.name ?? forceId} turned back from the road to ${provinceName(project.completionOutcome?.provinceId ?? null)}: a later order sent it elsewhere.`,
-      affectedRefs: [{ kind: "force", id: forceId }],
+      summary: `${force?.name ?? forceId} turned back from the road to ${provinceName(project.completionOutcome?.provinceId ?? null)}${keepTo === null ? "" : ` and makes for ${provinceName(keepTo)} instead`}: a later order sent it elsewhere, and "${project.label}" is called off.`.slice(0, 600),
+      affectedRefs: [{ kind: "force", id: forceId }, { kind: "project", id: project.id }],
       visibility: "polity",
       discoveryState: "polity",
       knowableInDays: 0,
-      significance: 20,
+      // The man whose work it was is told: a second project of Carthage's
+      // took the fleet the first was waiting on, and the first never knew.
+      knownToRefs: [
+        ...(project.sponsorEntityRef?.kind === "character" ? [{ kind: "character" as const, id: project.sponsorEntityRef.id }] : []),
+        ...(force === undefined ? [] : [{ kind: "character" as const, id: force.controllerCharacterId }]),
+      ],
+      significance: 35,
     });
   }
   return { ...world, projects: world.projects.map((project) => (cancelled.has(project.id) ? { ...project, status: "cancelled" as const } : project)) };
@@ -1496,24 +1744,45 @@ function applyOne(
     // Which power is bound is the whole of the terms for these; the power that
     // accepts an offer to be taken in is the one taken in.
     const bound = delta.boundPolityId == null ? message.toPolityId : resolve(delta.boundPolityId) ?? delta.boundPolityId;
-    const ordered = ["tributary", "protectorate", "foedus", "military_access"].includes(kind);
-    const [first, second] = ordered && bound === message.fromPolityId
-      ? [message.fromPolityId, message.toPolityId]
-      : [message.toPolityId, message.fromPolityId];
-    const opening: WorldDelta = {
-      op: "agreement_open",
-      localId: `accepted_${message.id}`.slice(0, 60),
-      kind,
-      polityId: first,
-      otherPolityId: second,
-      terms: message.terms.slice(0, 600),
-      forDays: message.forDays ?? null,
-      sourceMessageRef: message.id,
-      visibility: message.visibility === "private" ? "polity" : "public",
-      reason: `${polityName(replied, message.toPolityId)} accepted "${message.subject}".`.slice(0, 240),
-      // The terms it offered are the treaty's clauses, carried out now.
-      ...(message.clauses === undefined ? {} : { clauses: message.clauses as NonNullable<Extract<WorldDelta, { op: "agreement_open" }>["clauses"]> }),
-    };
+    // Written by a man who could not bind his government: accepted, it waits
+    // on the chamber that makes treaties, and is opened the day it ratifies.
+    if (message.withoutAuthority === true && SOVEREIGN_AGREEMENTS.has(kind)) {
+      const chamber = chamberThatDecides(replied, message.fromPolityId, "war");
+      const sender = replied.characters.find((character) => character.id === message.fromCharacterId);
+      if (chamber !== undefined && sender !== undefined && sender.alive) {
+        const localId = `ratify_${message.id}`.slice(0, 60);
+        const theirs = polityName(replied, message.toPolityId);
+        const motion: WorldDelta = {
+          op: "political_procedure_open", localId, type: "treaty_ratification", institutionRef: chamber.id, sponsorCharacterRef: sender.id,
+          subjectKind: "polity", subjectRef: message.toPolityId,
+          label: `Ratify the terms ${sender.name} agreed with ${theirs}: "${message.subject}"`.slice(0, 200),
+          resolutionMechanism: "vote", deadlineInDays: 10, visibility: "public", enacts: null, concerns: [kind === "war" ? "war" : "peace"],
+          reason: `${theirs} accepted terms written by a man who could not bind ${polityName(replied, message.fromPolityId)}; the ${chamber.name} decides whether they bind it.`.slice(0, 300),
+        } as WorldDelta;
+        try {
+          const moved = applyOne(replied, motion, context, assignedIds, resolve, emitFact, emitAccount);
+          const procedureId = assignedIds.get(localId);
+          if (procedureId !== undefined) {
+            emitFact(letterFact(moved, {
+              localId: `awaits_ratification_${message.id}`,
+              kind: "treaty_awaits_ratification",
+              summary: `${theirs} accepted "${message.subject}", but ${sender.name} could not bind ${polityName(replied, message.fromPolityId)} to it: the ${chamber.name} must ratify it first.`,
+              fromPolityId: message.fromPolityId,
+              toPolityId: message.toPolityId,
+              characterIds: [message.fromCharacterId],
+              visibility: message.visibility === "private" ? "polity" : message.visibility,
+              significance: 45,
+            }));
+            return { ...moved, diplomacy: moved.diplomacy.map((candidate) => (candidate.id === message.id
+              ? { ...candidate, ratification: { procedureId, agreementKind: kind, boundPolityId: bound, status: "waiting" as const } }
+              : candidate)) };
+          }
+        } catch (error) {
+          if (!(error instanceof DeltaRejection)) throw error;
+        }
+      }
+    }
+    const opening = acceptedAgreementDelta(replied, message, kind, bound);
     try {
       const opened = applyOne(replied, opening, context, assignedIds, resolve, emitFact, emitAccount);
       const agreementId = opened.polityAgreements.find((agreement) => agreement.sourceMessageId === message.id && agreement.kind === kind)?.id ?? null;
@@ -1760,6 +2029,7 @@ function applyOne(
       // move written as an order does (`callOffMarches`).
       const marching = delta.completionOutcome?.kind === "force_move" ? delta.completionOutcome : null;
       if (marching !== null && marching.forceRef !== null && marching.provinceId !== null) {
+        if (keptToItsWork(world, resolve(marching.forceRef) ?? marching.forceRef, context.actorRef.id, marching.provinceId)) reject(`${world.material.forces.find((force) => force.id === (resolve(marching.forceRef!) ?? marching.forceRef))?.name ?? "That force"} is already on the work its master sent it on, and keeps to it.`);
         const turned = callOffMarches(world, resolve(marching.forceRef) ?? marching.forceRef, marching.provinceId, emitFact);
         if (turned !== world) return applyOne(turned, delta, context, assignedIds, resolve, emitFact, emitAccount);
       }
@@ -1804,6 +2074,10 @@ function applyOne(
         const moving = world.material.forces.find((force) => force.id === completionOutcome.forceId);
         if (moving === undefined) reject(`No force "${completionOutcome.forceId}" exists to move.${nearestTo(completionOutcome.forceId)}`, "reference");
         const passage = passageFor(world, moving, completionOutcome.provinceId, warfareWith(world, context.warfare), monthOf(context));
+        if (passage.by === "sea" && !isNavalForce(moving, warfareWith(world, context.warfare))) {
+          const plan = passagePlanFor(world, moving, completionOutcome.provinceId, warfareWith(world, context.warfare), monthOf(context));
+          if (plan !== null) return arrangeCrossing(world, moving, completionOutcome.provinceId, plan, delta.localId, context, assignedIds, resolve, emitFact, emitAccount);
+        }
         if (passage.by === null) {
           // Too far from its ships to go over today: the crossing is arranged
           // -- the fleets sent for, the army walked to the shore -- rather than
@@ -1960,6 +2234,9 @@ function applyOne(
         ? { id: "infantry", label: "Infantry" }
         : warfareWith(world, context.warfare).troopCategories.find((candidate) => candidate.id === delta.categoryId);
       if (category === undefined) reject(`No kind of troops "${delta.categoryId}" exists; the kinds are ${warfareWith(world, context.warfare).troopCategories.map((candidate) => candidate.id).join(", ")}.`, "reference");
+      if ("naval" in category && category.naval === true && delta.fromForceRef == null && /hir|charter|mercenar/i.test(`${delta.name} ${delta.reason}`)) {
+        reject("Hired ships must come through a service_contract_open with their captain, company, and pay; they cannot be levied as men.");
+      }
       // A band answering to no power is raised with somebody's own money, or it
       // is simply a government's army that has been called something else.
       if (delta.outlaw === true) {
@@ -2051,12 +2328,12 @@ function applyOne(
         locationId: delta.locationId,
         positionId: null,
         authorizedStrength: levy.men,
-        personnel: [mustering(category.id, category.label, levy.men, atStep, id)],
+        personnel: [mustering(category.id, category.label, levy.men, atStep, id, musterRateFor(world, forcePolityId))],
         moraleBps: 6_000,
         cohesionBps: 5_000,
         fatigueBps: 0,
         provisionStatus: "provisioned" as const,
-        provisionedThroughStep: atStep + 30,
+        provisionedThroughStep: atStep + 90,
         payObligationId,
         payArrearsPeriods: 0,
         ...service,
@@ -2097,6 +2374,18 @@ function applyOne(
       // Its own ground written back beside a new name or commander is not an
       // order to halt, and leaves the road alone.
       if (delta.locationId !== undefined && delta.locationId !== force.locationId) {
+        if (keptToItsWork(world, forceId, context.actorRef.id, delta.locationId)) reject(`${force.name} is already on the work its master sent it on, and keeps to it.`);
+        // Somebody other than the player turning a force he sent out within
+        // the fortnight holds his first course: Hannibal Gisco sent his fleet
+        // to the Sikeloi coast, then Rhegium, then the Sikeloi coast, then
+        // Rhegium again, one burst after another, and it never arrived.
+        if (context.actorRef.id !== context.playerCharacterId && context.playerCharacterId != null) {
+          const recent = world.projects.find((project) => project.status === "in_progress" && project.completionOutcome?.kind === "force_move"
+            && project.completionOutcome.forceId === forceId && project.completionOutcome.provinceId !== delta.locationId
+            && project.sponsorEntityRef?.kind === "character" && project.sponsorEntityRef.id === context.actorRef.id
+            && atStep - project.startedAtStep < SETTLED_COURSE_DAYS);
+          if (recent !== undefined) reject(`${force.name} set out on "${recent.label}" ${atStep - recent.startedAtStep} days ago and holds that course.`);
+        }
         const turned = callOffMarches(world, forceId, delta.locationId, emitFact);
         if (turned !== world) return applyOne(turned, delta, context, assignedIds, resolve, emitFact, emitAccount);
       }
@@ -2130,6 +2419,11 @@ function applyOne(
           overWater = ferried.over;
         }
         if (ferried?.by === "sea" && !inOneGo) {
+          const plan = passagePlanFor(world, force, delta.locationId, warfareWith(world, context.warfare), monthOf(context), (delta.fleetRefs ?? []).map((ref) => resolve(ref) ?? ref));
+          if (plan !== null) {
+            const arranged = arrangeCrossing(world, force, delta.locationId, plan, `crossing-${forceId}`.slice(0, 60), context, assignedIds, resolve, emitFact, emitAccount);
+            return applyOne(arranged, { ...delta, locationId: undefined }, context, assignedIds, resolve, emitFact, emitAccount);
+          }
           const days = CROSSING_DAYS + ferryDays(ferried.ferry);
           return setOutOn(world, force, forceId, delta, verdict.allowed ? verdict.edge.distance : 0, days, describeFerry(world, force, ferried.ferry), context, assignedIds, resolve, emitFact, emitAccount);
         }
@@ -2149,6 +2443,13 @@ function applyOne(
             const arranged = arrangeCrossing(world, force, delta.locationId, plan, `crossing-${forceId}`.slice(0, 60), context, assignedIds, resolve, emitFact, emitAccount);
             return applyOne(arranged, { ...delta, locationId: undefined }, context, assignedIds, resolve, emitFact, emitAccount);
           }
+          if (passage.by === "sea") {
+            const plan = passagePlanFor(world, force, delta.locationId, warfareWith(world, context.warfare), monthOf(context), (delta.fleetRefs ?? []).map((ref) => resolve(ref) ?? ref));
+            if (plan !== null) {
+              const arranged = arrangeCrossing(world, force, delta.locationId, plan, `crossing-${forceId}`.slice(0, 60), context, assignedIds, resolve, emitFact, emitAccount);
+              return applyOne(arranged, { ...delta, locationId: undefined }, context, assignedIds, resolve, emitFact, emitAccount);
+            }
+          }
           // Far off, but there is a road: the order is a march, and a march
           // takes days. It used to be refused, and the refusal was never put
           // right -- "march on Rhegium" from Rome simply did not happen unless
@@ -2162,7 +2463,13 @@ function applyOne(
           const supplied = readDepartments(world).headLift({ kind: "polity", id: force.polityId }, "supply");
           // And winter, when the roads are mud and the passes snow.
           const overPass = strictKmBetween(world, force.locationId, delta.locationId, (crossing) => crossing === "land" || crossing === "river", km * DETOUR_FACTOR) === null;
-          const days = daysInSeason(Math.max(Math.ceil(km / FASTEST_MARCH_KM_PER_DAY), Math.round((km / MARCH_KM_PER_DAY) * (1 - (quartermaster === undefined ? 0 : skillShare(aptitude(quartermaster, "logistics"), 0.25)) - supplied))), monthOf(context), overPass);
+          // Ships sail it: a fleet sent 300 km along the coast was timed at a
+          // marching pace and took 25 days.
+          const days = isNavalForce(force, warfareWith(world, context.warfare))
+            ? Math.max(1, sailDaysFor(km))
+            // And how the army marches (`march_speed`): men carrying their own
+            // kit, with a short baggage train, cover more road in a day.
+            : daysInSeason(Math.max(Math.ceil(km / FASTEST_MARCH_KM_PER_DAY), Math.round((km / MARCH_KM_PER_DAY) * (1 - (quartermaster === undefined ? 0 : skillShare(aptitude(quartermaster, "logistics"), 0.25)) - supplied - Math.max(-0.35, Math.min(0.35, forceLever(warfareWith(world, context.warfare), force, "march_speed")))))), monthOf(context), overPass);
           const bySea = passage.by === "sea" ? passage.ferry : null;
           return setOutOn(world, force, forceId, delta, km, days + (bySea === null ? 0 : ferryDays(bySea)), bySea === null ? null : describeFerry(world, force, bySea), context, assignedIds, resolve, emitFact, emitAccount);
         }
@@ -2235,7 +2542,9 @@ function applyOne(
       }
 
       const strength = Math.max(0, force.authorizedStrength + (delta.authorizedStrengthDelta ?? 0));
-      const updated = {
+      // A rule firing has its own engine-set worth already (`mechanicWorth`); only what a model wrote is read by its size.
+      const shiftOf = (value: number | undefined): number => (context.firingMechanic !== undefined ? value ?? 0 : bandedShift(value));
+      const plain = {
         ...force,
         ...(delta.name === undefined ? {} : { name: delta.name }),
         ...(delta.standardId === undefined ? {} : { standardId: delta.standardId }),
@@ -2251,10 +2560,21 @@ function applyOne(
         ...(delta.battlePlan === undefined ? {} : { battlePlan: delta.battlePlan }),
         ...(delta.outlaw === undefined ? {} : { outlaw: delta.outlaw }),
         authorizedStrength: Math.max(1, strength),
-        moraleBps: clampBps(force.moraleBps + (delta.moraleBpsDelta ?? 0)),
-        cohesionBps: clampBps(force.cohesionBps + (delta.cohesionBpsDelta ?? 0)),
-        fatigueBps: clampBps(force.fatigueBps + (delta.fatigueBpsDelta ?? 0)),
+        // The size of the change is read, not its number (`bandedShift`): an
+        // order can rest an army or rouse it, not set its spirits to a figure.
+        // And no order makes men steadier than their drill and their years
+        // let them be (`restedCeilingOf`): that is what drill is for.
+        moraleBps: clampBps(force.moraleBps + shiftOf(delta.moraleBpsDelta)),
+        cohesionBps: context.firingMechanic !== undefined
+          ? clampBps(force.cohesionBps + shiftOf(delta.cohesionBpsDelta))
+          : Math.min(Math.max(force.cohesionBps, restedCeilingOf(force) + 1_000), clampBps(force.cohesionBps + shiftOf(delta.cohesionBpsDelta))),
+        fatigueBps: clampBps(force.fatigueBps + shiftOf(delta.fatigueBpsDelta)),
       };
+      // Drill, an officer's own formation, and a way of fighting this army
+      // takes up of its commander's accord (`practiseInArmy`).
+      const practice = practiseInArmy(world, plain, delta, resolve, atStep, context.actorRef.kind === "character" ? context.actorRef.id : null);
+      for (const fact of practice.facts) emitFact(fact);
+      const updated = practice.force;
       // A garrison that has turned pirate is news everywhere it might land.
       if (delta.outlaw !== undefined && delta.outlaw !== (force.outlaw === true)) {
         const home = world.map.polities.find((polity) => polity.id === force.polityId)?.name ?? force.polityId;
@@ -2313,6 +2633,7 @@ function applyOne(
       const escortIds = new Set(escort.map((fleet) => fleet.id));
       return {
         ...world,
+        doctrines: practice.doctrines,
         ...(mintedInto === null ? {} : {
           map: {
             ...world.map,
@@ -2334,6 +2655,11 @@ function applyOne(
       const forceId = required(delta.forceRef, "The force");
       const force = world.material.forces.find((candidate) => candidate.id === forceId);
       if (force === undefined) reject(`No force "${forceId}" exists to reinforce.`, "reference");
+      // Men of the same kind added to a force this very answer raised are the
+      // raising said twice: "raise Legio II, 5,000 men" became a levy of 5,000
+      // and a reinforcement of 5,000 more, two bounties paid and 10,000 under
+      // the standard.
+      if ([...assignedIds.values()].includes(forceId) && force.personnel.some((row) => row.categoryId === delta.categoryId)) return world;
 
       // A kind of troops the world does not know yet is made, not refused.
       //
@@ -2411,7 +2737,7 @@ function applyOne(
         base = levy.world;
         forces = base.material.forces;
         joining = levy.men;
-        arriving = mustering(delta.categoryId, delta.label, joining, atStep, context.ids.next("levy"));
+        arriving = mustering(delta.categoryId, delta.label, joining, atStep, context.ids.next("levy"), musterRateFor(world, force.polityId));
       }
 
       const existing = force.personnel.find((category) => category.categoryId === delta.categoryId && category.label === delta.label);
@@ -2739,8 +3065,12 @@ function applyOne(
       // meant, not a second one nobody can tell from him: a second "Publius
       // Nerius" was made for the second spying mission, and two "Abd al-Malik
       // of Gerrha" ruled one city (R74, R45). The handle is his.
+      // Spelt a letter differently is still him ("Aristodemos" for
+      // "Aristodemus"): one match only, or it is somebody else (E10).
+      const twoWords = delta.name.trim().split(/\s+/).length >= 2;
+      const alike = twoWords ? world.characters.filter((character) => character.alive && character.polityId === newCharacterPolityId && spelledAlike(character.name, delta.name)) : [];
       const sameMan = world.characters.find((character) => character.alive && character.polityId === newCharacterPolityId
-        && normalizeName(character.name) === normalizeName(delta.name) && delta.name.trim().split(/\s+/).length >= 2);
+        && normalizeName(character.name) === normalizeName(delta.name) && twoWords) ?? (alike.length === 1 ? alike[0] : undefined);
       if (sameMan !== undefined) {
         assignedIds.set(delta.localId, sameMan.id);
         return world;
@@ -2998,10 +3328,14 @@ function applyOne(
       // on authorization for a larger army" was opened before nobody, to be
       // settled at its sponsor's discretion with no day set: the consul's own
       // petition for an army was folded into it and could never be voted on.
-      const aboutTheState = delta.type === "council_deliberation" && delta.subjectKind === "polity" && namedInstitutionId === null;
+      // So does any vote that names no body: a consul's "put the Campanians'
+      // punitive service to the Senate", about a group and not the state, was
+      // refused three times for want of an institution, and his promise to the
+      // player was then told as a refusal.
+      const aboutTheState = namedInstitutionId === null && (delta.type === "council_deliberation" || delta.resolutionMechanism === "vote");
+      const sponsorPolityId = world.characters.find((character) => character.id === sponsorId)?.polityId ?? null;
       const statePolityId = !aboutTheState ? null
-        : (delta.subjectRef === null ? null : resolve(delta.subjectRef) ?? delta.subjectRef)
-          ?? world.characters.find((character) => character.id === sponsorId)?.polityId ?? null;
+        : (delta.subjectKind === "polity" && delta.subjectRef !== null ? resolve(delta.subjectRef) ?? delta.subjectRef : null) ?? sponsorPolityId;
       const chamberForIt = statePolityId === null ? null : sovereignChamberOf(world, statePolityId);
       const institutionId = namedInstitutionId ?? chamberForIt?.id ?? null;
       const resolutionMechanism = chamberForIt !== null && namedInstitutionId === null ? "vote" as const : delta.resolutionMechanism;
@@ -3011,6 +3345,11 @@ function applyOne(
         reject("A question can only be put to a vote before an institution that can hold one.");
       }
       const subjectId = delta.subjectRef === null ? null : required(delta.subjectRef, "The subject");
+      const existingQuestion = world.material.politicalProcedures.find((question) => question.institutionId === institutionId && question.subjectKind === delta.subjectKind && question.subjectId === subjectId && question.outcome === null && sameWork("political", question.label, "political", delta.label));
+      if (existingQuestion !== undefined) {
+        assignedIds.set(delta.localId, existingQuestion.id);
+        if (delta.enacts == null || world.enactments.some((enactment) => enactment.procedureId === existingQuestion.id)) return withConcerns(world, existingQuestion.id);
+      }
       // The constitution is changed only where it may be: before the chamber
       // that holds that power, or by the ruler's own decree where none does.
       const amendment = delta.enacts?.constitution;
@@ -3029,8 +3368,8 @@ function applyOne(
           }
         }
       }
-      const id = mint("procedure", delta.localId);
-      const procedure = {
+      const id = existingQuestion?.id ?? mint("procedure", delta.localId);
+      const procedure = existingQuestion ?? {
         id,
         type: delta.type,
         institutionId,
@@ -3053,7 +3392,7 @@ function applyOne(
         resultingEventIds: [],
         ...(delta.concerns === undefined ? {} : { concerns: [...delta.concerns] }),
       };
-      const opened: WorldState = { ...world, material: { ...world.material, politicalProcedures: [...world.material.politicalProcedures, procedure] } };
+      const opened: WorldState = { ...world, material: { ...world.material, politicalProcedures: existingQuestion === undefined ? [...world.material.politicalProcedures, procedure] : world.material.politicalProcedures } };
       if (delta.enacts == null) return withConcerns(opened, id);
       // What it will do if carried, kept until then with every reference
       // resolved now: an account named today is the one that pays.
@@ -3073,13 +3412,14 @@ function applyOne(
         }, context, assignedIds, resolve, () => {}, emitAccount);
         projectId = assignedIds.get(workLocalId) ?? null;
         const work = built.projects.find((project) => project.id === projectId);
-        if (work !== undefined) withWork = { ...opened, projects: [...opened.projects, { ...work, status: "proposed" as const }] };
+        if (work !== undefined) withWork = { ...opened, projects: [...opened.projects.filter((project) => project.id !== work.id), opened.projects.some((project) => project.id === work.id) ? work : { ...work, status: "proposed" as const }] };
       }
       const office = delta.enacts.office;
       const enacted = {
         ...withWork,
         enactments: [...withWork.enactments, {
           procedureId: id,
+          budget: delta.enacts.budget === undefined ? null : { accountId: required(delta.enacts.budget.accountRef, "The budget account"), amount: delta.enacts.budget.amount, purpose: delta.enacts.budget.purpose },
           projectId,
           polityId,
           effects: delta.enacts.effects ?? [],
@@ -3116,8 +3456,23 @@ function applyOne(
             };
           })(),
           waiver: delta.enacts.waiver === undefined ? null : { characterId: required(delta.enacts.waiver.characterRef, "The man excused"), officeId: delta.enacts.waiver.officeId },
+          // Its armies remade, carried out the day it passes (`military-reform.ts`).
+          // A body to redraw has to be one the power's establishment has.
+          military: (() => {
+            const military = delta.enacts.military;
+            if (military === undefined) return null;
+            const establishment = world.establishments.find((candidate) => candidate.polityId === polityId);
+            if (establishment === undefined && (military.redraw !== undefined || (military.drop ?? []).length > 0)) {
+              reject(`${world.map.polities.find((polity) => polity.id === polityId)?.name ?? polityId} keeps no establishment of armies to redraw; adopt a doctrine or set its terms of service first.`, "reference");
+            }
+            if (military.redraw !== undefined && establishment?.bodies.some((body) => body.id === military.redraw!.bodyId) !== true) {
+              reject(`No body "${military.redraw.bodyId}" in the establishment; it has ${establishment?.bodies.map((body) => body.id).join(", ") ?? "none"}.`, "reference");
+            }
+            return military;
+          })(),
           constitution: amendment === undefined ? null : {
             form: amendment.form ?? null,
+            commandTenure: amendment.commandTenure ?? null,
             chamber: amendment.chamber === undefined ? null : {
               institutionId: amendment.chamber.institutionRef == null ? null : required(amendment.chamber.institutionRef, "The chamber"),
               name: amendment.chamber.name ?? null,
@@ -3253,7 +3608,7 @@ function applyOne(
         const side = delta.position === "support" ? "for" : delta.position === "oppose" ? "against" : "on";
         emitFact({
           localId: `speech_${procedureId}_${supporterId}_${atStep}`.slice(0, 60),
-          kind: "senate_speech",
+          kind: before === undefined ? "senate_speech" : "political_position_changed",
           summary: `${who} spoke ${side} "${procedure.label}"${house === undefined ? "" : ` in the ${house.name}`}: "${delta.words}"`.slice(0, 600),
           affectedRefs: [{ kind: "procedure", id: procedureId }, { kind: "character", id: supporterId }, ...(house === undefined ? [] : [{ kind: "polity" as const, id: house.polityId }])],
           visibility: "public",
@@ -3402,6 +3757,16 @@ function applyOne(
       const forceId = required(delta.forceRef, "The army");
       const force = world.material.forces.find((candidate) => candidate.id === forceId);
       if (force === undefined) reject(`No force "${forceId}" exists.`, "reference");
+
+      // How a man means to bear himself in the next battle: his own to say,
+      // and read by the battle (`memberRates`) and by what it gives him after
+      // (`recordTheFight`). A man not in the ranks has no next battle to bear.
+      if (delta.change === "conduct") {
+        if (!force.memberCharacterIds.includes(characterId)) reject(`${person.name} is not in the ranks of ${force.name}.`);
+        if (delta.conduct === undefined) reject("Say how he means to bear himself: steady, glory or cautious.");
+        if (person.service === undefined) return world;
+        return { ...world, characters: world.characters.map((character) => (character.id === characterId && character.service !== undefined ? { ...character, service: { ...character.service, conduct: delta.conduct! } } : character)) };
+      }
 
       if (delta.change === "enlist") {
         if (force.commanderCharacterId === characterId) reject(`${person.name} already commands ${force.name}.`);
@@ -4146,7 +4511,7 @@ function applyOne(
           forceId = namedForceId;
           forceWas = { polityId: force.polityId, controllerCharacterId: force.controllerCharacterId };
           next = { ...next, material: { ...next.material, forces: next.material.forces.map((candidate) => (candidate.id === forceId
-            ? { ...candidate, controllerCharacterId: hirer, polityId: hirerPolity }
+            ? { ...candidate, controllerCharacterId: hirer, polityId: hirerPolity, payObligationId: obligationId }
             : candidate)) } };
         }
       }
@@ -4161,16 +4526,38 @@ function applyOne(
         }
         const category = warfareWith(world, context.warfare).troopCategories.find((candidate) => candidate.id === delta.company!.categoryId);
         if (category === undefined) reject(`No kind of troops "${delta.company.categoryId}" exists; the kinds are ${warfareWith(world, context.warfare).troopCategories.map((candidate) => candidate.id).join(", ")}.`, "reference");
-        const locationId = delta.provinceId ?? employee.locationProvinceId;
-        if (!world.map.provinces.some((province) => province.id === locationId)) reject(`No province "${locationId}" exists for ${employee.name}'s company to muster in.`, "reference");
         const hirer = employer.owner.kind === "character" ? employer.owner.id : context.actorRef.kind === "character" ? context.actorRef.id : employeeId;
+        // A company musters where its captain already was, else beside the
+        // man who hired it -- not at the place it is hired to serve. Transport
+        // hired to carry Legio I to Messana was raised at Messana, the army
+        // marched to meet it at a shore it never reached, and the crossing
+        // failed. Ships muster on the nearest shore.
+        const madeNow = [...assignedIds.values()].includes(employeeId);
+        const hirerAt = world.characters.find((character) => character.id === hirer)?.locationProvinceId ?? null;
+        const known = (id: string | null | undefined): id is string => id != null && world.map.provinces.some((province) => province.id === id);
+        const musterAt = !madeNow && known(employee.locationProvinceId) ? employee.locationProvinceId : known(hirerAt) ? hirerAt : known(employee.locationProvinceId) ? employee.locationProvinceId : delta.provinceId;
+        const naval = warfareWith(world, context.warfare).troopCategories.find((candidate) => candidate.id === delta.company!.categoryId)?.naval === true;
+        const locationId = naval && known(musterAt) ? nearestShore(world, musterAt) : musterAt;
+        if (!known(locationId)) reject(`No province "${locationId}" exists for ${employee.name}'s company to muster in.`, "reference");
         const hirerPolity = employer.owner.kind === "polity" ? employer.owner.id : world.characters.find((character) => character.id === hirer)?.polityId ?? employee.polityId;
         if (hirerPolity === null) reject(`Nobody who hired ${employee.name} belongs to a power his company could serve; a band answering to no power is raised with "force_create" as "outlaw".`);
         forceId = context.ids.next("force");
         // Whose they are once the contract ends: his own, under the power he came from.
         forceWas = { polityId: employee.polityId ?? hirerPolity, controllerCharacterId: employeeId };
-        const strength = delta.company.strength;
-        broughtWords = `, bringing ${strength} ${category.label.toLowerCase()}`;
+        // What the money buys: a company is paid for at least the going rate
+        // for its men or hulls over its term (`hireFloorPerMonth`). 400
+        // warships were once hired for 900 down and nothing a month -- a
+        // third of what the Republic paid to victual 18 -- so the captain
+        // brings what the pay will keep.
+        const months = Math.max(1, Math.round((delta.termDays ?? 90) / 30));
+        const paid = delta.advance + delta.monthlyPay * months;
+        const perHead = hireFloorPerMonth(category) * months;
+        const affordable = Math.floor(paid / perHead);
+        if (affordable < 1) reject(`${delta.advance} down and ${delta.monthlyPay} a month will not keep even one of ${category.label.toLowerCase()} for ${months} months: the going rate is about ${Math.ceil(perHead)} each over the term.`);
+        const strength = Math.min(delta.company.strength, affordable);
+        broughtWords = strength < delta.company.strength
+          ? `, bringing ${strength} ${category.label.toLowerCase()} -- all the pay would keep of the ${delta.company.strength} asked for`
+          : `, bringing ${strength} ${category.label.toLowerCase()}`;
         next = { ...next, material: { ...next.material,
           forces: [...next.material.forces, {
             id: forceId, name: delta.label.slice(0, 120), polityId: hirerPolity, commanderCharacterId: employeeId, controllerCharacterId: hirer,
@@ -4188,7 +4575,10 @@ function applyOne(
       next = { ...next, material: { ...next.material, contracts: [...next.material.contracts, {
         id, role: delta.role, label: delta.label, employerAccountId, employeeCharacterId: employeeId, obligationId, incomeSourceId, grantId,
         advance: delta.advance, monthlyPay: delta.monthlyPay, duties: delta.duties, openedAtStep: atStep, endsAtStep,
-        forceId, forceWas, provinceId: delta.provinceId, counterpartPolityId, status: "active" as const,
+        forceId, forceWas, provinceId: delta.provinceId, counterpartPolityId,
+        journey: (delta.role === "agent" || delta.role === "envoy") && delta.provinceId !== null && employee.locationProvinceId !== delta.provinceId
+          ? { fromProvinceId: employee.locationProvinceId, toProvinceId: delta.provinceId, arrivesAtStep: atStep + Math.max(1, newsDaysBetween(world, employee.locationProvinceId, delta.provinceId)), arrivedAtStep: null } : null,
+        status: "active" as const,
       }] } };
       emitFact({
         localId: `hired_${id}`.slice(0, 60),
@@ -4197,8 +4587,9 @@ function applyOne(
           ? `${employee.name} took the tax farm of ${world.map.provinces.find((province) => province.id === delta.provinceId)?.name ?? delta.provinceId}, paying ${delta.advance} for it${delta.monthlyPay > 0 ? ` and ${delta.monthlyPay} a month` : ""}.`
           : `${employee.name} was hired: ${delta.label}${broughtWords}${servedForceName === null ? "" : `, in the service of ${servedForceName}`}${delta.advance > 0 ? `, ${delta.advance} paid down` : ""}${delta.monthlyPay > 0 ? `, ${delta.monthlyPay} a month` : ""}${endsAtStep === null ? "" : `, for ${delta.termDays} days`}.`,
         affectedRefs: [{ kind: "character", id: employeeId }, { kind: "account", id: employerAccountId }],
-        visibility: delta.role === "assassin" ? "private" : "polity",
-        discoveryState: delta.role === "assassin" ? "private" : "polity",
+        knownToRefs: [{ kind: "character", id: employeeId }, ...(employer.owner.kind === "character" ? [{ kind: "character" as const, id: employer.owner.id }] : employer.owner.kind === "polity" && actorPolityOf(world, context) === employer.owner.id ? [context.actorRef] : [])],
+        visibility: delta.role === "assassin" || delta.role === "agent" ? "private" : "polity",
+        discoveryState: delta.role === "assassin" || delta.role === "agent" ? "private" : "polity",
         knowableInDays: 0,
         significance: 25,
       });
@@ -4522,6 +4913,17 @@ function applyOne(
       if (inReplyToId !== null && !world.diplomacy.some((message) => message.id === inReplyToId)) {
         reject(`No letter "${inReplyToId}" exists to be answering.`, "reference");
       }
+      const offer = peaceOfferMetadata(delta);
+      const proposed = { ...delta, ...offer, fromPolityId: letterFromId, toPolityId: letterToId, fromCharacterId: senderId };
+      const situationKey = diplomaticSituationKey(world, letterFromId, letterToId);
+      const redundant = redundantDiplomaticOffer(world.diplomacy, proposed, atStep, situationKey);
+      if (redundant !== undefined) {
+        // Idempotent success, so repairs cannot turn suppression into a new
+        // letter. References still resolve, but this is no progress for a plan.
+        assignedIds.set(delta.localId, redundant.id);
+        return world;
+      }
+      const previous = world.diplomacy.find((message) => sameNegotiation(message, proposed));
       const messageId = mint("message", delta.localId);
       // The road from the writer to the reader -- or, for a letter to a power
       // with nobody to take it, to its capital. The reply clock starts when it
@@ -4540,7 +4942,7 @@ function applyOne(
         toPolityId: letterToId,
         characterIds: [senderId, ...(recipientId === null ? [] : [recipientId])],
         visibility: delta.visibility,
-        significance: delta.kind === "letter" && (delta.proposes ?? []).length === 0 ? 8 : 15,
+        significance: offer.kind === "letter" && offer.proposes.length === 0 ? 8 : 15,
         travelDays,
       }));
       return {
@@ -4549,7 +4951,7 @@ function applyOne(
           ...world.diplomacy,
           {
             id: messageId,
-            kind: delta.kind,
+            kind: offer.kind,
             fromPolityId: letterFromId,
             fromCharacterId: senderId,
             toPolityId: letterToId,
@@ -4564,8 +4966,12 @@ function applyOne(
             answerText: null,
             answeredAtStep: null,
             inReplyToMessageId: inReplyToId,
+            ...(delta.negotiation === undefined ? {} : { negotiation: delta.negotiation }),
+            negotiationId: previous?.negotiationId ?? previous?.id ?? messageId,
+            negotiationOwnerCharacterId: previous?.negotiationOwnerCharacterId ?? previous?.fromCharacterId ?? senderId,
+            situationKey,
             visibility: delta.visibility,
-            proposes: [...new Set(delta.proposes ?? [])],
+            proposes: offer.proposes,
             agreementId: null,
             ...(delta.onRefusal == null ? {} : { onRefusal: delta.onRefusal }),
             ...(delta.clauses === undefined || delta.clauses.length === 0 ? {} : { clauses: delta.clauses }),
@@ -4576,8 +4982,9 @@ function applyOne(
 
     case "diplomatic_message_answer": {
       const messageId = required(delta.messageRef, "The letter being answered");
-      const message = world.diplomacy.find((candidate) => candidate.id === messageId);
-      if (message === undefined) reject(`No letter "${messageId}" exists to answer.`, "reference");
+      const storedMessage = world.diplomacy.find((candidate) => candidate.id === messageId);
+      if (storedMessage === undefined) reject(`No letter "${messageId}" exists to answer.`, "reference");
+      const message = { ...storedMessage, ...peaceOfferMetadata(storedMessage) };
       // Answering twice is not a second answer; it is the engine being asked to
       // rewrite a reply already sent and read.
       if (message !== undefined && message.status === "answered") {
@@ -4594,35 +5001,41 @@ function applyOne(
       const added = delta.answer !== "accepted" || offeredAgreementKinds(message).length === 0
         ? null
         : delta.addedTerms ?? (byThePlayer ? termsAddedIn(delta.answerText) : null);
-      if (added !== null) {
-        const countered = applyOne(world, { ...delta, answer: "countered", addedTerms: null }, context, assignedIds, resolve, emitFact, emitAccount);
+      // Each clause is agreed to or not: "we accept your protection, and
+      // will not send the men" takes the one and not the other, and binds
+      // neither until the other side agrees to what is left (E08).
+      const refusedAt = new Set(delta.answer === "accepted" ? (delta.refusedClauses ?? []).filter((at) => at < (message.clauses?.length ?? 0)) : []);
+      if (added !== null || refusedAt.size > 0) {
+        const kept = message.clauses?.filter((_, at) => !refusedAt.has(at));
+        const countered = applyOne(world, { ...delta, answer: "countered", addedTerms: null, refusedClauses: [] }, context, assignedIds, resolve, emitFact, emitAccount);
         const from = message.toCharacterId ?? (context.actorRef.kind === "character" ? context.actorRef.id : null);
         if (from === null) return countered;
         return applyOne(countered, {
           op: "diplomatic_message_send",
           localId: `counter_${message.id}`.slice(0, 60),
-          kind: message.kind === "letter" ? "alliance_offer" : message.kind,
+          kind: message.kind,
           fromPolityId: message.toPolityId,
           fromCharacterRef: from,
           toPolityId: message.fromPolityId,
           toCharacterRef: message.fromCharacterId,
           subject: `On "${message.subject}": accepted, on terms`.slice(0, 240),
-          terms: `${message.terms.slice(0, 560)} And, in return: ${added}`.slice(0, 1_200),
+          terms: `${message.terms.slice(0, 560)}${refusedAt.size === 0 ? "" : ` Without ${refusedAt.size === 1 ? "one of its clauses" : `${refusedAt.size} of its clauses`}.`}${added === null ? "" : ` And, in return: ${added}`}`.slice(0, 1_200),
           replyWithinDays: 30,
           inReplyToRef: message.id,
           visibility: message.visibility,
           ...(message.proposes === undefined ? {} : { proposes: message.proposes }),
-          ...(message.clauses === undefined ? {} : { clauses: message.clauses as never }),
+          ...(message.negotiation === undefined ? {} : { negotiation: { ...message.negotiation, positions: [{ issue: "counteroffer", value: `${added ?? ""}; omitted clauses: ${[...refusedAt].join(",")}`.slice(0, 240) }] } }),
+          ...(kept === undefined ? {} : { clauses: kept as never }),
           reason: `${delta.answerText}`.slice(0, 240),
         }, context, assignedIds, resolve, emitFact, emitAccount);
       }
       const answered = { ...message, status: "answered" as const, answer: delta.answer, answerText: delta.answerText, answeredAtStep: atStep };
-      const replied: WorldState = {
+      const repliedBeforeTable: WorldState = {
         ...world,
         diplomacy: world.diplomacy.map((candidate) => (candidate.id === messageId ? answered : candidate)),
         // How an approach was received is what moves the sender's opinion of
         // the power that received it -- silence hardest of all.
-        polityStances: [...applyDiplomaticAnswerToStance(world.polityStances, answered, atStep, (() => {
+        polityStances: diplomaticAnswerChangesTrust(world.diplomacy, answered) ? [...applyDiplomaticAnswerToStance(world.polityStances, answered, atStep, (() => {
           const writer = world.characters.find((character) => character.id === message.fromCharacterId);
           const answererHand = world.characters.find((character) => character.id === (message.toCharacterId ?? (context.actorRef.kind === "character" ? context.actorRef.id : "")));
           // A letter in a power's name -- its writer or answerer holds one of its
@@ -4631,8 +5044,10 @@ function applyOne(
           const liftFor = (hand: typeof writer, polityId: string): number =>
             hand !== undefined && officeholderPolity(world, hand.id, hand.polityId) === polityId ? inCharge.headLift({ kind: "polity", id: polityId }, "foreign_letters") : 0;
           return { writer, answerer: answererHand, writerLift: liftFor(writer, message.fromPolityId), answererLift: liftFor(answererHand, message.toPolityId) };
-        })())],
+        })())] : world.polityStances,
       };
+      // "Let us discuss peace", accepted: the two sides sit down at the table (`world/peace-table.ts`).
+      const replied: WorldState = message.kind === "peace_talks" && delta.answer === "accepted" ? openPeaceTable(repliedBeforeTable, message, atStep) : repliedBeforeTable;
       const answerer = message.toCharacterId ?? diplomaticAnswererOf(world, message.toPolityId, context.offices, message.fromCharacterId);
       const how = { accepted: "accepted", refused: "refused", countered: "answered with terms of its own", ignored: "let pass unanswered" }[delta.answer];
       // One person writing back to another is not a power answering a power:
@@ -4695,7 +5110,9 @@ function applyOne(
             visibility: pending.visibility,
             significance: 30,
           }));
-          return { ...world, diplomacy: world.diplomacy.map((message) => (message.id === pending.id ? { ...message, onRefusal: "war" as const } : message)) };
+          // What the letter already threatens stands: a war held back for the
+          // next attack is not brought forward by being written twice.
+          return { ...world, diplomacy: world.diplomacy.map((message) => (message.id === pending.id ? { ...message, onRefusal: message.onRefusal ?? ("war" as const) } : message)) };
         }
       }
       // A protectorate runs from the protected to the protector. Written the
@@ -4720,6 +5137,31 @@ function applyOne(
       // The acceptance of a letter opens what it offered (`bindTheAcceptance`);
       // the answerer writing the same treaty out beside it is saying so twice.
       if (standing !== undefined && sourceMessageId !== null && standing.sourceMessageId === sourceMessageId) return world;
+      // Terms still waiting on their ratification are not made by writing them out again.
+      if (sourceMessageId !== null && world.diplomacy.some((message) => message.id === sourceMessageId && message.ratification?.status === "waiting")) return world;
+      // New terms between powers already at peace are added to the peace they
+      // have. Rejected as a second peace, every cession after the first was
+      // "accepted" and nothing came of it: a war ended with six provinces, and
+      // the rest of Sicily could be had only by breaking the peace again.
+      if (standing !== undefined && delta.kind !== "war" && (delta.clauses ?? []).length > 0) {
+        const added = carryOutClauses(world, delta.clauses ?? [], standing.id, partyId, otherPartyId, required, context, emitFact, sourceMessageId);
+        emitFact({
+          localId: `terms_added_${delta.localId}`.slice(0, 60),
+          kind: "treaty_amended",
+          summary: `${polityName(world, partyId)} and ${polityName(world, otherPartyId)} added to the ${delta.kind.replace(/_/g, " ")} between them: ${delta.terms}`.slice(0, 600),
+          affectedRefs: [{ kind: "polity", id: partyId }, { kind: "polity", id: otherPartyId }],
+          visibility: delta.visibility === "private" ? "polity" : "public",
+          discoveryState: delta.visibility === "private" ? "polity" : "public",
+          knowableInDays: 0,
+          significance: 60,
+        });
+        return {
+          ...added,
+          polityAgreements: added.polityAgreements.map((agreement) => (agreement.id === standing.id
+            ? { ...agreement, terms: `${agreement.terms} ${delta.terms}`.slice(0, 600) }
+            : agreement)),
+        };
+      }
       if (standing !== undefined) {
         reject(`${partyId} and ${otherPartyId} already stand in ${delta.kind}.`);
       }
@@ -4775,12 +5217,45 @@ function applyOne(
         });
       }
       // What the treaty makes happen, carried out as it is made.
-      const bound = carryOutClauses(world, delta.clauses ?? [], agreementId, partyId, otherPartyId, required, context, emitFact);
+      const clauses = delta.kind === "peace" ? [...(delta.clauses ?? []), ...servesInTerms(world, delta.terms, partyId, otherPartyId, delta.clauses ?? [])] : delta.clauses ?? [];
+      const carried = carryOutClauses(world, clauses, agreementId, partyId, otherPartyId, required, context, emitFact, sourceMessageId);
+      // A peace settles what each side holds of the other's (`settleOccupations`).
+      const bound = delta.kind !== "peace" ? carried : { ...carried, map: { ...carried.map, provinces: settleOccupations(carried.map.provinces, partyId, otherPartyId, atStep) } };
       // A power that surrendered in it is no more, and is party to nothing.
-      if ((delta.clauses ?? []).some((clause) => clause.kind === "submission")) return bound;
+      if ((delta.clauses ?? []).some((clause) => clause.kind === "submission")) return {
+        ...bound,
+        storylines: bound.storylines.map((storyline) => {
+          const source = world.diplomacy.find((message) => message.id === sourceMessageId);
+          if (source === undefined || source.toCharacterId === null || storyline.phase === "closed" || storyline.provinceId === null
+            || !storyline.participantIds.includes(source.fromCharacterId) || !storyline.participantIds.includes(source.toCharacterId)) return storyline;
+          const focus = world.map.provinces.find((province) => province.id === storyline.provinceId);
+          const surrendered = (delta.clauses ?? []).some((clause) => clause.kind === "submission"
+            && (focus?.controllerPolityId === clause.polityId || focus?.settlements.some((city) => city.controllerPolityId === clause.polityId)));
+          if (!surrendered) return storyline;
+          return { ...storyline, phase: "closed" as const, updatedAtStep: atStep, closedAtStep: atStep,
+            history: [...storyline.history, delta.reason].slice(-24), nextDevelopment: "The agreed surrender has been carried out." };
+        }),
+        // Keep the signed instrument on record even though surrender ended
+        // one party. Otherwise the accepted offer had no treaty to link to.
+        polityAgreements: [...bound.polityAgreements, { id: agreementId, kind: delta.kind, polityId: fromId, otherPolityId: toId,
+          terms: delta.terms, sinceStep: atStep, untilStep: null, sourceMessageId, status: "ended" as const,
+          endedAtStep: atStep, endedReason: "The surrender terms were carried out; the submitting power ceased to exist.", visibility: delta.visibility }],
+      };
+      // A peace calls off the knives either side had out for the other: an
+      // attempt Decius laid on the consul during the war went ahead a fortnight
+      // after Decius had accepted Rome's terms. Spying goes on.
+      const sides = new Set([partyId, otherPartyId]);
+      const polityOfPerson = (id: string): string | null => bound.characters.find((character) => character.id === id)?.polityId ?? null;
+      const calledOff = delta.kind !== "peace" ? bound.covertPlots : bound.covertPlots.map((plot) => {
+        if (plot.outcome !== null || plot.kind === "espionage") return plot;
+        const by = polityOfPerson(plot.sponsorCharacterId);
+        const at = polityOfPerson(plot.targetCharacterId);
+        return by !== null && at !== null && by !== at && sides.has(by) && sides.has(at) ? { ...plot, outcome: "nothing" as const, resolvedAtStep: atStep } : plot;
+      });
       // What it ends stops being paid on, here as anywhere (`treaties.ts`).
       return endObligationsOfEndedAgreements({
         ...bound,
+        covertPlots: calledOff,
         polityAgreements: [
           ...bound.polityAgreements.map((agreement) =>
             agreement.status === "active" &&
@@ -4907,8 +5382,15 @@ function applyOne(
       }
       // Laid once: the same army at the same city is the siege already under way,
       // and an order naming works for it raises them there.
+      const assaultIf = (next: WorldState, siegeId: string): WorldState => {
+        if (delta.assault !== true) return next;
+        const stormed = assaultSiege(next, siegeId, atStep, context.warfare, context.ids, context.playerCharacterId ?? null);
+        for (const fact of stormed.facts) emitFact(fact);
+        for (const account of stormed.battles) emitAccount(account);
+        return stormed.world;
+      };
       const standing = world.sieges.find((siege) => siege.status === "active" && siege.forceId === forceId && siege.provinceId === province.id && siege.settlementId === (settlement?.id ?? null));
-      if (standing !== undefined) return raiseWorks(world, standing, force, delta.works ?? [], atStep, context, emitFact);
+      if (standing !== undefined) return assaultIf(raiseWorks(world, standing, force, delta.works ?? [], atStep, context, emitFact), standing.id);
       const siegeId = mint("siege", delta.localId);
       emitFact({
         localId: `siege_${siegeId}`.slice(0, 60),
@@ -4926,7 +5408,7 @@ function applyOne(
         startedAtStep: atStep, pressedToStep: atStep, reportedAtStep: atStep,
         pressureBps: 0, awaiting: null, works: [], told: [], status: "active" as const, endedAtStep: null, endedReason: null,
       };
-      return raiseWorks({ ...world, sieges: [...world.sieges, siege] }, siege, force, delta.works ?? [], atStep, context, emitFact);
+      return assaultIf(raiseWorks({ ...world, sieges: [...world.sieges, siege] }, siege, force, delta.works ?? [], atStep, context, emitFact), siege.id);
     }
 
     case "force_provision": {
@@ -5224,6 +5706,24 @@ function applyOne(
       };
     }
 
+    case "capital_set": {
+      const polityId = required(delta.polityRef, "The power designating its capital");
+      const polity = world.map.polities.find((candidate) => candidate.id === polityId);
+      if (polity === undefined || polity.endedAtStep != null) reject(`No surviving power "${polityId}" can designate a capital.`, "reference");
+      const settlement = world.map.provinces.flatMap((province) => province.settlements).find((city) => city.id === delta.settlementId);
+      if (settlement === undefined) reject(`No city "${delta.settlementId}" exists to be the capital.`, "reference");
+      if (settlement.controllerPolityId !== polityId) reject(`${polity.name} does not hold ${settlement.name} and cannot make it its capital.`);
+      if (polity.capitalSettlementId === settlement.id && polity.displacedCapital == null) reject(`${settlement.name} is already ${polity.name}'s capital.`);
+      emitFact({
+        localId: `capital_${polityId}_${atStep}`.slice(0, 60), kind: "capital_relocated",
+        summary: `${polity.name} designated ${settlement.name} as its capital.`,
+        affectedRefs: [{ kind: "polity", id: polityId }, { kind: "settlement", id: settlement.id }],
+        visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 60,
+      });
+      return { ...world, map: { ...world.map, polities: world.map.polities.map((candidate) => candidate.id === polityId
+        ? { ...candidate, capitalSettlementId: settlement.id, displacedCapital: null,
+          ...(candidate.formerCapitalSettlementIds === undefined ? {} : { formerCapitalSettlementIds: candidate.formerCapitalSettlementIds.filter((id) => id !== settlement.id) }) } : candidate) } };
+    }
     case "settlement_control_set": {
       const drawn = world.map.provinces.find((candidate) =>
         candidate.settlements.some((settlement) => settlement.id === delta.settlementId));
@@ -5293,7 +5793,7 @@ function applyOne(
             ? {
               ...candidate,
               settlements,
-              ...(allTaken ? { controllerPolityId: takerId, controlFirmnessBps: Math.min(candidate.controlFirmnessBps, 3_000), lostBy: candidate.controllerPolityId === null ? null : { polityId: candidate.controllerPolityId, atStep } } : {}),
+              ...(allTaken ? { ...takenBy(candidate, takerId, world.polityAgreements), controlFirmnessBps: Math.min(candidate.controlFirmnessBps, 3_000), lostBy: candidate.controllerPolityId === null ? null : { polityId: candidate.controllerPolityId, atStep } } : {}),
             }
             : candidate)),
         },
@@ -5352,11 +5852,27 @@ function applyOne(
       // it; otherwise the taker must already hold ground next to it across a
       // crossing the map admits -- which is how Sicily is taken from Italy and
       // why Gaul is not taken from Latium.
+      const armed = (force: (typeof world.material.forces)[number]): boolean => force.personnel.some((group) => group.fit > 0);
       const standing = world.material.forces.some((force) => force.polityId === takerId && force.locationId === province.id);
-      const held = new Set(world.map.provinces.filter((candidate) => candidate.controllerPolityId === takerId).map((candidate) => candidate.id));
-      const nextToHeldGround = adjacentTo(world, province.id).some(({ provinceId: touches, edge }) => held.has(touches) && crossingAdmitted(world, edge, context.terrains ?? []));
+      // Ground taken today is not yet ground to take more from: counted as
+      // held, one answer of twenty provinces flipped a whole coast from the
+      // one province an army stood in.
+      const before = new Set((context.batchStart ?? world).map.provinces.filter((candidate) => candidate.controllerPolityId === takerId).map((candidate) => candidate.id));
+      const held = new Set(world.map.provinces.filter((candidate) => candidate.controllerPolityId === takerId && candidate.lostBy?.atStep !== atStep && before.has(candidate.id)).map((candidate) => candidate.id));
+      const reach = adjacentTo(world, province.id).filter(({ edge }) => crossingAdmitted(world, edge, context.terrains ?? []));
+      const nextToHeldGround = reach.some(({ provinceId: touches }) => held.has(touches));
       if (!standing && !nextToHeldGround) {
         reject(`${takerId} has no army in ${province.name} and holds no ground next to it, so it cannot take the province.`);
+      }
+      // Ground nobody holds is claimed from next door by saying so. Ground
+      // another power holds is taken by men: an army in it, or one next to it
+      // with nobody of the holder's standing in the way.
+      if (!standing && province.controllerPolityId !== null) {
+        const near = new Set(reach.map(({ provinceId: touches }) => touches));
+        const armyNextDoor = world.material.forces.some((force) => force.polityId === takerId && near.has(force.locationId) && armed(force));
+        const defended = world.material.forces.some((force) => force.polityId === province.controllerPolityId && force.locationId === province.id && armed(force));
+        if (!armyNextDoor) reject(`${takerId} has no army in ${province.name} or next to it; ground another power holds is taken by men, not by saying so.`);
+        if (defended) reject(`${province.name} is held by men of ${province.controllerPolityId}; it is taken by beating them or by a siege, not by saying so.`);
       }
 
       // Ground taken from a people who never answered to a centre is not held
@@ -5375,7 +5891,7 @@ function applyOne(
           ...world.map,
           provinces: world.map.provinces.map((candidate) =>
             candidate.id === province.id
-              ? { ...candidate, controllerPolityId: takerId, controlFirmnessBps: firmness, lostBy: candidate.controllerPolityId === null ? null : { polityId: candidate.controllerPolityId, atStep } }
+              ? { ...candidate, ...takenBy(candidate, takerId, world.polityAgreements), controlFirmnessBps: firmness, lostBy: candidate.controllerPolityId === null ? null : { polityId: candidate.controllerPolityId, atStep } }
               : candidate),
         },
       };
@@ -5536,11 +6052,11 @@ function applyOne(
     case "authority_grant_upsert": {
       const existingId = delta.grantRef === null ? null : required(delta.grantRef, "The authority grant");
       const base = {
-        holder: delta.holder,
+        holder: { ...delta.holder, id: resolve(delta.holder.id) ?? delta.holder.id },
         source: delta.source,
         sourceRef: null,
         domain: delta.domain,
-        scope: delta.scope,
+        scope: { ...delta.scope, id: resolve(delta.scope.id) ?? delta.scope.id },
         powers: delta.powers,
         standing: delta.standing,
         legitimacyBps: 10_000,
@@ -5794,6 +6310,30 @@ type TreatyClause = NonNullable<Extract<WorldDelta, { op: "agreement_open" }>["c
  * A clause between powers who are not both parties to it, or about ground
  * neither of them holds, is refused: a treaty binds the two who made it.
  */
+/**
+ * An army a peace's words put into the other side's service, where no clause
+ * says so: "the Campanian legion serves as a punitive legion for ten years,
+ * maintained by Rome" was written as terms alone, and the legion stayed with
+ * the Campanians. Only a force named in the terms, beside words of service.
+ */
+export function servesInTerms(world: WorldState, terms: string, partyId: string, otherPartyId: string, clauses: readonly TreatyClause[]): TreatyClause[] {
+  if (!/\b(serv(e|es|ed|ing|ice)|enlist\w*|taken into|enters?|pass(es)? (in)?to)\b/i.test(terms)) return [];
+  const words = (text: string): string[] => text.toLowerCase().split(/[^\p{L}]+/u).filter((word) => word.length > 3 && !["legion", "army", "force", "host", "company", "field"].includes(word));
+  const said = new Set(words(terms).map((word) => word.slice(0, 6)));
+  return world.material.forces
+    .filter((force) => force.polityId === partyId || force.polityId === otherPartyId)
+    .filter((force) => !clauses.some((clause) => clause.kind === "force_transfer" && clause.forceRef === force.id))
+    .filter((force) => {
+      const own = words(force.name.replace(/\bof\b.*$/i, ""));
+      // Its name, and then within a few words the service: "the Campanian
+      // legion serves", not a Roman army merely named beside it.
+      return own.length > 0 && own.every((word) => said.has(word.slice(0, 6)))
+        && new RegExp(`${own.at(-1)!.slice(0, 6)}\\p{L}*\\s+(\\S+\\s+){0,4}(serv|enlist|enter|pass|taken)`, "iu").test(terms);
+    })
+    .slice(0, 2)
+    .map((force) => ({ kind: "force_transfer" as const, forceRef: force.id, toPolityId: force.polityId === partyId ? otherPartyId : partyId }));
+}
+
 function carryOutClauses(
   world: WorldState,
   clauses: readonly TreatyClause[],
@@ -5803,6 +6343,7 @@ function carryOutClauses(
   required: (ref: string, label: string) => string,
   context: ApplyContext,
   emitFact: (fact: FactProposalDraft) => void,
+  sourceMessageId: string | null = null,
 ): WorldState {
   const parties = new Set([partyId, otherPartyId]);
   const otherOf = (id: string): string => (id === partyId ? otherPartyId : partyId);
@@ -5844,7 +6385,9 @@ function carryOutClauses(
       const toId = required(clause.toPolityId, "The power the province is ceded to");
       const province = next.map.provinces.find((candidate) => candidate.id === clause.provinceId);
       if (province === undefined) reject(`No province "${clause.provinceId}" exists to be ceded.`, "reference");
-      if (!parties.has(toId) || province.controllerPolityId === null || !parties.has(province.controllerPolityId) || province.controllerPolityId === toId) {
+      // Ceded by whoever owns it: occupied ground is still its owner's to give.
+      const giver = ownerOf(province);
+      if (!parties.has(toId) || giver === null || !parties.has(giver) || giver === toId) {
         reject(`${province.name} is not ${name(otherOf(toId))}'s to cede to ${name(toId)} under this treaty.`);
       }
       next = {
@@ -5855,10 +6398,11 @@ function carryOutClauses(
             ? {
               ...candidate,
               controllerPolityId: toId,
+              ownerPolityId: null,
               controlFirmnessBps: 6_000,
-              settlements: candidate.settlements.map((settlement) => (settlement.controllerPolityId === province.controllerPolityId ? { ...settlement, controllerPolityId: toId } : settlement)),
+              settlements: candidate.settlements.map((settlement) => (settlement.controllerPolityId === province.controllerPolityId || settlement.controllerPolityId === giver ? { ...settlement, controllerPolityId: toId } : settlement)),
               // Its people were not asked, and remember who they belonged to.
-              yearning: { polityId: province.controllerPolityId!, bps: 3_000, updatedAtStep: next.elapsedStep },
+              yearning: { polityId: giver!, bps: 3_000, updatedAtStep: next.elapsedStep },
               lostBy: null,
             }
             : candidate)),
@@ -5876,15 +6420,100 @@ function carryOutClauses(
       });
       continue;
     }
+    // An army handed over by the treaty: the peace made with the Campanians
+    // of Rhegium put their legion into ten years of Roman service, and the
+    // legion stayed Decius's -- the order waiting for it could never begin.
+    if (clause.kind === "force_transfer") {
+      const toId = required(clause.toPolityId, "The power the army passes to");
+      const forceId = required(clause.forceRef, "The army handed over");
+      const force = next.material.forces.find((candidate) => candidate.id === forceId);
+      if (force === undefined) reject(`No force "${forceId}" exists to be handed over.`, "reference");
+      if (!parties.has(toId) || !parties.has(force.polityId) || force.polityId === toId) reject(`${force.name} is not ${name(otherOf(toId))}'s to hand to ${name(toId)} under this treaty.`);
+      // Who takes it: the man on the receiving side who wrote the terms,
+      // else that power's head.
+      const letter = sourceMessageId === null ? undefined : next.diplomacy.find((message) => message.id === sourceMessageId);
+      const writers = letter === undefined ? [] : [letter.fromCharacterId, letter.toCharacterId];
+      const government = { offices: context.offices, successionRules: context.successionRules ?? [] };
+      const receiver = writers.map((id) => next.characters.find((character) => character.id === id && character.alive && character.polityId === toId)).find((character) => character !== undefined)
+        ?? rulerOf(next, toId, government) ?? null;
+      next = {
+        ...next,
+        material: {
+          ...next.material,
+          forces: next.material.forces.map((candidate) => candidate.id !== force.id ? candidate : {
+            ...candidate,
+            polityId: toId,
+            controllerCharacterId: receiver?.id ?? candidate.controllerCharacterId,
+            commanderCharacterId: receiver?.id ?? candidate.commanderCharacterId,
+          }),
+        },
+      };
+      emitFact({
+        localId: `handed_over_${force.id}`.slice(0, 60),
+        kind: "force_handed_over",
+        summary: `By the treaty, ${force.name} passed into the service of ${name(toId)}${receiver === null ? "" : `, under ${receiver.name}`}.`.slice(0, 600),
+        affectedRefs: [{ kind: "force", id: force.id }, { kind: "polity", id: toId }, { kind: "polity", id: otherOf(toId) }, ...(receiver === null ? [] : [{ kind: "character" as const, id: receiver.id }])],
+        visibility: "public",
+        discoveryState: "public",
+        knowableInDays: 0,
+        significance: 55,
+      });
+      continue;
+    }
     if (clause.kind === "submission") {
       const submitting = required(clause.polityId, "The power surrendering");
       const to = required(clause.toPolityId, "The power it surrenders to");
       if (!parties.has(submitting) || !parties.has(to) || submitting === to) reject(`${name(submitting)} can only give itself up to the other party to this treaty.`, "reference");
       // A power gives itself up to a power that has beaten it, and to no other.
-      if (!warStanding(next, to, submitting).dictates) reject(`${name(submitting)} has not been beaten by ${name(to)}, and will not give itself up to it.`);
-      const ended = endPolity(next, submitting, "absorbed", to, next.elapsedStep);
+      const accepted = world.diplomacy.find((message) => message.id === sourceMessageId && message.answer === "accepted"
+        && parties.has(message.fromPolityId) && parties.has(message.toPolityId)
+        && message.clauses?.some((offered) => offered.kind === "submission" && offered.polityId === clause.polityId && offered.toPolityId === clause.toPolityId));
+      if (accepted === undefined && !warStanding(next, to, submitting).dictates) reject(`${name(submitting)} has not been beaten by ${name(to)}, and will not give itself up to it.`);
+      // Asked by letter and never fought over: a union, not a surrender.
+      const fought = next.polityAgreements.some((agreement) => agreement.kind === "war"
+        && ((agreement.polityId === to && agreement.otherPolityId === submitting) || (agreement.polityId === submitting && agreement.otherPolityId === to)));
+      const ended = endPolity(next, submitting, "absorbed", to, next.elapsedStep, accepted !== undefined && !fought);
       next = ended.world;
       for (const fact of ended.facts) emitFact(fact);
+      continue;
+    }
+    if (clause.kind === "undertaking") {
+      const by = required(clause.byPolityId, "The power taking it on");
+      if (!parties.has(by)) reject(`${name(by)} is not party to this treaty and takes nothing on under it.`, "reference");
+      const government = { offices: context.offices, successionRules: context.successionRules ?? [] };
+      // A garrison can negotiate through its named commander without having
+      // a constitutional ruler. Keep the people who signed, before surrender
+      // dissolves its offices and changes their polity.
+      const instrument = world.diplomacy.find((message) => message.id === sourceMessageId && message.answer === "accepted");
+      const representativeOf = (polityId: string) => {
+        const id = instrument?.fromPolityId === polityId ? instrument.fromCharacterId : instrument?.toPolityId === polityId ? instrument.toCharacterId : null;
+        return world.characters.find((character) => character.id === id && character.alive && character.polityId === polityId) ?? null;
+      };
+      const promisor = rulerOf(world, by, government) ?? representativeOf(by);
+      const beneficiary = rulerOf(world, otherOf(by), government) ?? representativeOf(otherOf(by));
+      if (promisor === null || beneficiary === null) reject(`An undertaking is somebody's word: ${promisor === null ? name(by) : name(otherOf(by))} has nobody at its head to give or take it.`, "reference");
+      next = {
+        ...next,
+        commitments: [...next.commitments, {
+          id: context.ids.next("commitment"),
+          promisorCharacterId: promisor.id,
+          beneficiaryCharacterId: beneficiary.id,
+          actionKind: clause.duty,
+          description: `Under the treaty: ${clause.what}`.slice(0, 400),
+          conditions: "",
+          form: "do" as const,
+          requiredOfficeId: null,
+          requiredResource: null,
+          visibility: "public" as const,
+          sourceEventId: agreementId,
+          breachPressureKind: "political_danger" as const,
+          status: "pending" as const,
+          createdAtStep: next.elapsedStep,
+          reviewAtStep: next.elapsedStep + clause.withinDays,
+          resolvedAtStep: null,
+          resolutionReason: null,
+        }],
+      };
       continue;
     }
     const hostageId = required(clause.characterRef, "The hostage");

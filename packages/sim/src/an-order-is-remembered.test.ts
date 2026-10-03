@@ -83,7 +83,7 @@ describe("an order, part by part", () => {
     expect(order.parts).toHaveLength(2);
     const [crossing, audit] = order.parts;
     expect(crossing!.workRefs.some((ref) => ref.kind === "project")).toBe(true);
-    expect(orderPartStatus(result.world, crossing!)).toBe("started");
+    expect(orderPartStatus(result.world, crossing!)).toBe("under_way");
     // Nothing was written for the second part, and it says so.
     expect(orderPartStatus(result.world, audit!)).toBe("unanswered");
   });
@@ -141,16 +141,22 @@ describe("a part that waited on a vote", () => {
       orders: [{
         id: "order-waiting", actorCharacterId: ACTOR, text: "Seek leave and carry the legion over.", givenAtStep: 0,
         parts: [{
-          said: "Carry Legio I to Messana once the Senate gives leave", workRefs: [{ kind: "procedure", id: voteId }], refusal: "It needs the Senate's leave.",
-          note: null, whyNot: null, factIds: [], waitingOnProcedureId: voteId, closedAtStep: null,
-          retry: { op: "force_modify", forceRef: "roman-field-army", locationId: MESSANA, fleetRefs: ["roman-navy"], reason: "Carry Legio I over." },
+          said: "Carry Legio I to Messana once the Senate gives leave", workRefs: [{ kind: "procedure", id: voteId }], refusal: null,
+          goals: [{ kind: "force_at", forceId: "roman-field-army", provinceId: MESSANA }], spend: null, attribution: "tagged",
+          note: null, whyNot: null, factIds: [], closedAtStep: null,
+          stages: [{
+            held: { op: "force_modify", forceRef: "roman-field-army", locationId: MESSANA, fleetRefs: ["roman-navy"], reason: "Carry Legio I over." },
+            waitsOn: [{ kind: "procedure_passed", procedureId: voteId }], status: "waiting", reason: null,
+          }],
         }],
       }],
     };
     const result = await runSimulationBurst({ ...input(scripted({})), world: { ...waiting, instant: { day: 1, minute: 540 }, elapsedStep: 1 }, orderText: null, burstId: "resumed" });
     const part = result.world.orders[0]!.parts[0]!;
-    expect(part.retry).toBeNull();
+    expect(part.stages[0]!.status).toBe("resumed");
     expect(part.workRefs.some((ref) => ref.kind === "project")).toBe(true);
+    // Allowed and set going, not done: the legion is not in Messana yet.
+    expect(orderPartStatus(result.world, part)).toBe("under_way");
     expect(result.newFacts.some((fact) => fact.kind === "order_resumed")).toBe(true);
   });
 });

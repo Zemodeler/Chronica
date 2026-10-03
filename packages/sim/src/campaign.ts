@@ -15,7 +15,9 @@ import {
   type Force,
   type ProvinceMaterial,
   type ScenarioWarfareRules,
+  type WarfareRules,
   type WorldState,
+  forceLever,
 } from "@chronica/shared";
 
 /**
@@ -66,6 +68,8 @@ const EATEN_AT_HOME_BPS = 1_000;
 const EATEN_FORAGING_BPS = 4_000;
 /** A province hungrier than this feeds no army, its own included. */
 const FAMINE_BPS = 1_500;
+/** A power feeds its own army from more than the one province it stands in: a camp is never reckoned to eat a tiny province bare. */
+const HOME_SUPPLY_MEN_PER_HEAD = 40;
 /** An army smaller than this is a garrison, and does not sicken as a camp does. */
 const CAMP_SIZE = 5_000;
 /** A fleet at sea in winter: its chance of being caught by a storm on a given day, in basis points. */
@@ -75,6 +79,25 @@ const RESTED_BPS = 7_000;
 
 const fitOf = (force: Force): number => force.personnel.reduce((sum, group) => sum + group.fit, 0);
 const clampBps = (value: number): number => Math.max(0, Math.min(10_000, Math.round(value)));
+/**
+ * Where a rested, paid and fed army's morale and cohesion settle: 7 000 for
+ * raw men, up to two thousand more for men drilled and seasoned to the full.
+ */
+export function restedCeilingOf(force: Force): number {
+  const formations = force.formations ?? [];
+  const men = force.personnel.reduce((sum, row) => sum + row.fit, 0);
+  if (formations.length === 0 || men <= 0) return RESTED_BPS;
+  let training = 0;
+  let experience = 0;
+  for (const row of force.personnel) {
+    const formation = formations.find((candidate) => candidate.id === row.formationId);
+    if (formation === undefined) continue;
+    training += formation.trainingBps * row.fit;
+    experience += formation.experienceBps * row.fit;
+  }
+  return Math.min(10_000, Math.round(RESTED_BPS + (training / men) * 0.12 + (experience / men) * 0.08));
+}
+
 /** Days of (a, b] that fall inside (c, d]. */
 const overlap = (a: number, b: number, c: number, d: number): number => Math.max(0, Math.min(b, d) - Math.max(a, c));
 
@@ -211,11 +234,13 @@ export function keepTheField(input: KeepTheFieldInput): { world: WorldState; fac
       // Whatever feeds an army is eaten: its own country a little, a
       // country it forages a great deal, and an enemy's with the burning
       // that foraging in it is.
+      // An army taught to live on less (`supply_need`) eats less of the country.
+      const need = Math.max(0.5, Math.min(1.5, 1 - forceLever(input.warfare as WarfareRules | undefined, force, "supply_need")));
       if (source === "home" && material !== undefined && material.population > 0) {
-        const eaten = Math.min(1_500, Math.round((days * EATEN_AT_HOME_BPS * men) / people));
+        const eaten = Math.min(1_500, Math.round((days * EATEN_AT_HOME_BPS * men * need) / Math.max(people, men * HOME_SUPPLY_MEN_PER_HEAD)));
         if (eaten > 0) strip(force.locationId, eaten, 0, 0, 0);
       } else if (source === "forage") {
-        const eaten = Math.min(3_000, Math.round((days * EATEN_FORAGING_BPS * men) / people));
+        const eaten = Math.min(3_000, Math.round((days * EATEN_FORAGING_BPS * men * need) / people));
         const holder = world.map.provinces.find((province) => province.id === force.locationId)?.controllerPolityId ?? null;
         if (hostile(force, holder)) strip(force.locationId, eaten, Math.round(eaten / 2), Math.round(eaten / 3), Math.round(eaten / 2));
         else strip(force.locationId, eaten, 0, Math.round(eaten / 4), 0);
@@ -240,7 +265,11 @@ export function keepTheField(input: KeepTheFieldInput): { world: WorldState; fac
         const lost = Math.min(Math.floor(men * 0.3), Math.floor(men * starvingDays * 0.004));
         const walked = Math.floor(lost * 0.6);
         force = takeMen(takeMen(force, lost - walked, "attrition_death", toDay, "hunger"), walked, "desertion", toDay, "hunger");
-        if (lost > 0) say("force_starving", force, `${force.name} is starving in ${place}: ${lost - walked} men have died of hunger and ${walked} have slipped away to find food.`, 65);
+        // Said when the hunger begins and once a month after: every tick of it
+        // once filled a turn's record with the same army starving.
+        const starvingFrom = through + STARVING_AFTER_DAYS;
+        const monthOf = (day: number): number => Math.floor((day - starvingFrom) / 30);
+        if (lost > 0 && (since < starvingFrom || monthOf(toDay) > monthOf(since))) say("force_starving", force, `${force.name} is starving in ${place}: ${lost - walked} men have died of hunger and ${walked} have slipped away to find food.`, 65);
       } else if (status !== before && status === "shortage") {
         say("force_short", force, penned.has(force.id)
           ? `${force.name} has eaten the bread it carried and is on short rations in its camp at ${place}: penned there by the enemy, its foragers cannot go out.`
@@ -309,7 +338,10 @@ export function keepTheField(input: KeepTheFieldInput): { world: WorldState; fac
         const commander = world.characters.find((character) => character.id === force.commanderCharacterId && character.alive);
         const quarters = winter && source === "home" ? 2 : 1;
         const hand = 1 + (commander === undefined ? 0 : skillShare(aptitude(commander, "authority"), 0.5));
-        const back = (value: number, perDay: number): number => (value >= RESTED_BPS ? value : Math.min(RESTED_BPS, value + Math.round(days * perDay * quarters * hand)));
+        // Drilled and seasoned men settle steadier than raw ones
+        // (`restedCeilingOf`): rest alone brought every army to the same 7 000.
+        const ceiling = restedCeilingOf(force);
+        const back = (value: number, perDay: number): number => (value >= ceiling ? value : Math.min(ceiling, value + Math.round(days * perDay * quarters * hand)));
         force = { ...force, moraleBps: back(force.moraleBps, 25), cohesionBps: back(force.cohesionBps, 20) };
       }
     }

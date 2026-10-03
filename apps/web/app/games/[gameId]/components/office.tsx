@@ -87,6 +87,8 @@ export function Office({
             alt=""
             aria-hidden="true"
             draggable={false}
+            fetchPriority="high"
+            decoding="async"
             width={ROOM_WIDTH}
             height={ROOM_HEIGHT}
           />

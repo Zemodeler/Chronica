@@ -54,6 +54,8 @@ export interface PoliticalMapState {
   readonly borderSegments: readonly PoliticalBorderSegment[];
   /** Each ally and the power it follows, so the map can paint a confederation as one family of colours. */
   readonly leaderByPolity: ReadonlyMap<string, string>;
+  /** Provinces held by somebody other than their owner, and who holds them: striped over the owner's colour. */
+  readonly occupierByProvince?: ReadonlyMap<string, string>;
 }
 export interface PoliticalOverlayInput { readonly polities: DynamicMapOverlay["polities"]; readonly provinces: DynamicMapOverlay["provinces"]; readonly politicalRelations?: DynamicMapOverlay["politicalRelations"]; }
 
@@ -303,14 +305,21 @@ export function derivePoliticalMapState(
   const ownerByProvince = new Map<string, string | null>(world.provinces.map((province) => [province.id, null]));
   const leaderByPolity = leadersOf(overlay?.politicalRelations ?? []);
   if (!overlay) return { ownerByProvince, leaderByPolity, territories: [], borderSegments: world.sharedBoundaries.map((boundary) => classified(boundary, boundary.provinceB === null ? edgeWithoutNeighbour(boundary, isSea) : "internal_province")) };
-  for (const province of overlay.provinces) if (world.provinceById.has(province.provinceId)) ownerByProvince.set(province.provinceId, province.controllerPolityId);
+  // Painted by whose it is: an occupied province keeps its owner's colour and
+  // borders, and carries the occupier's stripes (`occupierByProvince`).
+  const occupierByProvince = new Map<string, string>();
+  for (const province of overlay.provinces) {
+    if (!world.provinceById.has(province.provinceId)) continue;
+    ownerByProvince.set(province.provinceId, province.ownerPolityId ?? province.controllerPolityId);
+    if (province.ownerPolityId != null && province.controllerPolityId !== null && province.controllerPolityId !== province.ownerPolityId) occupierByProvince.set(province.provinceId, province.controllerPolityId);
+  }
   // A geometry polygon with no gameplay province of its own (several tribal
   // provinces merged onto one real region -- see geometryAliases) never gets
   // an owner from the loop above, since no overlay province carries its
   // exact id. It would otherwise render as permanently unclaimed inside an
   // otherwise fully owned nation. Borrow the controller of any gameplay
   // province known to alias onto it instead.
-  const controllerByGameplayId = new Map(overlay.provinces.map((province) => [province.provinceId, province.controllerPolityId]));
+  const controllerByGameplayId = new Map(overlay.provinces.map((province) => [province.provinceId, province.ownerPolityId ?? province.controllerPolityId]));
   for (const [gameplayId, geometryId] of geometryAliases ?? []) {
     if (ownerByProvince.get(geometryId) != null) continue;
     if (!world.provinceById.has(geometryId)) continue;
@@ -332,5 +341,5 @@ export function derivePoliticalMapState(
     const remaining = new Set(owned); const components: TerritorialComponent[] = []; while (remaining.size) components.push(componentFor(remaining.values().next().value as string, remaining, world)); components.sort((a, b) => b.totalArea - a.totalArea || a.provinceIds[0]!.localeCompare(b.provinceIds[0]!)); const primaryComponent = components[0]!; const componentLabels = components.map((component) => labelGeometry(component, world, name)); territories.push({ polityId, name, colour: politicalColourFromId(polityId), components, primaryComponent, label: componentLabels[0]!, componentLabels });
   }
   const borderSegments = world.sharedBoundaries.map((boundary) => { if (boundary.provinceB === null) return classified(boundary, edgeWithoutNeighbour(boundary, isSea)); const a = ownerByProvince.get(boundary.provinceA) ?? null; const b = ownerByProvince.get(boundary.provinceB) ?? null; return classified(boundary, a !== b ? "country_border" : "internal_province"); });
-  return { ownerByProvince, leaderByPolity, territories: territories.sort((a, b) => b.label.priority - a.label.priority), borderSegments };
+  return { ownerByProvince, leaderByPolity, occupierByProvince, territories: territories.sort((a, b) => b.label.priority - a.label.priority), borderSegments };
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, type MouseEvent, type ReactNode } from "react";
 import { TipRoot } from "./tip";
+import { useWindowReference, useWindowState } from "./window-workspace";
 
 /**
  * A document laid over the room.
@@ -34,6 +35,7 @@ export function Sheet({
   onClose,
   actions,
   className,
+  reference = true,
   children,
 }: {
   /** What a screen reader calls it, and what its close button closes. */
@@ -48,9 +50,15 @@ export function Sheet({
   /** Anything that belongs in the header beside the title. */
   readonly actions?: ReactNode;
   readonly className?: string;
+  readonly reference?: boolean;
   readonly children: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const body = useRef<HTMLDivElement>(null);
+  const workspace = useWindowReference();
+  const [scroll, setScroll] = useWindowState(`scroll:${label}`, 0);
+  const rememberedScroll = useRef(scroll);
+  rememberedScroll.current = scroll;
   // Closing by Escape fires the dialog's own close event; closing because the
   // parent said so must not report it back as if the player had.
   const wanted = useRef(open);
@@ -67,6 +75,7 @@ export function Sheet({
       // reader starts at its content and Tab reaches every control from there.
       const wantsFocus = dialog.querySelector<HTMLElement>("[data-autofocus]") ?? dialog.querySelector<HTMLElement>(".sheet__body");
       wantsFocus?.focus({ preventScroll: true });
+      requestAnimationFrame(() => { if (body.current !== null) body.current.scrollTop = rememberedScroll.current; });
     }
     if (!open && dialog.open) dialog.close();
   }, [open]);
@@ -89,11 +98,14 @@ export function Sheet({
     `sheet--${side}`,
     tone === "papyrus" ? "sheet--papyrus on-papyrus" : "sheet--umber",
     className,
+    reference && workspace?.content ? "sheet--with-reference" : undefined,
   ].filter(Boolean).join(" ");
 
   return (
     <dialog ref={ref} className={classes} aria-label={label} onClose={reportClose} onClick={onBackdrop}>
+      <div className="sheet__workspace">
       <div className="sheet__frame">
+        {workspace?.navigation && <nav className="sheet__navigation" aria-label="Office documents">{workspace.navigation}</nav>}
         <header className="sheet__header">
           <div className="sheet__heading">
             <h2 className="sheet__title">{title}</h2>
@@ -104,7 +116,9 @@ export function Sheet({
         </header>
         {/* Reachable by Tab, so a document too long for the sheet can be
             scrolled from the keyboard even when it holds no controls. */}
-        <div className="sheet__body" tabIndex={0}><TipRoot>{children}</TipRoot></div>
+        <div ref={body} className="sheet__body" tabIndex={0} onScroll={(event) => setScroll(event.currentTarget.scrollTop)}><TipRoot>{children}</TipRoot></div>
+      </div>
+      {reference && workspace?.content}
       </div>
     </dialog>
   );

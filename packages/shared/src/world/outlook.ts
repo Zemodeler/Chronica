@@ -55,7 +55,10 @@ export function outlookFor(outlooks: readonly PolityOutlook[], polityId: string 
 
 const WAR_CONCERN = (enemy: string): string => `the war with ${enemy}`;
 const WAR_INTENTION = (enemy: string): string => `press the war with ${enemy} wherever their armies and ground can be reached`;
-const WAR_MARK = /^(the war with |press the war with )/;
+/** A war that is the leader's, not its own: an ally bound by foedus sends men to it and makes no war of its own. */
+const LEADERS_WAR_CONCERN = (enemy: string, leader: string): string => `the war with ${enemy}, which is ${leader}'s`;
+const LEADERS_WAR_INTENTION = (enemy: string, leader: string): string => `send its men to ${leader}'s war with ${enemy} when ${leader} calls for them`;
+const WAR_MARK = /^(the war with |press the war with |send its men to )/;
 
 /**
  * A government's aims, kept true to the wars it is in.
@@ -73,13 +76,26 @@ export function aimsAtWar(
   enemiesOf: (polityId: string) => readonly string[],
   nameOf: (polityId: string) => string,
   atStep: number,
+  /**
+   * Whose wars these are. The Italian allies pulled into Rome's war with
+   * Rhegium were each told to "press the war wherever their armies can be
+   * reached" -- seven peoples who make no war of their own, with that as the
+   * only thing their governments wanted, for a year. A war that is the
+   * leader's is a contingent to send, not a war to press.
+   */
+  sides?: { readonly leaderOf: (polityId: string) => string | null; readonly ownEnemiesOf: (polityId: string) => readonly string[] },
 ): PolityOutlook[] {
   return outlooks.map((outlook) => {
-    const enemies = enemiesOf(outlook.polityId).map(nameOf);
+    const enemyIds = enemiesOf(outlook.polityId);
+    const leader = sides?.leaderOf(outlook.polityId) ?? null;
+    const own = new Set(sides === undefined || leader === null ? enemyIds : sides.ownEnemiesOf(outlook.polityId));
+    const enemies = enemyIds.map(nameOf);
     const concerns = outlook.concerns.filter((concern) => !WAR_MARK.test(concern.label));
     const intentions = outlook.intentions.filter((intention) => !WAR_MARK.test(intention));
-    const warConcerns = enemies.map((enemy) => ({ label: WAR_CONCERN(enemy), level: "high" as const }));
-    const warIntentions = enemies.map(WAR_INTENTION);
+    const warConcerns = enemyIds.map((id) => own.has(id)
+      ? { label: WAR_CONCERN(nameOf(id)), level: "high" as const }
+      : { label: LEADERS_WAR_CONCERN(nameOf(id), nameOf(leader!)).slice(0, 160), level: "medium" as const });
+    const warIntentions = enemyIds.map((id) => (own.has(id) ? WAR_INTENTION(nameOf(id)) : LEADERS_WAR_INTENTION(nameOf(id), nameOf(leader!)).slice(0, 200)));
     const next = {
       ...outlook,
       concerns: [...warConcerns, ...concerns].slice(0, 6),

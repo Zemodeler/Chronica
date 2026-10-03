@@ -16,6 +16,7 @@ import type { BattleAccount } from "../battle";
 import type { IdFactory } from "../ports";
 
 export interface ApplyContext {
+  readonly atomicGroups?: readonly (readonly WorldDelta[])[] | undefined;
   readonly now: WorldInstant;
   /** Who is acting. Authority is judged against this, and it is never the model's to choose. */
   readonly actorRef: OrderPartyRef;
@@ -81,6 +82,17 @@ export interface ApplyContext {
    */
   readonly orderDeltas?: ReadonlySet<WorldDelta> | undefined;
   /**
+   * Acts the chamber whose question they waited on has carried: the vote is
+   * their authority. A senator's war, moved in the Senate and voted, is the
+   * Republic's war, though no office of his makes war.
+   */
+  readonly sanctionedDeltas?: ReadonlySet<WorldDelta> | undefined;
+  /**
+   * The world as the batch found it. Ground taken earlier in the same answer
+   * is not ground to take more from: counted, twenty rows flipped a coast.
+   */
+  readonly batchStart?: WorldState | undefined;
+  /**
    * Whose life is the game. A duel or a death that would take the player has
    * to be the player's own act, or follow from something they let happen --
    * captivity -- and never another man's decision alone.
@@ -98,7 +110,11 @@ export interface ApplyContext {
 }
 
 export interface AppliedDelta {
+  /** False for an idempotent operation; it is not work or plan progress. */
+  readonly changed?: boolean;
   readonly delta: WorldDelta;
+  /** The act as it was handed in, before its gaps were filled: what the answer that wrote it can find it by. */
+  readonly written?: WorldDelta;
   readonly authority: AuthorityCheckResult;
   /** Whether it was one of the order's own acts. */
   readonly ofTheOrder?: boolean | undefined;
@@ -106,6 +122,8 @@ export interface AppliedDelta {
 
 export interface RejectedDelta {
   readonly delta: WorldDelta;
+  /** The act as it was handed in. */
+  readonly written?: WorldDelta;
   readonly reason: string;
   /**
    * "world" means the world genuinely could not comply -- the treasury was

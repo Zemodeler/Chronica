@@ -67,6 +67,15 @@ export function whatComesNext(
     add(`seat:${seat.seatId}`, seatById.get(seat.seatId)?.termExpiresAtStep ?? null, `Your term as ${seat.office.label} ends`, false);
   }
 
+  // Your command, held past your office: when it passes on, or runs out.
+  for (const hold of world.commandHolds ?? []) {
+    if (hold.status !== "active" || hold.characterId !== characterId) continue;
+    const army = world.material.forces.find((force) => force.id === hold.forceIds[0])?.name ?? "your army";
+    const successor = world.characters.find((character) => character.id === hold.successorCharacterId)?.name;
+    if (hold.basis === "awaiting_successor") add(`hold:${hold.id}`, hold.untilStep, clip(`${successor ?? "Your successor"} arrives to take over ${army}`), false);
+    if (hold.basis === "prorogued") add(`hold:${hold.id}`, hold.untilStep, clip(`Your prorogued command of ${army} runs out`), false);
+  }
+
   // The business of bodies you sit in, or that you are party to; and your own
   // power's public business, which any citizen would hear of.
   for (const procedure of world.material.politicalProcedures) {

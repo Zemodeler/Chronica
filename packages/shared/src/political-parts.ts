@@ -25,6 +25,42 @@ export const GovernmentFormSchema = z.enum([
 ]).meta({ id: "GovernmentForm" });
 export type GovernmentForm = z.infer<typeof GovernmentFormSchema>;
 
+/**
+ * How long a commander holds his army, and what ends it -- a part of a
+ * constitution like any other.
+ *
+ * - `annual_prorogable`: a magistrate commands for his year; the chamber may
+ *   extend it (prorogation), else his successor takes the army when he
+ *   reaches it. Rome.
+ * - `annual_no_iteration`: a year, never extended, and not twice running. The
+ *   Achaean League's general.
+ * - `at_pleasure`: as long as the ruler wants him. A king's general.
+ * - `indefinite_answerable`: as long as the war needs him, and he answers for
+ *   it before a court when it goes wrong. Carthage, and its Hundred and Four.
+ */
+export const CommandTenureSchema = z.enum(["annual_prorogable", "annual_no_iteration", "at_pleasure", "indefinite_answerable"]).meta({ id: "CommandTenure" });
+export type CommandTenure = z.infer<typeof CommandTenureSchema>;
+
+/** A form's seed for how long its commanders command, where nothing more is said. */
+export function defaultCommandTenure(form: GovernmentForm): CommandTenure {
+  switch (form) {
+    case "oligarchic_republic":
+    case "popular_republic":
+      return "annual_prorogable";
+    case "league":
+      return "annual_no_iteration";
+    default:
+      return "at_pleasure";
+  }
+}
+
+export const COMMAND_TENURE_IN_WORDS: Record<CommandTenure, string> = {
+  annual_prorogable: "a commander holds his army for his year of office; the chamber may extend it, and otherwise his successor takes it over when he arrives",
+  annual_no_iteration: "a commander holds his army for one year, never extended, and may not hold it two years running",
+  at_pleasure: "a commander holds his army for as long as the ruler wishes",
+  indefinite_answerable: "a commander holds his army for as long as the war needs him, and answers for defeat before a court",
+};
+
 export const GOVERNMENT_FORM_IN_WORDS: Record<GovernmentForm, string> = {
   monarchy: "a monarchy",
   oligarchic_republic: "a republic of the great houses",

@@ -153,7 +153,7 @@ describe("everyone you know, and what you know of them", () => {
       recipientDecisionReason: null, issuedAtStep: 1,
       // Only a terminal status records when it was decided; "delayed" is still open.
       decidedAtStep: status === "refused" ? 2 : null,
-      consequenceFactRefs: [],
+      consequenceFactRefs: [], servesRef: null,
     });
     const ordered = WorldStateSchema.parse({
       ...state,

@@ -50,7 +50,8 @@ describe("what the player's orders are doing", () => {
     const costly = project(state, player.id, {
       milestones: [{ id: "enrol", label: "Enrolment in Latium", requiredAtElapsedOffset: 18, costAmount: 500, status: "pending" }],
     });
-    const levy = ordersUnderWay({ ...state, projects: [costly] }, player.id, offices, clock).find((item) => item.key === "project:levy")!;
+    const short: WorldState = { ...state, material: { ...state.material, accounts: state.material.accounts.map((account) => account.owner.kind === "character" && account.owner.id === player.id ? { ...account, balance: 0 } : account) } };
+    const levy = ordersUnderWay({ ...short, projects: [costly] }, player.id, offices, clock).find((item) => item.key === "project:levy")!;
     expect(levy.stalled).toBe(true);
     expect(levy.detail).toContain("will not cover");
   });
@@ -74,4 +75,18 @@ describe("what the player's orders are doing", () => {
     const items = ordersUnderWay({ ...state, projects: [theirs] }, player.id, offices, clock);
     expect(items.some((item) => item.label.includes("secret"))).toBe(false);
   });
+});
+
+
+it("shows a crossing and its assembly as one operation", () => {
+  const state = world(); const player = consul(state);
+  const army = state.material.forces.find((force) => force.id === "roman-field-army")!;
+  const fleet = state.material.forces.find((force) => force.id === "allied-greek-hulls")!;
+  const shore = army.locationId;
+  const crossing = project(state, player.id, { id: "crossing", kind: "crossing", label: "Cross to Messana", completionOutcome: { kind: "force_move", label: "Arrives", forceId: army.id, provinceId: "sic-q659z", fleetIds: [fleet.id], embarkProvinceId: shore } });
+  const march = project(state, player.id, { id: "assembly-march", kind: "march", completionOutcome: { kind: "force_move", label: "Assemble", forceId: army.id, provinceId: shore } });
+  const sailing = project(state, player.id, { id: "assembly-sailing", kind: "sailing", completionOutcome: { kind: "force_move", label: "Assemble", forceId: fleet.id, provinceId: shore } });
+  const items = ordersUnderWay({ ...state, projects: [crossing, march, sailing] }, player.id, offices, clock);
+  expect(items.filter((item) => item.kind === "march")).toHaveLength(1);
+  expect(items.find((item) => item.key === "march:crossing")?.detail).toContain("assembling");
 });

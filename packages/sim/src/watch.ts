@@ -1,4 +1,4 @@
-import { atWar, deriveRelationDimension, provinceLevel, type MechanicPredicate, type WorldState } from "@chronica/shared";
+import { negotiationIssue, atWar, deriveRelationDimension, provinceLevel, type MechanicPredicate, type WorldState } from "@chronica/shared";
 
 /**
  * Evaluating what the ruler asked to be woken for (VISION §23's
@@ -38,6 +38,8 @@ const fitStrength = (force: { readonly personnel: readonly { readonly fit: numbe
  */
 function lettersAnswered(predicate: Extract<MechanicPredicate, { kind: "letter_answered" }>, world: WorldState): number {
   return world.diplomacy.filter((message) => message.status === "answered"
+    && (predicate.messageId === undefined || message.id === predicate.messageId)
+    && (predicate.issueKey === undefined || negotiationIssue(message) === predicate.issueKey.toLowerCase())
     && message.fromPolityId === predicate.fromPolityId && message.toPolityId === predicate.toPolityId
     && (predicate.answer === undefined
       || (predicate.answer === "accepted" ? message.answer === "accepted" : message.answer === "refused" || message.answer === "ignored"))).length;

@@ -54,6 +54,26 @@ export type FactProposal = z.infer<typeof FactProposalSchema>;
 /** The same, before defaults: what the engine itself writes when it records a consequence the model did not author. */
 export type FactProposalDraft = z.input<typeof FactProposalSchema>;
 
+/**
+ * A goal as the orchestrator names it: by refs, resolved by the engine. Only
+ * the goals the acts cannot say for themselves -- a march already under way
+ * says where it is going.
+ */
+export const OrderGoalProposalSchema = z.object({
+  /**
+   * - "force_at": "ref" (an army) stands in "at" (a province).
+   * - "control": "ref" (a power) holds "at" (a province).
+   * - "agreement_open": the order's power stands with "ref" (a power) in "at" (an agreement kind).
+   * - "seat_held": "ref" (a person) holds "at" (an office).
+   * - "paid": "amount" reached "ref" (an account).
+   */
+  kind: z.enum(["force_at", "control", "agreement_open", "seat_held", "paid", "force_strength"]),
+  ref: RefSchema,
+  at: RefSchema.nullable().default(null),
+  amount: z.number().positive().nullable().default(null),
+}).strict().meta({ id: "OrderGoalProposal" });
+export type OrderGoalProposal = z.infer<typeof OrderGoalProposalSchema>;
+
 /** VISION §13: an instruction aimed at someone who gets to decide about it. */
 export const DelegationProposalSchema = z.object({
   localId: LocalIdSchema,
@@ -61,6 +81,8 @@ export const DelegationProposalSchema = z.object({
   recipientRef: OrderPartyRefSchema,
   claimedAuthorityGrantRef: MaybeRefSchema.default(null),
   instruction: SummarySchema,
+  /** The order's part it hands on, by its place in intent.parts. */
+  part: z.number().int().min(0).max(9).nullable().default(null),
 });
 export type DelegationProposal = z.infer<typeof DelegationProposalSchema>;
 
@@ -234,7 +256,19 @@ export const OrchestratorOutputSchema = ProposalSchema.extend({
        * engine as having come to nothing.
        */
       parts: z.array(z.object({
-        said: z.string().trim().min(1).max(200),
+        // Over-long words are cut, not the part: a dropped part took its letter with it.
+        said: z.string().trim().min(1).transform((text) => text.slice(0, 200)),
+        afterParts: z.array(z.number().int().min(0).max(9)).max(4).optional(),
+        /** With `afterParts` naming a letter: how it must be answered for this part to go ahead ("otherwise" is "refused"). */
+        whenAnswered: z.enum(["accepted", "refused", "countered", "any"]).optional(),
+        whenForceExists: z.string().trim().min(1).max(160).optional(),
+        deferredActs: z.array(WorldDeltaSchema).max(6).optional(),
+        /** The acts of `deltas` that carry it out, by their place in that list. */
+        acts: z.array(z.number().int().min(0).max(23)).max(8).default([]),
+        /** What it is for, where the world can be read for it; the engine reads most goals from the acts themselves. */
+        goals: z.array(OrderGoalProposalSchema).max(3).default([]),
+        /** What it may spend, and from where, when the order said. */
+        spend: z.object({ payerAccountRef: RefSchema, cap: z.number().positive() }).strict().nullable().default(null),
         factLocalIds: z.array(z.string().trim().min(1).max(80)).max(6).default([]),
         whyNot: z.string().trim().min(1).max(300).nullable().default(null),
       }).strict()).max(10).default([]),
@@ -300,6 +334,7 @@ export const PlanProposalSchema = z
         inDays: z.number().int().min(1).max(730),
         /** What it has to wait for, if anything. */
         when: WatchPredicateSchema.nullable().default(null),
+        afterConditionDays: z.number().int().positive().max(730).optional(),
       }).strict())
       .min(1)
       .max(4),
@@ -323,8 +358,13 @@ export const CognitionOutputSchema = z
           reasoning: SummarySchema.default(""),
           proposal: CognitionProposalSchema,
           plan: PlanProposalSchema.nullable().default(null),
-          /** Steps of their own plan this answer carries out, by the ids in their section. */
-          stepsTaken: z.array(EntityIdSchema).max(2).default([]),
+          /**
+           * What this answer's acts are for: an order they hold, a step of
+           * their plan, a promise they keep -- by its id in their section, and
+           * the acts of `proposal.deltas` that do it, by their place in that
+           * list. Only an act that changed the world does anything for it.
+           */
+          serves: z.array(z.object({ ref: EntityIdSchema, acts: z.array(z.number().int().min(0).max(23)).min(1).max(8) }).strict()).max(4).default([]),
         }),
       )
       // The cap the router's own budget is allowed to fill. It was six, which

@@ -5,6 +5,7 @@ import {
   disbandForces,
   isStanding,
   openWar,
+  readDepartments,
   type FactProposalDraft,
   type WorldState,
 } from "@chronica/shared";
@@ -34,6 +35,8 @@ import type { IdFactory } from "./ports";
 
 /** Days with no ground and no army before a power is gone. */
 export const EXTINCTION_AFTER_DAYS = 60;
+/** How long a power with no ground keeps a starving army together before its men scatter. */
+export const LANDLESS_ARMY_DAYS = 90;
 /** How much a people handed over still want their own, at the handing over. */
 export const YEARNING_AT_SURRENDER_BPS = 4_000;
 /** A province rises for its yearning at this. */
@@ -53,6 +56,8 @@ export function endPolity(
   how: "absorbed" | "extinct",
   into: string | null,
   atStep: number,
+  /** Joined of its own will, not beaten into it: told as a union, not a surrender. */
+  willing = false,
 ): { world: WorldState; facts: FactProposalDraft[] } {
   const polity = world.map.polities.find((candidate) => candidate.id === polityId);
   if (polity === undefined || !isStanding(polity)) return { world, facts: [] };
@@ -61,6 +66,11 @@ export function endPolity(
 
   // Ground and cities to the victor, still wanting their own.
   const provinces = world.map.provinces.map((province) => {
+    // Ground it owned that somebody else occupies: the title passes to the
+    // victor, or, where nobody took it in, to whoever holds it.
+    if (province.ownerPolityId === polityId && province.controllerPolityId !== polityId) {
+      return { ...province, ownerPolityId: into !== null && into !== province.controllerPolityId ? into : null };
+    }
     if (province.controllerPolityId !== polityId && !province.settlements.some((city) => city.controllerPolityId === polityId)) return province;
     if (into === null) return province;
     return {
@@ -92,7 +102,12 @@ export function endPolity(
   });
 
   // Its army laid down its arms; its money is the victor's.
-  const disbanded = new Set(world.material.forces.filter((force) => force.polityId === polityId).map((force) => force.id));
+  // A power that gave itself up to a victor puts its soldiers into the
+  // victor's service, under the captains they had; one that simply ended has
+  // none left to serve.
+  const inherits = how === "absorbed" && into !== null;
+  const heirs = inherits ? world.material.forces.filter((force) => force.polityId === polityId) : [];
+  const disbanded = new Set(inherits ? [] : world.material.forces.filter((force) => force.polityId === polityId).map((force) => force.id));
   const treasuryIds = new Set(world.material.accounts.filter((account) => account.owner.kind === "polity" && account.owner.id === polityId).map((account) => account.id));
   const seized = world.material.accounts.filter((account) => treasuryIds.has(account.id)).reduce((sum, account) => sum + account.balance, 0);
   const victorTreasury = into === null ? undefined : world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === into);
@@ -102,8 +117,54 @@ export function endPolity(
     return account;
   });
 
+  const heirIds = new Set(heirs.map((force) => force.id));
+  // Taken into service, they answer to whoever raises the victor's levies, or
+  // its ruler, or the general of its largest army; a man who ruled the power
+  // that ended does not keep an army of it -- he is the first to want it back.
+  const reader = readDepartments(world);
+  const fitOf = (force: (typeof world.material.forces)[number]): number => force.personnel.reduce((sum, group) => sum + group.fit, 0);
+  const general = into === null ? undefined : world.material.forces.filter((force) => force.polityId === into)
+    .sort((a, b) => fitOf(b) - fitOf(a) || a.id.localeCompare(b.id))[0]?.commanderCharacterId;
+  const victorHand = into === null ? null : reader.holding({ kind: "polity", id: into }, "levy").people[0]?.id ?? reader.rulers(into)[0]?.id ?? general ?? null;
+  const formerRulers = new Set([...reader.rulers(polityId).map((person) => person.id), ...(restorer === null ? [] : [restorer])]);
+  // Its books go with it. A tax it raised is now raised for the victor, from
+  // the same ground; its soldiers taken into service are paid by the victor's
+  // treasury; whatever else it owed, or was owed, ended with it. Left as they
+  // were, a kingdom absorbed in June went on asking more of its lands than
+  // they could bear, and leaving its squadron unpaid, into the autumn -- and
+  // the victor's income never grew by the lands it took.
+  const victorTreasuryId = into === null ? null : victorTreasury?.id ?? null;
+  const servicePay = new Set(victorTreasuryId === null ? [] : heirs.map((force) => force.payObligationId).filter((id): id is string => id !== null && id !== undefined));
+  const incomeSources = world.material.incomeSources.map((source) => {
+    if (!source.active) return source;
+    if (source.counterpartyPolityId === polityId) return { ...source, active: false };
+    if (!treasuryIds.has(source.beneficiaryAccountId)) return source;
+    return victorTreasuryId === null ? { ...source, active: false } : { ...source, beneficiaryAccountId: victorTreasuryId };
+  });
+  const obligations = world.material.obligations.map((obligation) => {
+    if (!obligation.active) return obligation;
+    if (obligation.recipientAccountId !== undefined && treasuryIds.has(obligation.recipientAccountId)) return { ...obligation, active: false };
+    if (!treasuryIds.has(obligation.payerAccountId)) return obligation;
+    return servicePay.has(obligation.id) ? { ...obligation, payerAccountId: victorTreasuryId!, arrears: 0, missedPeriods: 0 } : { ...obligation, active: false };
+  });
+  const takenIntoService = (force: (typeof heirs)[number]) => ({
+    ...force,
+    polityId: into!,
+    payObligationId: force.payObligationId !== null && force.payObligationId !== undefined && servicePay.has(force.payObligationId) ? force.payObligationId : null,
+    ...(victorHand === null ? {} : {
+      controllerCharacterId: victorHand,
+      ...(formerRulers.has(force.commanderCharacterId) ? { commanderCharacterId: victorHand } : {}),
+    }),
+  });
+  // A crisis over ground that has just changed hands is over: its thread closes
+  // with the power it was about, and its rivals' aims stop pointing at it.
+  const passed = new Set(world.map.provinces.filter((province, at) => provinces[at] !== province).map((province) => province.id));
+  const storylines = into === null ? world.storylines : world.storylines.map((thread) => (thread.closedAtStep === null && thread.provinceId !== null && passed.has(thread.provinceId)
+    ? { ...thread, closedAtStep: atStep, updatedAtStep: atStep, history: [...thread.history, `${name} gave itself up to ${nameOf(world, into)}: the matter is settled.`].slice(-24).map((line) => line.slice(0, 480)) }
+    : thread));
   const next: WorldState = {
     ...world,
+    storylines,
     characters,
     map: {
       ...world.map,
@@ -115,8 +176,12 @@ export function endPolity(
     material: {
       ...world.material,
       accounts,
+      incomeSources,
+      obligations,
+      forces: heirIds.size === 0 ? world.material.forces
+        : world.material.forces.map((force) => (heirIds.has(force.id) ? takenIntoService(force) : force)),
       officeSeats: world.material.officeSeats.map((seat) => (seat.holderCharacterId !== null && people.some((person) => person.id === seat.holderCharacterId)
-        && seat.officeId.startsWith(`${polityId}`) ? { ...seat, holderCharacterId: null, status: "vacant" as const } : seat)),
+        && seat.officeId.startsWith(`${polityId}`) ? { ...seat, holderCharacterId: null, status: "vacant" as const, vacancyCause: "abolished" as const, termExpiresAtStep: atStep } : seat)),
     },
     polityAgreements: world.polityAgreements.map((agreement) => (agreement.status === "active" && (agreement.polityId === polityId || agreement.otherPolityId === polityId)
       ? { ...agreement, status: "ended" as const, endedAtStep: atStep, endedReason: reason }
@@ -128,11 +193,16 @@ export function endPolity(
       ? { ...siege, status: "lifted" as const, endedAtStep: atStep, endedReason: reason }
       : siege)),
     polityOutlooks: world.polityOutlooks.filter((outlook) => outlook.polityId !== polityId),
+    // What its men saw as its men -- a neighbour to dictate to, a council to
+    // win -- went with it.
+    characterPressures: world.characterPressures.filter((pressure) => !(pressure.id.startsWith("opening:") && people.some((person) => person.id === pressure.characterId))),
   };
 
   const cleared = disbandForces(next, disbanded, victorTreasury?.id ?? null);
-  const summary = how === "absorbed" && into !== null
-    ? `${name} gave itself up to ${nameOf(world, into)} and was no more: its ground and its people are ${nameOf(world, into)}'s${disbanded.size > 0 ? ", and its army laid down its arms" : ""}.`
+  const summary = how === "absorbed" && into !== null && willing
+    ? `${name} joined ${nameOf(world, into)} by its own consent and is one state with it: its ground and its people are ${nameOf(world, into)}'s${heirs.length > 0 ? `, and its levies serve ${nameOf(world, into)} under ${nameOf(world, into)}'s command` : ""}.`
+    : how === "absorbed" && into !== null
+    ? `${name} gave itself up to ${nameOf(world, into)} and was no more: its ground and its people are ${nameOf(world, into)}'s${disbanded.size > 0 ? ", and its army laid down its arms" : heirs.length > 0 ? `, and its army took service under ${nameOf(world, into)}` : ""}.`
     : `${name} was no more: it held no ground and no army, and its people are subjects of whoever holds the ground they stand on.`;
   return {
     world: cleared,
@@ -160,7 +230,13 @@ export function reviewPowers(world: WorldState, toDay: number, ids: IdFactory): 
   // ── No ground ──────────────────────────────────────────────────────────
   for (const polity of next.map.polities) {
     if (!isStanding(polity)) continue;
-    const landed = next.map.provinces.some((province) => province.controllerPolityId === polity.id);
+    // A city is ground: the Campanians held Rhegium inside a Bruttian
+    // province, and counting provinces alone made them landless from the
+    // first morning.
+    // And ground it owns that an enemy occupies: a country overrun is still a
+    // country until a peace says otherwise.
+    const landed = next.map.provinces.some((province) => province.controllerPolityId === polity.id || province.ownerPolityId === polity.id
+      || province.settlements.some((settlement) => settlement.controllerPolityId === polity.id));
     const armed = next.material.forces.some((force) => force.polityId === polity.id && force.personnel.some((group) => group.fit > 0));
     if (landed) {
       if (polity.landlessSinceStep != null) next = setPolity(next, polity.id, { landlessSinceStep: null });
@@ -173,7 +249,14 @@ export function reviewPowers(world: WorldState, toDay: number, ids: IdFactory): 
     if (!everHeld) continue;
     const since = polity.landlessSinceStep ?? toDay;
     if (polity.landlessSinceStep == null) next = setPolity(next, polity.id, { landlessSinceStep: toDay });
-    if (!armed && toDay - since >= EXTINCTION_AFTER_DAYS) {
+    // An army with no ground to feed it does not live on for ever: the
+    // Campanian legion starved behind Rhegium's lost walls for eight months,
+    // its war with Rome open the whole time. Once every army it has left is
+    // starving and a season has passed, the men scatter and the power ends.
+    const starving = armed && next.material.forces
+      .filter((force) => force.polityId === polity.id && force.personnel.some((group) => group.fit > 0))
+      .every((force) => force.provisionStatus === "critical");
+    if (toDay - since >= EXTINCTION_AFTER_DAYS && (!armed || (starving && toDay - since >= LANDLESS_ARMY_DAYS))) {
       const ended = endPolity(next, polity.id, "extinct", null, toDay);
       next = ended.world;
       facts.push(...ended.facts);

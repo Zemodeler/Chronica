@@ -1,8 +1,11 @@
 "use client";
 
+import { ServiceEvidence } from "./office-insights";
+
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import { THREAD_PHASES, explanationOf, type EntityKey, type EntityNote, type Glossary, type Linked, type SourceReading, type ThreadNote, type WhyReading } from "@chronica/shared";
 import { Tip, TipCard } from "../../../components/ui/tip";
+import { useWindowReference } from "../../../components/ui/window-workspace";
 
 /**
  * A note for every name, from the glossary the room brings (`readGlossary`).
@@ -174,9 +177,11 @@ export function Linkify({ text }: { readonly text: string }) {
 
 export function Name({ k, children }: { readonly k: EntityKey | null | undefined; readonly children: ReactNode }) {
   const glossary = useGlossary();
+  const reference = useWindowReference();
   const note = k === null || k === undefined ? undefined : glossary[k];
   if (note === undefined) return <>{children}</>;
-  return <Tip label={note.name} note={() => <NoteCard note={note} />}>{children}</Tip>;
+  if (reference !== null && k != null) return <button type="button" className="entity-link" onClick={() => reference.open(k)}>{children}</button>;
+  return <Tip label={note.name} note={() => <NoteCard note={note} entityKey={k ?? undefined} />}>{children}</Tip>;
 }
 
 /** A linked name: a note of its own when there is one, its words when not. */
@@ -223,7 +228,7 @@ export function SourceLine({ source }: { readonly source: SourceReading | null }
   return <p className="tip__source" data-freshness={source.freshness}>{source.text}</p>;
 }
 
-export function NoteCard({ note }: { readonly note: EntityNote }) {
+export function NoteCard({ note, entityKey }: { readonly note: EntityNote; readonly entityKey?: string | undefined }) {
   switch (note.kind) {
     case "person": return (
       <TipCard kicker={note.kicker} title={note.alive ? note.name : `${note.name}, now dead`}>
@@ -236,27 +241,41 @@ export function NoteCard({ note }: { readonly note: EntityNote }) {
           </p>
         )}
         <p>{capitalise(note.standingLabel)}.</p>
-        {note.knownFor.length > 0 && <p>Known to be {listInWords(note.knownFor.map((word) => word.toLowerCase()))}.</p>}
-        {note.skills.length > 0 && <p>Said to be {listInWords(note.skills)}.</p>}
-        {note.opinionLabel !== null && <p className="tip__rule">You think {note.female ? "her" : "him"} <Why word={note.opinionLabel} why={note.opinionWhy} kicker="Why you think so" />.</p>}
-        {note.ties.length > 0 && <p>{capitalise(listInWords(note.ties))}.</p>}
-        {note.towardYou.length > 0 && <p>{note.female ? "She" : "He"} has {listInWords(note.towardYou)}.</p>}
-        {note.leads.length > 0 && <p>Leads {listInWords(note.leads)}.</p>}
-        {note.people.length > 0 && (
-          <div className="tip__rule">
-            <p className="tip__kicker">{note.female ? "Her" : "His"} people</p>
-            <ul className="note__people">
-              {note.people.map((tie) => <li key={`${tie.role}-${tie.who.label}`}><span>{capitalise(tie.role)}</span> <LinkedName linked={tie.who} /></li>)}
-            </ul>
-          </div>
+        {(note.knownFor.length > 0 || note.skills.length > 0) && (
+          <p>
+            {note.knownFor.length > 0 && <>Known to be {listInWords(note.knownFor.map((word) => word.toLowerCase()))}.</>}
+            {note.knownFor.length > 0 && note.skills.length > 0 && " "}
+            {note.skills.length > 0 && <>Said to be {listInWords(note.skills)}.</>}
+          </p>
         )}
-        <Compared lines={note.compared} />
-        {note.heard.length > 0 && (
-          <ul className="tip__rule">
-            {note.heard.slice(0, 3).map((line, index) => (
-              <li key={index}>{line.preface}: {line.claim}{line.whenLabel === null ? "" : ` (${line.whenLabel})`}</li>
-            ))}
-          </ul>
+        {note.opinionLabel !== null && <p className="tip__rule">You think {note.female ? "her" : "him"} <Why word={note.opinionLabel} why={note.opinionWhy} kicker="Why you think so" />.</p>}
+        {note.towardYou.length > 0 && <p>{note.female ? "She" : "He"} has {listInWords(note.towardYou)}.</p>}
+        {(note.ties.length > 0 || note.leads.length > 0 || note.people.length > 0 || note.compared.length > 0 || note.heard.length > 0 || entityKey !== undefined) && (
+          <p className="note__more">
+            <Tip label={`More about ${note.name}`} note={() => (
+              <TipCard kicker="More" title={note.name}>
+                {note.ties.length > 0 && <p>{capitalise(listInWords(note.ties))}.</p>}
+                {note.leads.length > 0 && <p>Leads {listInWords(note.leads)}.</p>}
+                {note.people.length > 0 && (
+                  <div className="tip__rule">
+                    <p className="tip__kicker">{note.female ? "Her" : "His"} people</p>
+                    <ul className="note__people">
+                      {note.people.map((tie) => <li key={`${tie.role}-${tie.who.label}`}><span>{capitalise(tie.role)}</span> <LinkedName linked={tie.who} /></li>)}
+                    </ul>
+                  </div>
+                )}
+                <ServiceEvidence entityKey={entityKey} />
+                <Compared lines={note.compared} />
+                {note.heard.length > 0 && (
+                  <ul className="tip__rule">
+                    {note.heard.slice(0, 3).map((line, index) => (
+                      <li key={index}>{line.preface}: {line.claim}{line.whenLabel === null ? "" : ` (${line.whenLabel})`}</li>
+                    ))}
+                  </ul>
+                )}
+              </TipCard>
+            )}>More about {note.name}</Tip>
+          </p>
         )}
         <SourceLine source={note.source} />
       </TipCard>
@@ -295,6 +314,12 @@ export function NoteCard({ note }: { readonly note: EntityNote }) {
           : <p>Nobody holds it now.</p>}
         {(note.termLabel !== null || note.filledLabel !== null) && (
           <p>{[note.filledLabel, note.termLabel === null ? null : note.termLabel.toLowerCase()].filter((part) => part !== null).join("; ")}.</p>
+        )}
+        {note.powers.length > 0 && (
+          <div className="tip__rule">
+            <p className="tip__kicker">What it may do</p>
+            {note.powers.map((line) => <p key={line}>{line}</p>)}
+          </div>
         )}
         {note.next !== null && (note.next.standing.length > 0 || note.next.talkedOf.length > 0 || note.next.youLabel !== null) && (
           <div className="tip__rule">

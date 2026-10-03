@@ -41,6 +41,21 @@ export function summonToJudgment(world: WorldState, result: BattleResult, losers
   const facts: FactProposalDraft[] = [];
   // Before any court sits, the men he serves have already made up their minds.
   let next = judgedByTheirOwn(world, result, losers, provinceName);
+  // Every beaten commander has it to answer for, whatever his power's courts:
+  // a magistrate when his office no longer covers him (`command-tenure.ts`).
+  next = {
+    ...next,
+    answerable: [...next.answerable, ...losers.flatMap((force) => {
+      const after = next.material.forces.find((candidate) => candidate.id === force.id);
+      const before = force.personnel.reduce((sum, category) => sum + category.fit, 0);
+      const left = after === undefined ? 0 : after.personnel.reduce((sum, category) => sum + category.fit, 0);
+      const destroyed = after === undefined || left < before * 0.5;
+      return force.commanderCharacterId === null ? [] : [{
+        characterId: force.commanderCharacterId, polityId: force.polityId, kind: "defeat" as const,
+        label: `${destroyed ? "lost" : "was beaten with"} ${force.name} at ${provinceName}`.slice(0, 240), atStep: next.elapsedStep, weight: destroyed ? 5 : 2,
+      }];
+    })].slice(-400),
+  };
   for (const force of losers) {
     const court = next.departments.find((department) => department.abolishedAtStep === null && department.scope.kind === "polity" && department.scope.id === force.polityId
       && department.gates.some((gate) => gate.act === "judge_commander"));

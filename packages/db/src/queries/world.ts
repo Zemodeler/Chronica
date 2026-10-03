@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import {
   ScenarioDefinitionSchema,
   WorldDocumentUnreadableError,
@@ -9,8 +9,10 @@ import {
   type ScenarioClock,
   type ScenarioDefinition,
   type WorldState,
+  type Difficulty,
 } from "@chronica/shared";
 import type { ChronicaDatabase } from "../database";
+import { carryPunicWarsCities } from "../punic-wars-cities";
 import { games, players, scenarioVersions, scenarios } from "../schema/game";
 import {
   burstProgress,
@@ -118,7 +120,7 @@ export class ScenarioDefinitionUnreadableError extends Error {
 /** A stored world, upgraded and parsed, or `SaveNeedsRepairError` naming the paths. */
 export function readStoredWorld(gameId: string, raw: unknown): WorldState {
   try {
-    return readWorldDocument(raw).world;
+    return carryPunicWarsCities(readWorldDocument(raw).world);
   } catch (error) {
     if (error instanceof WorldDocumentUnreadableError) throw new SaveNeedsRepairError(gameId, error.issues, error.message);
     throw error;
@@ -261,7 +263,7 @@ export class WorldBusyError extends Error {
  */
 export async function persistRepairedWorld(
   db: ChronicaDatabase,
-  input: { readonly gameId: string; readonly expectedRevision: number; readonly world: WorldState; readonly scenarioVersion?: number | undefined },
+  input: { readonly gameId: string; readonly expectedRevision: number; readonly world: WorldState; readonly scenarioVersion?: number | undefined; readonly intelligenceReportsNotBeforeStep?: number; readonly repairRecord?: { readonly title: string; readonly body: string; readonly storylineIds?: readonly string[] } },
 ): Promise<number> {
   const { gameId, expectedRevision, world } = input;
   const loadable = WorldStateSchema.safeParse(world);
@@ -289,8 +291,16 @@ export async function persistRepairedWorld(
         updatedAt: new Date(),
       })
       .where(eq(gameWorlds.gameId, gameId));
+    if (input.intelligenceReportsNotBeforeStep !== undefined) {
+      const notBefore = (world.instant.day + input.intelligenceReportsNotBeforeStep - world.elapsedStep) * 1440 + world.instant.minute;
+      await tx.update(scheduledEvents).set({ dueInstantSortKey: sql`greatest(${scheduledEvents.dueInstantSortKey}, ${notBefore})` }).where(and(eq(scheduledEvents.gameId, gameId), eq(scheduledEvents.status, "pending"), eq(scheduledEvents.kind, "intelligence_mission_report")));
+    }
     if (input.scenarioVersion !== undefined) {
       await tx.update(games).set({ scenarioVersion: input.scenarioVersion }).where(eq(games.id, gameId));
+    }
+    if (input.repairRecord !== undefined) {
+      const key = instantSortKeyOf(loadable.data);
+      await tx.insert(chronicleCheckpoints).values({ gameId, fromInstantSortKey: key, toInstantSortKey: key, kind: "recorded", title: input.repairRecord.title, body: input.repairRecord.body, storylineIds: [...(input.repairRecord.storylineIds ?? [])], stopReason: "action_completed" });
     }
     return nextRevision;
   });
@@ -728,6 +738,29 @@ export async function listRecentFacts(db: ChronicaDatabase, gameId: string, limi
   return rows.reverse();
 }
 
+/**
+ * Facts of the last `withinDays` days that no Chronicle passage has told.
+ *
+ * A burst's historian is offered only the facts its own run created, so news
+ * that happened earlier and reached the court later had no route into the
+ * record once its run had ended. This is that route: whatever is not named by
+ * any passage's `factIds`, newest last. Whether the reader may know it yet is
+ * the composer's question, not this one's.
+ */
+export async function listUntoldFacts(db: ChronicaDatabase, gameId: string, withinDays = 40, limit = 200) {
+  const rows = await db
+    .select()
+    .from(worldFacts)
+    .where(and(
+      eq(worldFacts.gameId, gameId),
+      gte(worldFacts.instantSortKey, sql`(select coalesce(max(f.instant_sort_key), 0) from ${worldFacts} f where f.game_id = ${gameId}) - ${withinDays * 1440}`),
+      sql`not exists (select 1 from ${chronicleCheckpoints} c where c.game_id = ${worldFacts.gameId} and c.fact_ids @> jsonb_build_array(${worldFacts.id}))`,
+    ))
+    .orderBy(desc(worldFacts.instantSortKey))
+    .limit(limit);
+  return rows.reverse();
+}
+
 /** Everything the queue owes the world at or before `atSortKey` (VISION §17). */
 export async function listDueEvents(db: ChronicaDatabase, gameId: string, atSortKey: number, limit = 32) {
   return db
@@ -918,6 +951,8 @@ export interface CreateGameInput {
   readonly extraPrincipalsPerPlayer: number;
   readonly hostUserId: string;
   readonly coinBudgetMicroUnits: bigint;
+  /** Chosen on the page that begins the world (`world/pushback.ts`). */
+  readonly difficulty?: Difficulty | undefined;
 }
 
 export class NotGameHostError extends Error {
@@ -954,7 +989,8 @@ export async function createGame(db: ChronicaDatabase, input: CreateGameInput): 
     if (version === undefined) throw new Error("That shared world has no playable version.");
     // Through the upgrade chain, like any stored world: a version row
     // written by an older build still opens a game.
-    const initialWorld = readWorldDocument(version.initialWorld).world;
+    const opening = readWorldDocument(version.initialWorld).world;
+    const initialWorld = input.difficulty === undefined ? opening : { ...opening, difficulty: input.difficulty };
 
     const [game] = await tx
       .insert(games)

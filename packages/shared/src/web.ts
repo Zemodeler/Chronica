@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ContinuityConfigSchema } from "./continuity/index";
 import { DialogueChannelSchema, DialogueMessageSchema } from "./dialogue/index";
 import { EntityIdSchema } from "./material-state";
+import { DifficultySchema } from "./world/pushback";
 import { AccountRoleSchema, AvatarKeySchema, CoinAmountStringSchema } from "./coins";
 
 export const EmailAddressSchema = z.string().trim().email().max(254);
@@ -34,6 +35,8 @@ export const GameCreationSchema = z
     scenarioId: EntityIdSchema,
     continuity: ContinuityConfigSchema,
     coinCap: CoinAmountStringSchema,
+    /** How hard the world pushes back, and how much the player starts with (`world/pushback.ts`). */
+    difficulty: DifficultySchema.default("normal"),
   })
   .strict();
 export type GameCreation = z.infer<typeof GameCreationSchema>;

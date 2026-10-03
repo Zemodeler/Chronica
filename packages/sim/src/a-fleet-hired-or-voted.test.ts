@@ -40,7 +40,7 @@ describe("a fleet hired", () => {
   it("brings the hulls the captain was hired for, under whoever hired him, and they carry the legion", () => {
     const hired = as("gaius-genucius", [{
       op: "service_contract_open", localId: "ships", role: "mercenary", label: "Campanian transports", employerAccountRef: "rome-treasury",
-      employeeRef: "quintus-ogulnius", advance: 10, monthlyPay: 20, termDays: 365, duties: "Carry the legion to Sicily.",
+      employeeRef: "quintus-ogulnius", advance: 10, monthlyPay: 700, termDays: 365, duties: "Carry the legion to Sicily.",
       company: { categoryId: "warship", strength: 300 }, provinceId: army(opening()).locationId, reason: "The legion must cross.",
     }]);
     expect(hired.rejected).toEqual([]);

@@ -4,6 +4,7 @@ import { readPerson } from "../characters/acquaintance";
 import { lettersDirectory } from "../characters/directory";
 import { allOffices, allSuccessionRules, type Office, type SuccessionRule } from "../characters/character";
 import { electableFor, isBeneath, isEligibleFor, officeRequirements } from "../characters/candidates";
+import { describeOfficePowers } from "./office-powers-text";
 import { labelNamesOffice } from "../characters/player-materialization";
 import type { CharacterBelief, KnowledgeChannel } from "../characters/beliefs";
 import type { Muster } from "../material/forces";
@@ -150,6 +151,8 @@ export interface OfficeNote {
   readonly filledLabel: string | null;
   /** What kind of office it is, in `explanations.ts`. */
   readonly explainedBy: string;
+  /** Exactly what its holder may do, sentence by sentence (`office-powers-text.ts`). */
+  readonly powers: readonly string[];
   /** Who could hold it next, for an office of the viewer's own power that is elected (`electableFor`). */
   readonly next: OfficeNext | null;
   readonly source: SourceReading | null;
@@ -367,6 +370,7 @@ export function readGlossary(input: GlossaryInput): Glossary {
       termLabel: office.termDays === null || office.termDays === undefined ? null : `Held for ${termWords(office.termDays)}`,
       filledLabel: rules.get(office.successionRuleId)?.label ?? null,
       explainedBy: `office:${office.kind ?? "magistracy"}`,
+      powers: describeOfficePowers(office, { departments: world.departments }),
       next: office.polityId === viewer.polityId && rules.get(office.successionRuleId)?.kind === "elective" ? whoCouldBeNext(world, office, officeById, viewer, clock) : null,
       source: sourceLine([{ channel: "record", fromLabel: null, asOfStep: now }], now, "office", clock),
     };

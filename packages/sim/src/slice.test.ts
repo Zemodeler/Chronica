@@ -133,7 +133,12 @@ describe("what the player's government can see of the world", () => {
     // are now the ground the order and the armies are about, then the nearest,
     // instead of whatever sorted first, and the nearer ground has more towns.
     // The section is still forty lines.
-    expect(text.length).toBeLessThan(19_250);
+    //
+    // Moved 19.25k -> 19.5k for the wider world's politics (v43): Rome's own
+    // standing toward Massalia, Egypt and the Boii, and the Insubres and
+    // Massalia among the powers it can see. Far powers' aims and treaties
+    // were taken out again (`powersDealtWith`): the world AI pursues them.
+    expect(text.length).toBeLessThan(19_500);
   });
 });
 

@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { EntityIdSchema } from "../material-state";
 import { StandingEffectSchema, StandingUpkeepSchema } from "./standing-effects";
-import { ChamberPowerSchema, FranchiseSchema, GovernmentFormSchema } from "../political-parts";
+import { ChamberPowerSchema, CommandTenureSchema, FranchiseSchema, GovernmentFormSchema } from "../political-parts";
 import { LeverIdSchema } from "./departments";
+import { MilitaryReformSchema } from "../warfare/establishment";
 
 /**
  * A change to the constitution itself, as parts (`sim/constitutions.ts`).
@@ -15,6 +16,8 @@ import { LeverIdSchema } from "./departments";
 export const ConstitutionAmendmentSchema = z
   .object({
     form: GovernmentFormSchema.nullable().default(null),
+    /** How long its commanders hold their armies, changed by law. */
+    commandTenure: CommandTenureSchema.nullable().default(null),
     chamber: z
       .object({
         /** Null founds a new one. */
@@ -101,10 +104,34 @@ export const EnactmentSchema = z
       .default(null),
     /** A work it pays for, kept "proposed" until it passes and begun then. */
     projectId: EntityIdSchema.nullable().default(null),
+    /** Spending authority adopted by the chamber, distinct from an actual payment. */
+    budget: z.object({ accountId: EntityIdSchema, amount: z.number().int().positive().nullable(), purpose: z.string().max(240) }).strict().nullable().optional(),
     /** A man excused the ladder for one office (`resolveEligibility`). */
     waiver: z.object({ characterId: EntityIdSchema, officeId: EntityIdSchema }).strict().nullable().default(null),
+    /** Its armies remade (`sim/military-reform.ts`): doctrines, recruitment, terms of service, a body redrawn. */
+    military: MilitaryReformSchema.nullable().default(null),
     /** Set when it was carried out, so it is never carried out twice. */
     enactedAtStep: z.number().int().nonnegative().nullable().default(null),
+    /**
+     * What the law remembers of its own passing, written the day it is carried
+     * out. The procedure that carried it can be pruned, its chamber abolished
+     * and its sponsor die; a law should still be able to say who made it and
+     * how, long after (`authority/laws.ts`). Absent on one carried out before
+     * this was kept, and the reader falls back on whatever the world still has.
+     */
+    record: z
+      .object({
+        title: z.string().trim().min(1).max(200),
+        bodyName: z.string().trim().min(1).max(120).nullable(),
+        sponsorCharacterId: EntityIdSchema.nullable(),
+        decidedAtStep: z.number().int().nonnegative(),
+        vote: z.object({ yes: z.number().int().nonnegative(), no: z.number().int().nonnegative() }).strict().nullable(),
+        /** The measure in a plain sentence, in the words of what it did. */
+        said: z.string().trim().max(600),
+      })
+      .strict()
+      .nullable()
+      .optional(),
   })
   .strict();
 export type Enactment = z.infer<typeof EnactmentSchema>;

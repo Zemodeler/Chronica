@@ -7,6 +7,9 @@ import type { Force, ForcePersonnelCategory } from "../material-state";
 import type { WorldState } from "../world/world-state";
 import { formatWorldDate, type ScenarioClock } from "../world/clock";
 import { moraleInWords, payInWords, provisionInWords } from "./in-words";
+import { warfareWith } from "../warfare/troop-categories";
+import { bodiesInWords, doctrinesOf, formationTemplateOf, pluralOf, unitCountOf } from "../warfare/formation";
+import { qualityInWords } from "../warfare/establishment";
 
 /**
  * The muster, as the man responsible for it can read it.
@@ -78,7 +81,34 @@ export interface ForceReading {
   readonly naval: boolean;
   /** How many men its ships can carry across water. Zero for an army. */
   readonly carries: number;
+  /** What it is made of, in a line: "one legion, one ala". Null for an army with no formations. */
+  readonly make: string | null;
+  /** Its formations, as its commander reads them. Empty for an army with none. */
+  readonly formations: readonly FormationReadingView[];
+  /** The ways of fighting it practises, its power's and its own. */
+  readonly doctrines: readonly { readonly id: string; readonly label: string; readonly description: string; readonly own: boolean }[];
+  /** Under a standing order to drill. */
+  readonly drilling: boolean;
+  /** Its commander may give it orders from the muster (drill), not merely read it. */
+  readonly commandedByYou: boolean;
 }
+
+/** One formation of an army, read in words: the hastati of Legio I, 1,200 men, steady, drilling. */
+export interface FormationReadingView {
+  readonly id: string;
+  readonly label: string;
+  readonly bodyLabel: string;
+  readonly line: string;
+  readonly men: number;
+  readonly units: string;
+  readonly quality: string;
+  readonly drilling: boolean;
+  readonly refittingUntilLabel: string | null;
+}
+
+const LINE_WORDS: Readonly<Record<string, string>> = {
+  screen: "the screen", first: "the first line", second: "the second line", third: "the third line", wing: "the wings", reserve: "the reserve", afloat: "at sea",
+};
 
 export interface Muster {
   readonly forces: readonly ForceReading[];
@@ -167,6 +197,38 @@ export function musterTheForces(
     ? null
     : world.characters.find((character) => character.id === characterId)?.polityId ?? null;
 
+  const rules = warfare === undefined ? undefined : warfareWith(world, warfare);
+  const establishmentFor = (polityId: string) => world.establishments.find((candidate) => candidate.polityId === polityId);
+  const formationsOf = (force: Force): FormationReadingView[] => (force.formations ?? []).flatMap((formation) => {
+    const row = force.personnel.find((candidate) => candidate.formationId === formation.id);
+    if (row === undefined) return [];
+    const template = formationTemplateOf(establishmentFor(force.polityId), formation.templateId);
+    const units = unitCountOf(template, row.fit);
+    return [{
+      id: formation.id,
+      label: row.label,
+      bodyLabel: formation.bodyLabel,
+      line: LINE_WORDS[formation.line] ?? formation.line,
+      men: row.fit,
+      units: `${units} ${units === 1 ? template?.units.label ?? "company" : pluralOf(template?.units.label ?? "company")}`,
+      quality: qualityInWords(formation.trainingBps, formation.experienceBps),
+      drilling: force.drilling === true || formation.drilling === true,
+      refittingUntilLabel: formation.refitUntilStep === undefined || formation.refitUntilStep <= world.elapsedStep
+        ? null
+        : clock === undefined ? `day ${formation.refitUntilStep}` : formatWorldDate({ day: formation.refitUntilStep, minute: 0 }, clock),
+    }];
+  });
+  // Only what reaches its men: the triplex acies is not a fleet's.
+  const doctrinesOfForce = (force: Force) => {
+    const seen = new Map<string, { id: string; label: string; description: string; own: boolean }>();
+    for (const row of force.personnel) {
+      for (const doctrine of doctrinesOf(rules ?? { establishments: world.establishments, doctrines: world.doctrines, today: world.elapsedStep }, force, row)) {
+        seen.set(doctrine.id, { id: doctrine.id, label: doctrine.label, description: doctrine.description, own: doctrine.forceId === force.id });
+      }
+    }
+    return [...seen.values()];
+  };
+
   const forces = world.material.forces
     .filter((force) => ownPolity === null
       || force.polityId === ownPolity
@@ -184,7 +246,7 @@ export function musterTheForces(
         fitStrength,
         unavailable,
         totalHeadcount: fitStrength + unavailable,
-        effectiveStrength: Math.round(standingEffectiveStrength(force, warfare)),
+        effectiveStrength: Math.round(standingEffectiveStrength(force, rules)),
         moraleLabel: moraleInWords(force.moraleBps),
         provisionLabel: provisionInWords(force.provisionStatus),
         provisionedThroughLabel: clock === undefined
@@ -200,6 +262,11 @@ export function musterTheForces(
         ...bound,
         naval: isNavalForce(force, warfare),
         carries: isNavalForce(force, warfare) ? transportCapacityOf(force, warfare) : 0,
+        make: bodiesInWords(force, establishmentFor(force.polityId)),
+        formations: formationsOf(force),
+        doctrines: doctrinesOfForce(force),
+        drilling: force.drilling === true,
+        commandedByYou: characterId !== null && (force.commanderCharacterId === characterId || force.controllerCharacterId === characterId),
       };
     })
     .sort((a, b) => b.fitStrength - a.fitStrength || a.name.localeCompare(b.name));

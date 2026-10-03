@@ -23,7 +23,7 @@ export function endContract(world: WorldState, contract: ServiceContract, status
       obligations: world.material.obligations.map((obligation) => (obligation.id === contract.obligationId ? { ...obligation, active: false } : obligation)),
       incomeSources: world.material.incomeSources.map((source) => (source.id === contract.incomeSourceId ? { ...source, active: false } : source)),
       forces: world.material.forces.map((force) => (force.id === contract.forceId && contract.forceWas !== null
-        ? { ...force, polityId: contract.forceWas.polityId, controllerCharacterId: contract.forceWas.controllerCharacterId }
+        ? { ...force, polityId: contract.forceWas.polityId, controllerCharacterId: contract.forceWas.controllerCharacterId, payObligationId: null }
         : force)),
     },
   };
@@ -40,7 +40,15 @@ export function keepContracts(world: WorldState, toDay: number): { world: WorldS
     const died = employee === undefined || !employee.alive;
     const unpaid = pay !== undefined && pay.missedPeriods > 0;
     const over = contract.endsAtStep !== null && contract.endsAtStep <= toDay;
-    if (!died && !unpaid && !over) continue;
+    if (!died && !unpaid && !over) {
+      if (contract.journey != null && contract.journey.arrivedAtStep === null && contract.journey.arrivesAtStep <= toDay) {
+        const arrived = contract.journey.arrivesAtStep;
+        next = { ...next, characters: next.characters.map((character) => character.id === employee.id ? { ...character, locationProvinceId: contract.journey!.toProvinceId } : character),
+          material: { ...next.material, contracts: next.material.contracts.map((candidate) => candidate.id === contract.id ? { ...candidate, journey: { ...contract.journey!, arrivedAtStep: arrived } } : candidate) } };
+        facts.push({ localId: `arrival_${contract.id}`.slice(0, 60), kind: "contract_agent_arrived", summary: `${employee.name} reached ${world.map.provinces.find((province) => province.id === contract.journey!.toProvinceId)?.name ?? contract.journey.toProvinceId} for ${contract.label}.`, affectedRefs: [{ kind: "character", id: employee.id }, { kind: "account", id: contract.employerAccountId }], visibility: contract.role === "agent" ? "private" : "polity", discoveryState: contract.role === "agent" ? "private" : "polity", knownToRefs: [{ kind: "character", id: employee.id }, ...(world.material.accounts.find((account) => account.id === contract.employerAccountId)?.owner.kind === "character" ? [{ kind: "character" as const, id: world.material.accounts.find((account) => account.id === contract.employerAccountId)!.owner.id }] : [])], knowableInDays: 0, significance: 25 });
+      }
+      continue;
+    }
     next = endContract(next, contract, unpaid ? "lapsed" : "ended", toDay);
     const who = name(contract.employeeCharacterId);
     facts.push({

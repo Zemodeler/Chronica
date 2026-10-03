@@ -19,13 +19,15 @@
     "test": "npm run test --workspaces --if-present",
     "test:e2e": "npm run test:e2e --workspace @chronica/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "maps:graph": "tsx scripts/map-gen/build-map-graph.ts && tsx scripts/map-gen/resolve-extra-anchors.ts && tsx scripts/map-gen/describe-map-asset.ts",
+    "maps:graph": "tsx scripts/map-gen/build-map-graph.ts && node scripts/map-gen/add-polity-cities.mjs && tsx scripts/map-gen/resolve-extra-anchors.ts && tsx scripts/map-gen/describe-map-asset.ts",
     "maps:simplify": "node scripts/simplify-geojson.mjs",
     "validate:scenario": "tsx scripts/validate-scenario.ts",
     "play": "tsx scripts/hand-played-burst.mts",
+    "world:alone": "tsx scripts/world-alone.mts",
     "play:turn": "tsx --env-file=.env.local scripts/play-turn.mts",
     "eval:orders": "tsx scripts/eval-orders/run.mts",
-    "audit:deltas": "tsx scripts/delta-audit.mts"
+    "audit:deltas": "tsx scripts/delta-audit.mts",
+    "dev:hand": "node scripts/dev-hand.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

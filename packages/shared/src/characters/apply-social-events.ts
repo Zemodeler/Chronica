@@ -170,6 +170,8 @@ export function applySocialEvents(
           actionKind: proposal.actionKind,
           description: proposal.promisedResult,
           conditions: proposal.conditions,
+          form: proposal.form,
+          trigger: proposal.when,
           requiredOfficeId: proposal.requiredOfficeId,
           requiredResource: proposal.requiredResource,
           visibility: event.visibility,
@@ -334,9 +336,11 @@ export function applySocialEvents(
         occurredAtStep: event.createdAtStep,
         turnId,
         kind: event.kind === "discovery" ? "meeting" : "conversation",
-        outcome: event.commitmentProposal !== null
+        // Held to the schema's length: a battle's officers listed by id ran
+        // past it, and the whole batch the battle was in was refused.
+        outcome: (event.commitmentProposal !== null
           ? `${event.kind}: ${event.commitmentProposal.promisedResult}`
-          : `${event.kind} between ${event.participantCharacterIds.join(", ")}.`,
+          : `${event.kind} between ${event.participantCharacterIds.slice(0, 8).join(", ")}${event.participantCharacterIds.length > 8 ? ` and ${event.participantCharacterIds.length - 8} more` : ""}.`).slice(0, 400),
         visibility: event.visibility,
         witnessIds: event.knownByCharacterIds,
         salience: event.relationCauses.length > 0 ? 500 : 100,
