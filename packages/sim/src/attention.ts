@@ -88,6 +88,8 @@ export interface AttentionResult {
 
 export interface AttentionInput {
   readonly world: WorldState;
+  /** When supplied, unrelated people run on engine rules rather than occupying a cognition slot. */
+  readonly cognitionEligible?: ReadonlySet<string> | undefined;
   readonly facts: readonly Fact[];
   readonly offices: readonly Office[];
   /** Never wakes the player's own character: the player speaks for themselves. */
@@ -118,8 +120,8 @@ export interface AttentionInput {
  * Whether a person put before the model this round has anything to answer
  * that he has not already answered this burst (L17): news reaching him since,
  * a plan's step or a vote or a letter that wants him (`wanted`), an order to
- * answer, or no look at all yet. A reactor always has -- the router woke him
- * for news he had not been shown. The rest of the rotation, asked again two
+ * answer, or no look at all yet. Even a reactor needs an unread fact; a stale
+ * routing label alone is not new information. The rest of the rotation, asked again two
  * days later with nothing new, answered that nothing had changed, at the cost
  * of a call; a round of nobody with anything new is not asked at all.
  */
@@ -128,10 +130,12 @@ export function hasSomethingNew(
   answered: ReadonlySet<string> | undefined,
   wanted: ReadonlyMap<string, string>,
   owesAnAnswer: ReadonlySet<string>,
+  /** A known unchanged decision suppresses repeated obligations; changed circumstances wake it. */
+  decisionChanged?: boolean,
 ): boolean {
-  if (actor.impetus === "reaction" || answered === undefined) return true;
-  if (wanted.has(actor.characterId) || owesAnAnswer.has(actor.characterId)) return true;
-  return actor.knownFacts.some((fact) => !answered.has(fact.id));
+  if (answered === undefined || actor.knownFacts.some((fact) => !answered.has(fact.id))) return true;
+  if (decisionChanged === true) return true;
+  return decisionChanged !== false && (wanted.has(actor.characterId) || owesAnAnswer.has(actor.characterId));
 }
 
 /** The people the player is waiting on first, everybody else after, each in the router's order. */
@@ -195,7 +199,7 @@ export function routeAttention(input: AttentionInput): AttentionResult {
   let dormantCount = 0;
 
   for (const character of world.characters) {
-    if (!character.alive || excluded.has(character.id)) {
+    if (!character.alive || excluded.has(character.id) || (input.cognitionEligible !== undefined && !input.cognitionEligible.has(character.id))) {
       dormantCount += 1;
       continue;
     }
@@ -349,6 +353,7 @@ export function routeAttention(input: AttentionInput): AttentionResult {
 
 export interface AmbientInput {
   readonly world: WorldState;
+  readonly cognitionEligible?: ReadonlySet<string> | undefined;
   /** Recent history, for the context an ambient actor reasons from. */
   readonly facts: readonly Fact[];
   readonly offices: readonly Office[];
@@ -469,7 +474,7 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
 
   const scored: RoutedActor[] = [];
   for (const character of world.characters) {
-    if (!character.alive || excluded.has(character.id)) continue;
+    if (!character.alive || excluded.has(character.id) || (input.cognitionEligible !== undefined && !input.cognitionEligible.has(character.id))) continue;
 
     const reasons: string[] = [];
     let score = 0;

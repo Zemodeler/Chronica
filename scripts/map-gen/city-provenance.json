@@ -2209,6 +2209,66 @@
       "chronologyNote": null,
       "capitalNote": null,
       "politicalAttribution": null
+    },
+    {
+      "settlementId": "settlement-ireland-rathcroghan",
+      "name": "Rathcroghan",
+      "provinceId": "hib-267j0",
+      "basis": "modeled-seat",
+      "source": "https://heritageireland.ie/visit/places-to-visit/rathcroghan-visitor-centre//highlights/",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Documented prehistoric ceremonial complex with Bronze and Iron Age monuments; the city marker does not establish urban occupation in 270 BCE.",
+      "capitalNote": "Game administrative seat, not an attested contemporary capital.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-ireland-tara",
+      "name": "Tara",
+      "provinceId": "hib-ex9la",
+      "basis": "modeled-seat",
+      "source": "https://heritageireland.ie/visit/places-to-visit/hill-of-tara/",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Documented Iron Age ceremonial centre; later high kingship is not projected into 270 BCE. City status is a game abstraction.",
+      "capitalNote": "Game administrative seat, not an attested contemporary capital.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-ireland-uisneach",
+      "name": "Uisneach",
+      "provinceId": "hib-n9g60",
+      "basis": "modeled-seat",
+      "source": "https://royalsites.ie/sites/hill-of-uisneach",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Multi-period ceremonial landscape; continuous settlement in 270 BCE is not established. City status and regional affiliation are game abstractions.",
+      "capitalNote": null,
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-ireland-dun-ailinne",
+      "name": "Dún Ailinne",
+      "provinceId": "hib-vwnrm",
+      "basis": "modeled-seat",
+      "source": "https://royalsites.ie/sites/dun-ailinne",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "Documented Iron Age ceremonial enclosure with timber structures and feasting; the marker is not evidence of a contemporary urban city.",
+      "capitalNote": "Game administrative seat, not an attested contemporary capital.",
+      "politicalAttribution": "scenario-assignment"
+    },
+    {
+      "settlementId": "settlement-ireland-caherconree",
+      "name": "Caherconree",
+      "provinceId": "hib-ohgt0",
+      "basis": "modeled-seat",
+      "source": "https://consult.kerrycoco.ie/sites/default/files/4%20Archaeological%20Landscapes.pdf",
+      "nameEvidence": "archaeological-site-name",
+      "chronology": "uncertain",
+      "chronologyNote": "County archaeological assessment tentatively dates the fortified site to the Late Bronze Age or Early Iron Age; occupation in 270 BCE is not proven. The city marker is a fortified regional seat abstraction.",
+      "capitalNote": "Game administrative seat, not an attested contemporary capital.",
+      "politicalAttribution": "scenario-assignment"
     }
   ],
   "seats": [
@@ -2720,6 +2780,26 @@
     {
       "polityId": "ionian-islands",
       "settlementId": "settlement-ionian-islands-assembly",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "ireland-connacht-communities",
+      "settlementId": "settlement-ireland-rathcroghan",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "ireland-leinster-communities",
+      "settlementId": "settlement-ireland-dun-ailinne",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "ireland-midland-communities",
+      "settlementId": "settlement-ireland-tara",
+      "basis": "modeled-seat"
+    },
+    {
+      "polityId": "ireland-munster-communities",
+      "settlementId": "settlement-ireland-caherconree",
       "basis": "modeled-seat"
     },
     {

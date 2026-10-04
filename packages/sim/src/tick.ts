@@ -9,6 +9,7 @@ import {
   applyDiplomaticAnswerToStance,
   diplomaticAnswerChangesTrust,
   sameNegotiation,
+  settlePeaceTalks,
   domesticRevenuePolity,
   provinceTaxCapacity,
   taxBurdens,
@@ -77,6 +78,8 @@ import { settleUnionOffers } from "./submission";
 import { betweenHarvests, reviewTheLand } from "./economy";
 import { endObligationsOfEndedAgreements, keepTreaties } from "./treaties";
 import { keepPromises } from "./promises";
+import { workOnTreatyDuties } from "./treaty-duties";
+import { continueMissions } from "./mission-fieldwork";
 import { answerRequests } from "./requests";
 import { settleDebts, termTheLoans } from "./debts";
 import { keepPatronage, soldierPayShares } from "./money";
@@ -1233,7 +1236,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
   // Who has held what, written down before any term ends -- so the man whose
   // year ran out today is remembered as having held it.
   // An ally offered union and unable, or slow, to answer is answered by rule, before silence is counted (`submission.ts`).
-  const recovered = settleUnionOffers(recordTenures(materialAdvanced, input.toDay), input.toDay, facts);
+  const recovered = settlePeaceTalks(settleUnionOffers(recordTenures(materialAdvanced, input.toDay), input.toDay, facts));
 
   // Collectors who came back short. Once a tick per power, not per payment:
   // it is the kind of thing a government hears about and has to answer for.
@@ -1618,7 +1621,13 @@ export function runDeterministicTick(given: TickInput): TickResult {
   const asked = answerRequests({ world: debts.world, toDay: input.toDay, offices: input.government?.offices ?? [], ids: input.ids, playerCharacterId: input.playerCharacterId ?? null });
   facts.push(...asked.facts);
   // Promises between people, settled on their day by what was done (`promises.ts`).
-  const promised = keepPromises({ world: asked.world, toDay: input.toDay, playerCharacterId: input.playerCharacterId ?? null });
+  // What a treaty bound a power nobody plays to do on the ground, begun or done (`treaty-duties.ts`).
+  const dutiful = workOnTreatyDuties({ world: asked.world, toDay: input.toDay, ids: input.ids, playerPolityId });
+  facts.push(...dutiful.facts);
+  // Orders that want ground taken go on being worked at: the detachment, its march, the siege (`mission-fieldwork.ts`).
+  const afield = continueMissions({ world: dutiful.world, toDay: input.toDay, ids: input.ids, warfare: input.warfare, government: input.government, clock: input.clock, playerCharacterId: input.playerCharacterId ?? null });
+  facts.push(...afield.facts);
+  const promised = keepPromises({ world: afield.world, toDay: input.toDay, playerCharacterId: input.playerCharacterId ?? null });
   facts.push(...promised.facts);
   const unrest = reviewUnrest({ world: promised.world, toDay: input.toDay, months: land.months, ids: input.ids, burdens, government: input.government, playerCharacterId: input.playerCharacterId ?? null });
   facts.push(...unrest.facts);
@@ -1725,7 +1734,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
     notes,
     died: [...plots.died, ...lives.died],
     sprungContingencies: plans.sprung,
-    contingencyBattles: [...intercepted.battles, ...besieged.battles, ...met.battles, ...plans.battles],
+    contingencyBattles: [...intercepted.battles, ...besieged.battles, ...met.battles, ...afield.battles, ...plans.battles],
   };
 }
 

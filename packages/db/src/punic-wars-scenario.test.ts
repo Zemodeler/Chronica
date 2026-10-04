@@ -7,9 +7,9 @@ import { PUNIC_IDS } from "./punic-ids";
 import { POLITY_META, PUNIC_OLD_REGION_PROVINCES, PUNIC_WARS_GRAPH_POLITIES } from "./punic-wars-map-graph";
 
 describe("Punic Wars built-in scenario", () => {
-  it("opens in 270 BCE as a tense peace with the Messana crisis", () => {
+  it("opens in 270 BCE with Rome at war with the Campanian Legion and the Messana crisis unresolved", () => {
     expect(punicWarsScenario.definition.clock.epoch).toMatchObject({ year: 270, month: 3, day: 1, era: "BCE" });
-    expect(punicWarsScenario.initialWorld.conflicts.wars).toEqual([]);
+    expect(punicWarsScenario.initialWorld.conflicts.wars).toEqual([{ polityAId: "rhegium-campanians", polityBId: "rome" }]);
     expect(punicWarsScenario.initialWorld.storylines?.map((storyline) => storyline.id)).toContain("mamertine-syracusan-crisis");
     expect(punicWarsScenario.initialWorld.map.politicalRelations).toEqual([]);
   });
@@ -66,15 +66,30 @@ describe("Punic Wars built-in scenario", () => {
     expect(edges.some((edge) => edge.crossing === "sea_lane" && ((africa.has(edge.from) && fromMessana.has(edge.to)) || (africa.has(edge.to) && fromMessana.has(edge.from))))).toBe(true);
   });
 
-  it("holds Messana for the Mamertines and Rhegium's town for the Campanian legion", () => {
+  it("holds Messana for the Mamertines and Rhegium's coast for the separate rebel Campanian legion", () => {
     const { provinces } = punicWarsScenario.initialWorld.map;
     const messana = provinces.find((province) => province.id === PUNIC_IDS.messana)!;
     expect(messana.controllerPolityId).toBe("mamertines");
     expect(messana.settlements.find((settlement) => settlement.id === "settlement-messana")?.controllerPolityId).toBe("mamertines");
     const rhegium = provinces.find((province) => province.id === PUNIC_IDS.rhegium)!;
     expect(rhegium.settlements.find((settlement) => settlement.id === "settlement-rhegium")?.controllerPolityId).toBe("rhegium-campanians");
-    // Its province is the Bruttians' ground, as the Sila always was.
-    expect(rhegium.controllerPolityId).toBe("bruttians");
+    expect(rhegium.controllerPolityId).toBe("rhegium-campanians");
+    const world = punicWarsScenario.initialWorld;
+    expect(world.map.polities.find((polity) => polity.id === "rhegium-campanians")).toMatchObject({
+      name: "Campanian Legion", capitalSettlementId: "settlement-rhegium", governmentForm: "soldier_commune",
+    });
+    expect(provinces.filter((province) => province.controllerPolityId === "rhegium-campanians").map((province) => province.id)).toEqual([PUNIC_IDS.rhegium]);
+    const neighbours = world.map.edges.filter((edge) => edge.crossing === "land" && (edge.from === rhegium.id || edge.to === rhegium.id))
+      .map((edge) => edge.from === rhegium.id ? edge.to : edge.from);
+    expect(neighbours.length).toBeGreaterThan(0);
+    for (const id of neighbours) expect(provinces.find((province) => province.id === id)?.controllerPolityId).toBe("bruttians");
+    expect(world.material.forces.find((force) => force.id === "campanian-legion")).toMatchObject({
+      polityId: "rhegium-campanians", commanderCharacterId: "decius-vibellius", locationId: rhegium.id,
+    });
+    expect(world.polityAgreements.find((agreement) => agreement.id === "war-rome-rhegium")).toMatchObject({
+      kind: "war", polityId: "rome", otherPolityId: "rhegium-campanians", status: "active",
+    });
+    expect(world.polityAgreements.some((agreement) => agreement.kind === "foedus" && agreement.polityId === "rhegium-campanians")).toBe(false);
   });
 
   it("keeps Hanno at Carthage, Hieron at Syracuse and the Mamertine garrison at Messana", () => {
@@ -242,7 +257,7 @@ describe("the Punic Wars map as authoritative world state", () => {
     expect(seated("caucasian-iberia")).toBe("Pharnavaz I");
     // In the province holding the capital, which is Pergamon itself.
     const philetaerus = world.characters.find((character) => character.name === "Philetaerus")!;
-    expect(byId.get(philetaerus.locationProvinceId!)!.settlements.some((settlement) => settlement.id === "settlement-pergamon")).toBe(true);
+    expect(byId.get(philetaerus.locationProvinceId)!.settlements.some((settlement) => settlement.id === "settlement-pergamon")).toBe(true);
   });
 
   it("puts every fleet in a port on the sea, near the army it would carry", () => {
@@ -287,9 +302,7 @@ describe("the Punic Wars map as authoritative world state", () => {
 
   it("gives every polity that holds ground somewhere to hold", () => {
     const held = new Set(provinces.map((province) => province.controllerPolityId));
-    // A city counts. The Campanian legion holds Rhegium inside a province Rome
-    // otherwise controls, which is precisely what it did -- and what the
-    // Mamertines did at Messana.
+    // A city counts even for a power without a whole province of its own.
     for (const province of provinces) for (const settlement of province.settlements) held.add(settlement.controllerPolityId);
     // Brixia now gives the Cenomani their historical seat as well. Every
     // declared power holds a city or ground it can actually act on.

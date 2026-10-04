@@ -92,14 +92,14 @@ describe("a month thought about", { timeout: 300_000 }, () => {
     // once on the month's second day, and the burst stopped on its fifth with
     // the budget spent. After: seventeen -- one, eight, four, four -- with
     // people asked on the second, fifth, eighth and thirtieth days.
-    expect(result.modelCalls).toBeLessThanOrEqual(callCapFor(DEFAULT_BUDGET, 30));
+    expect(result.modelWorkCalls).toBeLessThanOrEqual(callCapFor(DEFAULT_BUDGET, 30));
     expect(lastDay).toBeGreaterThanOrEqual(21);
     // One correction and one reconciliation a round at most, never one a person.
     const rounds = new Set(port.cognitionDays).size;
     expect(port.calls.filter((call) => call === "repair_deltas").length).toBeLessThanOrEqual(rounds);
     expect(port.calls.filter((call) => call === "reconcile_facts").length).toBeLessThanOrEqual(rounds);
-    // A round of ten is two calls, not three.
-    expect(port.calls.filter((call) => call === "simulate_cognition").length).toBeLessThanOrEqual(2 * rounds);
+    // Extra parallel requests preserve the same work allowance.
+    expect(port.calls.filter((call) => call === "simulate_cognition").length).toBeLessThanOrEqual(3 * rounds);
     // What named the legion that is not there is never the event: withdrawn
     // by the round's reconciliation, or -- for the world riding along, which
     // nobody pays to correct -- kept as somebody's report of it.

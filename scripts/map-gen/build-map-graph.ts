@@ -437,9 +437,14 @@ const ANCHORS: [string, string, string][] = [
   ['ita-72843720b81376294924159-sicily-northeast', 'settlement-messana', 'Messana, on the strait'],
 ];
 const anchorOwners: string[] = [];
+// The old Bruttian region is anchored at Rhegium for the storyline, but its
+// regional owner cannot stand for the rebel garrison's occupied coastal cell.
+// At the March 270 opening Decius still holds Rhegium (Polybius 1.7);
+// the neighbouring Bruttian provinces keep their existing owners.
+const openingAnchorOwners: Readonly<Record<string, string>> = { 'settlement-rhegium': 'rhegium-campanians' };
 for (const [oldId, settlementId] of ANCHORS) {
   const home = settlements.find((x) => x.id === settlementId)!.provinceIndex;
-  const owner = old.provinces.find((p) => p.id === oldId)!.controller;
+  const owner = openingAnchorOwners[settlementId] ?? old.provinces.find((p) => p.id === oldId)!.controller;
   if (controller[home] !== owner) { anchorOwners.push(`${idOf[home]} ${controller[home]} -> ${owner} (${oldId})`); controller[home] = owner; }
 }
 // One settlement per province unless two must share: report the sharing.

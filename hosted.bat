@@ -8,6 +8,10 @@ if errorlevel 1 (
     exit /b 1
 )
 
+echo Checking the local database...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\start-local-database.ps1"
+if errorlevel 1 exit /b %ERRORLEVEL%
+
 if not exist node_modules (
     echo Installing dependencies...
     call npm ci

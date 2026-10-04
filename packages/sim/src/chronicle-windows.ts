@@ -17,6 +17,7 @@ import {
   type UtteranceLine,
 } from "./chronicle";
 import type { SimModelPort } from "./ports";
+import { DECISION_EVENTS } from "./cognition-policy";
 import { lineOf } from "./order-outcomes";
 
 /**
@@ -131,6 +132,8 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
   const farRoom = (): number => Math.min(FAR_THREADS_PER_WINDOW, Math.max(0, FAR_THREADS_PER_BURST - farTold));
   /** Settled when the window before has chosen what to tell and what to carry. */
   let selecting: Promise<void> = Promise.resolve();
+  let pending: WindowSnapshot | null = null;
+  let lastComposedDay: number | null = null;
 
   const compose = async (window: WindowSnapshot, gate: Promise<void>, chosenBefore: Promise<void>, chosen: () => void): Promise<readonly ChronicleEntry[]> => {
     // What the window before carries is this one's to tell, and what it chose
@@ -210,19 +213,45 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
     }
   };
 
+  const enqueue = (window: WindowSnapshot): void => {
+    // This window's passages wait for the previous window's; its composing
+    // does not.
+    const gate = publishing;
+    const chosenBefore = selecting;
+    let chosen: () => void = () => undefined;
+    selecting = new Promise<void>((resolve) => { chosen = resolve; });
+    const entries = compose(window, gate, chosenBefore, () => chosen());
+    composing.push(entries);
+    publishing = entries.then(() => undefined).catch(() => undefined);
+    lastComposedDay = window.to.day;
+  };
+  const flush = (final = false): void => {
+    if (pending === null) return;
+    const window = pending;
+    pending = null;
+    enqueue(final ? { ...window, final: true } : window);
+  };
   return {
     closed: (window) => {
-      // This window's passages wait for the previous window's; its composing
-      // does not.
-      const gate = publishing;
-      const chosenBefore = selecting;
-      let chosen: () => void = () => undefined;
-      selecting = new Promise<void>((resolve) => { chosen = resolve; });
-      const entries = compose(window, gate, chosenBefore, () => chosen());
-      composing.push(entries);
-      publishing = entries.then(() => undefined).catch(() => undefined);
+      // Keep every fact and state change, but compose routine business in
+      // weekly spans. The order, important turns of fortune and final record
+      // still publish immediately, without one historian per quiet day.
+      pending = pending === null ? window : {
+        ...window, from: pending.from, worldBefore: pending.worldBefore,
+        facts: [...pending.facts, ...window.facts],
+        significanceByFactId: new Map([...pending.significanceByFactId, ...window.significanceByFactId]),
+        narrative: [...pending.narrative, ...window.narrative],
+        frictions: [...pending.frictions, ...window.frictions],
+        utterances: [...pending.utterances, ...window.utterances],
+        battleAccounts: [...pending.battleAccounts, ...window.battleAccounts],
+        orderFactIds: [...pending.orderFactIds, ...window.orderFactIds],
+      };
+      const important = window.battleAccounts.length > 0 || window.facts.some((fact) =>
+        DECISION_EVENTS.has(fact.kind) || (window.significanceByFactId.get(fact.id) ?? 0) >= 60);
+      if (window.index === 0 || window.final || important || window.to.day - (lastComposedDay ?? window.from.day) >= 7) flush();
     },
     finish: async () => {
+      flush(true);
       await Promise.all(composing);
       await publishing;
       // A record that went blank gets one last look: when nothing at all

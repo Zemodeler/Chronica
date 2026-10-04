@@ -13,6 +13,7 @@ import {
 } from "@chronica/shared";
 import type { ChronicaDatabase } from "../database";
 import { carryPunicWarsCities } from "../punic-wars-cities";
+import { carryPunicWarsIreland } from "../punic-wars-ireland";
 import { games, players, scenarioVersions, scenarios } from "../schema/game";
 import {
   burstProgress,
@@ -120,7 +121,7 @@ export class ScenarioDefinitionUnreadableError extends Error {
 /** A stored world, upgraded and parsed, or `SaveNeedsRepairError` naming the paths. */
 export function readStoredWorld(gameId: string, raw: unknown): WorldState {
   try {
-    return carryPunicWarsCities(readWorldDocument(raw).world);
+    return carryPunicWarsCities(carryPunicWarsIreland(readWorldDocument(raw).world));
   } catch (error) {
     if (error instanceof WorldDocumentUnreadableError) throw new SaveNeedsRepairError(gameId, error.issues, error.message);
     throw error;

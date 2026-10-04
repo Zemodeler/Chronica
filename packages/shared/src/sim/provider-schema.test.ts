@@ -11,7 +11,13 @@ function walk(node: unknown, visit: (node: Json) => void): void {
   if (Array.isArray(node)) { for (const child of node) walk(child, visit); return; }
   if (!isObject(node)) return;
   visit(node);
-  for (const child of Object.values(node)) walk(child, visit);
+  for (const [key, child] of Object.entries(node)) {
+    // Property and definition names may themselves be JSON Schema keywords.
+    // Visit their schemas, not the name-to-schema dictionary as a schema.
+    if ((key === "properties" || key === "$defs") && isObject(child)) {
+      for (const schema of Object.values(child)) walk(schema, visit);
+    } else walk(child, visit);
+  }
 }
 
 describe("the delta union in the providers' dialect", () => {
@@ -44,6 +50,17 @@ describe("the delta union in the providers' dialect", () => {
     expect(Object.keys(schema.$defs as Json).length).toBeGreaterThan(5);
     const size = measureSchema(schema);
     expect(size.chars).toBeGreaterThan(10_000);
+  });
+
+  it("keeps descriptions without putting unsupported siblings beside references", () => {
+    walk(schema, (node) => {
+      if (typeof node.$ref === "string") expect(Object.keys(node)).toEqual(["$ref"]);
+    });
+    const id = z.string().meta({ id: "SharedId" });
+    const sample = toProviderSchema(z.object({ a: id, b: id.describe("The recipient's id") }));
+    const b = (sample.properties as Json).b as Json;
+    expect(b.description).toBe("The recipient's id");
+    expect(b.anyOf).toEqual([{ $ref: "#/$defs/SharedId" }]);
   });
 
   it("is not recursive", () => {

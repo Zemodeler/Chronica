@@ -320,3 +320,203 @@ one kind ever shared a rule), under the plan's five percent line: `shape.ts`, `w
 and the `mechanic_reused` audit kind are deleted; `shapeKey` stays on a rule as its fingerprint.
 The four local saves that carried the empty collection had the key stripped by hand
 (`update game_worlds set world = world - 'mechanicShapes'`), since the world schema is strict.
+
+## CLI hand-mode investigation and fixes (2026-10-03)
+
+The installed hand responder is Codex CLI 0.160.0 with a ChatGPT subscription login.
+The configured API connection is an Azure deployment named `gpt-6-ad`, while the CLI
+selects `gpt-6-luna`. Calling `gpt-6-luna` against that Azure connection returned
+`404 DeploymentNotFound`. The deployment's underlying model identity is unverified;
+this is not an identical-model comparison.
+
+### Confirmed faults
+
+- Both real simulation schemas were rejected before inference: a reference to a named
+  definition had a sibling `description`. The ChatGPT schema validator reported
+  `$ref cannot have keywords {'description'}`. Each operation then fell back to JSON
+  encoded inside an answer string. References now stand alone inside a single-branch
+  `anyOf`, preserving their descriptions on the enclosing schema. Live probes accepted
+  both corrected schemas and returned valid JSON.
+- The CLI was supplied both the provider schema and a second copy as prompt text.
+  The duplicate is now removed only when the trailing text parses as a schema and a
+  separate provider schema is present. The game's substantive instructions remain.
+- The game's instructions were carried as user text underneath the CLI's coding-agent
+  instructions. `model_instructions_file` now supplies the simulation instructions
+  directly, using the CLI's supported configuration mechanism. Optional coding tools,
+  shell snapshots and host skill discovery are disabled for these text-only responses.
+- Cognition's unused narrative summary was still required by the provider grammar;
+  it is now omitted, as it already was in the prompt's shown schema.
+- Chronicle and reconciliation previously always used the JSON-string envelope.
+  Their existing reader schemas are now shared with the CLI grammar, with the same
+  simulation validation behavior. A malformed structured reply is retried under
+  the same schema rather than abandoning the grammar.
+- Default reasoning is now low, matching the API's main simulation calls. Explicit
+  selections and environment overrides remain authoritative. The active local Codex
+  selection was changed from medium to low.
+- Cache namespace is now `codex-v3`, so previous envelope answers are not replayed
+  under the new prompt/grammar. Uncached attempts log format, effort, duration and usage.
+
+The earlier saved request timings are approximate queue-to-answer-file durations:
+orchestration 81.0 s, repair 17.4 s, reconciliation 10.7 s, cognition 53.6 / 73.7 /
+115.0 s. The 115 s call saved a malformed reply at 46.2 s and completed a replacement
+68.8 s later. Database progress recorded the first Chronicle entries at 120.8 s after
+the order. These historical calls are not a controlled before/after experiment.
+A `--version` launch took 56–64 ms; full inference-session setup was not isolated.
+
+### Small live benchmarks
+
+Only newly invented fictional events/characters were sent in these comparisons;
+no saved-game prompt was exported. Both paths used the same task, corrected schema
+and low effort, but different provider model/deployment names. Answers differ in
+length, and each figure is a single observation rather than a latency distribution.
+
+| Task | Azure API (`gpt-6-ad`) | ChatGPT CLI (`gpt-6-luna`) | Validation |
+|---|---:|---:|---|
+| One messenger Chronicle entry | 2.49 s | 6.62 s | Both passed |
+| Two NPCs making one-step plans | 7.02 s | 12.15 s | Both passed |
+| Same two-NPC task, CLI medium effort | — | 14.96 s | Passed |
+
+The Chronicle API call had 325 input tokens; the CLI had 5,456. Disabling more unused
+CLI features reduced that to 4,607 on a later check, but did not improve its single
+latency observation (6.92 s). The remaining harness context is material for tiny
+requests. A persistent app-server experiment using fresh isolated ephemeral threads
+took 4.54 / 6.70 s on a messenger task, with 5,890 input tokens and no cache hits.
+It was not adopted: these results do not establish an advantage over `exec`.
+
+Reproduce the synthetic tests with `scripts/benchmark-hand.mts --api --synthetic
+--api-model gpt-6-ad` or `--synthetic-cognition`. Use the existing env-file and TS
+runtime. `--api` opts into paid API requests; without it only the subscription CLI
+is called. `--effort medium` measures the alternate setting. Results and answers
+are written to `eval-out/hand-speed`. Saved-prompt replay is a separate path and
+requires authorization to export that prompt.
+
+Verification: 44 AI tests, 10 provider-schema tests, and 70 Chronicle/reconciliation
+tests passed. AI and simulation typechecks and lint on changed TypeScript files passed.
+No full-turn speed parity or saved-game semantic-quality claim is established yet.
+The code removes confirmed overhead; it cannot guarantee the Azure and ChatGPT
+services have identical inference latency. A matched full-turn evaluation remains
+the next measurement once saved-game export is approved.
+
+### Shared game requests and complete-turn measurement (2026-10-03)
+
+`packages/ai/src/game-request.ts` now owns simulation instructions, strict schemas,
+effort selection, normalization of provider records/nulls, and one malformed-JSON
+correction. API and CLI adapters both consume that contract. The Chronicle now
+defaults to the same selected low effort on both. Unstructured CLI replies are
+direct JSON too, removing the escaped JSON-string envelope. A schema refusal
+fails visibly rather than changing the contract silently. CLI answer cache keys
+were advanced to v4. API correction attempts retain the usage of both requests.
+
+No three-minute cutoff was added. The user's requirement is to finish the work
+within three minutes, preserving the simulation and report.
+
+The actual API adapter accepted the cognition schema on the invented two-person
+task: API 4.72s (20,383 input tokens, 368 output), CLI 14.92s (24,663 input tokens,
+343 output). Both answers passed cognition validation. This compares equal game
+instructions/schema/effort, rather than equal generated answers. The CLI sample
+ran while the full-turn benchmark was active, so it is not a contention-free
+latency comparison. Earlier uncontended samples also showed a gap.
+
+`scripts/benchmark-turn.mts` runs the normal simulation and window report writer
+against a fresh public Punic Wars seed, without reading or modifying a saved
+game, caching answers, or sending anything to the API. With the normal 30-day
+span and existing simulation budgets, the run finished in **438.36s (7m18s)**:
+28 transport calls, five report entries, no simulation parse failures, and a
+loadable resulting world. The stop reason was `max_span`. Existing call-budget
+and unchanged-actor skips still applied; this is not a claim that every possible
+actor was evaluated. The measured duration excludes web database commit costs.
+Orchestration took 41.57s; cognition calls ranged from 16.82s to 64.22s.
+Reporting overlapped simulation, and split cognition calls ran concurrently.
+The remaining critical path is mostly successive actor decisions. Shared
+request construction has not established a three-minute complete-turn result.
+
+Reproduce with:
+`node --env-file=apps/web/.env.local --import tsx scripts/benchmark-turn.mts`.
+Results and reports are saved under `eval-out/hand-speed/turn-*`. For the actual
+API adapter's small synthetic test, add `--adapter` to the earlier
+`benchmark-hand.mts --api --synthetic-cognition --api-model gpt-6-ad` command.
+
+Verification: 127 AI/schema/Chronicle/reconciliation tests passed; the AI
+typecheck and lint on changed adapter and contract files passed. No simulation
+budget, actor selection, or waiting deadline was shortened to obtain a result.
+
+### Parallel decisions and unchanged circumstances (2026-10-03)
+
+Cognition now splits casts of four or more actors into up to three concurrent
+groups, aiming for three actors per request. Prior answer sizes balance the
+groups; everyone retains the same prompt context and results return in router
+order. Additional initial requests caused by splitting do not consume the
+existing simulation work allowance. Actual request counts remain visible as
+`modelCalls`; `modelWorkCalls` records budget consumption, and retries still cost
+work. Parallelism can increase request and repeated-input costs.
+
+Within a burst, successful decisions remember the actor's circumstances. An
+actor wakes again for unread news, changed circumstances, new obligations or
+due plans. Routine distant countdown changes and removal of an answered
+obligation do not trigger another decision. Failed groups do not consume news
+or obligations. Memory resets on the next turn, and changes made by another
+actor remain eligible for consideration. Chronicle prompts, answer detail,
+simulation spans and deadlines are unchanged; compact NPC answers were not
+implemented.
+
+The latest fresh-seed, uncached 30-day CLI sample completed in **354.66s (5m55s)**,
+with 34 transport calls including report writing, 27 simulation model calls,
+18 simulation work units, four report entries, no parse failures and a loadable
+world. It stopped at `max_span`. Compared with the earlier 438.36s sample, this
+is about 19% shorter, but individual generated runs do not establish an average
+or a guaranteed speed gain. The three-minute goal remains unmet. The final
+context-memory guard was added after this sample; no further full benchmark
+was run.
+
+Final focused validation: 194 tests across cognition, attention, burst budgets,
+plans and Chronicle windows passed, as did the simulation typecheck. The wider
+simulation run had 1,646 passing tests and nine failures in scenario expectations
+and a timeout, alongside concurrent simulation changes. One failure was also
+reproduced with the original cognition implementation; the others were not all
+isolated. The focused results do not establish a clean full-suite run.
+
+### Compact decisions and approved routine work (2026-10-03)
+
+NPC instructions now ask for compact decisions and one fact per distinct event,
+retaining motives, important spoken words, secrecy, affected people, dependencies
+and consequences for the Chronicle. This is guidance, not an answer-token cutoff.
+The Chronicle writer's instructions and output limits remain unchanged. Both API
+and CLI consume these simulation instructions and the same extended plan schema.
+
+Context trimming is deliberately conservative: duplicate event records share
+their wording but retain every id; different event times or metadata keep separate
+lines. Agreed diplomatic business keeps its accepted terms, agreement id and
+latest answer, omitting earlier bargaining letters. Active negotiations retain
+their recent history. No stored facts or correspondence are deleted, and there
+is no new relevance filter that removes unique news or current obligations.
+
+Plan steps can now name `routineProjectRef` for approved work already underway.
+The engine resolves the reference (including handles for work created in the same
+answer) and accepts it only for a sponsor, overseer or commander of the moving
+force, and only for steps with no further dependency. Existing saves and plans
+without this optional field keep their previous behavior. Routine work uses the
+existing project machinery for travel, stages and payments; this change does not
+invent actions from plan prose. Its step is settled from actual project completion,
+not an NPC's claim. Running work does not wake its owner a week before its due
+date; missing, failed, cancelled or overdue work still requires a decision.
+Project facts continue to reach the Chronicle, and other news or duties can still
+wake the owner. Broader parallelism across situations was not added.
+
+Validation: 168 focused tests passed across NPC context, routine plans, budgets,
+Chronicle windows, negotiation and provider schemas. Additional tick/project
+tests passed; simulation and AI typechecks passed. Lint passed on the changed
+files checked separately from `burst.ts`, which retains its existing assertion
+error. These checks establish
+mechanical behavior, not equal narrative quality across generated runs.
+
+The new public-seed 30-day CLI sample took **533.86s (8m54s)**: 24 simulation
+model calls, 19 work units, 36 transport calls including reporting, six Chronicle
+entries, no parse failures, a loadable world and `max_span`. Its opening request
+took 61.28s and cognition requests ranged from 13.61s to 76.66s. Simulation calls
+were fewer than in the preceding sample (24 versus 27), but reporting calls were
+more numerous (12 versus seven) and several requests took longer. This result
+does not demonstrate a speed gain; neither it nor the preceding samples establish
+an average. The three-minute goal remains unmet. The duplicate-event metadata
+guard and dependency restriction were finalized while this run was active and
+were validated separately by tests. No second full benchmark was run. The result
+and report are in `eval-out/hand-speed/turn-1791045090622`.

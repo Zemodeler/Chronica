@@ -27,6 +27,7 @@ import {
   sameNegotiation,
   offeredAgreementKinds,
   peaceOfferMetadata,
+  settlePeaceTalks,
   isDelivered,
   newsDaysBetween,
   whereTheyHear,
@@ -137,6 +138,7 @@ import {
   hireFloorPerMonth,
   nearestShore,
 } from "@chronica/shared";
+import { dutyGoals, impliedUndertakings, offerMetadata } from "../treaty-duties";
 import { findInvariantViolations } from "../invariants";
 import { resolveEngagement, type BattleAccount } from "../battle";
 import { assaultSiege } from "../siege-decisions";
@@ -1882,7 +1884,7 @@ function applyOne(
     try {
       const opened = applyOne(replied, opening, context, assignedIds, resolve, emitFact, emitAccount);
       const agreementId = opened.polityAgreements.find((agreement) => agreement.sourceMessageId === message.id && agreement.kind === kind)?.id ?? null;
-      return { ...opened, diplomacy: opened.diplomacy.map((candidate) => (candidate.id === message.id ? { ...candidate, agreementId } : candidate)) };
+      return settlePeaceTalks({ ...opened, diplomacy: opened.diplomacy.map((candidate) => (candidate.id === message.id ? { ...candidate, agreementId } : candidate)) });
     } catch (error) {
       if (!(error instanceof DeltaRejection)) throw error;
       emitFact(letterFact(replied, {
@@ -5151,7 +5153,7 @@ function applyOne(
       if (inReplyToId !== null && !world.diplomacy.some((message) => message.id === inReplyToId)) {
         reject(`No letter "${inReplyToId}" exists to be answering.`, "reference");
       }
-      const offer = peaceOfferMetadata(delta);
+      const offer = offerMetadata(world, { ...delta, fromPolityId: letterFromId, toPolityId: letterToId });
       const proposed = { ...delta, ...offer, fromPolityId: letterFromId, toPolityId: letterToId, fromCharacterId: senderId };
       const situationKey = diplomaticSituationKey(world, letterFromId, letterToId);
       const redundant = redundantDiplomaticOffer(world.diplomacy, proposed, atStep, situationKey);
@@ -5222,7 +5224,7 @@ function applyOne(
       const messageId = required(delta.messageRef, "The letter being answered");
       const storedMessage = world.diplomacy.find((candidate) => candidate.id === messageId);
       if (storedMessage === undefined) reject(`No letter "${messageId}" exists to answer.`, "reference");
-      const message = { ...storedMessage, ...peaceOfferMetadata(storedMessage) };
+      const message = { ...storedMessage, ...offerMetadata(world, storedMessage) };
       // Answering twice is not a second answer; it is the engine being asked to
       // rewrite a reply already sent and read.
       if (message !== undefined && message.status === "answered") {
@@ -5460,7 +5462,18 @@ function applyOne(
         });
       }
       // What the treaty makes happen, carried out as it is made.
-      const clauses = delta.kind === "peace" ? [...(delta.clauses ?? []), ...servesInTerms(world, delta.terms, partyId, otherPartyId, delta.clauses ?? [])] : delta.clauses ?? [];
+      // Duties the terms speak of and no clause carries -- a withdrawal, a
+      // restoration -- are made the party's undertaking, to be judged by the ground.
+      // Only where each side has somebody to give and take the word; an implied
+      // duty never makes a treaty that was otherwise sound impossible to sign.
+      const signer = world.diplomacy.find((message) => message.id === sourceMessageId);
+      const hasVoice = (polityId: string): boolean => rulerOf(world, polityId, { offices: context.offices, successionRules: context.successionRules ?? [] }) !== null
+        || [signer?.fromCharacterId, signer?.toCharacterId].some((id) => world.characters.some((character) => character.id === id && character.alive && character.polityId === polityId));
+      const implied = delta.kind === "peace" || delta.kind === "truce"
+        ? impliedUndertakings(world, delta.terms, partyId, otherPartyId, delta.clauses ?? [], signer?.fromPolityId).filter((clause) => hasVoice(partyId) && hasVoice(otherPartyId) && hasVoice(clause.byPolityId))
+        : [];
+      const written = [...(delta.clauses ?? []), ...implied];
+      const clauses = delta.kind === "peace" ? [...written, ...servesInTerms(world, delta.terms, partyId, otherPartyId, written)] : written;
       const carried = carryOutClauses(world, clauses, agreementId, partyId, otherPartyId, required, context, emitFact, sourceMessageId);
       // A peace settles what each side holds of the other's (`settleOccupations`).
       const bound = delta.kind !== "peace" ? carried : { ...carried, map: { ...carried.map, provinces: settleOccupations(carried.map.provinces, partyId, otherPartyId, atStep) } };
@@ -6737,6 +6750,15 @@ function carryOutClauses(
       const promisor = rulerOf(world, by, government) ?? representativeOf(by);
       const beneficiary = rulerOf(world, otherOf(by), government) ?? representativeOf(otherOf(by));
       if (promisor === null || beneficiary === null) reject(`An undertaking is somebody's word: ${promisor === null ? name(by) : name(otherOf(by))} has nobody at its head to give or take it.`, "reference");
+      // Safe passage is kept when the protected garrison actually leaves
+      // unharmed, not when the consul's army happens to stand near its leader.
+      const safePassage = /\bsafe (?:passage|conduct)\b/i.test(clause.what);
+      const protectedForces = safePassage ? world.material.forces.filter((force) => force.polityId === otherOf(by)
+        && (force.commanderCharacterId === beneficiary.id || force.locationId === beneficiary.locationProvinceId)) : [];
+      const safeGoals = protectedForces.length === 0 ? undefined : protectedForces.slice(0, 4).map((force) => ({
+        kind: "safe_passage" as const, forceId: force.id, fromProvinceId: force.locationId, sinceStep: next.elapsedStep,
+      }));
+      const completionGoals = clause.completionGoals ?? (safeGoals ?? dutyGoals(world, clause.what, by, otherOf(by)));
       next = {
         ...next,
         commitments: [...next.commitments, {
@@ -6745,6 +6767,7 @@ function carryOutClauses(
           beneficiaryCharacterId: beneficiary.id,
           actionKind: clause.duty,
           description: `Under the treaty: ${clause.what}`.slice(0, 400),
+          ...(completionGoals === undefined ? {} : { completionGoals }),
           conditions: "",
           form: "do" as const,
           requiredOfficeId: null,

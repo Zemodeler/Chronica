@@ -5,7 +5,8 @@ import path from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const fake = vi.hoisted(() => ({ spawn: vi.fn(), loggedIn: false, oldVersion: false, existingHome: "", fail: false, answer: '{"actors":[]}', answers: [] as string[], schemas: [] as string[], refuseSchema: false }));
+type FakeChild = EventEmitter & { stdout: PassThrough; stderr: PassThrough; stdin: PassThrough; kill: ReturnType<typeof vi.fn> };
+const fake = vi.hoisted(() => ({ spawn: vi.fn<(_command: string, args: string[], options: {env: NodeJS.ProcessEnv}) => FakeChild>(), loggedIn: false, oldVersion: false, existingHome: "", fail: false, answer: '{"actors":[]}', answers: [] as string[], schemas: [] as string[], refuseSchema: false }));
 vi.mock("node:child_process", () => ({ spawn: fake.spawn }));
 
 describe("subscription hand responder", () => {
@@ -47,15 +48,14 @@ describe("subscription hand responder", () => {
           fake.loggedIn = true;
         } else if (args.includes("exec")) {
           code = fake.fail ? 1 : 0;
-          const schema = JSON.parse(readFileSync(args[args.indexOf("--output-schema") + 1]!, "utf8")) as { properties?: Record<string, unknown> };
-          const enveloped = schema.properties !== undefined && "answer" in schema.properties;
-          fake.schemas.push(enveloped ? "envelope" : "schema");
-          if (!enveloped && fake.refuseSchema) {
+          const structured = args.includes("--output-schema");
+          fake.schemas.push(structured ? "schema" : "json");
+          if (structured && fake.refuseSchema) {
             code = 1;
             child.stderr.write("invalid_request_error: Invalid schema for response_format");
           } else if (!code) {
             const answer = fake.answers.shift() ?? fake.answer;
-            writeFileSync(args[args.indexOf("--output-last-message") + 1]!, enveloped ? JSON.stringify({ answer }) : answer);
+            writeFileSync(args[args.indexOf("--output-last-message") + 1]!, answer);
           }
         }
         child.emit("close", code);
@@ -80,7 +80,7 @@ describe("subscription hand responder", () => {
       if (!call[1].includes('forced_login_method="chatgpt"') || call[1].includes("exec")) expect(call[2].env.CODEX_HOME).toBe(path.join(dir, "auth"));
     }
     expect(readFileSync(path.join(dir, "auth/config.toml"), "utf8")).toContain('forced_login_method = "chatgpt"');
-    expect(existsSync(exec[1][exec[1].indexOf("--cd") + 1])).toBe(false);
+    expect(existsSync(exec[1][exec[1].indexOf("--cd") + 1]!)).toBe(false);
   });
 
   it("reuses a ChatGPT CLI login without opening sign-in or copying its credentials", async () => {
@@ -116,7 +116,7 @@ describe("subscription hand responder", () => {
     await expect(answerWithHandCodex("S", "R", "failed")).rejects.toThrow("No API fallback");
     fake.fail = false;
     fake.answer = "not JSON";
-    await expect(answerWithHandCodex("S", "R", "bad-json")).rejects.toThrow();
+    expect(await answerWithHandCodex("S", "R", "bad-json")).toBe("not JSON");
   });
 
   it("refuses production before installation or login", async () => {
@@ -126,19 +126,19 @@ describe("subscription hand responder", () => {
     expect(fake.spawn).not.toHaveBeenCalled();
   });
 
-  it("asks at medium effort unless told otherwise, and keys the cache by model, effort and format", async () => {
+  it("asks at low effort unless told otherwise, and keys the cache by model, effort and format", async () => {
     fake.loggedIn = true;
     const { answerWithHandCodex, handCodexCacheNamespace, handCodexEffort } = await import("./hand-codex");
     await answerWithHandCodex("S", "R", "effort-default");
-    expect(fake.spawn.mock.calls.find((call) => call[1].includes("exec"))![1]).toContain('model_reasoning_effort="medium"');
-    expect(handCodexEffort("simulate_cognition")).toBe("medium");
-    expect(handCodexCacheNamespace("simulate_cognition")).toBe("codex-v2:gpt-6-luna:medium:schema");
-    expect(handCodexCacheNamespace("compose_chronicle")).toBe("codex-v2:gpt-6-luna:medium:envelope");
+    expect(fake.spawn.mock.calls.find((call) => call[1].includes("exec"))![1]).toContain('model_reasoning_effort="low"');
+    expect(handCodexEffort("simulate_cognition")).toBe("low");
+    expect(handCodexCacheNamespace("simulate_cognition")).toBe("codex-v4:gpt-6-luna:low:schema");
+    expect(handCodexCacheNamespace("compose_chronicle")).toBe("codex-v4:gpt-6-luna:low:schema");
     vi.stubEnv("CHRONICA_HAND_EFFORT", "high");
     vi.stubEnv("CHRONICA_AI_EFFORT_COMPOSE_CHRONICLE", "low");
     expect(handCodexEffort("simulate_cognition")).toBe("high");
     expect(handCodexEffort("compose_chronicle")).toBe("low");
-    expect(handCodexCacheNamespace("simulate_cognition")).toBe("codex-v2:gpt-6-luna:high:schema");
+    expect(handCodexCacheNamespace("simulate_cognition")).toBe("codex-v4:gpt-6-luna:high:schema");
   });
 
   it("holds cognition to its own schema and hands back what Zod expects", async () => {
@@ -152,13 +152,37 @@ describe("subscription hand responder", () => {
     expect(schemaPath).toContain("--output-schema");
   });
 
-  it("falls back to the plain envelope for good when Codex refuses an answer schema", async () => {
+  it("removes only a separately supplied schema and keeps the game's instructions", async () => {
+    const { handCodexInstructions } = await import("./hand-codex");
+    const system = 'Obey the authority rules.\n{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"actors":{}}}';
+    expect(handCodexInstructions(system, true)).toContain("Obey the authority rules.");
+    expect(handCodexInstructions(system, true)).not.toContain('"$schema"');
+    expect(handCodexInstructions(system, false)).toContain('"$schema"');
+    expect(handCodexInstructions('Keep this.\n{"$schema":broken', true)).toContain('"$schema":broken');
+  });
+
+  it("retries an unreadable structured reply under the same schema", async () => {
+    fake.loggedIn = true;
+    fake.answers = ["broken", '{"actors":[]}'];
+    const { answerWithHandCodex } = await import("./hand-codex");
+    expect(await answerWithHandCodex("S", "R", "same-schema-retry", { operation: "simulate_cognition" })).toBe('{"actors":[]}');
+    expect(fake.schemas).toEqual(["schema", "schema"]);
+  });
+
+  it("asks Chronicle and reconciliation for objects without a JSON-string envelope", async () => {
+    const { answerWithHandCodex } = await import("./hand-codex");
+    fake.answers = ['{"entries":[]}', '{"withdraw":[],"rewrite":[]}'];
+    expect(await answerWithHandCodex("S", "R", "chronicle", {operation: "compose_chronicle"})).toBe('{"entries":[]}');
+    expect(await answerWithHandCodex("S", "R", "reconcile", {operation: "reconcile_facts"})).toBe('{"withdraw":[],"rewrite":[]}');
+    expect(fake.schemas).toEqual(["schema", "schema"]);
+  });
+
+  it("reports schema refusal without silently changing the game contract", async () => {
     fake.loggedIn = true;
     fake.refuseSchema = true;
     const { answerWithHandCodex } = await import("./hand-codex");
-    expect(await answerWithHandCodex("S", "R", "refused-1", { operation: "simulate_orchestrate" })).toBe('{"actors":[]}');
-    expect(await answerWithHandCodex("S", "R2", "refused-2", { operation: "simulate_orchestrate" })).toBe('{"actors":[]}');
-    expect(fake.schemas).toEqual(["schema", "envelope", "envelope"]);
+    await expect(answerWithHandCodex("S", "R", "refused", { operation: "simulate_orchestrate" })).rejects.toThrow("No API fallback");
+    expect(fake.schemas).toEqual(["schema"]);
   });
 
   it("reads a fenced or trailing-comma answer, and asks once more for one it cannot read", async () => {
@@ -171,7 +195,7 @@ describe("subscription hand responder", () => {
     expect(await answerWithHandCodex("S", "R", path.join(dir, "retried.json"))).toBe('{"actors":[]}');
     const asked = fake.spawn.mock.calls.filter((call) => call[1].includes("exec"));
     expect(asked).toHaveLength(2);
-    expect(existsSync(path.join(dir, "retried.raw.txt"))).toBe(true);
+    expect(fake.schemas).toEqual(["json", "json"]);
   });
 
   it("reports a deadline as a timeout the loop recognises", async () => {

@@ -207,6 +207,14 @@ export function foldStrayProposalKeys(value: unknown): unknown {
 
 export const COGNITION_SYSTEM_PROMPT = `You are several people in a historical world, reasoning separately.
 
+Keep answers compact: write the decision and its meaningful consequences, not a
+review of the supplied context. Do not write reasoning or narrativeSummary.
+Usually one concise fact records one distinct event; do not restate the same
+event as several facts. Preserve motives that explain a choice, important spoken
+words, secrecy, affected people and consequences: these feed the Chronicle.
+Leave empty optional collections empty. Never shorten an answer by dropping a
+necessary act, treaty term, dependency or consequence.
+
 You will be given one section per person. Each section contains only what that
 person currently knows. Treat it as the whole of their knowledge: if something is
 not in their section, they have not heard it, and they must not act on it.
@@ -242,6 +250,12 @@ an act that changes the world counts. A step shown as
 missed means the plan has fallen behind, and they carry on late, lay it again,
 or give it up. What their government means to do is somebody's to carry out,
 and if it is theirs -- their office, their army -- it is their plan.
+For a step whose work is already approved and running as a project, name that
+project in routineProjectRef (an existing id, or local:handle of a project made
+in this answer). The engine carries its stages, payments and travel through and
+marks the step done when the project completes; do not redo the work. Only use
+this for a step with no further dependency (when: null). Use null
+for steps that still need a decision. Failed or overdue projects need a decision.
 
 Someone may act within their authority, beyond it, or against it. A general may
 march without orders; an official may quietly divert funds; a senator may begin
@@ -360,6 +374,10 @@ ${OUTPUT_JSON_SCHEMA}`;
 export interface CognitionResult {
   readonly output: CognitionOutput;
   readonly calls: number;
+  /** Extra initial requests caused only by splitting the same work more widely. Repairs still count fully. */
+  readonly parallelExtraCalls?: number;
+  /** A valid empty answer still considered its assigned actors; a failed group did not. */
+  readonly answeredActorIds?: readonly string[];
   readonly parseFailure: string | null;
   /** What was dropped to make an otherwise good answer parse, without a call. */
   readonly salvaged: readonly string[];
@@ -695,6 +713,14 @@ function describeMeans(character: Character, world: WorldState): string[] {
       `  - ${entity.label} [${entity.id}] (${entity.kind})${entity.mechanic === undefined || entity.mechanic.endedAtStep !== null ? "" : `; rule: ${ruleInWords(entity.mechanic, world, entity.id)}`}`));
   }
 
+  const forceIds = new Set(commanded.map((force) => force.id));
+  const work = world.projects.filter((project) => ["funded", "in_progress"].includes(project.status)
+    && ((project.sponsorEntityRef.kind === "character" && project.sponsorEntityRef.id === character.id)
+      || project.overseerCharacterId === character.id
+      || (project.completionOutcome?.kind === "force_move" && forceIds.has(project.completionOutcome.forceId ?? ""))));
+  if (work.length > 0) lines.push("Approved work the engine is carrying through:", ...work.map((project) =>
+    `  - ${project.label} [${project.id}]: ${project.status}${project.targetCompletionStep === null ? "" : `; due on day ${project.targetCompletionStep}`}. Do not restart it.`));
+
   return lines;
 }
 
@@ -935,7 +961,17 @@ export function renderCharacterPortrait(
   }
 
   if (options.knownFacts !== undefined) {
-    lines.push("What they know of recent events:", ...options.knownFacts.map((fact) => `  - ${fact.summary} [${fact.id}]`));
+    // Duplicate records can describe the same event. Distinct dates, secrecy
+    // or consequences stay separate even when their wording is identical.
+    const events = new Map<string, { summary: string; ids: string[] }>();
+    for (const fact of options.knownFacts) {
+      const { id, ...event } = fact;
+      const key = JSON.stringify(event);
+      const held = events.get(key) ?? { summary: fact.summary, ids: [] };
+      if (!held.ids.includes(id)) held.ids.push(id);
+      events.set(key, held);
+    }
+    lines.push("What they know of recent events:", ...[...events.values()].map(({ summary, ids }) => `  - ${summary} ${ids.map((id) => `[${id}]`).join(" ")}`));
   }
   if (options.extra !== undefined && options.extra.length > 0) lines.push(...options.extra);
   if (options.closeWithDate === true) lines.push(`Today is ${formatWorldDate(world.instant, clock)}.`);
@@ -956,57 +992,44 @@ function renderActor(actor: RoutedActor, world: WorldState, clock: ScenarioClock
 
 const EMPTY: CognitionOutput = { actors: [] };
 
-/**
- * How many people one call answers for before the batch is split in two.
- *
- * The batch is one generation, and generation is serial: ten people's
- * proposals come back one after another in a single stream, so the round takes
- * as long as the whole cast's output put together. Nothing about that is
- * required -- each person's section is built only from what that person knows
- * and never refers to another's -- so past this size the cast is dealt onto two
- * calls that run at once, and the round costs the longer half instead of the
- * sum.
- *
- * This buys wall time, not tokens: the same portraits go out and the same
- * proposals come back. The only duplication is a second copy of the system
- * prompt, which is the one part of the request that is cached.
- *
- * Nine, not six (L17): the split was tuned for a provider that answered in
- * seconds and ran calls side by side for free. In hand mode every call is a
- * minute or two and counts against the burst's call cap, and a round of ten
- * dealt onto three calls spent three of a month's eighteen. A cast of eight
- * is one call.
- */
-const BATCH_SPLIT_THRESHOLD = 9;
-
-/**
- * Roughly how many people one call should answer for once the cast is split.
- *
- * A round costs the slowest of its calls, so the shorter each one's answer the
- * sooner the round is done. Not smaller than this, though: every call repeats
- * the whole cast's context, and past a point the fixed cost of another request
- * outweighs the shorter answer it produces. Seven, under the twelve a single
- * answer may hold (`CognitionOutputSchema`).
- */
-const ACTORS_PER_CALL = 7;
-
-/** Not wider than the database pool is prepared to hold coin holds open, and two since a round is worth calls, not seconds (L17). */
-const MAX_BATCHES = 2;
+/** Four or more independent decisions can benefit from overlapping generation. */
+const BATCH_SPLIT_THRESHOLD = 4;
+/** Keep responses short enough to finish together without repeating the system prompt for every actor. */
+const ACTORS_PER_CALL = 3;
+/** Bound concurrency for both transports. Later rounds use previous answer sizes to balance the work. */
+const MAX_BATCHES = 3;
 
 /** How a cast is dealt onto calls. The defaults are the measured guess; `CHRONICA_COGNITION_SHARDS` overrides them to measure another. */
 export interface CognitionSharding {
   readonly maxBatches: number;
   readonly actorsPerCall: number;
+  /** Previous answer sizes, when known, help keep one long decision from sharing a group with another. */
+  readonly weights?: ReadonlyMap<string, number>;
 }
 export const DEFAULT_SHARDING: CognitionSharding = { maxBatches: MAX_BATCHES, actorsPerCall: ACTORS_PER_CALL };
 
 /** The cast, dealt into the calls that will answer for it, in the router's order. */
 export function deal(actors: readonly RoutedActor[], sharding: CognitionSharding = DEFAULT_SHARDING): readonly (readonly RoutedActor[])[] {
   if (actors.length < BATCH_SPLIT_THRESHOLD) return [actors];
-  const batches = Math.max(1, Math.min(sharding.maxBatches, Math.ceil(actors.length / Math.max(1, sharding.actorsPerCall))));
-  const size = Math.ceil(actors.length / batches);
-  return Array.from({ length: batches }, (_, index) => actors.slice(index * size, (index + 1) * size))
-    .filter((batch) => batch.length > 0);
+  const batches = Math.max(1, Math.min(actors.length, Math.floor(sharding.maxBatches), Math.ceil(actors.length / Math.max(1, sharding.actorsPerCall))));
+  const groups: RoutedActor[][] = Array.from({ length: batches }, () => []);
+  const loads = groups.map(() => 0);
+  const capacity = Math.ceil(actors.length / batches);
+  const rank = new Map(actors.map((actor, index) => [actor.characterId, index]));
+  const weight = (actor: RoutedActor) => Math.max(1, sharding.weights?.get(actor.characterId) ?? 1);
+  const ordered = [...actors].sort((a, b) => weight(b) - weight(a));
+  for (const actor of ordered) {
+    const index = groups.reduce((best, group, candidate) => group.length < capacity
+      && (best === -1 || loads[candidate]! < loads[best]! || (loads[candidate] === loads[best] && group.length < groups[best]!.length)) ? candidate : best, -1);
+    groups[index]!.push(actor);
+    loads[index]! += weight(actor);
+  }
+  return groups.map((group) => group.sort((a, b) => rank.get(a.characterId)! - rank.get(b.characterId)!));
+}
+
+/** The previous one/two-call allocation: parallel transport overhead must not reduce later simulation work. */
+export function cognitionWorkCalls(actorCount: number): number {
+  return actorCount === 0 ? 0 : actorCount < 9 ? 1 : Math.min(2, Math.ceil(actorCount / 7));
 }
 
 /** One call's worth: the actors it answers for, against the whole cast's context. */
@@ -1035,7 +1058,7 @@ async function runOneBatch(
   let failure: string;
   try {
     const parsed = read(await port.complete("simulate_cognition", COGNITION_SYSTEM_PROMPT, userMessage));
-    if (parsed.success) return { output: parsed.data, calls: 1, parseFailure: null, salvaged };
+    if (parsed.success) return { output: parsed.data, calls: 1, parseFailure: null, salvaged, answeredActorIds: actors.map((actor) => actor.characterId) };
     failure = complain(parsed.error.issues);
   } catch (error) {
     if (abortsTheTurn(error)) throw error;
@@ -1069,7 +1092,7 @@ async function runOneBatch(
       `${userMessage}\n\nYour previous answer was rejected. Fix exactly these problems and answer again with the whole object:\n${failure}`,
     );
     const repaired = read(raw);
-    if (repaired.success) return { output: repaired.data, calls: 2, parseFailure: null, salvaged };
+    if (repaired.success) return { output: repaired.data, calls: 2, parseFailure: null, salvaged, answeredActorIds: actors.map((actor) => actor.characterId) };
     return { output: EMPTY, calls: 2, parseFailure: complain(repaired.error.issues), salvaged };
   } catch (error) {
     if (abortsTheTurn(error)) throw error;
@@ -1081,10 +1104,10 @@ async function runOneBatch(
  * NPC cognition for one round (VISION §28).
  *
  * Every actor the router selected is answered for, from their own knowledge
- * and nobody else's. A large cast is dealt onto two concurrent calls rather
+ * and nobody else's. A large cast is dealt onto up to three concurrent calls rather
  * than one long one -- see `BATCH_SPLIT_THRESHOLD` -- and the answers are put
  * back in the order the router chose, so the deltas are applied in the same
- * sequence whether the round took one call or two.
+ * sequence regardless of which group finishes first.
  */
 export async function runCognition(
   port: SimModelPort,
@@ -1122,6 +1145,8 @@ export async function runCognition(
   return {
     output: { actors: merged },
     calls: results.reduce((sum, result) => sum + result.calls, 0),
+    parallelExtraCalls: Math.max(0, chunks.length - cognitionWorkCalls(actors.length)),
+    answeredActorIds: results.flatMap((result) => result.answeredActorIds ?? []),
     parseFailure: failures.length === 0 ? null : failures.join(" | "),
     salvaged: results.flatMap((result) => result.salvaged),
   };

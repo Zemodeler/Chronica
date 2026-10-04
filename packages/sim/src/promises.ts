@@ -1,5 +1,6 @@
 import {
   isOwedATurn,
+  goalsMet,
   breakCommitment,
   cancelCommitment,
   checkCommitmentAuthority,
@@ -52,6 +53,7 @@ export interface PromiseInput {
 
 /** What the record shows was done for the beneficiary since the promise was made. */
 export function keptOnTheRecord(world: WorldState, commitment: Commitment): string | null {
+  if (commitment.completionGoals !== undefined) return goalsMet(world, commitment.completionGoals) === "met" ? "The treaty's recorded outcomes have been met" : null;
   const promisor = world.characters.find((character) => character.id === commitment.promisorCharacterId);
   const beneficiary = world.characters.find((character) => character.id === commitment.beneficiaryCharacterId);
   if (promisor === undefined || beneficiary === undefined) return null;
@@ -214,7 +216,8 @@ export function keepPromises(input: PromiseInput): { world: WorldState; facts: F
       continue;
     }
 
-    const deed = commitment.status === "prepared" ? `${nameOf(promisor)} did as he said` : keptOnTheRecord(world, commitment);
+    const deed = commitment.status === "prepared" && commitment.completionGoals === undefined
+      ? `${nameOf(promisor)} did as he said` : keptOnTheRecord(world, commitment);
     const due = commitment.reviewAtStep <= input.toDay;
     const paysByHand = commitment.actionKind === "payment" && commitment.requiredResource !== null && promisor !== input.playerCharacterId
       && checkCommitmentAuthority(world, promisor, commitment.requiredOfficeId, commitment.requiredResource).ok;
@@ -232,6 +235,10 @@ export function keepPromises(input: PromiseInput): { world: WorldState; facts: F
       continue;
     }
     if (!due) continue;
+
+    // A guarantee upon withdrawal remains in force while withdrawal has not
+    // happened. Its deadline alone is not proof that the guarantor harmed it.
+    if (commitment.completionGoals?.some((goal) => goal.kind === "safe_passage")) continue;
 
     // A promise to hold back is kept by holding back. Its day passing is the
     // proof of it, not a breach: Fabricius was marked a traitor to his word

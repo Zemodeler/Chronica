@@ -1,4 +1,5 @@
-import { allOffices, buildAuthorityIndex, formatWorldDate, isDelivered, peaceOfferMetadata, readDepartments, type DiplomaticMessage, type Office, type ScenarioClock, type WorldState } from "@chronica/shared";
+import { offerMetadata } from "./treaty-duties";
+import { allOffices, buildAuthorityIndex, formatWorldDate, isDelivered, readDepartments, settlePeaceTalks, type DiplomaticMessage, type Office, type ScenarioClock, type WorldState } from "@chronica/shared";
 
 /**
  * Who answers a letter sent to a power.
@@ -53,7 +54,8 @@ export function diplomaticAnswererOf(world: WorldState, polityId: string, office
  * sent. Run once at the top of a burst, before anybody is asked anything.
  */
 export function addressWaitingLetters(world: WorldState, offices: readonly Office[]): WorldState {
-  world = { ...world, diplomacy: world.diplomacy.map((message) => ({ ...message, ...peaceOfferMetadata(message) })) };
+  world = settlePeaceTalks(world);
+  world = { ...world, diplomacy: world.diplomacy.map((message) => ({ ...message, ...offerMetadata(world, message) })) };
   if (!world.diplomacy.some((message) => message.status === "awaiting_reply" && message.toCharacterId === null)) return world;
   return {
     ...world,

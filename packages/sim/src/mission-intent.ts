@@ -7,6 +7,36 @@ const STAYING = new Set(["of", "from", "hold", "holds", "holding", "keep", "keep
 /** Words before a name that send something there: "to Messana", "against Syracuse". */
 const GOING = new Set(["to", "towards", "toward", "into", "against", "on", "reach", "reaches", "reaching", "for"]);
 
+/** Outcomes explicitly requested, independent of whatever substitute acts were proposed. */
+export function explicitOrderGoals(world: WorldState, said: string, original: string, actorPolityId: string | null): OrderGoal[] {
+  const namedForces = (text: string) => world.material.forces.filter((force) => {
+    const name = normalizeName(force.name.split(/\s+of\s+/i)[0]!);
+    return name.length > 4 && normalizeName(text).includes(name);
+  });
+  if (/\bkill\b/i.test(said) && !/\b(?:not|never|without|avoid)\s+(?:\w+\s+){0,2}kill(?:ing)?\b/i.test(said)) {
+    const targets = namedForces(said);
+    if (targets.length === 1) {
+      const target = targets[0]!;
+      return [{ kind: "force_killed", forceId: target.id, sinceStep: world.elapsedStep,
+        minimumDeaths: Math.max(1, target.personnel.reduce((sum, row) => sum + row.fit + row.unavailable.reduce((n, group) => n + group.count, 0), 0)) }];
+    }
+  }
+  if (actorPolityId !== null && /\b(?:claim|claiming|conquer|seize|capture)\b/i.test(said) && /\b(?:territory|land|provinces)\b/i.test(said)) {
+    const targets = namedForces(said).length > 0 ? namedForces(said) : /\b(?:them|their)\b/i.test(said) ? namedForces(original) : [];
+    const owners = [...new Set(targets.map((force) => force.polityId))];
+    if (owners.length === 1 && owners[0] !== actorPolityId) {
+      // Provinces the owner holds whole, and cities it holds in ground that is
+      // somebody else's: a power that holds one city has territory too.
+      const goals = world.map.provinces.flatMap((province): OrderGoal[] => province.controllerPolityId === owners[0]
+        ? [{ kind: "control", provinceId: province.id, settlementId: null, polityId: actorPolityId }]
+        : province.settlements.filter((city) => city.controllerPolityId === owners[0])
+          .map((city): OrderGoal => ({ kind: "control", provinceId: province.id, settlementId: city.id, polityId: actorPolityId })));
+      return goals.slice(0, 4);
+    }
+  }
+  return [];
+}
+
 /**
  * Resolve an explicitly named settlement, including a small spelling mistake.
  *

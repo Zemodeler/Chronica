@@ -105,7 +105,6 @@ export function Sheet({
     <dialog ref={ref} className={classes} aria-label={label} onClose={reportClose} onClick={onBackdrop}>
       <div className="sheet__workspace">
       <div className="sheet__frame">
-        {workspace?.navigation && <nav className="sheet__navigation" aria-label="Office documents">{workspace.navigation}</nav>}
         <header className="sheet__header">
           <div className="sheet__heading">
             <h2 className="sheet__title">{title}</h2>

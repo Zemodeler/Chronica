@@ -57,6 +57,43 @@ const weigh = (facts: readonly Fact[], weight: number) => new Map(facts.map((can
 /** A moment for the historian to finish a window, as she would have long before the next hop closes. */
 const tick = () => new Promise<void>((resolve) => { setTimeout(resolve, 0); });
 
+describe("routine windows share a historian", () => {
+  it("batches daily updates and flushes the last partial week without losing its facts", async () => {
+    const port = historian();
+    const w = writer(port);
+    const updates: Fact[] = [];
+    w.closed(window(0, 0, 0, [], new Map()));
+    for (let day = 1; day <= 6; day += 1) {
+      const update = fact({ time: { day, minute: 0 }, kind: "work_progress", summary: `Supplies delivered on day ${day}.`,
+        affectedEntities: [OBSERVER, { kind: "project", id: "stores" }] });
+      updates.push(update);
+      w.closed(window(day, day - 1, day, [update], weigh(updates, 45)));
+      await tick();
+    }
+    expect(port.calls).toBe(0);
+    const { entries, calls } = await w.finish();
+    expect(calls).toBeGreaterThan(0);
+    expect(calls).toBeLessThan(6);
+    const told = new Set(entries.flatMap((entry) => entry.factIds));
+    expect(updates.every((update) => told.has(update.id))).toBe(true);
+  });
+  it("flushes an urgent event together with preceding routine facts before the week ends", async () => {
+    const port = historian();
+    const w = writer(port);
+    w.closed(window(0, 0, 0, [], new Map()));
+    const routine = fact({ time: { day: 1, minute: 0 }, kind: "work_progress", summary: "Supplies arrive.", affectedEntities: [OBSERVER] });
+    w.closed(window(1, 0, 1, [routine], weigh([routine], 40)));
+    await tick();
+    expect(port.calls).toBe(0);
+    const decisive = fact({ time: { day: 2, minute: 0 }, kind: "city_taken", summary: "The city falls.", affectedEntities: [OBSERVER, rome] });
+    w.closed(window(2, 1, 2, [decisive], new Map([[routine.id, 40], [decisive.id, 90]])));
+    await tick();
+    expect(port.calls).toBeGreaterThan(0);
+    const { entries } = await w.finish();
+    expect(entries.some((entry) => entry.factIds.includes(decisive.id))).toBe(true);
+  });
+});
+
 describe("the record reads forward in time", () => {
   it("publishes entries in non-decreasing date order across the windows of a burst", async () => {
     const answer = fact({ time: { day: 0, minute: 0 }, summary: "The consul orders the levy.", affectedEntities: [rome] });

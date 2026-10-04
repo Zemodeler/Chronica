@@ -337,6 +337,8 @@ export const PlanProposalSchema = z
         /** What it has to wait for, if anything. */
         when: WatchPredicateSchema.nullable().default(null),
         afterConditionDays: z.number().int().positive().max(730).optional(),
+        /** Already-approved project whose completion fulfils this step; never an instruction to create work. */
+        routineProjectRef: RefSchema.nullable().optional(),
       }).strict())
       .min(1)
       .max(4),

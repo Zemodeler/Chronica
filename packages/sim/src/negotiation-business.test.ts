@@ -5,7 +5,7 @@ import { applyDeltas } from "./apply/apply-deltas";
 import { routeAttention, routeAmbientActors } from "./attention";
 import { runSimulationBurst, DEFAULT_BUDGET } from "./burst";
 import { renderCharacterPortrait } from "./cognition";
-import { diplomaticMemory } from "./negotiation-business";
+import { describeDiplomaticBusiness, diplomaticMemory } from "./negotiation-business";
 import { dueSteps, layPlan, markWoken, nextPlanDay, settleOverdueSteps } from "./plans";
 import { createIdFactory, type SimModelPort } from "./ports";
 import { isWatchSatisfied } from "./watch";
@@ -93,6 +93,24 @@ describe("negotiations progress instead of restarting", () => {
 });
 
 describe("diplomatic memory and responsibility", () => {
+  it("shortens settled correspondence but keeps agreed terms and active bargaining history", () => {
+    const world = day(initial(), 60);
+    const first = letter({ id: "early-terms", sentAtStep: 0, deliveredOnDay: 0, status: "answered", answer: "countered", answeredAtStep: 1, answerText: "Three days instead." });
+    const second = letter({ id: "middle-terms", sentAtStep: 2, deliveredOnDay: 2, status: "answered", answer: "countered", answeredAtStep: 3, answerText: "Four days instead." });
+    const latest = letter({ id: "final-terms", sentAtStep: 4, deliveredOnDay: 4, status: "answered", answer: "accepted", answeredAtStep: 5, answerText: "Five days is agreed", agreementId: "notice-agreement" });
+    world.diplomacy = [first, second, latest];
+    const settled = describeDiplomaticBusiness(world, actor).join("\n");
+    expect(settled).toContain("Five days notice");
+    expect(settled).toContain("Five days is agreed");
+    expect(settled).toContain("notice-agreement");
+    expect(settled).toContain("Letter [final-terms]");
+    expect(settled).not.toContain("Letter [early-terms]");
+    const active = describeDiplomaticBusiness({ ...world, diplomacy: [first, second, { ...latest, status: "awaiting_reply", answer: null }] }, actor).join("\n");
+    expect(active).toContain("Letter [early-terms]");
+    expect(active).toContain("Letter [middle-terms]");
+    expect(active).toContain("Letter [final-terms]");
+    expect(world.diplomacy).toHaveLength(3);
+  });
   it("shows pending outgoing business and agreement history, with no incoming leak", () => {
     const world = initial();
     const m = letter();

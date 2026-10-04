@@ -7,7 +7,7 @@ import { WORLD_PRESSURES, withWorldPolitics } from "./punic-wars-politics";
 import { houseFamilies, rosterPeople } from "./punic-wars-rosters";
 
 /**
- * The Mediterranean and the Near East of 270 BCE, on the generated map: 6,384 provinces, 164 powers
+ * The Mediterranean and the Near East of 270 BCE, on the generated map: provinces and powers
  * and every drawn town come from the map's graph (`punic-wars-map-graph.ts`,
  * built by `scripts/map-gen`), and this file adds what the graph cannot know --
  * how each power governs, who its people are, what armies and money they hold.
@@ -563,7 +563,7 @@ const WRITTEN_OUT: ReadonlySet<string> = new Set(["rome", "carthage", "syracuse"
 
 const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
   schemaVersion: 3,
-  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 44, libraryVersion: 1 },
+  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 46, libraryVersion: 1 },
   elapsedStep: 0,
   instant: { day: 0, minute: 0 },
   map: {
@@ -583,7 +583,7 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
       // them at all: two forces of one power will not fight each other, so the
       // assault on Rhegium was refused by the engine and the siege could never
       // end. They are what they actually were: a power holding a city.
-      { id: "rhegium-campanians", name: "Campanian legion of Rhegium", capitalSettlementId: "settlement-rhegium", cohesionBps: cohesionFor("rhegium-campanians"), governmentForm: governmentFormFor("rhegium-campanians") },
+      { id: "rhegium-campanians", name: "Campanian Legion", capitalSettlementId: "settlement-rhegium", cohesionBps: cohesionFor("rhegium-campanians"), governmentForm: governmentFormFor("rhegium-campanians") },
       ...italianPolities.map(([id, name]) => ({ id, name, capitalSettlementId: PUNIC_WARS_GRAPH_POLITIES.find((polity) => polity.polityId === id)?.capitalSettlementId ?? null, cohesionBps: cohesionFor(id), governmentForm: governmentFormFor(id) })),
       // Everyone else who holds ground on this map: the Gaulish and Iberian
       // peoples, the Britons, the Germanic and Illyrian and Thracian
@@ -668,7 +668,7 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
   // Carthage is named as a participant, not merely adjacent to the crisis: it
   // has its own stake in whether Messana falls to Syracuse or holds.
   storylines: [{ id: "rhegium-recovery", title: "Rhegium and the Campanian Legion", participantIds: ["gaius-genucius", "decius-vibellius", "manius-curius"], provinceId: PUNIC_IDS.rhegium, phase: "escalating", stakes: "Rome must retake a city its own garrison murdered and kept, in front of every ally watching how the Republic treats a broken oath.", history: ["The Campanian legion sent to hold Rhegium killed its citizens and took the city for itself.", "The Senate has resolved that the matter be ended."], nextDevelopment: "The consular army turns south, or the Senate finds someone else to send.", visibility: "public", updatedAtStep: 0 }, { id: "mamertine-syracusan-crisis", title: "The Messana Crisis", participantIds: ["hieron-ii", "mamertine-spokesman", "hanno-carthage"], provinceId: PUNIC_IDS.messana, phase: "escalating", stakes: "Syracuse seeks to contain the Mamertines without drawing Rome and Carthage into a wider war.", history: ["Hieron II's forces pressure the Mamertines around the Strait of Messana.", "Carthage watches the strait for any opening or threat to its own position in Sicily."], nextDevelopment: "Envoys may seek outside support if the local balance collapses.", visibility: "public", updatedAtStep: 0 }],
-  conflicts: { battles: [], sieges: [], wars: [] },
+  conflicts: { battles: [], sieges: [], wars: [{ polityAId: "rhegium-campanians", polityBId: "rome" }] },
   // Who is in charge of what beneath the consuls and the suffetes (v35,
   // docs/plans/departments.md). Named once, as the sources have them; every
   // other power opens with its ruler holding all of it. What Rome's consuls

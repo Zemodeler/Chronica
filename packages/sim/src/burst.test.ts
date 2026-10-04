@@ -423,7 +423,7 @@ describe("budget and termination", () => {
     // Somebody is in the batch on their own account rather than as a reaction,
     // and is told so: asked to react to news nobody brought them, the world
     // elsewhere sensibly answers that it will do nothing.
-    expect(seen.join("\n")).toContain("Nobody has brought them news");
+    expect(seen.join("\n")).toContain("They are here because of their own affairs:");
   });
 
   it("carries an open-ended order to the thing it was waiting for", async () => {

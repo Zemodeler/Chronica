@@ -1,7 +1,7 @@
 import type { DynamicMapOverlay } from "@chronica/shared";
 import { provincesInRect as provincesMeetingRect, type StaticProvince, type StaticWorldGeometry } from "./world-geometry";
 import { politicalColourWithAlpha, type PoliticalBorderSegment, type PoliticalMapState } from "./political-geometry";
-import { detachedFragmentProvinces, GROUP_STRENGTH, PROVINCE_LINE_RGB, provinceLineStyle, strokeGroupOf, type ProvinceLineStyle } from "./border-strokes";
+import { detachedFragmentProvinces, enclosedGapBorders, GROUP_STRENGTH, PROVINCE_LINE_RGB, provinceLineStyle, strokeGroupOf, type ProvinceLineStyle } from "./border-strokes";
 import type { ViewportTransform } from "./map-viewport";
 import { drawPoliticalLabels } from "./map-canvas-labels";
 import { drawForces, drawSettlements, settlementObstacles } from "./map-canvas-entities";
@@ -125,15 +125,16 @@ const _borderIndexCache = new WeakMap<PoliticalMapState, BorderIndex>();
 const _segmentPathCache = new WeakMap<PoliticalBorderSegment, Path2D>();
 
 /** Every border by province, and the line each is drawn with (border-strokes.ts). Built once per political state. */
-function borderIndex(political: PoliticalMapState): BorderIndex {
+function borderIndex(world: StaticWorldGeometry, political: PoliticalMapState): BorderIndex {
   const cached = _borderIndexCache.get(political);
   if (cached) return cached;
   const fragments = detachedFragmentProvinces(political);
+  const enclosedGaps = enclosedGapBorders(world, political);
   const byProvince = new Map<string, PoliticalBorderSegment[]>();
   const groups = new Map<PoliticalBorderSegment, ReturnType<typeof strokeGroupOf>>();
   const add = (id: string, segment: PoliticalBorderSegment) => { const list = byProvince.get(id); if (list) list.push(segment); else byProvince.set(id, [segment]); };
   for (const segment of political.borderSegments) {
-    groups.set(segment, strokeGroupOf(segment, political.ownerByProvince, fragments));
+    groups.set(segment, strokeGroupOf(segment, political.ownerByProvince, fragments, enclosedGaps));
     add(segment.provinceA, segment);
     if (segment.provinceB !== null) add(segment.provinceB, segment);
   }
@@ -189,8 +190,8 @@ function smoothSegmentPath(segment: PoliticalBorderSegment): Path2D {
 }
 
 /** An owned province's edges that face another power or the sea: the outline band. */
-function outerEdges(political: PoliticalMapState, provinceId: string): Path2D | undefined {
-  const index = borderIndex(political);
+function outerEdges(world: StaticWorldGeometry, political: PoliticalMapState, provinceId: string): Path2D | undefined {
+  const index = borderIndex(world, political);
   const kept = index.outer.get(provinceId);
   if (kept !== undefined) return kept ?? undefined;
   let edge: Path2D | undefined;
@@ -204,8 +205,8 @@ function outerEdges(political: PoliticalMapState, provinceId: string): Path2D | 
 }
 
 /** The province lines for these provinces, one Path2D per style. */
-function provinceLinePaths(political: PoliticalMapState, provinces: readonly StaticProvince[]): Record<"internal" | "frontier" | "unclaimed", Path2D> {
-  const index = borderIndex(political);
+function provinceLinePaths(world: StaticWorldGeometry, political: PoliticalMapState, provinces: readonly StaticProvince[]): Record<"internal" | "frontier" | "unclaimed", Path2D> {
+  const index = borderIndex(world, political);
   const paths = { internal: new Path2D(), frontier: new Path2D(), unclaimed: new Path2D() };
   const seen = new Set<PoliticalBorderSegment>();
   for (const province of provinces) {
@@ -231,7 +232,7 @@ function stripeTile(colour: string): HTMLCanvasElement | OffscreenCanvas | null 
   if (known !== undefined) return known;
   const size = OCCUPIED_STRIPE_PX;
   const tile = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(size, size) : typeof document !== "undefined" ? Object.assign(document.createElement("canvas"), { width: size, height: size }) : null;
-  const paint = tile?.getContext("2d") as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null | undefined;
+  const paint = tile?.getContext("2d");
   if (tile == null || paint == null) return null;
   paint.strokeStyle = colour;
   paint.lineWidth = OCCUPIED_STRIPE_WIDTH_PX;
@@ -270,7 +271,7 @@ function fillProvinces(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingC
   // The thin province lines, under the outline bands. Widths are set against the
   // screen's resolution, not the cache's, so they match what is drawn straight.
   if (lines !== null) {
-    const paths = provinceLinePaths(political, provinces);
+    const paths = provinceLinePaths(world, political, provinces);
     ctx.lineWidth = lines.style.widthCssPixels * (typeof window === "undefined" ? 1 : window.devicePixelRatio || 1) / lines.screenPixelsPerUnit;
     ctx.lineJoin = "round";
     ctx.lineCap = "butt";
@@ -292,7 +293,7 @@ function fillProvinces(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingC
     const land = new Path2D();
     const band = new Path2D();
     for (const province of owned) {
-      const edge = outerEdges(political, province.id);
+      const edge = outerEdges(world, political, province.id);
       if (!edge) continue;
       land.addPath(getProvincePath(world, province.id, province.svgPath));
       band.addPath(edge);

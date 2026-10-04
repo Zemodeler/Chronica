@@ -30,6 +30,7 @@ import {
   VisibilitySchema,
 } from "../material-state";
 import { PolityAgreementKindSchema } from "../world/agreements";
+import { TreatyCompletionGoalSchema } from "../world/goals";
 import { ContingencyEffectSchema } from "../world/contingency";
 import { CovertPlotKindSchema } from "../world/covert-plot";
 import { WatchPredicateSchema } from "../world/watch";
@@ -1717,6 +1718,7 @@ const TreatyClauseSchema = z.discriminatedUnion("kind", [
         duty: z.enum(["payment", "military_support", "protection", "other"]),
         what: LabelSchema,
         withinDays: DaysSchema,
+        completionGoals: z.array(TreatyCompletionGoalSchema).min(1).max(4).optional(),
       }).strict(),
     ]).meta({ id: "TreatyClause" });
 

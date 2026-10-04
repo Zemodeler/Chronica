@@ -156,6 +156,8 @@ export const PlanStepSchema = z
     /** Time for the act after its reply arrives; waiting is not overdue work. */
     afterConditionDays: z.number().int().positive().max(730).optional(),
     waitingReviewOnDay: z.number().int().nonnegative().nullable().optional(),
+    /** Approved work the engine can finish without asking the owner to decide it again. */
+    routineProjectId: EntityIdSchema.optional(),
   })
   .strict();
 export type PlanStep = z.infer<typeof PlanStepSchema>;
