@@ -1,5 +1,6 @@
 import { goalsMet, orderPartStatus, type OrderPart, type OrderPartStatus, type WorldState } from "@chronica/shared";
 import type { ChronicleEntry } from "./chronicle";
+import { CLERK_PHRASES } from "./chronicle-lint";
 import { lineOf } from "./order-outcomes";
 
 /**
@@ -77,19 +78,7 @@ export function scoreOrders(world: WorldState, orderIds?: readonly string[]): Or
   };
 }
 
-/** The clerk's phrases the Chronicle is meant not to use (plan phase 3). */
-export const CLERK_PHRASES: readonly RegExp[] = [
-  /\brecognized\b/gi,
-  /\bauthori[sz]ed strength\b/gi,
-  /\bwas recorded as\b/gi,
-  /\bwere recorded as\b/gi,
-  /\bit is recorded that\b/gi,
-  /\bno [a-z ]{3,40} (?:is|was) recorded\b/gi,
-  /\bappears to have\b/gi,
-  /\bis said to have\b/gi,
-  /\bin accordance with\b/gi,
-  /\bpursuant to\b/gi,
-];
+export { CLERK_PHRASES } from "./chronicle-lint";
 
 /** A last sentence that sums up or forecasts, which the register forbids. */
 const MORAL_OR_FORECAST = /\b(?:would (?:soon|later|in time|come to)|was to (?:prove|become|remain)|remained to be seen|time would tell|the future|would not be the last|a lesson|taught (?:him|them|rome|carthage) that|what (?:was|would be) to come)\b/i;

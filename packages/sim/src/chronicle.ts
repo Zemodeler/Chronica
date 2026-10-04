@@ -1,5 +1,6 @@
-import { z } from "zod";
 import {
+  CHRONICLE_MAX_ENTRIES,
+  ChronicleOutputSchema,
   type OrderPartStatus,
   factsKnownTo,
   newsArrivesAt,
@@ -24,6 +25,7 @@ import {
 } from "@chronica/shared";
 import { extractJson } from "./json";
 import { claimsItDone } from "./order-outcomes";
+import { clerkPhraseCount, clerkRetryMessage, clerkSentences } from "./chronicle-lint";
 import type { SimModelPort } from "./ports";
 
 /**
@@ -96,7 +98,7 @@ import type { SimModelPort } from "./ports";
  * window as the burst walks forward (`WINDOW_MAX_ENTRIES`), and a burst of
  * four hops that told three things a hop would run to twelve.
  */
-const MAX_ENTRIES = 10;
+const MAX_ENTRIES = CHRONICLE_MAX_ENTRIES;
 
 /**
  * How many entries one window of a burst may carry, beyond the answer to the
@@ -253,6 +255,18 @@ sentences, a battle or an embassy that went back and forth in a paragraph or
 two. Say each thing once, and stop when the last thing that happened has been
 told -- no summing up, no moral, no word on what it means or what may come.
 
+Two passages to hear the register by (invented; never borrow their facts):
+"Praetor Withholds Grain from Tarentum Until the Hostages Come" -- The praetor
+Lucius Valerius held back the grain ships at Brundisium. Tarentum had promised
+twelve hostages by midsummer and sent four, and he would feed no city that
+bargained with him. Its magistrates answered that the rest were children and
+would follow with the harvest. Valerius sent centurions to the gate to count
+them as they came.
+"Hasdrubal Burns the Camp at Lilybaeum" -- Hasdrubal fired his stores on the
+night the wind turned. Some six thousand men marched out by the south road with
+what they could carry, and the Roman pickets saw the glow before they heard the
+column.
+
 Tell what people did and why they did it: what they wanted, what they argued,
 what it cost them, what they found. Name them in full at first mention, with
 their office -- "the consul Gaius Genucius Clepsina" -- and by one name after.
@@ -303,30 +317,6 @@ closed on the ford".
 Answer with JSON and nothing else:
 {"entries":[{"thread":1,"title":"...","body":"...","quote":{"speaker":"...","line":"...","occasion":"..."}}]}
 "quote" may be left out.`;
-
-const ChronicleOutputSchema = z
-  .object({
-    entries: z
-      .array(
-        z.object({
-          thread: z.number().int().positive(),
-          title: z.string().trim().min(1).max(120),
-          body: z.string().trim().min(1),
-          quote: z
-            .object({
-              speaker: z.string().trim().min(1).max(120),
-              line: z.string().trim().min(1).max(220),
-              occasion: z.string().trim().min(1).max(160),
-            })
-            .nullable()
-            .optional()
-            // A quotation that does not read is dropped, never the passage with it.
-            .catch(null),
-        }),
-      )
-      .max(MAX_ENTRIES),
-  })
-  .strict();
 
 /**
  * One actor's account of what they were doing, tied to the facts it describes.
@@ -1674,6 +1664,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
       }
     }
   };
+  let retries = 0;
   await mapWithLimit(threads, CHRONICLE_CONCURRENCY, async (thread, index): Promise<void> => {
     // The answer to the order is news by definition: the player gave it this
     // turn. Shown the last report's titles, the historian judged "Clepsina
@@ -1685,7 +1676,17 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
     let entry: ChronicleEntry | null;
     try {
       const raw = await input.port.complete("compose_chronicle", CHRONICLE_SYSTEM_PROMPT, userMessage);
-      const parsed = ChronicleOutputSchema.safeParse(extractJson(raw));
+      let parsed = ChronicleOutputSchema.safeParse(extractJson(raw));
+      // The clerk's register is caught here, for nothing, and the passage written once more with the sentences quoted; the better of the two stands (3.2).
+      const clerkly = parsed.success ? clerkSentences(parsed.data.entries.find((candidate) => candidate.thread === 1)?.body ?? "") : [];
+      if (parsed.success && clerkly.length > 0) {
+        try {
+          retries += 1;
+          const again = ChronicleOutputSchema.safeParse(extractJson(await input.port.complete("compose_chronicle", CHRONICLE_SYSTEM_PROMPT, clerkRetryMessage(userMessage, clerkly))));
+          const better = again.success ? again.data.entries.find((candidate) => candidate.thread === 1) : undefined;
+          if (again.success && better !== undefined && clerkPhraseCount(better.body) < clerkPhraseCount(parsed.data.entries.find((candidate) => candidate.thread === 1)?.body ?? "")) parsed = again;
+        } catch { /* the first passage stands */ }
+      }
       if (!parsed.success) entry = plainly(thread);
       else {
         const passage = parsed.data.entries.find((candidate) => candidate.thread === 1);
@@ -1693,9 +1694,13 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
         // -- told what the last report said, she judged this the same thing.
         // That is a decision, not a failure, and the record honours it: the
         // thread is dropped, not printed as bare facts under a period title.
+        const body = passage === undefined ? null : faithful(thread, passage.body.trim());
+        const contradicted = passage !== undefined && thread.outcome !== null
+          && (body !== passage.body.trim() || claimsItDone(passage.title, thread.outcome.status));
         entry = passage === undefined
           ? (answering ? plainly(thread) : null)
-          : entryOf(thread, passage.title, faithful(thread, passage.body.trim()));
+          : entryOf(thread, contradicted ? headlineOf(thread.facts) ?? period : passage.title,
+            contradicted ? [thread.outcome!.line, ...thread.facts.map((fact) => readable(fact.summary))].join("\n\n") : body!);
         const own = passage?.quote ?? null;
         // A quotation is somebody's recorded words, or it is not printed. The
         // historian's own line is kept only where it is, near enough, what that
@@ -1721,7 +1726,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   });
   await handing;
 
-  return { entries: results.flatMap((entry) => (entry === null || entry === undefined ? [] : [entry])), calls: threads.length, carried };
+  return { entries: results.flatMap((entry) => (entry === null || entry === undefined ? [] : [entry])), calls: threads.length + retries, carried };
 }
 
 /**

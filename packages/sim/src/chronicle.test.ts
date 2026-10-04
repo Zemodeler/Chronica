@@ -1293,3 +1293,45 @@ describe("the audit of a Roman consul's spring", () => {
     expect(result.entries).toHaveLength(0);
   });
 });
+
+describe("the clerk's register", () => {
+  // Plan chronicle-and-order-truth, 3.2: caught locally, written once more, the better stands.
+  const write = (bodies: string[]): SimModelPort & { calls: string[] } => {
+    const port = {
+      calls: [] as string[],
+      complete(_operation: Parameters<SimModelPort["complete"]>[0], _system: string, user: string) {
+        port.calls.push(user);
+        const body = bodies.shift() ?? "Rome raised two legions.";
+        return Promise.resolve(JSON.stringify({ entries: [{ thread: 1, title: "The levy", body }] }));
+      },
+    };
+    return port;
+  };
+  const run = (port: SimModelPort) => composeChronicle({
+    port, clock, observer: { kind: "character", id: "marcus-atilius" }, observerPolityId: "rome",
+    facts: [fact({ summary: "Rome begins raising two new legions." })], from: { day: 0, minute: 0 }, to: { day: 30, minute: 0 }, narrative: [], frictions: [],
+  });
+
+  it("writes the passage once more, quoting the sentence, and keeps the plainer one", async () => {
+    const port = write(["The levy was recorded as two legions in accordance with the law. Men came in.", "Rome raised two legions, and the men came in."]);
+    const result = await run(port);
+    expect(port.calls).toHaveLength(2);
+    expect(port.calls[1]).toContain("clerk's register");
+    expect(port.calls[1]).toContain("recorded as two legions");
+    expect(result.entries[0]!.body).toBe("Rome raised two legions, and the men came in.");
+    expect(result.calls).toBe(2);
+  });
+
+  it("keeps the first passage when the second is no better, and never asks a third time", async () => {
+    const port = write(["The levy was recorded as two legions.", "The levy was recorded as two legions again, pursuant to the law."]);
+    const result = await run(port);
+    expect(port.calls).toHaveLength(2);
+    expect(result.entries[0]!.body).toBe("The levy was recorded as two legions.");
+  });
+
+  it("spends nothing extra on a passage without it", async () => {
+    const port = write(["Rome raised two legions."]);
+    await run(port);
+    expect(port.calls).toHaveLength(1);
+  });
+});

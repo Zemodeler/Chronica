@@ -30,7 +30,8 @@ describe("the system prompts stay the size they are", () => {
   });
 
   it("the historian, the repairer and the reconciler: prose only", () => {
-    expect(CHRONICLE_SYSTEM_PROMPT.length).toBeLessThan(4_500);
+    // Raised 4.5k -> 5.2k (2026-10-04) for two register exemplars (plan chronicle-and-order-truth, 3.3).
+    expect(CHRONICLE_SYSTEM_PROMPT.length).toBeLessThan(5_200);
     expect(DELTA_REPAIR_SYSTEM_PROMPT.length).toBeLessThan(1_300);
     expect(FACT_RECONCILE_SYSTEM_PROMPT.length).toBeLessThan(1_400);
   });
