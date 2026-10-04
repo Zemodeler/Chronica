@@ -127,6 +127,7 @@ import { dueSteps, emptyPlanTally, layPlan, markWoken, nextPlanDay, settleOverdu
 import { claimPromisesKept } from "./promises";
 import { goalsOfAct, mergeGoals, refResolver, resolveGoal } from "./order-goals";
 import { verifyPart } from "./order-verifier";
+import { factContradictsState } from "./fact-parity";
 import type { RequestLedger } from "./request-ledger";
 import { findInvariantViolations } from "./invariants";
 import { debatersOf, electiveOfficesOf, voteCalendarDays } from "./senate";
@@ -426,7 +427,7 @@ export interface WindowSnapshot {
  * router to look at.
  */
 export interface BurstSkip {
-  readonly stage: "cognition" | "reconcile" | "repair" | "fact_places" | "engine_facts" | "mechanic" | "private_minds" | "invariant" | "delegation";
+  readonly stage: "cognition" | "reconcile" | "repair" | "fact_places" | "engine_facts" | "mechanic" | "private_minds" | "invariant" | "delegation" | "parity";
   readonly reason: string;
 }
 
@@ -1805,9 +1806,18 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       const message = world.diplomacy.find((candidate) => candidate.id === (result.assignedIds.get(messageRef.replace(/^local:/, "")) ?? messageRef));
       return message === undefined ? [] : [message.toPolityId];
     }));
-    const unrepeated = answeredBy.size === 0 ? happened : happened.filter((fact) =>
+    const unrepeatedAll = answeredBy.size === 0 ? happened : happened.filter((fact) =>
       !(/(reply|refus|answer|accept|counter|declin)/i.test(fact.kind)
         && fact.affectedRefs.some((ref) => answeredBy.has(ref.id) || answeredBy.has(world.characters.find((character) => character.id === ref.id)?.polityId ?? ""))));
+    // A fact claiming a city taken, an army arrived or a man appointed is held to
+    // the state the acts left, or dropped and said so (1.6).
+    const unrepeated = unrepeatedAll.filter((fact) => {
+      const refs = fact.affectedRefs.map((ref) => resolveFactRef(world, ref));
+      const contradiction = factContradictsState(world, { kind: fact.kind, summary: fact.summary, affectedRefs: refs }, (forceId) => new Set([...groundOfForce(world, forceId), ...(stoodBefore.has(forceId) ? [stoodBefore.get(forceId)!] : [])]));
+      if (contradiction === null) return true;
+      skipped.push({ stage: "parity", reason: `dropped "${fact.summary.slice(0, 80)}": it ${contradiction}` });
+      return false;
+    });
     // Named as the model named them: "roman-republic" for Rome, the consul by
     // his name. Unresolved, a fact about Rome was invisible to Rome's own
     // consul, and its tag printed the slug.
