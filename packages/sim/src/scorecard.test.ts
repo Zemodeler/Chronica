@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
-import { WorldStateSchema, ensureProvinceMaterial, type OrderPart, type WorldState } from "@chronica/shared";
+import { WorldStateSchema, ensureProvinceMaterial, orderPartStatus, type OrderPart, type WorldState } from "@chronica/shared";
 import type { ChronicleEntry } from "./chronicle";
 import { lineOf } from "./order-outcomes";
 import { scoreOrders, scoreProse } from "./scorecard";
@@ -75,5 +75,21 @@ describe("the prose scorecard", () => {
   it("does not score the engine's own outcome lines as prose", () => {
     const body = "Hieron sent grain.\n\nWhat came of the order:\n- \"x\" -- done (was recorded as done).";
     expect(scoreProse([entry(body)]).clerkPhrases).toBe(0);
+  });
+});
+
+describe("a part whose goal was already so", () => {
+  // Plan chronicle-and-order-truth, 1.2: only a change counts as progress.
+  it("reads as already so when ordered, not as done", () => {
+    const legion = opening().material.forces.find((force) => force.id === "roman-field-army")!;
+    const found = part({ goals: [{ kind: "force_at", forceId: legion.id, provinceId: legion.locationId }], metAtOrder: true, actsCarried: 1 });
+    expect(orderPartStatus(opening(), found)).toBe("already_so");
+    expect(lineOf(opening(), found, "gaius-genucius")).toContain("already so when ordered");
+  });
+
+  it("still reads as done when the order's own work did it", () => {
+    const legion = opening().material.forces.find((force) => force.id === "roman-field-army")!;
+    const moved = part({ goals: [{ kind: "force_at", forceId: legion.id, provinceId: legion.locationId }], metAtOrder: false, actsCarried: 1 });
+    expect(orderPartStatus(opening(), moved)).toBe("achieved");
   });
 });

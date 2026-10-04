@@ -129,5 +129,12 @@ export function withOrderOutcomes(
  */
 export function claimsItDone(body: string, status: ReturnType<typeof orderPartStatus>): boolean {
   if (status === "achieved") return false;
-  return /\b(arrived|landed|crossed over|made the crossing|reached|was completed|were completed|was carried out|were carried out|accomplished|achieved|succeeded|was done|stands now in|now stood in|was killed|were killed|was slain|were slain|was destroyed|were destroyed|was annihilated|were annihilated|was found and killed|were found and killed)\b/i.test(body);
+  if (DONE_WORDS.test(body)) return true;
+  // Said begun with nothing begun: a part under way, allowed or waiting may say it started (1.7).
+  return NOTHING_BEGUN.has(status) && BEGUN_WORDS.test(body);
 }
+
+const DONE_WORDS = /\b(arrived|landed|crossed over|made the crossing|reached|was completed|were completed|was carried out|were carried out|accomplished|achieved|succeeded|was done|stands now in|now stood in|was killed|were killed|was slain|were slain|was destroyed|were destroyed|was annihilated|were annihilated|was found and killed|were found and killed|was taken|were taken|was captured|was seized|fell to|was appointed|were appointed|was installed|was paid|were paid|was signed|was concluded|was ratified|was delivered|were delivered)\b/i;
+const BEGUN_WORDS = /\b(began|had begun|was begun|were begun|was started|were started|commenced|got under way|set out)\b/i;
+/** Statuses with nothing yet set going in the world. */
+const NOTHING_BEGUN: ReadonlySet<ReturnType<typeof orderPartStatus>> = new Set(["unanswered", "refused", "failed", "blocked", "pending", "acknowledged"]);

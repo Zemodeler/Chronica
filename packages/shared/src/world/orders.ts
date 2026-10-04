@@ -114,6 +114,12 @@ export const OrderPartSchema = z
      * kept the goals of the first four, and the other four were nobody's.
      */
     goals: z.array(OrderGoalSchema).max(MAX_PART_GOALS).default([]),
+    /**
+     * Whether every goal was already so on the day the order was given. Only a
+     * change counts as progress: an army already in Messana was not carried
+     * there by an order that found it so (plan chronicle-and-order-truth, 1.2).
+     */
+    metAtOrder: z.boolean().optional(),
     /** Everything this part set going, in the order it was made. */
     workRefs: z.array(OrderWorkRefSchema).max(12).default([]),
     /** Why the world would not have it, when it would not. */
@@ -229,18 +235,18 @@ export function findOrderPart(world: WorldState, ref: string): { readonly order:
  */
 export const ORDER_PART_STATUSES = [
   "achieved", "partly_done", "under_way", "acknowledged", "authorized", "awaiting_authority", "awaiting_reply", "awaiting_condition", "pending",
-  "blocked", "failed", "refused", "unanswered", "carried_unverified",
+  "blocked", "failed", "refused", "unanswered", "carried_unverified", "already_so",
 ] as const;
 export type OrderPartStatus = (typeof ORDER_PART_STATUSES)[number];
 
 /** Least finished first: a part stands where its least finished work stands. */
 const RANK: Record<OrderPartStatus, number> = {
   blocked: 0, failed: 1, under_way: 2, acknowledged: 3, awaiting_authority: 4, awaiting_reply: 5, awaiting_condition: 6, pending: 7, authorized: 8,
-  refused: 9, unanswered: 10, carried_unverified: 11, partly_done: 12, achieved: 13,
+  refused: 9, unanswered: 10, carried_unverified: 11, already_so: 12, partly_done: 13, achieved: 14,
 };
 
 /** The statuses a part is finished at, one way or another. */
-const FINISHED: ReadonlySet<OrderPartStatus> = new Set(["achieved", "partly_done", "failed", "refused", "unanswered", "carried_unverified"]);
+const FINISHED: ReadonlySet<OrderPartStatus> = new Set(["achieved", "partly_done", "failed", "refused", "unanswered", "carried_unverified", "already_so"]);
 
 /** Statuses with something still moving in the world: a march, a vote, a letter on the road, an act held for its moment. */
 const MOVING: ReadonlySet<OrderPartStatus> = new Set(["under_way", "awaiting_authority", "awaiting_reply", "awaiting_condition"]);
@@ -408,6 +414,8 @@ export function orderPartStatus(world: WorldState, part: OrderPart, options: { r
     // Rome" read done with the man discharged and the journey refused (E5).
     const tallied = tally === null ? null : tallyStatus(tally);
     if (part.actsRefused > 0 || part.stages.some((stage) => stage.status === "failed") || (tallied !== null && tallied !== "achieved" && tallied !== "awaiting_reply")) return "partly_done";
+    // Found so on the day it was given, and nothing set going since: no change to call progress.
+    if (part.metAtOrder === true && work.length === 0 && part.stages.length === 0) return "already_so";
     return tallied === "awaiting_reply" ? "awaiting_reply" : "achieved";
   }
   if (reading === "impossible") {
@@ -431,7 +439,7 @@ export function orderPartStatus(world: WorldState, part: OrderPart, options: { r
 }
 
 /** A note that says how a part came out, not that it was done beyond his authority. */
-const NOT_A_BREACH = /^(Not needed|Not all of it|It could not be carried out as written|Lapsed)/;
+const NOT_A_BREACH = /^(Not needed|Not all of it|It could not be carried out as written|Lapsed|Check:)/;
 
 /**
  * The status word for a part, as the player reads it. Done beyond the actor's
@@ -521,6 +529,7 @@ export const ORDER_PART_STATUS_LABEL: Record<OrderPartStatus, string> = {
   refused: "refused",
   unanswered: "nothing came of it",
   carried_unverified: "ordered, effect not observed",
+  already_so: "already so when ordered",
 };
 
 /** Records past the cap drop their oldest wholly-closed ones first, then the oldest of all. */

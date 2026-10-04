@@ -126,6 +126,17 @@ export function goalsOfAct(
       const forceId = resolve(delta.forceRef, "force");
       return characterId === null || forceId === null ? [] : [{ kind: "out_of_service", characterId, forceId }];
     }
+    case "office_seat_set": {
+      // An appointment is done when the man holds the seat, not when it was written (plan chronicle-and-order-truth, 1.3).
+      if (delta.holderCharacterRef === null || delta.holderCharacterRef === undefined) return [];
+      const characterId = resolve(delta.holderCharacterRef, "character");
+      return characterId === null ? [] : [{ kind: "seat_held", officeId: delta.officeId, characterId }];
+    }
+    case "agreement_open": {
+      const polityId = resolve(delta.polityId, "polity");
+      const withPolityId = resolve(delta.otherPolityId, "polity");
+      return polityId === null || withPolityId === null ? [] : [{ kind: "agreement_open", agreementKind: delta.kind, polityId, withPolityId }];
+    }
     default:
       return [];
   }

@@ -123,6 +123,7 @@ import { aLetterWaitsOnItsReader, addressWaitingLetters, lettersOwed, markLetter
 import { dueSteps, emptyPlanTally, layPlan, markWoken, nextPlanDay, settleOverdueSteps, settleRoutineSteps, takeSteps, type PlanTally } from "./plans";
 import { claimPromisesKept } from "./promises";
 import { goalsOfAct, mergeGoals, refResolver, resolveGoal } from "./order-goals";
+import { verifyPart } from "./order-verifier";
 import { findInvariantViolations } from "./invariants";
 import { debatersOf, electiveOfficesOf, voteCalendarDays } from "./senate";
 import { ensureConstitutions } from "./constitutions";
@@ -516,7 +517,9 @@ export interface AuditEntry {
     /** An act placed in a part of an order, or credited to a delegated one, by its words alone. */
     | "attribution_uncertain"
     /** The order's reading named a goal its own act contradicts; the act's stood. */
-    | "goal_conflict";
+    | "goal_conflict"
+    /** The acts written for a part are not of the kind its words ask for (`verifyPart`). */
+    | "substitution";
   readonly ofTheOrder: boolean;
   /**
    * "first" for the answer as written; "repair" for the corrected attempt at
@@ -2919,6 +2922,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       // beside it, never as its answer (E4).
       const carried = mine.filter((act) => act.carried);
       const refusal = stages.length > 0 || carried.length > 0 ? null : refused[0]?.refusal?.slice(0, 600) ?? null;
+      // Acts of another kind than the words ask for are said beside the part, never refused (1.1).
+      const substituted = verifyPart({ said: part.said, ops: [...mine.flatMap((act) => act.delta === undefined ? [] : [act.delta.op]), ...(part.deferredActs ?? []).map((delta) => delta.op)], handedOn: handedOn.length > 0 });
+      const firstAct = mine.find((act) => act.delta !== undefined)?.delta;
+      if (substituted !== null && firstAct !== undefined) audit.push({ actorRef: input.actorRef, op: firstAct.op, kind: "substitution", ofTheOrder: true, attempt: "first", reason: substituted, delta: firstAct });
       const breaches = mine.map((act) => act.breach ?? null).filter((breach): breach is string => breach !== null);
       const shortBy = refused.find((act) => !heldActs.has(act))?.refusal ?? (mine.some((act) => act.unwritten === true) ? UNWRITTEN : null);
       const short = carried.length > 0 && shortBy !== null ? `Not all of it: ${shortBy}` : null;
@@ -2929,13 +2936,14 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       return {
         said: part.said,
         goals: merged.goals,
+        metAtOrder: merged.goals.length > 0 && merged.goals.every((goal) => goalMet(input.world, goal) === "met"),
         workRefs,
         // A refusal that is waiting on a vote is not yet the part's answer.
         refusal,
         refusedAtStep: refusal === null ? null : world.elapsedStep,
         whyNot: stages.length > 0 ? null : part.whyNot,
         factIds: part.factLocalIds.map((localId) => acts.factIdsByLocalId?.get(localId)).filter((id): id is string => id !== undefined).slice(0, 12),
-        note: [...breaches, ...(short === null ? [] : [short]), ...(unwritten === null ? [] : [unwritten])].join("; ").slice(0, 400) || null,
+        note: [...breaches, ...(short === null ? [] : [short]), ...(unwritten === null ? [] : [unwritten]), ...(substituted === null ? [] : [substituted])].join("; ").slice(0, 400) || null,
         stages: dedupeStages(stages).slice(0, 6),
         spend: payer === null || part.spend === null || part.spend === undefined ? null : { payerAccountId: payer, cap: part.spend.cap, reservationId: null },
         attribution: mine.some((act) => act.guessed) || handedOn.some((attempt) => partOfAttempt(attempt).guessed) ? "guessed" as const : "tagged" as const,
