@@ -14,10 +14,24 @@ import type { WorldState } from "./world-state";
  * order wanted, named by ids, and `goalMet` reads the world for it and for
  * nothing else. Never a fact's words: a fact can say the legion crossed.
  */
+const SafePassageGoalSchema = z.object({ kind: z.literal("safe_passage"), forceId: EntityIdSchema, fromProvinceId: EntityIdSchema, sinceStep: ElapsedStepSchema }).strict();
+const ForceAtGoalSchema = z.object({ kind: z.literal("force_at"), forceId: EntityIdSchema, provinceId: EntityIdSchema }).strict();
+const ControlGoalSchema = z.object({ kind: z.literal("control"), provinceId: EntityIdSchema, settlementId: EntityIdSchema.nullable().default(null), polityId: EntityIdSchema }).strict();
+
+/** Treaty duties currently express movement, restoration of ground and safe passage. */
+export const TreatyCompletionGoalSchema = z.discriminatedUnion("kind", [SafePassageGoalSchema, ForceAtGoalSchema, ControlGoalSchema]).meta({ id: "TreatyCompletionGoal" });
+
 export const OrderGoalSchema = z.discriminatedUnion("kind", [
+  /** Killing a force requires personnel deaths, not a posture or a narration. */
+  z.object({ kind: z.literal("force_killed"), forceId: EntityIdSchema, sinceStep: ElapsedStepSchema, minimumDeaths: z.number().int().positive() }).strict(),
+  z.object({ kind: z.literal("force_named"), forceId: EntityIdSchema, name: z.string().trim().min(1).max(160) }).strict(),
+  z.object({ kind: z.literal("force_commanded"), forceId: EntityIdSchema, characterId: EntityIdSchema }).strict(),
+  SafePassageGoalSchema,
+  /** A force has left the ground a treaty bound it to quit. Derived by the engine, never proposed by a model. */
+  z.object({ kind: z.literal("force_withdrawn"), forceId: EntityIdSchema, fromProvinceId: EntityIdSchema }).strict(),
   z.object({ kind: z.literal("force_strength"), forceId: EntityIdSchema, minimum: z.number().int().positive() }).strict(),
   z.object({ kind: z.literal("contract_active"), contractId: EntityIdSchema }).strict(),
-  z.object({ kind: z.literal("force_at"), forceId: EntityIdSchema, provinceId: EntityIdSchema }).strict(),
+  ForceAtGoalSchema,
   z.object({ kind: z.literal("project_done"), projectId: EntityIdSchema }).strict(),
   z.object({ kind: z.literal("procedure_passed"), procedureId: EntityIdSchema }).strict(),
   /** A letter answered, one way or the other: the answer is what was asked for. */
@@ -35,7 +49,7 @@ export const OrderGoalSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("plot_outcome"), plotId: EntityIdSchema }).strict(),
   z.object({ kind: z.literal("seat_held"), officeId: EntityIdSchema, characterId: EntityIdSchema }).strict(),
   z.object({ kind: z.literal("agreement_open"), agreementKind: PolityAgreementKindSchema, polityId: EntityIdSchema, withPolityId: EntityIdSchema }).strict(),
-  z.object({ kind: z.literal("control"), provinceId: EntityIdSchema, settlementId: EntityIdSchema.nullable().default(null), polityId: EntityIdSchema }).strict(),
+  ControlGoalSchema,
   /** A thing made: an army raised, an arrangement set up. It is met while the thing stands. */
   z.object({ kind: z.literal("exists"), of: z.enum(["force", "entity"]), id: EntityIdSchema }).strict(),
   /**
@@ -59,6 +73,35 @@ export type GoalReading = "met" | "not_yet" | "impossible";
 /** Reads the world for one goal. Pure: the same world gives the same answer. */
 export function goalMet(world: WorldState, goal: OrderGoal): GoalReading {
   switch (goal.kind) {
+    case "safe_passage": {
+      const force = world.material.forces.find((candidate) => candidate.id === goal.forceId);
+      if (force === undefined) return "impossible";
+      const harmed = force.history.some((event) => event.atStep >= goal.sinceStep && event.count > 0
+        && (event.kind === "battle_death" || event.kind === "capture"));
+      if (harmed) return "impossible";
+      return force.locationId !== goal.fromProvinceId ? "met" : "not_yet";
+    }
+    case "force_withdrawn": {
+      const force = world.material.forces.find((candidate) => candidate.id === goal.forceId);
+      if (force === undefined) return "impossible";
+      return force.locationId !== goal.fromProvinceId ? "met" : "not_yet";
+    }
+    case "force_killed": {
+      const force = world.material.forces.find((candidate) => candidate.id === goal.forceId);
+      if (force === undefined) return "impossible";
+      const alive = force.personnel.reduce((sum, category) => sum + category.fit + category.unavailable.reduce((n, group) => n + group.count, 0), 0);
+      const deaths = force.history.filter((event) => event.atStep >= goal.sinceStep && (event.kind === "battle_death" || event.kind === "wounds_death"))
+        .reduce((sum, event) => sum + event.count, 0);
+      return alive === 0 && deaths >= goal.minimumDeaths ? "met" : "not_yet";
+    }
+    case "force_named": {
+      const force = world.material.forces.find((candidate) => candidate.id === goal.forceId);
+      return force === undefined ? "impossible" : force.name === goal.name ? "met" : "not_yet";
+    }
+    case "force_commanded": {
+      const force = world.material.forces.find((candidate) => candidate.id === goal.forceId);
+      return force === undefined ? "impossible" : force.commanderCharacterId === goal.characterId ? "met" : "not_yet";
+    }
     case "force_strength": {
       const force = world.material.forces.find((candidate) => candidate.id === goal.forceId);
       return force === undefined ? "impossible" : force.personnel.reduce((sum, category) => sum + category.fit, 0) >= goal.minimum ? "met" : "not_yet";
@@ -167,4 +210,42 @@ export function goalsMet(world: WorldState, goals: readonly OrderGoal[]): GoalRe
 /** Two goals that want the same thing. */
 export function sameGoal(a: OrderGoal, b: OrderGoal): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/**
+ * What the world shows for a goal that is met, in words: "Legio I at Messana".
+ * A part is told done only with this beside it (plan chronicle-and-order-truth,
+ * 1.5); null when the goal is not met or there is nothing to point at.
+ */
+export function goalEvidence(world: WorldState, goal: OrderGoal): string | null {
+  if (goalMet(world, goal) !== "met") return null;
+  const force = (id: string) => world.material.forces.find((candidate) => candidate.id === id);
+  const province = (id: string) => world.map.provinces.find((candidate) => candidate.id === id)?.name ?? id;
+  const person = (id: string) => world.characters.find((candidate) => candidate.id === id)?.name ?? id;
+  const polity = (id: string) => id.replace(/-/g, " ").replace(/^./, (letter) => letter.toUpperCase());
+  switch (goal.kind) {
+    case "force_at": return `${force(goal.forceId)?.name ?? "the force"} at ${province(goal.provinceId)}`;
+    case "character_at": return `${person(goal.characterId)} at ${province(goal.provinceId)}`;
+    case "control": {
+      const place = goal.settlementId === null ? province(goal.provinceId) : world.map.provinces.find((candidate) => candidate.id === goal.provinceId)?.settlements.find((city) => city.id === goal.settlementId)?.name ?? province(goal.provinceId);
+      return `${polity(goal.polityId)} holds ${place}`;
+    }
+    case "project_done": return `${world.projects.find((project) => project.id === goal.projectId)?.label ?? "the work"} completed`;
+    case "force_commanded": return `${force(goal.forceId)?.name ?? "the force"} commanded by ${person(goal.characterId)}`;
+    case "force_named": return `now named ${goal.name}`;
+    case "force_strength": return `${force(goal.forceId)?.name ?? "the force"} at ${force(goal.forceId)?.personnel.reduce((sum, category) => sum + category.fit, 0) ?? 0} fit`;
+    case "force_killed": return `${force(goal.forceId)?.name ?? "the force"} destroyed`;
+    case "force_withdrawn":
+    case "safe_passage": return `${force(goal.forceId)?.name ?? "the force"} now at ${province(force(goal.forceId)?.locationId ?? goal.fromProvinceId)}`;
+    case "seat_held": return `${person(goal.characterId)} holds the seat`;
+    case "paid": return `${goal.amount} paid`;
+    case "procedure_passed": return "the vote passed";
+    case "audit_finding": return "the inquiry reached a finding";
+    case "answer_from": return "an answer came";
+    case "agreement_open": return `agreement in force between ${polity(goal.polityId)} and ${polity(goal.withPolityId)}`;
+    case "out_of_service": return `${person(goal.characterId)} out of the army`;
+    case "contract_active": return "the hire stands";
+    case "plot_outcome": return "the plot ran its course";
+    case "exists": return goal.of === "force" ? `${force(goal.id)?.name ?? "the force"} raised` : "set up";
+  }
 }

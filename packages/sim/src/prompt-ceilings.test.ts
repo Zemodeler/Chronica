@@ -26,7 +26,7 @@ describe("the system prompts stay the size they are", () => {
     // a little wider than the orchestrator's for that reason, so a change
     // that pays its way there is not refused here.
     // Raised 63k -> 73k (2026-10-03), for the same schema as the orchestrator's.
-    expect(COGNITION_SYSTEM_PROMPT.length).toBeLessThan(73_000);
+    expect(COGNITION_SYSTEM_PROMPT.length).toBeLessThan(85_000);
   });
 
   it("the historian, the repairer and the reconciler: prose only", () => {

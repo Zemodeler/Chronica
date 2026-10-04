@@ -1,4 +1,4 @@
-import { missionGoals, preserveDestination } from "./mission-intent";
+import { explicitOrderGoals, missionGoals, preserveDestination } from "./mission-intent";
 import {
   addMinutes,
   readDepartments,
@@ -55,6 +55,7 @@ import {
   type OrderStage,
   type StageCondition,
   goalMet,
+  goalsMet,
   orderPartRef,
   findOrderPart,
   MAX_OWED_BURSTS,
@@ -71,6 +72,9 @@ import {
   isOrderPartStale,
   OrderRecordSchema,
   OrderPartSchema,
+  STAGE_REVIEW_DAYS,
+  STAGE_LAPSE_DAYS,
+  stageReviewDay,
 } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import { settleRatifications } from "./ratification";
@@ -84,7 +88,9 @@ import { actsBehindFacts, asClaim, isClaim, whereTheActorIs } from "./apply/fill
 import { kindsIn } from "./bare-refs";
 import { misfiledWorldActs, whyMisfiled } from "./apply/misfiled";
 import { hasSomethingNew, playersPeopleFirst, routeAmbientActors, routeAttention } from "./attention";
-import { renderCharacterPortrait, runCognition } from "./cognition";
+import { DEFAULT_SHARDING, renderCharacterPortrait, runCognition } from "./cognition";
+import { createCognitionMemory } from "./cognition-memory";
+import { createCognitionPolicy, playerInterests } from "./cognition-policy";
 import { materializeFacts } from "./facts";
 import { answerByTemper } from "./insubordination";
 import { answerForTheSilent } from "./requests";
@@ -114,7 +120,7 @@ import { runMechanics } from "./mechanics/run-mechanics";
 import { validateMechanic } from "./mechanics/validate-mechanic";
 import { writeMechanic } from "./mechanics/write-mechanic";
 import { aLetterWaitsOnItsReader, addressWaitingLetters, lettersOwed, markLettersPut, nextReplyDueKey } from "./letters";
-import { dueSteps, emptyPlanTally, layPlan, markWoken, nextPlanDay, settleOverdueSteps, takeSteps, type PlanTally } from "./plans";
+import { dueSteps, emptyPlanTally, layPlan, markWoken, nextPlanDay, settleOverdueSteps, settleRoutineSteps, takeSteps, type PlanTally } from "./plans";
 import { claimPromisesKept } from "./promises";
 import { goalsOfAct, mergeGoals, refResolver, resolveGoal } from "./order-goals";
 import { findInvariantViolations } from "./invariants";
@@ -148,7 +154,7 @@ const STATECRAFT_EVERY_DAYS = 30;
 
 export interface SimulationBudget {
   readonly maxIterations: number;
-  /** The hard ceiling on a burst's model calls, however long it runs (`callCapFor`). */
+  /** The ceiling on model work, excluding extra initial parallel requests for the same cast (`callCapFor`). */
   readonly maxModelCalls: number;
   /**
    * What a burst may spend, by how long it runs: this many calls, and one
@@ -434,6 +440,8 @@ export interface BurstResult {
   readonly firedEventIds: readonly string[];
   readonly iterations: number;
   readonly modelCalls: number;
+  /** Work allowance spent; extra initial parallel requests are reported in modelCalls but excluded here. */
+  readonly modelWorkCalls?: number;
   /** Calls that wrote a mechanic (plan §2): counted apart, so they never end a burst early. */
   readonly mechanicCalls: number;
   readonly outcome: "continue" | "chronicle" | "player_decision";
@@ -538,7 +546,7 @@ function holdForArrival<T extends { readonly output: OrchestratorOutput }>(orche
   const held = new Set<number>();
   for (const [index, part] of output.intent.parts.entries()) {
     if ((part.afterParts ?? []).filter((at) => at !== index).length === 0) continue;
-    for (const at of part.acts) if (output.deltas[at] !== undefined && ON_ARRIVAL.has(output.deltas[at]!.op)) held.add(at);
+    for (const at of part.acts) if (output.deltas[at] !== undefined && ON_ARRIVAL.has(output.deltas[at].op)) held.add(at);
   }
   if (held.size === 0) return orchestration;
   const moved = new Map<number, number>();
@@ -726,7 +734,7 @@ function isVoteAct(act: OwnAct): boolean {
  * done the moment it is. "Rename the field army to Legio I" was renamed, and its
  * receipt said nothing came of it, for want of anything to read it by.
  */
-function renamedOrRecommanded(delta: WorldDelta, resolve: (ref: string, kind: "force") => string | null): OrderGoal[] {
+function renamedOrRecommanded(delta: WorldDelta, resolve: (ref: string, kind: "force" | "character") => string | null): OrderGoal[] {
   // So is a man's own resolve in the ranks: "in the next battle I mean to win
   // glory" is done the moment he means it, and joining an army the moment he
   // joins. Its receipt said nothing came of it, like a rename's once did.
@@ -736,7 +744,12 @@ function renamedOrRecommanded(delta: WorldDelta, resolve: (ref: string, kind: "f
   }
   if (delta.op !== "force_modify" || delta.locationId !== undefined) return [];
   const forceId = resolve(delta.forceRef, "force");
-  return forceId === null ? [] : [{ kind: "exists", of: "force", id: forceId }];
+  if (forceId === null) return [];
+  const commanderId = delta.commanderCharacterRef === undefined ? null : resolve(delta.commanderCharacterRef, "character");
+  return [
+    ...(delta.name === undefined ? [] : [{ kind: "force_named" as const, forceId, name: delta.name }]),
+    ...(commanderId === null ? [] : [{ kind: "force_commanded" as const, forceId, characterId: commanderId }]),
+  ];
 }
 
 /** The ids an answer said it served whose acts changed the world. */
@@ -938,6 +951,9 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   };
   let modelCalls = 0;
   /** What this burst may spend, by how long it may run (`callCapFor`). */
+  // Record every real request, but parallelizing the same decisions must not spend later rounds' allowance.
+  let parallelExtraCalls = 0;
+  const budgetCalls = () => modelCalls - parallelExtraCalls;
   const callCap = callCapFor(budget, Math.max(1, Math.min(input.spanDays ?? budget.maxSimulatedDays, input.clock.maxSpanDays)));
   let iterations = 0;
   let significance = 0;
@@ -1301,6 +1317,31 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
               settled = parsed.success ? carryOut([parsed.data], stage, stageIndex) : { ...stage, status: "failed", reason: "The act it held could no longer be read.", failedAtStep: world.elapsedStep };
             }
           }
+          // A wait nothing has settled is looked at on its day, and lapses for
+          // good after a season: it is told, never left to stand (plan
+          // chronicle-and-order-truth, 2.3).
+          if (settled === null && stage.status === "waiting") {
+            if (world.elapsedStep >= since + STAGE_LAPSE_DAYS) {
+              const why = `It could not go ahead: ${conditionInWords(stage.waitsOn[0]!)} did not come in ${world.elapsedStep - since} days.`.slice(0, 400);
+              settled = { ...stage, status: "failed", reason: why, failedAtStep: world.elapsedStep };
+              next = { ...next, refusal: why, refusedAtStep: world.elapsedStep };
+            } else if (world.elapsedStep >= stageReviewDay(stage, order.givenAtStep)) {
+              const actorRef = { kind: "character" as const, id: order.actorCharacterId };
+              const waited = [...new Set(stage.waitsOn.map((condition) => conditionInWords(condition)))].join(" and ");
+              const told = materializeFacts({
+                proposals: [{
+                  localId: `order_wait_review_${partIndex}_${stageIndex}`,
+                  kind: "order_wait_review",
+                  summary: `Still waiting for ${waited} (${world.elapsedStep - since} days) before "${part.said}" can go ahead. It lapses on day ${since + STAGE_LAPSE_DAYS}; your word?`.slice(0, 600),
+                  affectedRefs: [actorRef], visibility: "private" as const, discoveryState: "private" as const, knowableInDays: 0, knownToRefs: [actorRef], significance: 35,
+                }],
+                now: world.instant, forces: world.material.forces, atStep: world.elapsedStep, ids, causalDepth: 0, assignedIds: new Map(),
+              });
+              newFacts.push(...told.facts.map((fact) => ({ ...fact, sourceActionId: ref })));
+              for (const [factId, weight] of told.significanceByFactId) significanceByFactId.set(factId, weight);
+              settled = { ...stage, reviewAtStep: world.elapsedStep + STAGE_REVIEW_DAYS };
+            }
+          }
           if (settled !== null) {
             const done = settled;
             next = { ...next, stages: next.stages.map((old, at) => (at === stageIndex ? done : old.status === "waiting" ? { ...old, held: resolveHandles(old.held, handles) } : old)) };
@@ -1513,10 +1554,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     if (referenceRejections.length > 0 && repairable.length === 0 && pass.calls !== "none") {
       skipped.push({ stage: "repair", reason: `${referenceRejections.length} refusal(s) no correction can cure: ${referenceRejections.map((rejection) => rejection.reason.slice(0, 80)).join(" | ")}` });
     }
-    if (repairable.length > 0 && pass.calls === "own" && modelCalls >= callCap) {
-      skipped.push({ stage: "repair", reason: `the call budget is spent (${modelCalls} of ${callCap}); ${repairable.length} refusal(s) left uncorrected: ${repairable.map((rejection) => rejection.reason.slice(0, 80)).join(" | ")}` });
+    if (repairable.length > 0 && pass.calls === "own" && budgetCalls() >= callCap) {
+      skipped.push({ stage: "repair", reason: `the call budget is spent (${budgetCalls()} of ${callCap}); ${repairable.length} refusal(s) left uncorrected: ${repairable.map((rejection) => rejection.reason.slice(0, 80)).join(" | ")}` });
     }
-    if (repairable.length > 0 && pass.calls === "own" && modelCalls < callCap) {
+    if (repairable.length > 0 && pass.calls === "own" && budgetCalls() < callCap) {
       const repair = await repairDeltas({ port: input.port, worldText: sliceText, rejected: repairable, world });
       modelCalls += repair.calls;
       if (repair.failure !== null) parseFailures.push(repair.failure);
@@ -1682,15 +1723,15 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     if (result.rejected.length > 0 && aboutRealThings.length > 0 && naming.length === 0 && pass.calls !== "none") {
       skipped.push({ stage: "reconcile", reason: `${result.rejected.length} refusal(s), and none of ${aboutRealThings.length} fact(s) names them` });
     }
-    if (naming.length > 0 && pass.calls === "own" && modelCalls >= callCap) {
-      skipped.push({ stage: "reconcile", reason: `the call budget is spent (${modelCalls} of ${callCap}); ${naming.length} fact(s) still name what was refused` });
+    if (naming.length > 0 && pass.calls === "own" && budgetCalls() >= callCap) {
+      skipped.push({ stage: "reconcile", reason: `the call budget is spent (${budgetCalls()} of ${callCap}); ${naming.length} fact(s) still name what was refused` });
     }
     // Left to the round, the facts naming what was refused wait for its one
     // reconciliation; with nobody paying, they are kept as what was said.
     const heldBack = new Set(pass.calls === "own" ? [] : naming.map((fact) => fact.localId));
     if (heldBack.size > 0) happened = aboutRealThings.filter((fact) => !heldBack.has(fact.localId));
     if (pass.calls === "none") claims.push(...naming.map(asClaim));
-    if (naming.length > 0 && pass.calls === "own" && modelCalls < callCap) {
+    if (naming.length > 0 && pass.calls === "own" && budgetCalls() < callCap) {
       const reconciled = await reconcileFacts({ port: input.port, facts: naming, refused: result.rejected });
       modelCalls += reconciled.calls;
       if (reconciled.failure !== null) parseFailures.push(`fact reconciliation: ${reconciled.failure}`);
@@ -2115,8 +2156,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     const nothingSaid = CognitionProposalSchema.parse({});
     const refusals = owed.reduce((sum, entry) => sum + entry.correction.repairable.length, 0);
     let corrections: readonly (readonly WorldDelta[])[] = owed.map(() => []);
-    if (refusals > 0 && modelCalls >= callCap) {
-      skipped.push({ stage: "repair", reason: `the call budget is spent (${modelCalls} of ${callCap}); ${refusals} refusal(s) of the round left uncorrected` });
+    if (refusals > 0 && budgetCalls() >= callCap) {
+      skipped.push({ stage: "repair", reason: `the call budget is spent (${budgetCalls()} of ${callCap}); ${refusals} refusal(s) of the round left uncorrected` });
     } else if (refusals > 0) {
       const repaired = await repairTheRound({ port: input.port, worldText: sliceText, world, owed: owed.map((entry) => entry.correction) });
       modelCalls += repaired.calls;
@@ -2141,8 +2182,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     const standing = owed.map((entry, at) => entry.correction.naming.filter((fact) => !held[at]!.facts.includes(fact)));
     let reconciled: readonly (readonly FactProposal[])[] = held.map((entry) => entry.facts);
     const asked = held.reduce((sum, entry) => sum + entry.facts.length, 0);
-    if (asked > 0 && modelCalls >= callCap) {
-      skipped.push({ stage: "reconcile", reason: `the call budget is spent (${modelCalls} of ${callCap}); ${asked} fact(s) of the round that name what was refused are kept as reports` });
+    if (asked > 0 && budgetCalls() >= callCap) {
+      skipped.push({ stage: "reconcile", reason: `the call budget is spent (${budgetCalls()} of ${callCap}); ${asked} fact(s) of the round that name what was refused are kept as reports` });
       reconciled = held.map((entry) => entry.facts.map(asClaim));
     } else if (asked > 0) {
       const settled = await reconcileTheRound({ port: input.port, held });
@@ -2314,6 +2355,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     factsSeenByMechanics = newFacts.length;
     // Plans whose steps passed their day undone. Each owner's own record of
     // it, and the step left for the router to wake him with.
+    const routine = settleRoutineSteps(world);
+    if (routine.taken > 0 && checkpoint("settling approved plan work", () => { world = routine.world; })) plans.taken += routine.taken;
     const behind = settleOverdueSteps(world, input.clock, (prefix) => `${prefix}_${newFacts.length}_${(planFactSerial += 1)}`);
     if (behind.missed > 0 || behind.slipped > 0) checkpoint("settling overdue plan steps", () => {
       world = behind.world;
@@ -2689,10 +2732,14 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // on the day of the order and taken up again a fortnight later.
     const heldForLater = (part: IntentPart): boolean => (part.deferredActs ?? []).length > 0 || (part.afterParts ?? []).length > 0
       || part.whenForceExists != null || /^(once|after|when|on arrival)\b/i.test(part.said);
-    const unanswered = parts.map((part, index) => ({ part, index })).filter(({ part, index }) =>
-      !part.factLocalIds.some((localId) => acts.factLocalIds.has(localId))
-      && !own.some((act) => act.part === index && act.carried)
-      && !heldForLater(part));
+    const actorPolityId = world.characters.find((character) => character.id === input.actorRef.id)?.polityId ?? null;
+    const unanswered = parts.map((part, index) => ({ part, index })).filter(({ part, index }) => {
+      const requested = explicitOrderGoals(input.world, part.said, input.orderText!, actorPolityId);
+      const substituted = requested.length > 0 && goalsMet(world, requested) !== "met"
+        && !own.some((act) => act.part === index && act.carried && (act.work ?? []).length > 0);
+      return !heldForLater(part) && (substituted || (!part.factLocalIds.some((localId) => acts.factLocalIds.has(localId))
+        && !own.some((act) => act.part === index && act.carried)));
+    });
     if (unanswered.length === 0) return;
     // What the order itself set going that a refused act can wait on: a vote,
     // or something being built (`recordOrder` holds the act on them).
@@ -2794,13 +2841,15 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       const refused = mine.filter((act) => !act.carried && act.refusal !== null);
       const resolve = refResolver(world, acts.assignedIds ?? new Map());
       const named = (part.goals ?? []).map((goal) => resolveGoal(world, goal, actorPolityId, resolve)).filter((goal): goal is OrderGoal => goal !== null);
-      const wanted = mine.flatMap((act) => act.delta === undefined ? [] : missionGoals(world, act.delta, part.said, input.orderText!, input.actorRef.id));
+      const wanted = [...explicitOrderGoals(input.world, part.said, input.orderText!, actorPolityId),
+        ...mine.flatMap((act) => act.delta === undefined ? [] : missionGoals(world, act.delta, part.said, input.orderText!, input.actorRef.id))];
       // A held act is the part's too: a siege put off until the army arrives is
       // done when the town is Rome's, however that came about.
       // (Not a siege of "wherever the army stands": it does not stand there yet.)
       const heldFor = (part.deferredActs ?? []).filter((delta) => delta.op !== "siege_lay" || delta.settlementId !== null)
         .flatMap((delta) => goalsOfAct(world, delta, [], resolve));
-      const merged = mergeGoals([...mine.flatMap((act) => act.goals ?? []), ...heldFor], [...named, ...wanted]);
+      const requested = explicitOrderGoals(input.world, part.said, input.orderText!, actorPolityId);
+      const merged = mergeGoals([...requested, ...mine.flatMap((act) => act.goals ?? []), ...heldFor], [...named, ...wanted]);
       const conflicted = mine.find((act) => act.delta !== undefined)?.delta;
       if (conflicted !== undefined) for (const conflict of merged.conflicts) audit.push({ actorRef: input.actorRef, op: conflicted.op, kind: "goal_conflict", ofTheOrder: true, attempt: "first", reason: conflict, delta: conflicted });
       // A refused act beside a vote asked in the same breath is what the vote
@@ -2829,7 +2878,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       // "local:fleet-question" named nothing (E9).
       const hold = (delta: WorldDelta, on: StageCondition[]): OrderStage => ({
         held: resolveHandles(delta, acts.assignedIds ?? new Map()),
-        waitsOn: on, status: "waiting", reason: null, heldSinceStep: world.elapsedStep, failedAtStep: null,
+        waitsOn: on, status: "waiting", reason: null, heldSinceStep: world.elapsedStep, failedAtStep: null, reviewAtStep: world.elapsedStep + STAGE_REVIEW_DAYS,
       });
       const heldActs = new Map((waitsOn.length === 0 ? [] : refused.filter((act) => act.delta !== undefined).slice(0, 6)).map((act) => [act, hold(act.delta!, [...waitsOn])] as const));
       const stages: OrderStage[] = [...heldActs.values()];
@@ -2862,7 +2911,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       if (dependencies.length > 0) {
         const deferred = part.deferredActs ?? [];
         if (deferred.length > 0) stages.push(...deferred.map((delta) => hold(delta, dependencies.slice(0, 4))));
-        else if (mine.every((act) => !act.carried)) stages.push({ held: { op: "resume_instruction", instruction: part.said }, waitsOn: dependencies.slice(0, 4), status: "waiting", reason: null, heldSinceStep: world.elapsedStep, failedAtStep: null });
+        else if (mine.every((act) => !act.carried)) stages.push({ held: { op: "resume_instruction", instruction: part.said }, waitsOn: dependencies.slice(0, 4), status: "waiting", reason: null, heldSinceStep: world.elapsedStep, failedAtStep: null, reviewAtStep: world.elapsedStep + STAGE_REVIEW_DAYS });
       }
       const payer = part.spend === null || part.spend === undefined ? null : resolve(part.spend.payerAccountRef, "account");
       // A part some of whose acts were carried was not refused: the eight
@@ -3277,6 +3326,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   // Who has been asked about what, and who wrote what, this burst (see
   // `routeAttention`'s `alreadyAnswered`).
   const answeredBy = new Map<string, Set<string>>();
+  const cognitionMemory = createCognitionMemory();
+  const cognitionPolicy = createCognitionPolicy();
 
   // The powers' own business, by rule, once a month (`statecraft.ts`): wars,
   // risings, raids, alliances, levies, armies on campaign, and letters to
@@ -3287,6 +3338,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   const statecraftInput = (): StatecraftInput => {
     const playerPolityId = input.actorPolityId ?? null;
     const reader = readDepartments(world);
+    const interests = playerInterests(world, playerId, input.offices);
     return {
       world,
       gameId: input.gameId,
@@ -3294,7 +3346,9 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         ...(playerPolityId === null ? [] : [playerPolityId]),
         ...world.map.polities.filter((polity) => reader.rulers(polity.id).some((ruler) => ruler.id === playerId)).map((polity) => polity.id),
       ]),
-      playedByModel: new Set([...answeredBy.keys(), ...world.cast.members.map((member) => member.characterId)]),
+      playedByModel: new Set([...answeredBy.keys(), ...world.cast.members
+        .filter((member) => interests.detailOf(member.characterId) !== "background")
+        .map((member) => member.characterId)]),
       playerCharacterId: playerId,
       nearPlayer: powersNearThePlayer(world, playerId),
       pressures: input.historicalPressures ?? [],
@@ -3441,7 +3495,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // A letter its reader has still to be shown, or has read past its term,
     // is settled within days, not at the next thing on the calendar -- while
     // there is still a call to pay him with.
-    const readerKey = modelCalls < callCap && aLetterWaitsOnItsReader(world, input.actorRef.kind === "character" ? [input.actorRef.id] : [], input.actorPolityId)
+    const readerKey = budgetCalls() < callCap && aLetterWaitsOnItsReader(world, input.actorRef.kind === "character" ? [input.actorRef.id] : [], input.actorPolityId)
       ? reactionKey
       : Number.MAX_SAFE_INTEGER;
     const targetKey = Math.min(hops === 1 ? reactionKey : nextScheduled ?? idle, replyDueKey, readerKey, ceilingKey);
@@ -3498,8 +3552,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     const orderPeople = new Set(world.orderAttempts
       .filter((attempt) => attempt.issuerRef.id === input.actorRef.id && ["issued", "received", "delayed", "accepted"].includes(attempt.status))
       .map((attempt) => attempt.recipientRef.id));
+    const interests = playerInterests(world, playerId, input.offices);
     const attention = routeAttention({
       world,
+      cognitionEligible: interests.eligibleCharacterIds,
       facts: reactTo,
       offices: input.offices,
       excludeCharacterIds: playerCharacterIds,
@@ -3558,6 +3614,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     const castThisRound = castToAsk();
     const ambient = routeAmbientActors({
       world,
+      cognitionEligible: interests.eligibleCharacterIds,
       facts: [...input.knownFacts, ...newFacts],
       offices: input.offices,
       excludeCharacterIds: [...playerCharacterIds, ...attention.focused.map((actor) => actor.characterId)],
@@ -3604,16 +3661,29 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // spent all but `ORDER_RESERVE_CALLS`, only the people the player's order
     // is waiting on are asked. A burst once ran out answering senators on the
     // Anio waterworks while the man handed the transport was never asked (R80).
-    const reserved = modelCalls >= callCap - ORDER_RESERVE_CALLS && orderPeople.size > 0;
+    const reserved = budgetCalls() >= callCap - ORDER_RESERVE_CALLS && orderPeople.size > 0;
     // Nobody is asked again with nothing new to answer (`hasSomethingNew`):
     // the rotation, put before the model two days after its last look, said
     // nothing had changed, at a call a time (L17).
     const owesAnAnswer = new Set(world.orderAttempts.filter((attempt) => attempt.status === "issued" || attempt.status === "received").map((attempt) => attempt.recipientRef.id));
-    const fresh = playersPeopleFirst(castNow.filter((actor) => hasSomethingNew(actor, answeredBy.get(actor.characterId), dueWhy, owesAnAnswer)), orderPeople);
-    if (fresh.length < castNow.length) {
-      skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: ${castNow.length - fresh.length} with nothing new since they last answered left unasked (${castNow.filter((actor) => !fresh.includes(actor)).map((actor) => actor.name).join(", ").slice(0, 160)})` });
+    const planDueOwners = new Set(due.map((entry) => entry.ownerId));
+    const novel = castNow.filter((actor) => hasSomethingNew(
+      actor, answeredBy.get(actor.characterId), dueWhy, owesAnAnswer,
+      planDueOwners.has(actor.characterId) || cognitionMemory.changed(actor, world, input.clock, dueWhy.get(actor.characterId)),
+    ));
+    const fresh = playersPeopleFirst(novel.filter((actor) => playerId === null
+      || cognitionPolicy.shouldAsk(actor, world, interests, significanceByFactId, authorOf, due)), orderPeople);
+    if (novel.length < castNow.length) {
+      skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: ${castNow.length - novel.length} with nothing new since they last answered left unasked` });
     }
-    const asking = reserved ? fresh.filter((actor) => orderPeople.has(actor.characterId)) : fresh;
+    if (fresh.length < novel.length) {
+      skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: ${novel.length - fresh.length} routine decisions continue on engine rules until a consequential change or their next review` });
+    }
+    const candidates = reserved ? fresh.filter((actor) => orderPeople.has(actor.characterId)) : fresh;
+    // A large group consumes two units of decision work. With only one left,
+    // keep a single group rather than exceeding the allowance to ask it.
+    const asking = callCap - budgetCalls() === 1 ? candidates.slice(0, 8) : candidates;
+    if (asking.length < candidates.length) oweTurns(candidates.filter((actor) => !asking.includes(actor)), (id) => dueWhy.get(id));
     if (reserved && asking.length < fresh.length) {
       skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: the last calls are kept for the order; ${fresh.length - asking.length} others left unasked` });
       oweTurns(fresh.filter((actor) => !asking.includes(actor)), (id) => dueWhy.get(id));
@@ -3633,7 +3703,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       if (ambientOnly) ambientOnlyRounds += 1;
       // Somebody has something to say and there is nothing left to pay them
       // with. Stopping here is honest; carrying on would silence them.
-      const spent = modelCalls >= callCap || (!reactionsSpent && iterations - chainStartIterations >= budget.maxIterations);
+      const spent = budgetCalls() >= callCap || (!reactionsSpent && iterations - chainStartIterations >= budget.maxIterations);
       // The order's own consequences stop the burst when they cannot be paid
       // for, and so does anything in a burst the player gave no span: he gets
       // the wheel back rather than a world that went quiet. A span he asked
@@ -3653,10 +3723,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // spent a month's budget in its first three days.
     const keptForLater = input.spanDays === undefined || asking.some((actor) => orderPeople.has(actor.characterId)) ? 0
       : Math.min(Math.floor(callCap / 2), LATER_CHAIN_CALLS * Math.floor(Math.max(0, startDay + maxDays - world.instant.day) / budget.newChainAfterDays));
-    const canPay = modelCalls < callCap - keptForLater && (reactionsSpent || iterations - chainStartIterations < budget.maxIterations);
+    const canPay = budgetCalls() < callCap - keptForLater && (reactionsSpent || iterations - chainStartIterations < budget.maxIterations);
     if (wantsAnswering && !canPay) {
       asked = false;
-      skipped.push({ stage: "cognition", reason: modelCalls < callCap && modelCalls >= callCap - keptForLater
+      skipped.push({ stage: "cognition", reason: budgetCalls() < callCap && budgetCalls() >= callCap - keptForLater
         ? `hop ${hops} on ${today()}: chain ${chain}, ${keptForLater} call(s) are kept for the weeks to come; ${asking.length} left unasked`
         : `hop ${hops} on ${today()}: chain ${chain}, the call budget is spent; ${asking.length} left unasked` });
       oweTurns(asking, (id) => dueWhy.get(id) ?? (orderPeople.has(id) ? "an order of the ruler's he holds" : undefined));
@@ -3675,22 +3745,26 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       // budget turned away stays due, and wakes him next time.
       const castIds = new Set(asking.map((actor) => actor.characterId));
       for (const id of castIds) castAsked.add(id);
-      // What each of them is being shown now is theirs to have answered.
-      for (const actor of asking) {
-        const seen = answeredBy.get(actor.characterId) ?? new Set<string>();
-        for (const fact of actor.knownFacts) seen.add(fact.id);
-        answeredBy.set(actor.characterId, seen);
-      }
-      if (world.owed.some((entry) => castIds.has(entry.characterId))) world = { ...world, owed: world.owed.filter((entry) => !castIds.has(entry.characterId)) };
       const woken = due.filter((entry) => castIds.has(entry.ownerId));
       world = markWoken(world, woken);
       world = markLettersPut(world, castIds);
       plans.woken += woken.length;
       const cognition = await runCognition(
         input.port, asking, world, input.clock,
-        budget.cognitionShards === undefined ? undefined : { maxBatches: budget.cognitionShards, actorsPerCall: Math.ceil(asking.length / budget.cognitionShards) },
+        { ...(budget.cognitionShards === undefined ? DEFAULT_SHARDING : { maxBatches: budget.cognitionShards, actorsPerCall: Math.ceil(asking.length / budget.cognitionShards) }), weights: cognitionMemory.weights },
       );
       modelCalls += cognition.calls;
+      parallelExtraCalls += cognition.parallelExtraCalls ?? 0;
+      const answeredIds = new Set(cognition.answeredActorIds ?? []);
+      if (world.owed.some((entry) => answeredIds.has(entry.characterId))) world = { ...world, owed: world.owed.filter((entry) => !answeredIds.has(entry.characterId)) };
+      for (const actor of asking) {
+        if (!answeredIds.has(actor.characterId)) continue;
+        const seen = answeredBy.get(actor.characterId) ?? new Set<string>();
+        for (const fact of actor.knownFacts) seen.add(fact.id);
+        answeredBy.set(actor.characterId, seen);
+        cognitionMemory.remember(actor, world, input.clock, dueWhy.get(actor.characterId), cognitionMemory.weights.get(actor.characterId) ?? 1);
+        cognitionPolicy.remember(actor, world, actor.knownFacts, due);
+      }
       iterations += 1;
       if (reactionsSpent) planRounds += 1;
       else chainRounds[chain - 1] = (chainRounds[chain - 1] ?? 0) + 1;
@@ -3704,6 +3778,9 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       const owedCorrection: { correction: RoundCorrection; idle: boolean }[] = [];
       const ridingAlong = new Set(asking.filter((actor) => actor.impetus === "own_business" && !orderPeople.has(actor.characterId)).map((actor) => actor.characterId));
       for (const actor of cognition.output.actors) {
+        const responder = actor.actorRef.kind === "character" ? asking.find((candidate) => candidate.characterId === actor.actorRef.id) : undefined;
+        // All parallel decisions saw the same world. Earlier actors' changes were not part of a later actor's decision.
+        const circumstancesChangedBeforeActing = responder !== undefined && cognitionMemory.changed(responder, world, input.clock, dueWhy.get(responder.characterId));
         const factsBeforeActor = newFacts.length;
         const pays: CorrectionCalls = actor.actorRef.kind === "character" && castIds.has(actor.actorRef.id) && !ridingAlong.has(actor.actorRef.id) ? "round" : "none";
         const acts = await applyProposal(actor.proposal, actor.actorRef, causalDepth, false, actor.serves, { calls: pays });
@@ -3722,6 +3799,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         if (actor.actorRef.kind !== "character" || !castIds.has(actor.actorRef.id)) continue;
         const ownerId = actor.actorRef.id;
         for (const fact of newFacts.slice(factsBeforeActor)) authorOf.set(fact.id, ownerId);
+        const askedActor = asking.find((candidate) => candidate.characterId === ownerId)!;
+        const seen = answeredBy.get(ownerId) ?? new Set<string>();
+        for (const fact of [...askedActor.knownFacts, ...newFacts.slice(factsBeforeActor)]) seen.add(fact.id);
+        answeredBy.set(ownerId, seen);
         // A step is done when an act written for it changed the world, not
         // when a sentence was written, nor when something else did: "reviewed
         // the legion's readiness" satisfied any step there was, and Decius
@@ -3743,6 +3824,14 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
           plans.acted += 1;
           if (laid || took.taken > 0) plans.actedOnAPlan += 1;
         }
+        const answerSize = JSON.stringify(actor).length;
+        if (!circumstancesChangedBeforeActing) {
+          cognitionMemory.remember(askedActor, world, input.clock, dueWhy.get(ownerId), answerSize);
+          // Include this person's own settled work, but never pretend they
+          // considered another actor's later changes in the parallel batch.
+          cognitionPolicy.remember(askedActor, world, askedActor.knownFacts, due);
+        }
+        else cognitionMemory.weights.set(ownerId, answerSize);
       }
       if (owedCorrection.length > 0) roundChanged += await settleTheRound(owedCorrection);
       idleRounds = roundChanged === 0 ? idleRounds + 1 : 0;
@@ -3826,6 +3915,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     firedEventIds,
     iterations,
     modelCalls,
+    modelWorkCalls: budgetCalls(),
     mechanicCalls,
     outcome,
     stopReason,

@@ -1,5 +1,5 @@
 import { formatWorldDate, letterTally, letterTallyInWords, spentForOrderPart, type ScenarioClock } from "@chronica/shared";
-import { orderPartLabel, orderPartStatus, procedureReasonOf, type OrderPart, type WorldState } from "@chronica/shared";
+import { goalEvidence, orderPartLabel, orderPartStatus, procedureReasonOf, type OrderPart, type WorldState } from "@chronica/shared";
 import type { ChronicleEntry } from "./chronicle";
 import { refOfPart, whyNothingSetAside } from "./order-money";
 
@@ -56,9 +56,12 @@ export function lineOf(world: WorldState, part: OrderPart, actorId: string, cloc
     : reservation === undefined || reservation.status !== "active"
       ? ` (up to ${part.spend.cap} allowed; ${spent} spent; ${whyNothingSetAside(world, part, refOfPart(world, part))})`
       : ` (up to ${part.spend.cap} allowed; ${reservation.remainingAmount} currently set aside, ${Math.max(spent, reservation.reservedAmount - reservation.remainingAmount)} spent)`;
+  // "Done" is shown with what the world shows for it, on the day it was read (plan chronicle-and-order-truth, 1.5).
+  const shown = status === "achieved" ? [...new Set(part.goals.map((goal) => goalEvidence(world, goal)).filter((text): text is string => text !== null))] : [];
+  const evidence = shown.length === 0 ? "" : `: ${shown.slice(0, 3).join("; ")}${clock === undefined ? "" : `, ${formatWorldDate(world.instant, clock)}`}`;
   const guessed = part.attribution === "guessed" ? " (its work was matched to it by the words alone)" : "";
   const note = `${paid}${envelope}${part.note === null ? "" : ` (${part.note})`}${guessed}`;
-  return `"${part.said}" -- ${orderPartLabel(status, part, world)}${on}${how}${letters}${reason}${note}.`.replace(/\.\.$/, ".");
+  return `"${part.said}" -- ${orderPartLabel(status, part, world)}${evidence}${on}${how}${letters}${reason}${note}.`.replace(/\.\.$/, ".");
 }
 
 /** Whole sentences up to a length, never a word cut in half. */
@@ -126,5 +129,5 @@ export function withOrderOutcomes(
  */
 export function claimsItDone(body: string, status: ReturnType<typeof orderPartStatus>): boolean {
   if (status === "achieved") return false;
-  return /\b(arrived|landed|crossed over|made the crossing|reached|was completed|were completed|was carried out|were carried out|accomplished|achieved|succeeded|was done|stands now in|now stood in)\b/i.test(body);
+  return /\b(arrived|landed|crossed over|made the crossing|reached|was completed|were completed|was carried out|were carried out|accomplished|achieved|succeeded|was done|stands now in|now stood in|was killed|were killed|was slain|were slain|was destroyed|were destroyed|was annihilated|were annihilated|was found and killed|were found and killed)\b/i.test(body);
 }

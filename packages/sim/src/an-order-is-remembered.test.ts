@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
-import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, ensureProvinceMaterial, ordersUnderWay, orderPartStatus, type Force, type Office, type WorldState } from "@chronica/shared";
+import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, ensureProvinceMaterial, ordersUnderWay, orderPartLabel, orderPartStatus, type Force, type Office, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import { createIdFactory } from "./ports";
-import { runSimulationBurst, type BurstInput } from "./burst";
+import { DEFAULT_BUDGET, runSimulationBurst, type BurstInput } from "./burst";
 import { orderOutcomeLines, withOrderOutcomes } from "./order-outcomes";
 import type { SimModelPort, SimOperation } from "./ports";
 import type { ChronicleEntry } from "./chronicle";
@@ -120,37 +120,42 @@ describe("an order, part by part", () => {
   });
 });
 
+function stageWaitingOnPassedVote(): WorldState {
+  const government = { offices: definition.government.offices, successionRules: definition.government.successionRules };
+  const act = (state: WorldState, delta: Record<string, unknown>) => applyDeltas(state, [WorldDeltaSchema.parse(delta)], {
+    now: { day: 0, minute: 540 }, actorRef: { kind: "character", id: "hieron-ii" }, ...government,
+    warfare: definition.warfare, ids: createIdFactory(`vote-${delta.op as string}`), gameId: "game-vote",
+  });
+  const opened = act(world(), {
+    op: "political_procedure_open", localId: "d", type: "decree", institutionRef: null, sponsorCharacterRef: "hieron-ii",
+    subjectKind: "polity", subjectRef: "syracuse", label: "Leave for the crossing", resolutionMechanism: "appointment_authority", deadlineInDays: null,
+    reason: "Leave.",
+  });
+  const voteId = opened.assignedIds.get("d")!;
+  const passed = act(opened.world, { op: "political_procedure_resolve", procedureRef: voteId, outcome: "passed", outcomeReason: "Granted.", reason: "Granted." }).world;
+  const waiting: WorldState = {
+    ...passed,
+    orders: [{
+      id: "order-waiting", actorCharacterId: ACTOR, text: "Seek leave and carry the legion over.", givenAtStep: 0,
+      parts: [{
+        said: "Carry Legio I to Messana once the Senate gives leave", workRefs: [{ kind: "procedure", id: voteId }], refusal: null,
+        goals: [{ kind: "force_at", forceId: "roman-field-army", provinceId: MESSANA }], spend: null, attribution: "tagged",
+        note: null, whyNot: null, factIds: [], closedAtStep: null, refusedAtStep: null, actsCarried: 0, actsRefused: 0,
+        stages: [{
+          held: { op: "force_modify", forceRef: "roman-field-army", locationId: MESSANA, fleetRefs: ["roman-navy"], reason: "Carry Legio I over." },
+          waitsOn: [{ kind: "procedure_passed", procedureId: voteId }], status: "waiting", reason: null, heldSinceStep: 0, failedAtStep: null, reviewAtStep: null,
+        }],
+      }],
+    }],
+  };
+  return waiting;
+}
+
 describe("a part that waited on a vote", () => {
   // R67: the Senate's leave came, and its record said "what it allows waits on
   // somebody's order" -- although the order had been given.
   it("is taken up again the day the vote passes, without a second order", async () => {
-    const government = { offices: definition.government.offices, successionRules: definition.government.successionRules };
-    const act = (state: WorldState, delta: Record<string, unknown>) => applyDeltas(state, [WorldDeltaSchema.parse(delta)], {
-      now: { day: 0, minute: 540 }, actorRef: { kind: "character", id: "hieron-ii" }, ...government,
-      warfare: definition.warfare, ids: createIdFactory(`vote-${delta.op as string}`), gameId: "game-vote",
-    });
-    const opened = act(world(), {
-      op: "political_procedure_open", localId: "d", type: "decree", institutionRef: null, sponsorCharacterRef: "hieron-ii",
-      subjectKind: "polity", subjectRef: "syracuse", label: "Leave for the crossing", resolutionMechanism: "appointment_authority", deadlineInDays: null,
-      reason: "Leave.",
-    });
-    const voteId = opened.assignedIds.get("d")!;
-    const passed = act(opened.world, { op: "political_procedure_resolve", procedureRef: voteId, outcome: "passed", outcomeReason: "Granted.", reason: "Granted." }).world;
-    const waiting: WorldState = {
-      ...passed,
-      orders: [{
-        id: "order-waiting", actorCharacterId: ACTOR, text: "Seek leave and carry the legion over.", givenAtStep: 0,
-        parts: [{
-          said: "Carry Legio I to Messana once the Senate gives leave", workRefs: [{ kind: "procedure", id: voteId }], refusal: null,
-          goals: [{ kind: "force_at", forceId: "roman-field-army", provinceId: MESSANA }], spend: null, attribution: "tagged",
-          note: null, whyNot: null, factIds: [], closedAtStep: null, refusedAtStep: null, actsCarried: 0, actsRefused: 0,
-          stages: [{
-            held: { op: "force_modify", forceRef: "roman-field-army", locationId: MESSANA, fleetRefs: ["roman-navy"], reason: "Carry Legio I over." },
-            waitsOn: [{ kind: "procedure_passed", procedureId: voteId }], status: "waiting", reason: null, heldSinceStep: 0, failedAtStep: null,
-          }],
-        }],
-      }],
-    };
+    const waiting = stageWaitingOnPassedVote();
     const result = await runSimulationBurst({ ...input(scripted({})), world: { ...waiting, instant: { day: 1, minute: 540 }, elapsedStep: 1 }, orderText: null, burstId: "resumed" });
     const part = result.world.orders[0]!.parts[0]!;
     expect(part.stages[0]!.status).toBe("resumed");
@@ -158,5 +163,65 @@ describe("a part that waited on a vote", () => {
     // Allowed and set going, not done: the legion is not in Messana yet.
     expect(orderPartStatus(result.world, part)).toBe("under_way");
     expect(result.newFacts.some((fact) => fact.kind === "order_resumed")).toBe(true);
+  });
+
+  // Plan chronicle-and-order-truth, phase 2: a held stage wakes on the tick,
+  // not on whatever the model budget allowed.
+  it("is taken up again although the burst had no model calls to spend", async () => {
+    const waiting = stageWaitingOnPassedVote();
+    const result = await runSimulationBurst({
+      ...input(scripted({})), world: { ...waiting, instant: { day: 1, minute: 540 }, elapsedStep: 1 }, orderText: null, burstId: "resumed-broke",
+      budget: { ...DEFAULT_BUDGET, maxModelCalls: 0, maxMechanicCalls: 0 },
+    });
+    expect(result.world.orders[0]!.parts[0]!.stages[0]!.status).toBe("resumed");
+  });
+});
+
+describe("a part carried out with nothing to check it against", () => {
+  // Plan chronicle-and-order-truth, phase 1.4: no "done" without evidence.
+  it("reads as ordered, effect not observed, never as done", () => {
+    const part = {
+      said: "Make the allies ready", workRefs: [], refusal: null, goals: [], spend: null, attribution: "tagged" as const,
+      note: null, whyNot: null, factIds: [], closedAtStep: null, refusedAtStep: null, actsCarried: 1, actsRefused: 0, stages: [],
+    };
+    const status = orderPartStatus(world(), part);
+    expect(status).toBe("carried_unverified");
+    expect(orderPartLabel(status, part)).toBe("ordered, effect not observed");
+  });
+});
+
+describe("a part held for something that does not come", () => {
+  // Plan chronicle-and-order-truth, 2.3: every wait has a day it is looked at.
+  const holding = (): WorldState => ({
+    ...world(),
+    orders: [{
+      id: "order-held", actorCharacterId: ACTOR, text: "Carry the legion over when the Senate gives leave.", givenAtStep: 0,
+      parts: [{
+        said: "Carry Legio I to Messana when the road is clear", workRefs: [], refusal: null,
+        goals: [{ kind: "force_at", forceId: "roman-field-army", provinceId: MESSANA }], spend: null, attribution: "tagged",
+        note: null, whyNot: null, factIds: [], closedAtStep: null, refusedAtStep: null, actsCarried: 0, actsRefused: 0,
+        stages: [{
+          held: { op: "force_modify", forceRef: "roman-field-army", locationId: MESSANA, reason: "Carry Legio I over." },
+          waitsOn: [{ kind: "force_named", name: "No Such Army Will Be Named This", polityId: "rome" }], status: "waiting", reason: null, heldSinceStep: 0, failedAtStep: null, reviewAtStep: 14,
+        }],
+      }],
+    }],
+  });
+  const at = (day: number): WorldState => ({ ...holding(), instant: { day, minute: 540 }, elapsedStep: day });
+
+  it("asks the player on its review day and puts the next one a fortnight on", async () => {
+    const result = await runSimulationBurst({ ...input(scripted({})), world: at(20), orderText: null, burstId: "review" });
+    const stage = result.world.orders[0]!.parts[0]!.stages[0]!;
+    expect(stage.status).toBe("waiting");
+    expect(stage.reviewAtStep).toBeGreaterThan(20);
+    expect(result.newFacts.some((fact) => fact.kind === "order_wait_review" && /your word/.test(fact.summary))).toBe(true);
+  });
+
+  it("lets it lapse, loudly, after a season", async () => {
+    const result = await runSimulationBurst({ ...input(scripted({})), world: at(95), orderText: null, burstId: "lapse" });
+    const part = result.world.orders[0]!.parts[0]!;
+    expect(part.stages[0]!.status).toBe("failed");
+    expect(part.stages[0]!.reason).toMatch(/did not come in/);
+    expect(part.refusal).not.toBeNull();
   });
 });
