@@ -73,6 +73,8 @@ import {
   OrderRecordSchema,
   OrderPartSchema,
   STAGE_REVIEW_DAYS,
+  goalEvidence,
+  type OrderAttempt,
   STAGE_LAPSE_DAYS,
   stageReviewDay,
 } from "@chronica/shared";
@@ -1109,6 +1111,30 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
    * its goals and the rest of its work -- and never from the order itself
    * having been taken up, which is what made "accepted" read as done.
    */
+  /**
+   * What a delegate sends back when his work is settled, in his own voice and
+   * from what the world shows (4.1). Addressed from the attempt's own issuer,
+   * never a name written by anybody: a report once named a player id that did
+   * not exist (R69).
+   */
+  const reportBack = (attempt: OrderAttempt, what: string, deed: string): void => {
+    const recipient = world.characters.find((character) => character.id === attempt.recipientRef.id);
+    if (recipient === undefined || attempt.issuerRef.kind !== "character") return;
+    const told = materializeFacts({
+      proposals: [{
+        localId: `delegate_report_${attempt.id}`,
+        kind: "delegate_report",
+        summary: `${recipient.name} sent word to ${world.characters.find((character) => character.id === attempt.issuerRef.id)?.name ?? "the one who ordered it"} of "${attempt.instruction.slice(0, 160)}": ${what}.`.slice(0, 600),
+        affectedRefs: [attempt.issuerRef, attempt.recipientRef],
+        visibility: "private" as const, discoveryState: "private" as const, knowableInDays: 0, knownToRefs: [attempt.issuerRef, attempt.recipientRef], significance: 30,
+        story: { subject: recipient.name, deed, motive: null, cost: null, source: "reported" as const },
+      }],
+      now: world.instant, forces: world.material.forces, atStep: world.elapsedStep, ids, causalDepth: 0, assignedIds: new Map(),
+    });
+    newFacts.push(...told.facts.map((fact) => ({ ...fact, sourceActionId: attempt.id })));
+    for (const [factId, weight] of told.significanceByFactId) significanceByFactId.set(factId, weight);
+  };
+
   const settleDelegations = (): void => {
     let changed = false;
     const attempts = world.orderAttempts.map((attempt) => {
@@ -1123,10 +1149,14 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       const statuses = readable.map((part) => orderPartStatus(world, part, { without: self }));
       if (statuses.every((status) => status === "achieved" || status === "partly_done")) {
         changed = true;
+        const shown = [...new Set(readable.flatMap((part) => part.goals.map((goal) => goalEvidence(world, goal))).filter((text): text is string => text !== null))].slice(0, 3);
+        reportBack(attempt, `it is done${shown.length === 0 ? "" : `: ${shown.join("; ")}`}`, "carried it out");
         return completeOrderAttempt(attempt, world.elapsedStep);
       }
       if (statuses.every((status) => status === "failed" || status === "refused" || status === "blocked")) {
         changed = true;
+        const why = readable.map((part) => part.refusal ?? part.whyNot).find((text): text is string => text != null);
+        reportBack(attempt, `it could not be done${why === undefined ? "" : `: ${why.replace(/\s+/g, " ").slice(0, 200)}`}`, "could not carry it out");
         return abandonOrderAttempt(attempt, world.elapsedStep);
       }
       return attempt;

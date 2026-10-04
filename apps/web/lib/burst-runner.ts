@@ -25,7 +25,7 @@ import {
   type ChronicaDatabase,
 } from "@chronica/db";
 import { FactSchema, abortsTheTurn, formatWorldDate, type Fact, type Office, type OrderPartyRef, type ScenarioClock, type WorldState } from "@chronica/shared";
-import { DEFAULT_BUDGET, allowanceFromEnv, closeTheBooks, createRequestLedger, meteredPort, createWindowWriter, orderOutcomeLines, runSimulationBurst, withOrderOutcomes, type AnsweredDecision, type BurstProgress, type BurstResult, type ChronicleEntry, type SimModelPort } from "@chronica/sim";
+import { DEFAULT_BUDGET, allowanceFromEnv, closeTheBooks, createRequestLedger, meteredPort, createWindowWriter, orderOutcomeLines, runSimulationBurst, whatChangedEntry, withOrderOutcomes, type AnsweredDecision, type BurstProgress, type BurstResult, type ChronicleEntry, type SimModelPort } from "@chronica/sim";
 import { eq } from "drizzle-orm";
 import { ABANDONED_ERROR, BURST_DEADLINE_MS, HEARTBEAT_MS, STALE_HOLD_MS, livenessAt } from "./burst-status";
 import { unopenableSave } from "./save-errors";
@@ -390,8 +390,11 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
         // stays on the order, and the next order takes it up.
         ...(result.stopReason === "budget_exhausted" ? ["The report stops here: not everybody concerned could be heard this time. What is still open stays in hand for your next order."] : []),
       ], result.orderFactIds, result.world.instant.day * 1440 + result.world.instant.minute);
+    // What the turn changed, read from the two worlds: whatever the prose chose to tell (4.5).
+    const changedEntry = whatChangedEntry({ before: view.world, after: result.world, polityId: actorPolityId, characterId: actorRef.kind === "character" ? actorRef.id : null }, result.world.instant.day * 1440 + result.world.instant.minute);
     const entries: ChronicleEntry[] = [
       ...answered,
+      ...(changedEntry === null ? [] : [changedEntry]),
       ...closeTheBooks({ world: result.world, clock, from, to: result.world.instant, polityId: actorPolityId }),
     ];
 

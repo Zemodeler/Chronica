@@ -249,3 +249,32 @@ describe("a part handed on and accepted, then left", () => {
     expect(orderPartLabel(status, part)).toBe("accepted, but nothing done for weeks");
   });
 });
+
+describe("a delegate whose work is settled", () => {
+  // Plan chronicle-and-order-truth, 4.1 and 4.2: he reports in his own voice, from what the world shows.
+  it("sends word to the one who ordered it, with what the world shows", async () => {
+    const legion = world().material.forces.find((force) => force.id === "roman-field-army")!;
+    const attempt = {
+      id: "order-del", actionId: "action-del", issuerRef: { kind: "character" as const, id: ACTOR }, recipientRef: { kind: "character" as const, id: "tiberius-coruncanius" },
+      claimedAuthorityGrantId: null, authorityCheck: { authorized: true, grant: null, standing: null, reason: "Consul." },
+      instruction: "Keep the legion at Rome", standing: "binding" as const, status: "accepted" as const, recipientDecisionReason: "Yes.",
+      issuedAtStep: 0, decidedAtStep: 0, consequenceFactRefs: [], servesRef: null,
+    };
+    const state: WorldState = {
+      ...world(), orderAttempts: [attempt],
+      orders: [{ id: "order-d", actorCharacterId: ACTOR, text: "Keep the legion at Rome.", givenAtStep: 0, parts: [{
+        said: "Keep the legion at Rome", workRefs: [{ kind: "order_attempt", id: "order-del" }], refusal: null,
+        goals: [{ kind: "force_at", forceId: legion.id, provinceId: legion.locationId }], spend: null, attribution: "tagged",
+        note: null, whyNot: null, factIds: [], closedAtStep: null, refusedAtStep: null, actsCarried: 0, actsRefused: 0, stages: [],
+      }] }],
+    };
+    const result = await runSimulationBurst({ ...input(scripted({})), world: state, orderText: null, burstId: "report" });
+    const report = result.newFacts.find((fact) => fact.kind === "delegate_report");
+    expect(report).toBeDefined();
+    expect(report!.summary).toContain("it is done");
+    expect(report!.summary).toContain(legion.name);
+    expect(report!.story?.source).toBe("reported");
+    // Addressed to people who exist: the issuer and the delegate.
+    expect(report!.affectedEntities.map((entity) => entity.id)).toEqual([ACTOR, "tiberius-coruncanius"]);
+  });
+});
