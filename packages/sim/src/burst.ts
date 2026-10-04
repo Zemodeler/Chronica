@@ -124,6 +124,7 @@ import { dueSteps, emptyPlanTally, layPlan, markWoken, nextPlanDay, settleOverdu
 import { claimPromisesKept } from "./promises";
 import { goalsOfAct, mergeGoals, refResolver, resolveGoal } from "./order-goals";
 import { verifyPart } from "./order-verifier";
+import type { RequestLedger } from "./request-ledger";
 import { findInvariantViolations } from "./invariants";
 import { debatersOf, electiveOfficesOf, voteCalendarDays } from "./senate";
 import { ensureConstitutions } from "./constitutions";
@@ -337,6 +338,12 @@ export interface BurstInput {
   /** Everything the queue still owes the world, due or not. */
   readonly queue: readonly PendingEvent[];
   readonly port: SimModelPort;
+  /**
+   * The turn's one request allowance (`createRequestLedger`), when the caller
+   * meters the port with it. The burst stops asking the world's people when
+   * its ambient share is spent and owes them their turns (S3).
+   */
+  readonly requests?: RequestLedger | undefined;
   readonly budget?: SimulationBudget;
   /**
    * What stirs this burst, decided in advance. Tests use it to put a known
@@ -443,6 +450,8 @@ export interface BurstResult {
   readonly modelCalls: number;
   /** Work allowance spent; extra initial parallel requests are reported in modelCalls but excluded here. */
   readonly modelWorkCalls?: number;
+  /** Requests the turn's ledger counted by operation, when the burst was given one (`createRequestLedger`). */
+  readonly requests?: Readonly<Record<string, number>>;
   /** Calls that wrote a mechanic (plan §2): counted apart, so they never end a burst early. */
   readonly mechanicCalls: number;
   readonly outcome: "continue" | "chronicle" | "player_decision";
@@ -957,6 +966,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   // Record every real request, but parallelizing the same decisions must not spend later rounds' allowance.
   let parallelExtraCalls = 0;
   const budgetCalls = () => modelCalls - parallelExtraCalls;
+  /** The turn's allowance has nothing left for the world's own business: the order's and the historian's share is theirs (S3). */
+  const allowanceSpent = (): boolean => input.requests !== undefined && input.requests.remaining("ambient") < 1;
   const callCap = callCapFor(budget, Math.max(1, Math.min(input.spanDays ?? budget.maxSimulatedDays, input.clock.maxSpanDays)));
   let iterations = 0;
   let significance = 0;
@@ -3690,7 +3701,16 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     const candidates = reserved ? fresh.filter((actor) => orderPeople.has(actor.characterId)) : fresh;
     // A large group consumes two units of decision work. With only one left,
     // keep a single group rather than exceeding the allowance to ask it.
-    const asking = callCap - budgetCalls() === 1 ? candidates.slice(0, 8) : candidates;
+    // And a batch is paid for before it is sent: each concurrent call is one request of the allowance.
+    const room = input.requests === undefined ? Infinity : input.requests.remaining("ambient");
+    if (room < 1 && candidates.length > 0) {
+      // Nothing left to ask them with: the turn says so, and they are owed their turns (S3).
+      skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: the turn's request allowance is spent; ${candidates.length} left unasked` });
+      oweTurns(candidates, (id) => dueWhy.get(id) ?? (orderPeople.has(id) ? "an order of the ruler's he holds" : undefined));
+      stopReason = "budget_exhausted";
+      break;
+    }
+    const asking = callCap - budgetCalls() === 1 ? candidates.slice(0, 8) : room < 3 ? candidates.slice(0, 8 * Math.max(0, room)) : candidates;
     if (asking.length < candidates.length) oweTurns(candidates.filter((actor) => !asking.includes(actor)), (id) => dueWhy.get(id));
     if (reserved && asking.length < fresh.length) {
       skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: the last calls are kept for the order; ${fresh.length - asking.length} others left unasked` });
@@ -3711,7 +3731,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       if (ambientOnly) ambientOnlyRounds += 1;
       // Somebody has something to say and there is nothing left to pay them
       // with. Stopping here is honest; carrying on would silence them.
-      const spent = budgetCalls() >= callCap || (!reactionsSpent && iterations - chainStartIterations >= budget.maxIterations);
+      const spent = budgetCalls() >= callCap || allowanceSpent() || (!reactionsSpent && iterations - chainStartIterations >= budget.maxIterations);
       // The order's own consequences stop the burst when they cannot be paid
       // for, and so does anything in a burst the player gave no span: he gets
       // the wheel back rather than a world that went quiet. A span he asked
@@ -3731,7 +3751,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // spent a month's budget in its first three days.
     const keptForLater = input.spanDays === undefined || asking.some((actor) => orderPeople.has(actor.characterId)) ? 0
       : Math.min(Math.floor(callCap / 2), LATER_CHAIN_CALLS * Math.floor(Math.max(0, startDay + maxDays - world.instant.day) / budget.newChainAfterDays));
-    const canPay = budgetCalls() < callCap - keptForLater && (reactionsSpent || iterations - chainStartIterations < budget.maxIterations);
+    const canPay = budgetCalls() < callCap - keptForLater && !allowanceSpent() && (reactionsSpent || iterations - chainStartIterations < budget.maxIterations);
     if (wantsAnswering && !canPay) {
       asked = false;
       skipped.push({ stage: "cognition", reason: budgetCalls() < callCap && budgetCalls() >= callCap - keptForLater
@@ -3924,6 +3944,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     iterations,
     modelCalls,
     modelWorkCalls: budgetCalls(),
+    ...(input.requests === undefined ? {} : { requests: input.requests.counts() }),
     mechanicCalls,
     outcome,
     stopReason,

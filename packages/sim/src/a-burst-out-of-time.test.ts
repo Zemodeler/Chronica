@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, type WorldState } from "@chronica/shared";
 import { DEFAULT_BUDGET, runSimulationBurst, type BurstInput } from "./burst";
+import { createRequestLedger, meteredPort } from "./request-ledger";
 import type { SimModelPort, SimOperation } from "./ports";
 
 /**
@@ -86,5 +87,21 @@ describe("a burst out of calls", () => {
     expect(result.stopReason).toBe("budget_exhausted");
     expect(result.skipped.some((skip) => skip.stage === "cognition" && /budget is spent/.test(skip.reason))).toBe(true);
     expect(result.skipped.some((skip) => skip.stage === "mechanic")).toBe(false);
+  });
+});
+
+describe("a burst given one allowance for every request", () => {
+  // Player-focused simulation plan, S3: the order and the historian keep theirs.
+  it("answers the order, stops asking the world when its share is gone, and says who it left unasked", async () => {
+    const asked: SimOperation[] = [];
+    const ledger = createRequestLedger({ total: 3, reserveForOrder: 1, reserveForChronicle: 2 });
+    const result = await runSimulationBurst(input(meteredPort(port(asked), ledger), { spanDays: undefined, requests: ledger }));
+    expect(asked).toEqual(["simulate_orchestrate"]);
+    expect(result.newFacts.some((fact) => fact.summary === "Rome begins raising a new legion.")).toBe(true);
+    expect(result.stopReason).toBe("budget_exhausted");
+    expect(result.requests).toEqual({ simulate_orchestrate: 1 });
+    expect(result.skipped.some((skip) => skip.stage === "cognition" && /request allowance is spent/.test(skip.reason))).toBe(true);
+    // The historian's share is untouched.
+    expect(ledger.canSpend("compose_chronicle", 2)).toBe(true);
   });
 });

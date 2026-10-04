@@ -30,3 +30,4 @@ export { diplomaticAnswererOf } from "./letters";
 export { keepTheRanks, recordTheFight, doctrineUpkeep } from "./ranks";
 export { armyInWords, serviceInWords } from "./army-words";
 export { carryOutMilitaryReform } from "./military-reform";
+export * from "./request-ledger";

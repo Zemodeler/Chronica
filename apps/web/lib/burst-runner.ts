@@ -25,7 +25,7 @@ import {
   type ChronicaDatabase,
 } from "@chronica/db";
 import { FactSchema, abortsTheTurn, formatWorldDate, type Fact, type Office, type OrderPartyRef, type ScenarioClock, type WorldState } from "@chronica/shared";
-import { DEFAULT_BUDGET, closeTheBooks, createWindowWriter, orderOutcomeLines, runSimulationBurst, withOrderOutcomes, type AnsweredDecision, type BurstProgress, type BurstResult, type ChronicleEntry, type SimModelPort } from "@chronica/sim";
+import { DEFAULT_BUDGET, allowanceFromEnv, closeTheBooks, createRequestLedger, meteredPort, createWindowWriter, orderOutcomeLines, runSimulationBurst, withOrderOutcomes, type AnsweredDecision, type BurstProgress, type BurstResult, type ChronicleEntry, type SimModelPort } from "@chronica/sim";
 import { eq } from "drizzle-orm";
 import { ABANDONED_ERROR, BURST_DEADLINE_MS, HEARTBEAT_MS, STALE_HOLD_MS, livenessAt } from "./burst-status";
 import { unopenableSave } from "./save-errors";
@@ -266,13 +266,16 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
     const adapter = createAiAdapter();
     const timed = createTimedPort({ db, userId, gameId, adapter });
     // Every answered call is progress, whichever stage asked for it.
-    const port: SimModelPort = {
+    const counted: SimModelPort = {
       complete: async (operation, system, user) => {
         const answer = await timed.port.complete(operation, system, user);
         progressed();
         return answer;
       },
     };
+    // One allowance for the whole turn: the order, the world's decisions, repairs, retries and the historian (S3).
+    const requests = createRequestLedger(allowanceFromEnv(process.env.CHRONICA_REQUEST_ALLOWANCE));
+    const port = meteredPort(counted, requests);
     const turnStartedAt = performance.now();
     const deadline = burstDeadlineMs(process.env, adapter.free === true);
     const deadlineAt = deadline === null ? null : Date.now() + deadline;
@@ -342,6 +345,7 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
         knownFacts: job.knownFacts,
         queue: job.queue,
         port,
+        requests,
         // Stop between hops once the burst has run too long, or once the row
         // says it has been given up; what was done so far is kept.
         shouldStop: () => reaped || (deadlineAt !== null && Date.now() > deadlineAt),
@@ -363,6 +367,8 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
     }
 
     say({ stage: "chronicling", line: "The historian finishes writing." });
+    // Every request, by operation, whichever path sent it (S3).
+    console.info(`[burst ${burstId}] requests ${requests.spent} of ${requests.allowance.total}: ${JSON.stringify(requests.counts())}`);
     // The last window closes as the burst returns; this waits for it to be
     // written, and for the closing passage if no window told anything. Whatever the historian does, the turn has happened: the
     // facts are kept either way, only the prose is lost.
