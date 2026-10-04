@@ -537,6 +537,12 @@ export interface ChronicleResult {
    * beside its own, so a matter that builds slowly is told once it has built.
    */
   readonly carried: readonly Fact[];
+  /**
+   * For the dev inspector (plan chronicle-and-order-truth, 6.1): per entry, the
+   * facts it was written from with the weight each carried, and whether the
+   * thread was news from afar. And how many facts were carried, not told.
+   */
+  readonly inspection?: { readonly entries: readonly { readonly title: string; readonly facts: readonly { readonly id: string; readonly kind: string; readonly weight: number }[]; readonly reported: boolean }[]; readonly carriedCount: number };
 }
 
 interface Thread {
@@ -1744,7 +1750,16 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   });
   await handing;
 
-  return { entries: results.flatMap((entry) => (entry === null || entry === undefined ? [] : [entry])), calls: threads.length + retries, carried };
+  const told = results.flatMap((entry) => (entry === null || entry === undefined ? [] : [entry]));
+  const inspection = {
+    entries: told.map((entry) => ({
+      title: entry.title,
+      facts: entry.factIds.flatMap((id) => { const found = visible.find((fact) => fact.id === id); return found === undefined ? [] : [{ id, kind: found.kind, weight: weightOf(found) }]; }),
+      reported: entry.factIds.length > 0 && entry.factIds.every((id) => reportedIds.has(id)),
+    })),
+    carriedCount: carried.length,
+  };
+  return { entries: told, calls: threads.length + retries, carried, inspection };
 }
 
 /**

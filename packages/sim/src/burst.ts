@@ -74,6 +74,7 @@ import {
   OrderPartSchema,
   STAGE_REVIEW_DAYS,
   goalEvidence,
+  stableHash,
   type OrderAttempt,
   STAGE_LAPSE_DAYS,
   stageReviewDay,
@@ -252,6 +253,9 @@ export const DEFAULT_BUDGET: SimulationBudget = {
 };
 
 /** The model calls a burst over this many days may spend (`baseModelCalls`), never past `maxModelCalls`. */
+/** Facts that end an "until something happens" burst: word the player has been waiting for or must act on. */
+const HAPPENED_TO_THE_PLAYER: ReadonlySet<string> = new Set(["delegate_report", "order_wait_review", "order_resumed", "insubordination"]);
+
 export function callCapFor(budget: SimulationBudget, spanDays: number): number {
   return Math.min(budget.maxModelCalls, budget.baseModelCalls + Math.ceil(Math.max(0, spanDays) / Math.max(1, budget.modelCallDays)));
 }
@@ -346,6 +350,13 @@ export interface BurstInput {
    * its ambient share is spent and owes them their turns (S3).
    */
   readonly requests?: RequestLedger | undefined;
+  /**
+   * Run until something happens to the player (plan chronicle-and-order-truth,
+   * 5.8): an open part of his orders changes state, or word of a delegate, a
+   * wait that needs his word, or a subordinate's breach reaches him. The span
+   * is still the bound; this only ends the burst sooner, as `salient_event`.
+   */
+  readonly untilSomethingHappens?: boolean | undefined;
   readonly budget?: SimulationBudget;
   /**
    * What stirs this burst, decided in advance. Tests use it to put a known
@@ -1869,6 +1880,30 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       return { ...fact, visibility: "private" as const, discoveryState: "private" as const, knownToRefs: [...fact.knownToRefs, ...participants] };
     });
 
+    // A secret thread in the player's own realm is learned of late and badly
+    // (5.4): not the secret, which stays private, but a rumour of trouble in
+    // that province some weeks on, through the same epistemic gate as any news.
+    const revealedThreads = new Set<string>();
+    const delayedReveals: FactProposalDraft[] = keptSecret.flatMap((fact) => {
+      if (fact.storylineRef === null || fact.visibility !== "private") return [];
+      const storyline = world.storylines.find((candidate) => candidate.id === resolveId(fact.storylineRef!));
+      if (storyline === undefined || storyline.visibility !== "private" || storyline.seedKey === null || storyline.provinceId === null || revealedThreads.has(storyline.id)) return [];
+      const province = world.map.provinces.find((candidate) => candidate.id === storyline.provinceId);
+      if (province === undefined || province.controllerPolityId === null || province.controllerPolityId !== input.actorPolityId) return [];
+      revealedThreads.add(storyline.id);
+      return [{
+        localId: `rumour_${storyline.id}`,
+        kind: "rumour_of_trouble",
+        summary: `Word came, weeks late and unconfirmed, of some trouble stirring in ${province.name}.`,
+        affectedRefs: [{ kind: "province" as const, id: province.id }],
+        visibility: "public" as const,
+        discoveryState: "rumoured" as const,
+        knowableInDays: 14 + stableHash([input.gameId, "reveal", storyline.id]) % 22,
+        significance: 40,
+        story: { subject: null, deed: "trouble stirring", motive: null, cost: null, source: "rumoured" as const },
+      }];
+    });
+
     // An act carried out without the authority to carry it out is history too
     // -- private history, known to the one who did it, which is what an audit
     // later discovers. Computed and dropped, a breach was insubordination
@@ -1913,12 +1948,37 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       };
     });
 
+    // A subordinate of the player's own side who went ahead without leave is a
+    // person doing something, told as that once somebody would come to know of
+    // it (5.2): the ledger line stays the engine's (`NEVER_PUBLISHED`), and
+    // this is what the court hears.
+    const insubordination: FactProposalDraft[] = actorRef.kind === "character" && actorRef.id !== input.actorRef.id && actorPolity !== null && actorPolity === input.actorPolityId
+      ? result.breaches.flatMap((breach, index) => {
+        if (keptSecret.some((fact) => fact.visibility === "private")) return [];
+        const noticers = findWhoWouldNotice(world, input.offices, breach, actorRef.id);
+        if (noticers.length === 0) return [];
+        const deed = breach.delta.op.replace(/_/g, " ");
+        return [{
+          localId: `insubordination_${newFacts.length}_${index}`,
+          kind: "insubordination",
+          summary: `${actorName} went ahead without leave (${deed}), and word of it reached those who answer for him.`,
+          affectedRefs: [actorRef],
+          visibility: "polity" as const,
+          discoveryState: "delayed" as const,
+          knowableInDays: noticers.reduce((days, noticer) => Math.min(days, noticer.afterDays), Number.POSITIVE_INFINITY),
+          knownToRefs: [actorRef, ...noticersAsRefs(noticers)],
+          significance: 45,
+          story: { subject: actorName, deed: `acted without the authority to ${deed}`, motive: null, cost: null, source: "reported" as const },
+        }];
+      })
+      : [];
+
     // What the engine itself made true (casualties, seizures) counts as history
     // exactly as much as what the actor said they were doing.
     // Except the far powers' small business, which is nobody's news (L16).
     const worthWriting = (fact: FactProposalDraft): boolean => pass.factFloor === undefined || fact.significance >= pass.factFloor;
     const materialized = materializeFacts({
-      proposals: [...keptSecret.filter(worthWriting), ...result.factProposals.filter(worthWriting), ...breachFacts],
+      proposals: [...keptSecret.filter(worthWriting), ...result.factProposals.filter(worthWriting), ...breachFacts, ...insubordination, ...delayedReveals],
       now: world.instant,
       forces: world.material.forces,
       atStep: world.elapsedStep,
@@ -3489,6 +3549,13 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   // new chain.
   let idleRounds = 0;
 
+  // What the player's open order parts read as when the burst began, and how many facts there were (5.8).
+  const orderStateOf = (state: WorldState): string => state.orders.filter((order) => order.actorCharacterId === (input.actorRef.kind === "character" ? input.actorRef.id : null))
+    .flatMap((order) => order.parts.filter((part) => part.closedAtStep === null).map((part) => `${order.id}:${part.said}:${orderPartStatus(state, part)}`)).sort().join("|");
+  const orderStateAtStart = orderStateOf(world);
+  const somethingHappenedToTheOrders = (): boolean => orderStateOf(world) !== orderStateAtStart;
+  const factsAtStart = newFacts.length;
+
   while (playerDecision === null) {
     const elapsedDays = world.instant.day - startDay;
     if (elapsedDays >= maxDays) {
@@ -3902,6 +3969,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     }
 
     const spanned = world.instant.day - startDay;
+    if (input.untilSomethingHappens === true && spanned >= 1 && (somethingHappenedToTheOrders() || newFacts.slice(factsAtStart).some((fact) => HAPPENED_TO_THE_PLAYER.has(fact.kind)))) {
+      stopReason = "salient_event";
+      break;
+    }
     if (sprungThisBurst) {
       stopReason = "watch_condition";
       break;

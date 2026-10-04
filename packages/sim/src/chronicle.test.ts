@@ -1367,3 +1367,17 @@ describe("a fact's story seeds", () => {
     expect(message).not.toContain("who:");
   });
 });
+
+describe("the dev inspector", () => {
+  // Plan chronicle-and-order-truth, 6.1.
+  it("says what each entry was made of, with the weight each fact carried", async () => {
+    const made = fact({ summary: "Rome begins raising two new legions." });
+    const result = await composeChronicle({
+      port: capturingPort(), clock, observer: { kind: "character", id: "marcus-atilius" }, observerPolityId: "rome", facts: [made],
+      from: { day: 0, minute: 0 }, to: { day: 30, minute: 0 }, narrative: [], frictions: [], significanceByFactId: new Map([[made.id, 77]]),
+    });
+    expect(result.inspection!.entries).toHaveLength(1);
+    expect(result.inspection!.entries[0]!.facts).toEqual([{ id: made.id, kind: made.kind, weight: 77 }]);
+    expect(result.inspection!.carriedCount).toBe(0);
+  });
+});

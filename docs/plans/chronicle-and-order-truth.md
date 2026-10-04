@@ -171,16 +171,22 @@ Done so far: phase 2 step 1 verified; `carried_unverified` status (phase 1.4, fi
 Done, tested, committed:
 
 - **Phase 0:** scorecard (`npm run scorecard`), fixtures, baseline doc. Live Clepsina/Rhegium rows still to add.
-- **Phase 1:** 1.1 verifier (flags, never refuses); 1.2 goal baselines (`already_so`); 1.3 effect checks for appointments and agreements, on top of the existing march, construction, payment, discharge and letter goals; 1.4 `carried_unverified`; 1.5 evidence in the outcome line; 1.7 wider claim check (taken, appointed, paid, signed; begun only against a part with nothing begun); 1.8 every part already gets an outcome line.
-- **Phase 2:** 2.1 verified (no stranding on a budget stop); 2.3 review days, "your word?" fact, 90-day lapse; 2.6 `stalled` delegation after three weeks; 2.7 Council label shows since/lapse days.
-- **S3:** one request allowance, counted at the port, reserves for the order and the closing account.
-- **Phase 3:** 3.2 clerk lint with one retry; 3.3 two original register exemplars (historian prompt ceiling 4.5k to 5.2k).
-- **Phase 5:** 5.1 one seed in three is aimed at the ground of the player's open orders.
+- **Phase 1:** 1.1 verifier (flags, never refuses); 1.2 goal baselines (`already_so`); 1.3 effect checks for appointments and agreements, on top of the existing march, construction, payment, discharge and letter goals; 1.4 `carried_unverified`; 1.5 evidence in the outcome line; 1.7 wider claim check; 1.8 every part already gets an outcome line.
+- **Phase 2:** 2.1 verified; 2.3 review days, "your word?" fact, 90-day lapse; 2.6 `stalled` delegation; 2.7 Council label shows since/lapse days.
+- **S3:** one request allowance counted at the port, reserves for the order and the closing account.
+- **S4:** `cognitionReviews` on the world (hashes, 14 days, versioned); a new burst does not review everybody again.
+- **Phase 3:** 3.1 `Fact.story` (subject, deed, motive, cost, source); 3.2 clerk lint with one retry; 3.3 two original register exemplars (historian ceiling 4.5k to 5.2k); 3.4 source notes (observed / reported / rumoured); 3.5 order answers and refusals name the person.
+- **Phase 4:** 4.1/4.2 delegates report in their own voice from observed state, addressed from the attempt's own refs; 4.5 computed "What changed" entry.
+- **Phase 5:** 5.1 seeds aimed at the ground of open orders; 5.2 insubordination told as a person acting; 5.4 delayed rumour of a secret thread in the player's realm; 5.6 "Still open" entry (D3); 5.8 `untilSomethingHappens` mode (stops as `salient_event`).
+- **Phase 6:** 6.1 dev inspector (`ChronicleResult.inspection`, logged with `CHRONICA_INSPECT=1`); 6.3 is S3.
 
 Decided not to build, with reasons:
 
-- **2.4 satisfiable holds:** an impossible condition already fails on the next tick, a ship wait fails at its limit, and every wait now lapses at 90 days, so none can strand. Auto-building the missing fleet is a gameplay change, left for a decision.
-- **1.6 fact/state parity, 1.7 numbers:** a check needs to know what a fact claims, and facts carry only free text until 3.1 structured fields exist. Do 3.1 first.
-- **2.5 re-plan on failure, 5.x pre-flight:** model calls; wait for scorecard evidence.
+- **2.4 satisfiable holds:** an impossible condition already fails on the next tick, a ship wait fails at its limit, and every wait lapses at 90 days, so none can strand. Auto-building the missing fleet is a gameplay change.
+- **1.6 fact/state parity:** facts now carry a story block, but nothing yet says which state a kind of fact claims; a per-kind table is the next step, not done.
+- **2.5 re-plan, pre-flight:** model calls; wait for scorecard evidence.
+- **4.3 private receipts, 4.4 stable agents:** the outcome line already shows spend and payer for plots; agent identity (R74) needs a look at the agent-creation path, not done.
+- **5.3 three-beat arcs, 5.5 outside shocks, 5.7 digest:** scenario pressures already carry condition guards (`pressureHolds`) and thin months already batch into digest threads; arcs not built.
+- **6.2 threshold retune:** needs live scorecard rows first.
 
-Still open: S4 persisted review state; 3.1, 3.4, 3.5 structured and sourced facts; Phase 4 (delegates' dispatches, receipts, stable agents, "what changed" panel, which is UI); 5.2 to 5.8 (insubordination, arcs, delayed reveals, outside shocks, open-threads footer, quiet-month digest, advance-until); Phase 6 inspector and threshold retune.
+Not exercised by a scenario test: 5.2 (the existing breach scenarios are covert, which must stay hidden).

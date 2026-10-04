@@ -80,11 +80,11 @@ const FIXTURES: readonly Fixture[] = [
 ];
 
 /** Run every fixture and score it. `entries` are chronicle passages to score for prose, when a run has them. */
-export async function runScorecard(entries: readonly ChronicleEntry[] = []): Promise<readonly Scorecard[]> {
+export async function runScorecard(entries: readonly ChronicleEntry[] = [], now: () => number = () => 0): Promise<readonly Scorecard[]> {
   const cards: Scorecard[] = [];
   for (const fixture of FIXTURES) {
     const asked: string[] = [];
-    const started = Date.now();
+    const started = now();
     const burst: BurstInput = {
       world: clepsinaWorld(), clock: definition.clock, offices: definition.government.offices, warfare: definition.warfare,
       burstId: `scorecard-${cards.length}`, gameId: "game-scorecard", actorRef: { kind: "character", id: ACTOR }, actorPolityId: "rome",
@@ -97,7 +97,7 @@ export async function runScorecard(entries: readonly ChronicleEntry[] = []): Pro
       prose: scoreProse(entries),
       requests: countRequests(asked),
       totalRequests: asked.length,
-      wallSeconds: (Date.now() - started) / 1000,
+      wallSeconds: (now() - started) / 1000,
       stopReason: result.stopReason,
     });
   }

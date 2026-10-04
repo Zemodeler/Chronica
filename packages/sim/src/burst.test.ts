@@ -604,7 +604,7 @@ const ORDER_AND_PLOT = JSON.stringify({
   frictions: [],
   deltas: [
     { op: "force_modify", forceRef: "legio-i", moraleBpsDelta: 200, reason: "The consul's inspection lifts spirits." },
-    { op: "storyline_open", localId: "plot", seedKey: "seed-plot", title: "The Quaestor's Silence", participantRefs: ["quintus-fabius"], provinceId: null, phase: "brewing", stakes: "Whether the Senate can be turned against the consul unnoticed.", nextDevelopment: "Fabius sounds out the patrician bloc.", visibility: "private", reason: "The world stirs." },
+    { op: "storyline_open", localId: "plot", seedKey: "seed-plot", title: "The Quaestor's Silence", participantRefs: ["quintus-fabius"], provinceId: world().map.provinces.find((province) => province.settlements.some((city) => city.id === "settlement-rome"))!.id, phase: "brewing", stakes: "Whether the Senate can be turned against the consul unnoticed.", nextDevelopment: "Fabius sounds out the patrician bloc.", visibility: "private", reason: "The world stirs." },
     { op: "character_pressure_set", characterRef: "quintus-fabius", action: "create", kind: "political_danger", intensity: 80, label: "Afraid the consul suspects him.", reviewInDays: 30, expiresInDays: null, visibility: "private", reason: "A plotter's fear." },
     { op: "character_intent_set", actorCharacterRef: "quintus-fabius", actionType: "seek_support", targetRefs: [], rationale: "Gather senators against the consul.", priority: 70, visibility: "private" },
   ],
@@ -692,6 +692,19 @@ describe("the world stirs: a secret plot", () => {
     expect(strike!.discovery.discoveredBy.map((entry) => entry.observerRef.id)).toEqual(["quintus-fabius"]);
   });
 
+  it("lets the court hear a rumour of it weeks late, never the secret itself (5.4)", async () => {
+    const { result } = await run();
+    const thread = result.world.storylines.find((storyline) => storyline.seedKey === "seed-plot")!;
+    const province = result.world.map.provinces.find((candidate) => candidate.id === thread.provinceId);
+    const rumour = result.newFacts.find((fact) => fact.kind === "rumour_of_trouble");
+    expect(province?.controllerPolityId).toBe("rome");
+    expect(rumour).toBeDefined();
+    expect(rumour!.discovery.state).toBe("rumoured");
+    expect(rumour!.discovery.knowableAtInstant!.day).toBeGreaterThan(result.world.instant.day - 90 + 13);
+    expect(rumour!.summary).not.toContain("conspir");
+    expect(rumour!.story?.source).toBe("rumoured");
+  });
+
   it("lets nothing of it reach the ruler's record", async () => {
     const { result } = await run();
     const known = factsKnownTo(result.newFacts, player, "rome", result.world.instant).map((fact) => fact.kind);
@@ -704,7 +717,7 @@ describe("the world stirs: a secret plot", () => {
     // it describes the visible order too -- which is what the secrecy principle (7) is for.
     const historian = capturingScriptedPort({ compose_chronicle: [JSON.stringify({ entries: [] })] });
     const record = await composeChronicle({
-      port: historian, clock, observer: player, observerPolityId: "rome", facts: result.newFacts, from: { day: 0, minute: 0 }, to: result.world.instant,
+      port: historian, clock, observer: player, observerPolityId: "rome", facts: result.newFacts.filter((fact) => fact.kind !== "rumour_of_trouble"), from: { day: 0, minute: 0 }, to: result.world.instant,
       narrative: result.narrative, frictions: result.frictions, significanceByFactId: result.significanceByFactId, storylines: result.world.storylines,
     });
     // Whatever reaches the record: what the historian was shown, and what the

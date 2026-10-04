@@ -54,6 +54,8 @@ export interface WindowWriterInput {
   readonly untold?: { readonly facts: readonly Fact[]; readonly significanceByFactId: ReadonlyMap<string, number> } | undefined;
   /** Called with each passage as it is written, in the order of the record. Awaited, so passages are handed out in order. */
   readonly onEntry?: ((entry: ChronicleEntry, window: number) => Promise<void>) | undefined;
+  /** Dev inspector (6.1): what each window's entries were made of, as `composeChronicle` reports it. */
+  readonly onInspection?: ((inspection: NonNullable<Awaited<ReturnType<typeof composeChronicle>>["inspection"]>, window: number) => void) | undefined;
 }
 
 export interface WindowWriter {
@@ -201,6 +203,7 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
         },
       });
       calls += out.calls;
+      if (out.inspection !== undefined) input.onInspection?.(out.inspection, window.index);
       return out.entries;
     } catch (error) {
       // The record is not the world. A window that could not be written is

@@ -12,7 +12,7 @@ import { SCORECARD_HEADER, scorecardRow } from "../packages/sim/src/scorecard";
 
 const at = process.argv.indexOf("--entries");
 const entries = at < 0 ? [] : JSON.parse(readFileSync(process.argv[at + 1]!, "utf8"));
-const cards = await runScorecard(entries);
+const cards = await runScorecard(entries, () => performance.now());
 console.log(SCORECARD_HEADER);
 for (const card of cards) console.log(scorecardRow(card));
 console.log("\nrequests by operation:");

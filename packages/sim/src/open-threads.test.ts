@@ -1,0 +1,33 @@
+import { describe, expect, it } from "vitest";
+import { punicWarsScenario } from "@chronica/db";
+import { WorldStateSchema, type WorldState } from "@chronica/shared";
+import { openThreadLines, openThreadsEntry } from "./open-threads";
+
+const opening = (): WorldState => WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
+const storyline = (id: string, change: Record<string, unknown>) => ({
+  id, title: `Thread ${id}`, participantIds: [], provinceId: null, phase: "rising", stakes: "Something.", history: ["It began."],
+  nextDevelopment: "The envoys are expected.", visibility: "public", origin: "world", openedByRef: null, openedAtStep: 0, updatedAtStep: 0, closedAtStep: null, causalFactIds: [], seedKey: null,
+  ...change,
+}) as unknown as WorldState["storylines"][number];
+
+describe("what is still open", () => {
+  it("lists the threads the player's side can see, never a private one, a closed one or a stale one", () => {
+    const world: WorldState = { ...opening(), elapsedStep: 100, storylines: [
+      storyline("a", { updatedAtStep: 95 }), storyline("b", { visibility: "private", updatedAtStep: 99 }),
+      storyline("c", { phase: "closed", updatedAtStep: 99 }), storyline("d", { updatedAtStep: 1 }),
+    ] };
+    expect(openThreadLines(world, null)).toEqual(["Thread a: The envoys are expected."]);
+  });
+
+  it("is no entry at all when nothing is open", () => {
+    expect(openThreadsEntry({ ...opening(), storylines: [] }, null, 0)).toBeNull();
+  });
+
+  it("is a recorded entry otherwise", () => {
+    const world: WorldState = { ...opening(), elapsedStep: 10, storylines: [storyline("a", { updatedAtStep: 9 })] };
+    const entry = openThreadsEntry(world, null, 5)!;
+    expect(entry.kind).toBe("recorded");
+    expect(entry.title).toBe("Still open");
+    expect(entry.body).toContain("Thread a");
+  });
+});

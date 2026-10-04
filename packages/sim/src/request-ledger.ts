@@ -92,7 +92,7 @@ export function meteredPort(port: SimModelPort, ledger: RequestLedger): SimModel
       try {
         ledger.spend(operation);
       } catch (error) {
-        return Promise.reject(error);
+        return Promise.reject(error instanceof Error ? error : new Error(String(error)));
       }
       return port.complete(operation, systemPrompt, userMessage);
     },

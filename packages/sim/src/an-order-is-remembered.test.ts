@@ -278,3 +278,22 @@ describe("a delegate whose work is settled", () => {
     expect(report!.affectedEntities.map((entity) => entity.id)).toEqual([ACTOR, "tiberius-coruncanius"]);
   });
 });
+
+describe("advancing until something happens", () => {
+  // Plan chronicle-and-order-truth, 5.8.
+  // Held for something that does not come: the first thing to happen is its review day.
+  const waiting = (): WorldState => {
+    const held = stageWaitingOnPassedVote();
+    const order = held.orders[0]!;
+    const part = order.parts[0]!;
+    const stage = { ...part.stages[0]!, waitsOn: [{ kind: "force_named" as const, name: "Nobody Will Be Named This", polityId: "rome" }], reviewAtStep: 14 };
+    return { ...held, instant: { day: 20, minute: 540 }, elapsedStep: 20, orders: [{ ...order, parts: [{ ...part, stages: [stage] }] }] };
+  };
+
+  it("stops when a wait needs his word, where an ordinary burst runs its span", async () => {
+    const quick = await runSimulationBurst({ ...input(scripted({})), world: waiting(), orderText: null, burstId: "until", spanDays: 30, untilSomethingHappens: true });
+    expect(quick.stopReason).toBe("salient_event");
+    const plain = await runSimulationBurst({ ...input(scripted({})), world: waiting(), orderText: null, burstId: "plain", spanDays: 30 });
+    expect(plain.stopReason).not.toBe("salient_event");
+  });
+});

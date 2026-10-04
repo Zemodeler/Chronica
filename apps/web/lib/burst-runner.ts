@@ -25,7 +25,7 @@ import {
   type ChronicaDatabase,
 } from "@chronica/db";
 import { FactSchema, abortsTheTurn, formatWorldDate, type Fact, type Office, type OrderPartyRef, type ScenarioClock, type WorldState } from "@chronica/shared";
-import { DEFAULT_BUDGET, allowanceFromEnv, closeTheBooks, createRequestLedger, meteredPort, createWindowWriter, orderOutcomeLines, runSimulationBurst, whatChangedEntry, withOrderOutcomes, type AnsweredDecision, type BurstProgress, type BurstResult, type ChronicleEntry, type SimModelPort } from "@chronica/sim";
+import { DEFAULT_BUDGET, allowanceFromEnv, closeTheBooks, createRequestLedger, meteredPort, createWindowWriter, openThreadsEntry, orderOutcomeLines, runSimulationBurst, whatChangedEntry, withOrderOutcomes, type AnsweredDecision, type BurstProgress, type BurstResult, type ChronicleEntry, type SimModelPort } from "@chronica/sim";
 import { eq } from "drizzle-orm";
 import { ABANDONED_ERROR, BURST_DEADLINE_MS, HEARTBEAT_MS, STALE_HOLD_MS, livenessAt } from "./burst-status";
 import { unopenableSave } from "./save-errors";
@@ -295,6 +295,8 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
       recentSubjects: job.recentSubjects,
       recentTitles: job.recentTitles,
       untold: job.untold,
+      // Dev inspector (6.1): what each window's entries were made of, with CHRONICA_INSPECT=1.
+      ...(process.env.CHRONICA_INSPECT === "1" ? { onInspection: (inspection: unknown, window: number) => { console.info(`[burst ${burstId}] window ${window} inspection: ${JSON.stringify(inspection)}`); } } : {}),
       onEntry: async (entry, window) => {
         ordinal += 1;
         await appendBurstProgress(db, {
@@ -392,9 +394,12 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
       ], result.orderFactIds, result.world.instant.day * 1440 + result.world.instant.minute);
     // What the turn changed, read from the two worlds: whatever the prose chose to tell (4.5).
     const changedEntry = whatChangedEntry({ before: view.world, after: result.world, polityId: actorPolityId, characterId: actorRef.kind === "character" ? actorRef.id : null }, result.world.instant.day * 1440 + result.world.instant.minute);
+    const openEntry = openThreadsEntry(result.world, actorRef.kind === "character" ? actorRef.id : null, result.world.instant.day * 1440 + result.world.instant.minute);
     const entries: ChronicleEntry[] = [
       ...answered,
       ...(changedEntry === null ? [] : [changedEntry]),
+      // What the player can still look for, outside the prose (D3).
+      ...(openEntry === null ? [] : [openEntry]),
       ...closeTheBooks({ world: result.world, clock, from, to: result.world.instant, polityId: actorPolityId }),
     ];
 
