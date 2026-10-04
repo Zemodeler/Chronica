@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { firstPunicWarScenario, punicWarsScenario } from "@chronica/db";
+import { firstPunicWarScenario, punicWarsScenario, PUNIC_IDS } from "@chronica/db";
+
+const MESSANA = PUNIC_IDS.messana;
 import { WorldStateSchema, ensureProvinceMaterial, type WorldState } from "@chronica/shared";
 import { decideNarratorSeed, decideNarratorSeeds, livePressures, readTension, recordSeedOffered, recordSeedOutcome, recordSeedsOffered, seedWasTaken, type NarratorInput } from "./narrator";
 
@@ -378,5 +380,45 @@ describe("the player's own troubles", () => {
     expect(hard.summary).toMatch(/3 men hate him/);
     // Rome is exactly as comfortable as it was.
     expect(readTension(hated, "rome").comfort).toBeCloseTo(readTension(world, "rome").comfort);
+  });
+});
+
+describe("trouble that finds the player where he is looking", () => {
+  // Plan chronicle-and-order-truth, 5.1: complications aimed at open order parts.
+  const withOpenOrder = (world: WorldState): WorldState => {
+    const legion = world.material.forces.find((force) => force.id === "roman-field-army")!;
+    return {
+      ...world,
+      orders: [{
+        id: "order-aim", actorCharacterId: "marcus-atilius", text: "Carry Legio I to Messana.", givenAtStep: 0,
+        parts: [{
+          said: "Carry Legio I to Messana", workRefs: [], refusal: null, goals: [{ kind: "force_at", forceId: legion.id, provinceId: MESSANA }], spend: null,
+          attribution: "tagged", note: null, whyNot: null, factIds: [], closedAtStep: null, refusedAtStep: null, actsCarried: 0, actsRefused: 0,
+          // Held for something still to come: an open part, which an act written and nothing more is not.
+          stages: [{ held: { op: "force_modify" }, waitsOn: [{ kind: "force_named", name: "Nobody", polityId: "rome" }], status: "waiting", reason: null, heldSinceStep: 0, failedAtStep: null, reviewAtStep: 14 }],
+        }],
+      }],
+    };
+  };
+
+  it("names the ground of his open orders", async () => {
+    const { groundOfOpenOrders } = await import("./narrator");
+    const world = large();
+    expect(groundOfOpenOrders(world, "marcus-atilius").size).toBe(0);
+    const ground = groundOfOpenOrders(withOpenOrder(world), "marcus-atilius");
+    expect(ground.has(MESSANA)).toBe(true);
+    expect(groundOfOpenOrders(withOpenOrder(world), null).size).toBe(0);
+  });
+
+  it("lands some of a season's seeds there, which a world without the order never does", () => {
+    const landedOn = (world: WorldState): number => {
+      let hits = 0;
+      for (let ordinal = 0; ordinal < 40; ordinal += 1) {
+        const stirred = { ...later(world, 200), narrator: { ...world.narrator, seedCount: ordinal } };
+        for (const seed of decideNarratorSeeds(input(stirred, { spanDays: 90 }))) if (seed.target.provinceId === MESSANA) hits += 1;
+      }
+      return hits;
+    };
+    expect(landedOn(withOpenOrder(large()))).toBeGreaterThan(landedOn(large()));
   });
 });

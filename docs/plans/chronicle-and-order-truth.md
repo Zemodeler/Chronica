@@ -165,3 +165,22 @@ The other plan (player-focused simulation, fewer AI calls) is mostly implemented
 8. Phase 6 (inspector, thresholds) and S5's optional interest marking, which suits the "open threads" footer.
 
 Done so far: phase 2 step 1 verified; `carried_unverified` status (phase 1.4, first part); S1 implemented per its own notes, live measurement still missing.
+
+## Progress (4 October 2026, branch `chronicle-order-truth`)
+
+Done, tested, committed:
+
+- **Phase 0:** scorecard (`npm run scorecard`), fixtures, baseline doc. Live Clepsina/Rhegium rows still to add.
+- **Phase 1:** 1.1 verifier (flags, never refuses); 1.2 goal baselines (`already_so`); 1.3 effect checks for appointments and agreements, on top of the existing march, construction, payment, discharge and letter goals; 1.4 `carried_unverified`; 1.5 evidence in the outcome line; 1.7 wider claim check (taken, appointed, paid, signed; begun only against a part with nothing begun); 1.8 every part already gets an outcome line.
+- **Phase 2:** 2.1 verified (no stranding on a budget stop); 2.3 review days, "your word?" fact, 90-day lapse; 2.6 `stalled` delegation after three weeks; 2.7 Council label shows since/lapse days.
+- **S3:** one request allowance, counted at the port, reserves for the order and the closing account.
+- **Phase 3:** 3.2 clerk lint with one retry; 3.3 two original register exemplars (historian prompt ceiling 4.5k to 5.2k).
+- **Phase 5:** 5.1 one seed in three is aimed at the ground of the player's open orders.
+
+Decided not to build, with reasons:
+
+- **2.4 satisfiable holds:** an impossible condition already fails on the next tick, a ship wait fails at its limit, and every wait now lapses at 90 days, so none can strand. Auto-building the missing fleet is a gameplay change, left for a decision.
+- **1.6 fact/state parity, 1.7 numbers:** a check needs to know what a fact claims, and facts carry only free text until 3.1 structured fields exist. Do 3.1 first.
+- **2.5 re-plan on failure, 5.x pre-flight:** model calls; wait for scorecard evidence.
+
+Still open: S4 persisted review state; 3.1, 3.4, 3.5 structured and sourced facts; Phase 4 (delegates' dispatches, receipts, stable agents, "what changed" panel, which is UI); 5.2 to 5.8 (insubordination, arcs, delayed reveals, outside shocks, open-threads footer, quiet-month digest, advance-until); Phase 6 inspector and threshold retune.

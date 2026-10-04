@@ -1,4 +1,4 @@
-import { difficultyRules, readService, type ServiceReading } from "@chronica/shared";
+import { difficultyRules, isOrderPartOpen, readService, type ServiceReading } from "@chronica/shared";
 import {
   LOOSE_COHESION_BPS,
   adjacentTo,
@@ -473,10 +473,38 @@ function recentlyNamed(facts: readonly Fact[], today: number): Set<string> {
   return named;
 }
 
+/**
+ * The ground the player's open orders are about: where the army he sent is
+ * and is going, the province he means to take, where the man he sent is bound.
+ * Trouble that finds him there is trouble he is watching for (plan
+ * chronicle-and-order-truth, 5.1); the model is still never told why.
+ */
+export function groundOfOpenOrders(world: WorldState, playerCharacterId: string | null): Set<string> {
+  const ground = new Set<string>();
+  if (playerCharacterId === null) return ground;
+  for (const order of world.orders) {
+    if (order.actorCharacterId !== playerCharacterId) continue;
+    for (const part of order.parts) {
+      if (!isOrderPartOpen(world, part)) continue;
+      for (const goal of part.goals) {
+        if (goal.kind === "force_at") {
+          ground.add(goal.provinceId);
+          const force = world.material.forces.find((candidate) => candidate.id === goal.forceId);
+          if (force !== undefined) ground.add(force.locationId);
+        } else if (goal.kind === "control" || goal.kind === "character_at") ground.add(goal.provinceId);
+      }
+    }
+  }
+  return ground;
+}
+
 function chooseProvince(input: NarratorInput, tension: TensionReading, seedCount: number, requireController: boolean, requireCoast = false): WorldState["map"]["provinces"][number] | null {
   const { world } = input;
   const coastal = requireCoast ? coastalProvinceIds(world) : null;
   const home = landsAtHome(tension.comfort, input.gameId, seedCount);
+  // One seed in three is aimed at what the player is attempting (5.1).
+  const focus = groundOfOpenOrders(world, input.playerCharacterId);
+  const aimed = focus.size > 0 && stableChoice([input.gameId, "narrator", "aim", seedCount], 3) === 0;
   const busy = recentlyNamed(input.facts, world.instant.day);
   const garrisoned = new Set(world.material.forces.map((force) => force.locationId));
   const atWar = new Set(world.conflicts.wars.flatMap((war) => [war.polityAId, war.polityBId]));
@@ -494,10 +522,11 @@ function chooseProvince(input: NarratorInput, tension: TensionReading, seedCount
   if (possible.length === 0) return null;
   const candidates = possible
     .filter((province) => (!requireController || province.controllerPolityId !== null) && !(province.controllerPolityId !== null && filling.has(province.controllerPolityId)))
-    .filter((province) => (province.controllerPolityId === input.ownPolityId) === home);
+    .filter((province) => (aimed && focus.has(province.id)) || (province.controllerPolityId === input.ownPolityId) === home);
   const scored = (candidates.length === 0 ? possible : candidates)
     .map((province) => {
       let score = 0;
+      if (aimed && focus.has(province.id)) score += 6;
       if (!busy.has(province.id) && (province.controllerPolityId === null || !busy.has(province.controllerPolityId))) score += 3;
       if (!garrisoned.has(province.id)) score += 1;
       if (province.controllerPolityId !== null && atWar.has(province.controllerPolityId)) score -= 3;
