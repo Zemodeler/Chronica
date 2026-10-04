@@ -190,6 +190,12 @@ Decided not to build, with reasons:
 - **5.5 outside shocks, 5.7 digest:** scenario pressures already carry condition guards (`pressureHolds`) and thin months already batch into digest threads.
 - **6.2 threshold retune:** needs live scorecard rows first.
 
-Still open: 6.2 threshold retune (needs live scorecard rows) and 2.5 re-plan.
+Added at the end: held acts that fail are told with what to do (`order_stage_failed`; for a ship wait, hire or build the fleet and order again), which is the deterministic part of 2.4 and 2.5; the model re-plan itself stays a player decision. 5.2 now has a scenario test.
+
+Cannot be done without a live game and model, so left as procedure:
+
+1. Play Clepsina and Rhegium; `npm run export:entries -- <gameId> > run.json`; `npm run scorecard -- --entries run.json`; append the rows to the baseline doc.
+2. 6.2: with those rows, adjust `DEFAULT_ENTRY_THRESHOLD` (45 / 25 / 40) and the 3-per-window cap so entries per window and quote share land near the Pax Historia sample, then rerun the scorecard to confirm no hidden successes or erased failures appear.
+3. Measure one real turn's `requests` log line and set `DEFAULT_ALLOWANCE` from it.
 
 Not exercised by a scenario test: 5.2 (the existing breach scenarios are covert, which must stay hidden).

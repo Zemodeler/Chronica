@@ -255,7 +255,7 @@ export const DEFAULT_BUDGET: SimulationBudget = {
 
 /** The model calls a burst over this many days may spend (`baseModelCalls`), never past `maxModelCalls`. */
 /** Facts that end an "until something happens" burst: word the player has been waiting for or must act on. */
-const HAPPENED_TO_THE_PLAYER: ReadonlySet<string> = new Set(["delegate_report", "order_wait_review", "order_resumed", "insubordination"]);
+const HAPPENED_TO_THE_PLAYER: ReadonlySet<string> = new Set(["delegate_report", "order_wait_review", "order_resumed", "order_stage_failed", "insubordination"]);
 
 export function callCapFor(budget: SimulationBudget, spanDays: number): number {
   return Math.min(budget.maxModelCalls, budget.baseModelCalls + Math.ceil(Math.max(0, spanDays) / Math.max(1, budget.modelCallDays)));
@@ -1397,6 +1397,24 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
               for (const [factId, weight] of told.significanceByFactId) significanceByFactId.set(factId, weight);
               settled = { ...stage, reviewAtStep: world.elapsedStep + STAGE_REVIEW_DAYS };
             }
+          }
+          // A held act that fails is told, with what he can do about it, not
+          // left as a line in the Council (2.4, 2.5). The re-plan is his word.
+          if (settled !== null && settled.status === "failed" && stage.status === "waiting") {
+            const actorRef = { kind: "character" as const, id: order.actorCharacterId };
+            const needsShips = stage.waitsOn.some((condition) => condition.kind === "transport_capacity");
+            const told = materializeFacts({
+              proposals: [{
+                localId: `order_stage_failed_${partIndex}_${stageIndex}`,
+                kind: "order_stage_failed",
+                summary: `"${part.said}" could not go ahead: ${(settled.reason ?? "what it waited on did not come").replace(/^It could not go ahead: /, "")} ${needsShips ? "Hire or build the ships, then order the crossing again." : "Give the order again, changed, if you still want it."}`.slice(0, 600),
+                affectedRefs: [actorRef], visibility: "private" as const, discoveryState: "private" as const, knowableInDays: 0, knownToRefs: [actorRef], significance: 45,
+                story: { subject: null, deed: "a held order failed", motive: null, cost: null, source: "observed" as const },
+              }],
+              now: world.instant, forces: world.material.forces, atStep: world.elapsedStep, ids, causalDepth: 0, assignedIds: new Map(),
+            });
+            newFacts.push(...told.facts.map((fact) => ({ ...fact, sourceActionId: ref })));
+            for (const [factId, weight] of told.significanceByFactId) significanceByFactId.set(factId, weight);
           }
           if (settled !== null) {
             const done = settled;

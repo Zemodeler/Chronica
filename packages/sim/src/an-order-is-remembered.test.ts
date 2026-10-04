@@ -223,6 +223,7 @@ describe("a part held for something that does not come", () => {
     expect(part.stages[0]!.status).toBe("failed");
     expect(part.stages[0]!.reason).toMatch(/did not come in/);
     expect(part.refusal).not.toBeNull();
+    expect(result.newFacts.some((fact) => fact.kind === "order_stage_failed" && /again/.test(fact.summary))).toBe(true);
   });
 });
 

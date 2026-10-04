@@ -28,7 +28,8 @@
     "eval:orders": "tsx scripts/eval-orders/run.mts",
     "audit:deltas": "tsx scripts/delta-audit.mts",
     "dev:hand": "node scripts/dev-hand.mjs",
-    "scorecard": "tsx scripts/scorecard.mts"
+    "scorecard": "tsx scripts/scorecard.mts",
+    "export:entries": "tsx --env-file=.env.local scripts/export-entries.mts"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

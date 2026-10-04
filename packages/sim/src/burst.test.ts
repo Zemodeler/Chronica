@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario, FIRST_PUNIC_IDS } from "@chronica/db";
 import { FactSchema, ScenarioDefinitionSchema, WorldStateSchema, answerDueOf, factsKnownTo, factsVisibleTo, type Office, type ScenarioClock, type WorldState } from "@chronica/shared";
 import { DEFAULT_BUDGET, runSimulationBurst, type BurstInput, type WindowSnapshot } from "./burst";
-import { composeChronicle } from "./chronicle";
+import { NEVER_PUBLISHED, composeChronicle } from "./chronicle";
 import type { SimModelPort, SimOperation } from "./ports";
 
 const definition = ScenarioDefinitionSchema.parse(firstPunicWarScenario.definition);
@@ -632,6 +632,36 @@ const FABIUS_ACTS = JSON.stringify({
       delegations: [], schedule: [],
     },
   }],
+});
+
+/** The same overreach, done in the open: nothing secret in it, so those who answer for him can learn of it. */
+const FABIUS_OPENLY = JSON.stringify({
+  actors: [{
+    actorRef: FABIUS,
+    reasoning: "The officers need a firm hand.",
+    proposal: {
+      narrativeSummary: "Fabius takes the legion's officers in hand.",
+      frictions: [],
+      deltas: [{ op: "force_modify", forceRef: "legio-i", moraleBpsDelta: -300, reason: "A harsh review." }],
+      facts: [{ localId: "review", kind: "camp_review", summary: "Fabius held a harsh review of the legion's officers.", affectedRefs: [FABIUS], visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 35, knownToRefs: [FABIUS] }],
+      delegations: [], schedule: [],
+    },
+  }],
+});
+
+describe("a subordinate who goes ahead without leave (5.2)", () => {
+  it("is told as a person acting once somebody would come to know of it, never as the ledger line", async () => {
+    const port = capturingScriptedPort({ simulate_orchestrate: [ORDER_AND_PLOT], simulate_cognition: [FABIUS_OPENLY, JSON.stringify({ actors: [] }), JSON.stringify({ actors: [] }), JSON.stringify({ actors: [] })] });
+    const result = await runSimulationBurst(input(port, { orderText: "Inspect the legion.", narratorSeed: PLOT_SEED }));
+    const breaches = result.newFacts.filter((fact) => fact.kind === "authority_breach");
+    const told = result.newFacts.filter((fact) => fact.kind === "insubordination");
+    // Whenever there was a breach somebody would find out, it is told as a deed.
+    expect(breaches.some((fact) => fact.discovery.state === "delayed")).toBe(true);
+    expect(told.length).toBeGreaterThan(0);
+    expect(told[0]!.story?.source).toBe("reported");
+    expect(told[0]!.summary).not.toMatch(/grant|domain/);
+    expect(NEVER_PUBLISHED.has(told[0]!.kind)).toBe(false);
+  });
 });
 
 describe("the world stirs: a secret plot", () => {
