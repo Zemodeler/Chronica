@@ -41,7 +41,7 @@ export interface OrderScore {
 }
 
 const TOLD_DONE: ReadonlySet<OrderPartStatus> = new Set(["achieved"]);
-const TOLD_NOT_DONE: ReadonlySet<OrderPartStatus> = new Set(["unanswered", "refused", "failed", "blocked", "pending", "acknowledged"]);
+const TOLD_NOT_DONE: ReadonlySet<OrderPartStatus> = new Set(["unanswered", "refused", "failed", "blocked", "pending", "acknowledged", "stalled"]);
 
 function scorePart(world: WorldState, part: OrderPart, actorId: string): PartScore {
   const status = orderPartStatus(world, part);

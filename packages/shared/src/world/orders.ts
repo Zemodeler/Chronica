@@ -79,6 +79,8 @@ export type OrderStage = z.infer<typeof OrderStageSchema>;
 
 /** How long a held act waits before the player is asked again, and how long before it lapses for good. */
 export const STAGE_REVIEW_DAYS = 14;
+/** How long a delegate may have accepted an order, with nothing done for it, before it reads as stalled. */
+export const DELEGATION_STALLED_DAYS = 21;
 export const STAGE_LAPSE_DAYS = 90;
 
 /** The day a waiting stage is next looked at: its own, else a fortnight after it was held. */
@@ -235,14 +237,14 @@ export function findOrderPart(world: WorldState, ref: string): { readonly order:
  */
 export const ORDER_PART_STATUSES = [
   "achieved", "partly_done", "under_way", "acknowledged", "authorized", "awaiting_authority", "awaiting_reply", "awaiting_condition", "pending",
-  "blocked", "failed", "refused", "unanswered", "carried_unverified", "already_so",
+  "blocked", "failed", "refused", "unanswered", "carried_unverified", "already_so", "stalled",
 ] as const;
 export type OrderPartStatus = (typeof ORDER_PART_STATUSES)[number];
 
 /** Least finished first: a part stands where its least finished work stands. */
 const RANK: Record<OrderPartStatus, number> = {
   blocked: 0, failed: 1, under_way: 2, acknowledged: 3, awaiting_authority: 4, awaiting_reply: 5, awaiting_condition: 6, pending: 7, authorized: 8,
-  refused: 9, unanswered: 10, carried_unverified: 11, already_so: 12, partly_done: 13, achieved: 14,
+  refused: 9, unanswered: 10, carried_unverified: 11, already_so: 12, partly_done: 13, achieved: 14, stalled: 2.5,
 };
 
 /** The statuses a part is finished at, one way or another. */
@@ -306,7 +308,8 @@ export function workStatus(world: WorldState, ref: OrderWorkRef): OrderPartStatu
       if (attempt === undefined) return null;
       if (attempt.status === "carried_out") return "achieved";
       if (attempt.status === "issued" || attempt.status === "received" || attempt.status === "delayed") return "pending";
-      if (attempt.status === "accepted") return "acknowledged";
+      // Taken up and nothing done for three weeks is not "taken up": it is stuck, and said so (plan chronicle-and-order-truth, 2.6).
+      if (attempt.status === "accepted") return attempt.decidedAtStep !== null && world.elapsedStep - attempt.decidedAtStep >= DELEGATION_STALLED_DAYS ? "stalled" : "acknowledged";
       if (attempt.status === "abandoned") return "failed";
       return "refused";
     }
@@ -530,6 +533,7 @@ export const ORDER_PART_STATUS_LABEL: Record<OrderPartStatus, string> = {
   unanswered: "nothing came of it",
   carried_unverified: "ordered, effect not observed",
   already_so: "already so when ordered",
+  stalled: "accepted, but nothing done for weeks",
 };
 
 /** Records past the cap drop their oldest wholly-closed ones first, then the oldest of all. */

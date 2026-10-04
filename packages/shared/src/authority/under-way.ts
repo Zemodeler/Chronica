@@ -157,7 +157,7 @@ export function ordersUnderWay(
         kind: "order",
         label: part.said,
         detail: `${stateLabel}.${tally === null ? "" : ` ${letterTallyInWords(tally)}.`}${why === null || status === "achieved" ? "" : ` ${lastSentenceWithin(why, 320)}`}${part.note === null ? "" : ` ${upperFirst(part.note)}.`}`,
-        stalled: status === "blocked" || status === "failed" || status === "refused" || status === "unanswered" || status === "authorized" || status === "acknowledged",
+        stalled: status === "blocked" || status === "failed" || status === "refused" || status === "unanswered" || status === "authorized" || status === "acknowledged" || status === "stalled",
       });
     }
   }

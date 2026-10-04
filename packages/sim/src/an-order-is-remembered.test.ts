@@ -225,3 +225,27 @@ describe("a part held for something that does not come", () => {
     expect(part.refusal).not.toBeNull();
   });
 });
+
+describe("a part handed on and accepted, then left", () => {
+  // Plan chronicle-and-order-truth, 2.6: taken up is not done, and after three weeks it is stalled.
+  const handed = (): WorldState => {
+    const attempt = {
+      id: "order-1", actionId: "action-1", issuerRef: { kind: "character" as const, id: ACTOR }, recipientRef: { kind: "character" as const, id: "tiberius-coruncanius" },
+      claimedAuthorityGrantId: null, authorityCheck: { authorized: true, grant: null, standing: null, reason: "Consul." },
+      instruction: "Arrange the transport", standing: "binding" as const, status: "accepted" as const, recipientDecisionReason: "Yes.",
+      issuedAtStep: 0, decidedAtStep: 2, consequenceFactRefs: [], servesRef: null,
+    };
+    return { ...world(), orderAttempts: [attempt] };
+  };
+  const part = { said: "Arrange the transport", workRefs: [{ kind: "order_attempt" as const, id: "order-1" }], refusal: null, goals: [], spend: null, attribution: "tagged" as const, note: null, whyNot: null, factIds: [], closedAtStep: null, refusedAtStep: null, actsCarried: 0, actsRefused: 0, stages: [] };
+
+  it("is taken up for the first three weeks", () => {
+    expect(orderPartStatus({ ...handed(), elapsedStep: 10 }, part)).toBe("acknowledged");
+  });
+
+  it("is stalled after, and says so", () => {
+    const status = orderPartStatus({ ...handed(), elapsedStep: 30 }, part);
+    expect(status).toBe("stalled");
+    expect(orderPartLabel(status, part)).toBe("accepted, but nothing done for weeks");
+  });
+});
