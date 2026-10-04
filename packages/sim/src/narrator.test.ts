@@ -422,3 +422,37 @@ describe("trouble that finds the player where he is looking", () => {
     expect(landedOn(withOpenOrder(large()))).toBeGreaterThan(landedOn(large()));
   });
 });
+
+describe("a thread given its next beat", () => {
+  // Plan chronicle-and-order-truth, 5.3: omen, escalation, crisis, resolution, a fortnight apart.
+  const thread = (change: Record<string, unknown>) => ({
+    id: "arc-1", title: "The Sickness in Latium", participantIds: [], provinceId: null, phase: "brewing", stakes: "Whether Rome can feed itself.", history: ["It began."],
+    nextDevelopment: "It spreads or burns out.", visibility: "public", origin: "world", openedByRef: null, openedAtStep: 0, updatedAtStep: 100, closedAtStep: null, causalFactIds: [], seedKey: null,
+    ...change,
+  }) as unknown as WorldState["storylines"][number];
+  const at = (day: number, storylines: WorldState["storylines"]): NarratorInput => input({ ...later(large(), day), storylines });
+
+  it("moves a quiet thread on one phase, and says which", async () => {
+    const { arcBeat } = await import("./narrator");
+    const beat = arcBeat(at(120, [thread({})]))!;
+    expect(beat.archetype).toBe("arc_beat");
+    expect(beat.brief).toContain('phase "escalating"');
+    expect(beat.brief).toContain("[arc-1]");
+    expect(arcBeat(at(120, [thread({ phase: "escalating" })]))!.brief).toContain('phase "crisis"');
+    expect(arcBeat(at(120, [thread({ phase: "crisis" })]))!.severity).toBe("minor");
+  });
+
+  it("leaves a thread alone inside its fortnight, once it is resolving or closed, or when the world did not open it", async () => {
+    const { arcBeat } = await import("./narrator");
+    expect(arcBeat(at(105, [thread({})]))).toBeNull();
+    expect(arcBeat(at(200, [thread({ phase: "resolving" })]))).toBeNull();
+    expect(arcBeat(at(200, [thread({ phase: "closed" })]))).toBeNull();
+    expect(arcBeat(at(200, [thread({ origin: "scenario" })]))).toBeNull();
+  });
+
+  it("puts one beat among a season's seeds, ahead of anything new", () => {
+    const seeds = decideNarratorSeeds(input({ ...later(large(), 200), storylines: [thread({ updatedAtStep: 150 })] }, { spanDays: 90 }));
+    expect(seeds.filter((seed) => seed.archetype === "arc_beat")).toHaveLength(1);
+    expect(seeds[0]!.archetype).toBe("arc_beat");
+  });
+});

@@ -681,6 +681,50 @@ export function decideNarratorSeed(input: NarratorInput): NarratorSeed | null {
   return seedAt(input, tension, ledger.seedCount, !ledger.consumed && ledger.lastSeedKey !== null, new Set());
 }
 
+/** A thread the world opened is given its next beat after this long quiet, so an arc runs omen, escalation, break. */
+const ARC_BEAT_AFTER_DAYS = 14;
+
+/**
+ * The next beat of a thread the world is already following (plan
+ * chronicle-and-order-truth, 5.3): omen to escalation to crisis to resolution,
+ * one beat at a time, each after the thread has been quiet a fortnight, and at
+ * most one per call. The model is told to advance the thread; it is never told
+ * why now.
+ */
+export function arcBeat(input: NarratorInput): NarratorSeed | null {
+  const { world } = input;
+  const beats = { brewing: "escalating", escalating: "crisis", crisis: "resolving" } as const;
+  const due = openStorylines(world.storylines)
+    .filter((storyline) => storyline.origin === "world" && storyline.phase in beats && world.elapsedStep - storyline.updatedAtStep >= ARC_BEAT_AFTER_DAYS)
+    .sort((a, b) => a.updatedAtStep - b.updatedAtStep || a.id.localeCompare(b.id));
+  const thread = due[0];
+  if (thread === undefined) return null;
+  const next = beats[thread.phase as keyof typeof beats];
+  const province = thread.provinceId === null ? null : world.map.provinces.find((candidate) => candidate.id === thread.provinceId) ?? null;
+  const polityId = province?.controllerPolityId ?? null;
+  const polity = polityId === null ? null : world.map.polities.find((candidate) => candidate.id === polityId) ?? null;
+  const person = thread.participantIds.map((id) => world.characters.find((character) => character.id === id)).find((character) => character !== undefined);
+  const severity: SeedSeverity = next === "crisis" ? "grave" : next === "escalating" ? "serious" : "minor";
+  return {
+    key: `seed-arc-${thread.id}-${next}`,
+    kind: "world_event",
+    archetype: "arc_beat",
+    severity,
+    secret: thread.visibility === "private",
+    oneShot: false,
+    target: {
+      provinceId: province?.id ?? null, provinceName: province?.name ?? null, polityId, polityName: polity?.name ?? null,
+      characterId: person?.id ?? null, characterName: person?.name ?? null, otherPolityId: null, otherPolityName: null,
+      forceId: null, forceName: null, forceIsNaval: false,
+    },
+    inPlayerRealm: polityId !== null && polityId === input.ownPolityId,
+    repeated: false,
+    pressureId: null,
+    why: `the thread "${thread.title}" has been quiet ${world.elapsedStep - thread.updatedAtStep} days`,
+    brief: `The thread "${thread.title}" [${thread.id}] has moved on: it is now ${next === "resolving" ? "coming to its end" : next}. Advance it with "storyline_advance" (phase "${next}"): say what just happened in it, in a line, and what comes next. Where it changes the province or the people in it, do that too, and record what happened as a fact. Its stakes were: ${thread.stakes}`,
+  };
+}
+
 /**
  * Everything that stirs this burst, not merely the one thing.
  *
@@ -720,7 +764,10 @@ export function decideNarratorSeeds(input: NarratorInput): NarratorSeed[] {
   const share = wanted * difficultyRules(input.world.difficulty).personalSeedShare;
   const personalCount = Math.floor(share) + (stableChoice([input.gameId, "narrator", "personal-count", ledger.seedCount], 12) < Math.round((share % 1) * 12) ? 1 : 0);
   const personal = input.playerCharacterId === null || personalCount === 0 ? [] : personalSeeds(input, ledger.seedCount + wanted, personalCount);
-  for (let index = 0; index < wanted - personal.length; index += 1) {
+  // One beat of an arc already running, before anything new is started (5.3).
+  const beat = arcBeat(input);
+  if (beat !== null) { keys.add(beat.key); seeds.push(beat); }
+  for (let index = 0; index < wanted - personal.length - (beat === null ? 0 : 1); index += 1) {
     // Only the first carries the repeat: a batch of six re-offered whole
     // because one of them went unread would be the same month twice.
     const repeated = index === 0 && !ledger.consumed && ledger.lastSeedKey !== null;

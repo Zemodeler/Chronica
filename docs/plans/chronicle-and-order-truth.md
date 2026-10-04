@@ -178,15 +178,18 @@ Done, tested, committed:
 - **Phase 3:** 3.1 `Fact.story` (subject, deed, motive, cost, source); 3.2 clerk lint with one retry; 3.3 two original register exemplars (historian ceiling 4.5k to 5.2k); 3.4 source notes (observed / reported / rumoured); 3.5 order answers and refusals name the person.
 - **Phase 4:** 4.1/4.2 delegates report in their own voice from observed state, addressed from the attempt's own refs; 4.5 computed "What changed" entry.
 - **Phase 5:** 5.1 seeds aimed at the ground of open orders; 5.2 insubordination told as a person acting; 5.4 delayed rumour of a secret thread in the player's realm; 5.6 "Still open" entry (D3); 5.8 `untilSomethingHappens` mode (stops as `salient_event`).
+- **1.6 fact/state parity:** a fact claiming arrival, capture or appointment is checked against the state the acts left and dropped, with a skipped line (`fact-parity.ts`). Only those three claims are read; others pass.
+- **5.3 arcs:** a quiet world-opened thread gets its next beat (brewing, escalating, crisis, resolving) after a fortnight, at most one per call (`arcBeat`).
 - **Phase 6:** 6.1 dev inspector (`ChronicleResult.inspection`, logged with `CHRONICA_INSPECT=1`); 6.3 is S3.
 
 Decided not to build, with reasons:
 
 - **2.4 satisfiable holds:** an impossible condition already fails on the next tick, a ship wait fails at its limit, and every wait lapses at 90 days, so none can strand. Auto-building the missing fleet is a gameplay change.
-- **1.6 fact/state parity:** facts now carry a story block, but nothing yet says which state a kind of fact claims; a per-kind table is the next step, not done.
 - **2.5 re-plan, pre-flight:** model calls; wait for scorecard evidence.
-- **4.3 private receipts, 4.4 stable agents:** the outcome line already shows spend and payer for plots; agent identity (R74) needs a look at the agent-creation path, not done.
-- **5.3 three-beat arcs, 5.5 outside shocks, 5.7 digest:** scenario pressures already carry condition guards (`pressureHolds`) and thin months already batch into digest threads; arcs not built.
+- **4.3 private receipts, 4.4 stable agents:** already in the engine: the outcome line shows spend and payer for plots, and `character_create` reuses a same-named living person (R74).
+- **5.5 outside shocks, 5.7 digest:** scenario pressures already carry condition guards (`pressureHolds`) and thin months already batch into digest threads.
 - **6.2 threshold retune:** needs live scorecard rows first.
+
+Still open: 6.2 threshold retune (needs live scorecard rows) and 2.5 re-plan.
 
 Not exercised by a scenario test: 5.2 (the existing breach scenarios are covert, which must stay hidden).
