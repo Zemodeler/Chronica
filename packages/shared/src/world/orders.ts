@@ -172,6 +172,27 @@ export const OrderRecordSchema = z
   .strict();
 export type OrderRecord = z.infer<typeof OrderRecordSchema>;
 
+/**
+ * What a person last decided on, kept between bursts (player-focused simulation
+ * plan, S4): so a new burst does not buy every relevant character another
+ * first review. Hashes, not text: the portrait it was made from is long and
+ * is rebuilt on the day. Another `version` is another policy and is ignored.
+ */
+export const COGNITION_REVIEW_VERSION = 1;
+/** How long a kept review stands before the person is looked at again whatever has changed (the elapsed review interval). */
+export const COGNITION_REVIEW_DAYS = 14;
+export const CognitionReviewSchema = z
+  .object({
+    characterId: EntityIdSchema,
+    context: z.string().max(16),
+    reason: z.string().max(16),
+    atStep: ElapsedStepSchema,
+    weight: z.number().int().min(1).max(10_000).default(1),
+    version: z.number().int().nonnegative().default(COGNITION_REVIEW_VERSION),
+  })
+  .strict();
+export type CognitionReview = z.infer<typeof CognitionReviewSchema>;
+
 /** Somebody the burst had to ask and could not pay to (`WorldState.owed`). */
 export const OwedTurnSchema = z
   .object({

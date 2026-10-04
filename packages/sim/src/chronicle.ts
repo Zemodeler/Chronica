@@ -1091,6 +1091,24 @@ function renderBattle(battle: BattleAccountLine): string[] {
   return lines;
 }
 
+/** How the court knows a fact, said before it: the fact's own source where it has one, else what the thread shows. */
+function sourceNote(fact: Fact, thread: Thread): string {
+  const source = fact.story?.source ?? null;
+  if (source === "reported" || fact.kind === "spy_report") return "(an agent's report: say so, and that it may be wrong) ";
+  if (source === "rumoured") return "(rumour only: tell it as rumour) ";
+  if (source === "observed") return "";
+  return !thread.reported && thread.hearsayIds.has(fact.id) ? "(word only, not witnessed) " : "";
+}
+
+/** The fact's seeds, on the line after it: who, what, why, at what cost. Nothing the fact did not give. */
+function storySeeds(fact: Fact): string {
+  const story = fact.story;
+  if (story === undefined) return "";
+  const parts = [story.subject === null ? null : `who: ${story.subject}`, story.deed === null ? null : `did: ${story.deed}`, story.motive === null ? null : `why: ${story.motive}`, story.cost === null ? null : `cost: ${story.cost}`].filter((part): part is string => part !== null);
+  return parts.length === 0 ? "" : `
+    (${parts.join("; ")})`;
+}
+
 function renderThread(thread: Thread, index: number, said: readonly UtteranceLine[] = []): string {
   const lines = [`THREAD ${index + 1}${thread.reported ? " (news reaching the court; nobody here witnessed it)" : ""}`];
   if (thread.matter !== null) lines.push(`Part of a longer matter: ${thread.matter}.`);
@@ -1103,7 +1121,7 @@ function renderThread(thread: Thread, index: number, said: readonly UtteranceLin
     // Where it is known from, fact by fact: one witnessed fact used to make a
     // whole thread firsthand, and a spy's report read as the court's own
     // knowledge (C05, R43).
-    ...thread.facts.map((fact) => `- ${fact.kind === "spy_report" ? "(an agent's report: say so, and that it may be wrong) " : !thread.reported && thread.hearsayIds.has(fact.id) ? "(word only, not witnessed) " : ""}${readable(fact.summary)}`),
+    ...thread.facts.map((fact) => `- ${sourceNote(fact, thread)}${readable(fact.summary)}${storySeeds(fact)}`),
   );
   if (thread.narrative.length > 0) lines.push("Accounts given at the time:", ...thread.narrative.map((line) => `- ${readable(line)}`));
   if (thread.frictions.length > 0) lines.push("Difficulties reported:", ...thread.frictions.map((line) => `- ${readable(line)}`));

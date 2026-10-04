@@ -2006,6 +2006,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
           // (`OWN_BUSINESS_FLOOR`); the world's own frictions stay small.
           significance: ignored ? 30 : rejection.ofTheOrder === true ? OWN_BUSINESS_FLOOR : 5,
           knownToRefs: [actorRef],
+          // A person doing something, not a clerk's line (3.5).
+          story: { subject: world.characters.find((character) => character.id === actorRef.id)?.name ?? null, deed: ignored ? "gave orders to people who did not have to take them" : `tried to ${rejection.delta.op.replace(/_/g, " ")}`, motive: null, cost: null, source: "observed" },
         }],
         now: world.instant,
         atStep: world.elapsedStep,
@@ -2712,6 +2714,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         knowableInDays: 0,
         knownToRefs: [input.actorRef],
         significance: 20,
+        story: { subject: who, deed: `ordered: ${quoted}`.slice(0, 160), motive: null, cost: null, source: "observed" },
       }],
       now: world.instant,
       atStep: world.elapsedStep,
@@ -2778,6 +2781,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         knowableInDays: 0,
         knownToRefs: [input.actorRef],
         significance: 30,
+        story: { subject: who, deed: `ordered: ${part.said}`.slice(0, 160), motive: null, cost: null, source: "observed" },
       })),
       now: world.instant,
       atStep: world.elapsedStep,
@@ -3345,7 +3349,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   // Who has been asked about what, and who wrote what, this burst (see
   // `routeAttention`'s `alreadyAnswered`).
   const answeredBy = new Map<string, Set<string>>();
-  const cognitionMemory = createCognitionMemory();
+  // Reviews kept from the last burst: a short wait does not buy everybody a first review again (S4).
+  const cognitionMemory = createCognitionMemory(input.world.cognitionReviews, input.world.elapsedStep);
   const cognitionPolicy = createCognitionPolicy();
 
   // The powers' own business, by rule, once a month (`statecraft.ts`): wars,
@@ -3935,7 +3940,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     playerDecision !== null ? "player_decision" : significance > 0 ? "chronicle" : "continue";
 
   return {
-    world,
+    world: { ...world, cognitionReviews: cognitionMemory.snapshot(world.elapsedStep) },
     newFacts,
     rediscoveredFacts: [...rediscovered.values()],
     significanceByFactId,

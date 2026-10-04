@@ -22,7 +22,7 @@ import { ContingencySchema } from "./contingency";
 import { SiegeSchema } from "./siege";
 import { EnactmentSchema } from "./enactment";
 import { CovertPlotSchema } from "./covert-plot";
-import { OrderRecordSchema, OwedTurnSchema } from "./orders";
+import { CognitionReviewSchema, OrderRecordSchema, OwedTurnSchema } from "./orders";
 import { MapConflictsOverlaySchema } from "./map-presentation";
 import { NemesisSchema } from "./nemesis";
 import { WorldStorylineSchema } from "./storylines";
@@ -317,6 +317,8 @@ export const WorldStateSchema = z
      * held up waiting for anybody.
      */
     owed: z.array(OwedTurnSchema).max(40).default([]),
+    /** What each person was last asked about and decided on, so a new burst does not review everybody afresh (S4, `CognitionReviewSchema`). */
+    cognitionReviews: z.array(CognitionReviewSchema).max(200).default([]),
     /**
      * Plans laid against days that have not come -- see `world/contingency.ts`.
      *

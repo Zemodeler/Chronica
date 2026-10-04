@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { EntityIdSchema, MaybeIdSchema } from "../material-state";
-import { FactDiscoveryStateSchema, FactVisibilitySchema } from "../world/facts";
+import { FactDiscoveryStateSchema, FactStorySchema, FactVisibilitySchema } from "../world/facts";
 import { OrderPartyRefSchema } from "../world/party-ref";
 import { WatchPredicateSchema } from "../world/watch";
 import { AmbitionKindSchema } from "../characters/character";
@@ -50,6 +50,8 @@ export const FactProposalSchema = z.object({
   knownToRefs: z.array(OrderPartyRefSchema).max(16).default([]),
   /** The thread this belongs to, when it belongs to one: an existing storyline id or a "local:" handle opened in this answer. */
   storylineRef: MaybeRefSchema.default(null),
+  /** Who did what, why, at what cost, and how the court knows -- seeds the historian tells it from. Null when the summary says it all. */
+  story: FactStorySchema.nullable().default(null),
 });
 export type FactProposal = z.infer<typeof FactProposalSchema>;
 /** The same, before defaults: what the engine itself writes when it records a consequence the model did not author. */

@@ -1,4 +1,4 @@
-import { answerDueOf, type ScenarioClock, type WorldState } from "@chronica/shared";
+import { COGNITION_REVIEW_DAYS, COGNITION_REVIEW_VERSION, answerDueOf, type CognitionReview, type ScenarioClock, type WorldState } from "@chronica/shared";
 import type { RoutedActor } from "./attention";
 import { renderCharacterPortrait } from "./cognition";
 
@@ -24,20 +24,49 @@ export function cognitionDecisionContext(actor: RoutedActor, world: WorldState, 
   ]);
 }
 
-/** Kept within one burst only. A later turn starts with fresh decisions. */
-export function createCognitionMemory() {
-  const contexts = new Map<string, { context: string; reason: string }>();
+/** A short, stable hash for comparing what a person last decided on. */
+function hashOf(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let at = 0; at < text.length; at += 1) {
+    hash ^= text.charCodeAt(at);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
+/**
+ * What each person was last asked about and decided on. It starts from the
+ * reviews the world kept (`WorldState.cognitionReviews`, S4): a later burst
+ * does not buy everybody a first review, only the people whose circumstances
+ * changed or whose last review is older than `COGNITION_REVIEW_DAYS`. Reviews
+ * of another policy version are ignored.
+ */
+export function createCognitionMemory(saved: readonly CognitionReview[] = [], nowStep = 0) {
+  const contexts = new Map<string, { context: string; reason: string; atStep: number }>();
   const weights = new Map<string, number>();
+  for (const review of saved) {
+    if (review.version !== COGNITION_REVIEW_VERSION || nowStep - review.atStep > COGNITION_REVIEW_DAYS) continue;
+    contexts.set(review.characterId, { context: review.context, reason: review.reason, atStep: review.atStep });
+    weights.set(review.characterId, review.weight);
+  }
   return {
     weights,
     changed(actor: RoutedActor, world: WorldState, clock: ScenarioClock, wanted?: string): boolean {
       const previous = contexts.get(actor.characterId);
-      return previous === undefined || previous.context !== cognitionDecisionContext(actor, world, clock)
-        || (wanted !== undefined && previous.reason !== circumstances(wanted));
+      return previous === undefined || previous.context !== hashOf(cognitionDecisionContext(actor, world, clock))
+        || (wanted !== undefined && previous.reason !== hashOf(circumstances(wanted)));
     },
     remember(actor: RoutedActor, world: WorldState, clock: ScenarioClock, wanted: string | undefined, answerSize: number): void {
-      contexts.set(actor.characterId, { context: cognitionDecisionContext(actor, world, clock), reason: circumstances(wanted ?? "") });
+      contexts.set(actor.characterId, { context: hashOf(cognitionDecisionContext(actor, world, clock)), reason: hashOf(circumstances(wanted ?? "")), atStep: world.elapsedStep });
       weights.set(actor.characterId, Math.max(1, answerSize));
+    },
+    /** What to keep on the world: the freshest reviews, at most as many as the world holds. */
+    snapshot(nowStep: number): CognitionReview[] {
+      return [...contexts.entries()]
+        .filter(([, entry]) => nowStep - entry.atStep <= COGNITION_REVIEW_DAYS)
+        .sort((a, b) => b[1].atStep - a[1].atStep)
+        .slice(0, 200)
+        .map(([characterId, entry]) => ({ characterId, context: entry.context, reason: entry.reason, atStep: entry.atStep, weight: Math.min(10_000, weights.get(characterId) ?? 1), version: COGNITION_REVIEW_VERSION }));
     },
   };
 }

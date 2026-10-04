@@ -102,6 +102,24 @@ export const StarContextLevelSchema = z.enum([
 ]);
 export type StarContextLevel = z.infer<typeof StarContextLevelSchema>;
 
+/**
+ * What a fact is *about*, as seeds the historian can tell it from (plan
+ * chronicle-and-order-truth, 3.1 and 3.4): who did it, what they did, why, what
+ * it cost them, and how the court knows. All optional; a fact without them is
+ * told from its summary as before.
+ */
+export const FactStorySchema = z
+  .object({
+    subject: z.string().trim().min(1).max(120).nullable().default(null),
+    deed: z.string().trim().min(1).max(160).nullable().default(null),
+    motive: z.string().trim().min(1).max(200).nullable().default(null),
+    cost: z.string().trim().min(1).max(160).nullable().default(null),
+    /** Seen by the court, reported by an agent, or only rumoured: so the prose hedges as the sources do. */
+    source: z.enum(["observed", "reported", "rumoured"]).nullable().default(null),
+  })
+  .strict();
+export type FactStory = z.infer<typeof FactStorySchema>;
+
 export const FactSchema = z
   .object({
     id: EntityIdSchema,
@@ -131,6 +149,8 @@ export const FactSchema = z
      * before a battle already knew the battle's dead. Absent on facts from
      * before this was kept, and on facts that name no army.
      */
+    /** What it is about, as seeds for the historian (`FactStorySchema`). Absent on facts that were not given one. */
+    story: FactStorySchema.optional(),
     forcesAsReported: z.array(z.object({ forceId: EntityIdSchema, men: z.number().int().nonnegative(), locationId: EntityIdSchema }).strict()).max(8).optional(),
   })
   .strict();

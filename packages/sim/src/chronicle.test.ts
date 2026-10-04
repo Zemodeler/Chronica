@@ -1335,3 +1335,35 @@ describe("the clerk's register", () => {
     expect(port.calls).toHaveLength(1);
   });
 });
+
+describe("a fact's story seeds", () => {
+  // Plan chronicle-and-order-truth, 3.1 and 3.4: who did what, why, at what cost, and how the court knows.
+  const tell = async (story: Fact["story"]) => {
+    const port = capturingPort();
+    await composeChronicle({
+      port, clock, observer: { kind: "character", id: "marcus-atilius" }, observerPolityId: "rome",
+      facts: [{ ...fact({ summary: "The legate refused the crossing." }), ...(story === undefined ? {} : { story }) }],
+      from: { day: 0, minute: 0 }, to: { day: 30, minute: 0 }, narrative: [], frictions: [],
+    });
+    return port.lastUserMessage;
+  };
+
+  it("hands the historian who, what, why and the cost", async () => {
+    const message = await tell({ subject: "the legate Antuvi", deed: "refused leave to cross", motive: "he would not move without the Senate's word", cost: "a week of the season", source: "observed" });
+    expect(message).toContain("who: the legate Antuvi");
+    expect(message).toContain("did: refused leave to cross");
+    expect(message).toContain("why: he would not move without the Senate's word");
+    expect(message).toContain("cost: a week of the season");
+  });
+
+  it("has the prose hedge as the source does", async () => {
+    expect(await tell({ subject: null, deed: null, motive: null, cost: null, source: "rumoured" })).toContain("rumour only");
+    expect(await tell({ subject: null, deed: null, motive: null, cost: null, source: "reported" })).toContain("an agent's report");
+  });
+
+  it("tells a fact with no story from its summary alone", async () => {
+    const message = await tell(undefined);
+    expect(message).toContain("The legate refused the crossing.");
+    expect(message).not.toContain("who:");
+  });
+});

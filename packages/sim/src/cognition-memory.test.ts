@@ -55,3 +55,50 @@ describe("whether a decision needs reconsideration", () => {
     expect(cognitionDecisionContext(actor, changed, clock)).not.toBe(before);
   });
 });
+
+describe("reviews kept between bursts", () => {
+  // Player-focused simulation plan, S4.
+  it("does not buy a person a first review again after a short wait", () => {
+    const world = { ...seed(), elapsedStep: 10 };
+    const actor = actorFor(world);
+    const first = createCognitionMemory([], 10);
+    first.remember(actor, world, clock, "same order", 40);
+    const kept = first.snapshot(10);
+    expect(kept).toHaveLength(1);
+    const later = { ...world, elapsedStep: 13 };
+    const second = createCognitionMemory(kept, 13);
+    expect(second.changed(actor, later, clock, "same order")).toBe(false);
+    expect(second.weights.get(actor.characterId)).toBe(40);
+  });
+
+  it("looks at him again once his circumstances change, or the review interval has passed", () => {
+    const world = { ...seed(), elapsedStep: 10 };
+    const actor = actorFor(world);
+    const first = createCognitionMemory([], 10);
+    first.remember(actor, world, clock, "same order", 40);
+    const kept = first.snapshot(10);
+    const wounded = { ...world, elapsedStep: 12, characters: world.characters.map((person) => person.id === actor.characterId ? { ...person, healthBps: 2_000 } : person) };
+    expect(createCognitionMemory(kept, 12).changed(actor, wounded, clock, "same order")).toBe(true);
+    expect(createCognitionMemory(kept, 40).changed(actor, { ...world, elapsedStep: 40 }, clock, "same order")).toBe(true);
+  });
+
+  it("ignores a review made under another policy", () => {
+    const world = { ...seed(), elapsedStep: 10 };
+    const actor = actorFor(world);
+    const first = createCognitionMemory([], 10);
+    first.remember(actor, world, clock, "same order", 40);
+    const other = first.snapshot(10).map((review) => ({ ...review, version: 0 }));
+    expect(createCognitionMemory(other, 10).changed(actor, world, clock, "same order")).toBe(true);
+  });
+
+  it("is written onto the world a burst returns", async () => {
+    const { runSimulationBurst } = await import("./burst");
+    const definition = ScenarioDefinitionSchema.parse(firstPunicWarScenario.definition);
+    const result = await runSimulationBurst({
+      world: seed(), clock: definition.clock, offices: definition.government.offices, warfare: definition.warfare, burstId: "kept", gameId: "game-kept",
+      actorRef: { kind: "character", id: "marcus-atilius" }, actorPolityId: "rome", orderText: null, knownFacts: [], queue: [], spanDays: 3,
+      port: { complete: () => Promise.resolve(JSON.stringify({ actors: [] })) },
+    });
+    expect(Array.isArray(result.world.cognitionReviews)).toBe(true);
+  });
+});
