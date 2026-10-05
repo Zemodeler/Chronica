@@ -1,3 +1,4 @@
+import { isDecisiveFight } from "./decisive-fight";
 import {
   StructureSchema,
   aptitude,
@@ -279,7 +280,9 @@ export function fightRound(input: FightInput, engagementId: string, day: number,
   // does not, the rule the engine plays by stands.
   const player = input.playerCharacterId ?? null;
   const his = (force: Force): boolean => player !== null && (force.commanderCharacterId === player || force.controllerCharacterId === player);
-  const playerSide = defenders.some(his) ? "defender" as const : attackersNow.some(his) ? "attacker" as const : null;
+  const sideOfPlayer = defenders.some(his) ? "defender" as const : attackersNow.some(his) ? "attacker" as const : null;
+  // Only a fight that can decide a campaign stops the turn for his word; a lesser one is the commander's own to settle, by the engine's rule.
+  const playerSide = sideOfPlayer !== null && isDecisiveFight(world, engagement.provinceId, sideOfPlayer === "defender" ? defenders : attackersNow, sideOfPlayer === "defender" ? attacking : defenders, rules) ? sideOfPlayer : null;
   const mineNow = playerSide === "defender" ? defenders : playerSide === "attacker" ? attackersNow : [];
   const theirsNow = playerSide === "defender" ? attacking : playerSide === "attacker" ? defenders : [];
   const seen = new Set(engagement.seenForceIds);
@@ -564,7 +567,7 @@ export function fightRound(input: FightInput, engagementId: string, day: number,
       const key = `idle:${bystander.id}`.slice(0, 60);
       const now = world.engagements.find((candidate) => candidate.id === engagement.id)!;
       if (now.asked.includes(key)) continue;
-      if (his(bystander) && now.status === "open" && now.awaiting === null) {
+      if (his(bystander) && now.status === "open" && now.awaiting === null && isDecisiveFight(world, engagement.provinceId, [bystander, ...attacking], defenders, rules)) {
         world = { ...world, engagements: world.engagements.map((candidate) => (candidate.id === engagement.id
           ? { ...candidate, awaiting: { kind: "ally_fighting" as const, side: "attacker" as const, askedAtStep: day }, asked: [...candidate.asked, key].slice(-40) }
           : candidate)) };

@@ -197,6 +197,20 @@ describe("turning points", () => {
     expect(waited.engagements.find((candidate) => candidate.id === engagement.id)!.rounds).toBe(0);
   });
 
+  it("does not stop the turn for a skirmish: the commander settles it by the engine's rule (item 5)", () => {
+    const small = facing({ hieronCaution: 70, syracusans: 400 });
+    const skirmish: WorldState = { ...small, material: { ...small.material, forces: small.material.forces.map((force) => (force.id === "roman-field-army" ? { ...force, personnel: [{ ...force.personnel[0]!, fit: 800 }] } : force)) } };
+    const offered = offer(skirmish).world;
+    const engagement = offered.engagements.find((candidate) => candidate.status === "open")!;
+    expect(engagement.awaiting).toBeNull();
+    expect(engagementDecision(offered, "hieron-ii", definition.warfare)).toBeUndefined();
+  });
+
+  it("still stops it for a fight of the main armies", () => {
+    const offered = offer(facing({ hieronCaution: 70 })).world;
+    expect(offered.engagements.find((candidate) => candidate.status === "open")!.awaiting?.kind).toBe("battle_offered");
+  });
+
   it("fights the battle the day after he says to come out", () => {
     const offered = offer(facing({ hieronCaution: 70 })).world;
     const answered = answerEngagement(offered, "hieron-ii", "fight-fight", offered.elapsedStep + 1).world;

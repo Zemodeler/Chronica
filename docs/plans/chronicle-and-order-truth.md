@@ -199,3 +199,13 @@ Cannot be done without a live game and model, so left as procedure:
 3. Measure one real turn's `requests` log line and set `DEFAULT_ALLOWANCE` from it.
 
 Not exercised by a scenario test: 5.2 (the existing breach scenarios are covert, which must stay hidden).
+
+## Follow-up round (5 October 2026)
+
+- **Nine failing tests fixed** by reading each against the scenario change (v44 to v46: the Campanian Legion at war with Rome, named Carthaginian accountants, Curius as censor). One was an engine fix, not a test fix: a censor no longer counts as a magistrate who raises legions.
+- **Overstatement alarm:** `inspection.overstated` and `passages` on every compose; the runner warns when a window had any.
+- **Tight allowance through a turn:** `a-turn-on-a-tight-allowance.test.ts` runs the burst and the historian on one metered port.
+- **Review state bounds:** capped at 200, 14-day expiry, old saves load, a corrupt save is refused.
+- **Item 5, insubordination as a decision, big things only:** `breach-decisions.ts`. A ranking man (a magistracy, or an army of 3,000) acting beyond leave on an army, a tenth of the treasury, ground, an agreement or an officer, with someone to notice and nothing covert, is flagged `grand` on his `answerable` record and put to the player: censure, endorse, or let it pass. One at a time, none within 30 days of the last.
+- **Battle narrowing:** `decisive-fight.ts`. A turning point stops the turn for the player only when the sides together are more than 1,500 men and either puts a quarter of its power's field army on the ground, or the ground is a capital or a city under siege. Smaller fights go by the engine's rule.
+- **Left:** `packages/shared/src/knowledge/office-powers-text.test.ts` is a committed empty file and fails as "no test suite"; deleting it was not permitted in this session. Live scorecard rows, the 6.2 retune and the allowance numbers still need a played game.

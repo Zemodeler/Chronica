@@ -127,6 +127,7 @@ import { dueSteps, emptyPlanTally, layPlan, markWoken, nextPlanDay, settleOverdu
 import { claimPromisesKept } from "./promises";
 import { goalsOfAct, mergeGoals, refResolver, resolveGoal } from "./order-goals";
 import { verifyPart } from "./order-verifier";
+import { answerBreach, breachDecision, isGrandBreach } from "./breach-decisions";
 import { factContradictsState } from "./fact-parity";
 import type { RequestLedger } from "./request-ledger";
 import { findInvariantViolations } from "./invariants";
@@ -1718,7 +1719,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       const plight = playerPlight(world, input.actorRef.id);
       if (plight !== undefined) playerDecision = fieldDecision(world, plight);
       // Or a fight of his come to a moment his word could change (`engagement-decisions.ts`).
-      else playerDecision = engagementDecision(world, input.actorRef.id, input.warfare) ?? siegeDecision(world, input.actorRef.id) ?? null;
+      else playerDecision = engagementDecision(world, input.actorRef.id, input.warfare) ?? siegeDecision(world, input.actorRef.id) ?? (input.answeredDecision === undefined ? breachDecision(world, input.actorRef.id) : undefined) ?? null;
     }
 
     // A fact that belongs to a secret thread is secret, whatever the model
@@ -1943,6 +1944,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       world = { ...world, answerable: [...world.answerable, ...result.breaches.map((breach) => ({
         characterId: actorRef.id, polityId: actorPolity, kind: "breach" as const,
         label: describeBreach(breach.delta, world, actorName).slice(0, 240), atStep: world.elapsedStep, weight: 1,
+        // Only a ranking man's big act, which somebody would come to know of, is put to the player (item 5).
+        ...(actorPolity === input.actorPolityId && actorRef.id !== input.actorRef.id && !keptSecret.some((fact) => fact.visibility === "private")
+          && findWhoWouldNotice(world, input.offices, breach, actorRef.id).length > 0 && isGrandBreach(world, breach.delta, actorRef.id, actorPolity)
+          ? { grand: true } : {}),
       }))].slice(-400) };
     }
     const breachFacts: FactProposalDraft[] = result.breaches.map((breach, index) => {
@@ -2440,7 +2445,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       const plight = playerPlight(world, input.actorRef.id);
       if (plight !== undefined) playerDecision = fieldDecision(world, plight);
       // Or a fight of his come to a moment his word could change (`engagement-decisions.ts`).
-      else playerDecision = engagementDecision(world, input.actorRef.id, input.warfare) ?? siegeDecision(world, input.actorRef.id) ?? null;
+      else playerDecision = engagementDecision(world, input.actorRef.id, input.warfare) ?? siegeDecision(world, input.actorRef.id) ?? (input.answeredDecision === undefined ? breachDecision(world, input.actorRef.id) : undefined) ?? null;
     }
     if (ticked.factProposals.length > 0) {
       const materialized = materializeFacts({
@@ -2732,7 +2737,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     const fought = answerEngagement(world, input.actorRef.id, answeredOption, world.elapsedStep);
     const besieged = answerSiege(fought.world, input.actorRef.id, answeredOption, world.elapsedStep, input.warfare, ids);
     battleAccounts.push(...besieged.battles);
-    const answered = { world: besieged.world, facts: [...fought.facts, ...besieged.facts] };
+    const forgiven = answerBreach(besieged.world, input.actorRef.id, answeredOption, world.elapsedStep);
+    const answered = { world: forgiven.world, facts: [...fought.facts, ...besieged.facts, ...forgiven.facts] };
     world = answered.world;
     if (answered.facts.length > 0) {
       const materialized = materializeFacts({
@@ -3424,7 +3430,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   // else the world meant to ask.
   const plightNow = playerPlight(world, playerId);
   if (plightNow !== undefined) playerDecision = fieldDecision(world, plightNow);
-  else if (playerDecision === null) playerDecision = engagementDecision(world, playerId, input.warfare) ?? siegeDecision(world, playerId) ?? null;
+  else if (playerDecision === null) playerDecision = engagementDecision(world, playerId, input.warfare) ?? siegeDecision(world, playerId) ?? breachDecision(world, playerId) ?? null;
 
   // ── Advancing the world ────────────────────────────────────────────────
   //

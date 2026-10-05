@@ -61,6 +61,11 @@ export const AnswerableSchema = z
     atStep: ElapsedStepSchema,
     /** How heavily it weighs: a skirmish lost is 1, an army or a fleet lost is 5. */
     weight: z.number().int().min(1).max(10),
+    /**
+     * A big act beyond leave by a ranking subordinate, waiting on the
+     * player's word (true) or answered (false); absent for everything else.
+     */
+    grand: z.boolean().optional(),
   })
   .strict();
 export type Answerable = z.infer<typeof AnswerableSchema>;

@@ -664,6 +664,43 @@ describe("a subordinate who goes ahead without leave (5.2)", () => {
   });
 });
 
+describe("a ranking subordinate's big act without leave, put to the player (item 5)", () => {
+  const NOBODY = JSON.stringify({ actors: [] });
+  // Fabius made a magistrate for the test: the same overreach is then a ranking man moving a legion of three thousand.
+  const asMagistrate = (): WorldState => {
+    const state = world();
+    const seat = state.material.officeSeats.find((candidate) => candidate.status === "held")!;
+    return { ...state, material: { ...state.material, officeSeats: [...state.material.officeSeats, { ...seat, id: "fabius-seat", officeId: "roman-praetor", seatIndex: 9, holderCharacterId: "quintus-fabius" }] } };
+  };
+  const run = (overrides: Partial<BurstInput> = {}) => runSimulationBurst(input(
+    capturingScriptedPort({ simulate_orchestrate: [ORDER_AND_PLOT], simulate_cognition: [FABIUS_OPENLY, NOBODY, NOBODY, NOBODY] }),
+    { orderText: "Inspect the legion.", narratorSeed: PLOT_SEED, world: asMagistrate(), ...overrides },
+  ));
+
+  it("ends the report on the question, with the three answers", async () => {
+    const result = await run();
+    expect(result.playerDecision?.options.map((option) => option.id)).toEqual(["breach-censure", "breach-endorse", "breach-ignore"]);
+    expect(result.world.answerable.some((entry) => entry.characterId === "quintus-fabius" && entry.grand === true)).toBe(true);
+  });
+
+  it("takes the answer at the start of the next report, and does not ask twice", async () => {
+    const first = await run();
+    const second = await runSimulationBurst(input(capturingScriptedPort({ simulate_orchestrate: [ORDER_AND_PLOT], simulate_cognition: [NOBODY, NOBODY, NOBODY, NOBODY] }), {
+      world: first.world, orderText: null, burstId: "after", knownFacts: first.newFacts,
+      answeredDecision: { prompt: first.playerDecision!.prompt, label: "Censure him", summary: "Rebuke him.", optionId: "breach-censure" },
+    }));
+    expect(second.newFacts.some((fact) => fact.kind === "subordinate_censured")).toBe(true);
+    expect(second.world.answerable.some((entry) => entry.grand === true)).toBe(false);
+    expect(second.playerDecision?.options.some((option) => option.id.startsWith("breach-"))).not.toBe(true);
+  });
+
+  it("is not put to him for a man of no rank", async () => {
+    const result = await run({ world: world() });
+    expect(result.world.answerable.some((entry) => entry.grand === true)).toBe(false);
+    expect(result.playerDecision?.options.some((option) => option.id.startsWith("breach-"))).not.toBe(true);
+  });
+});
+
 describe("the world stirs: a secret plot", () => {
   const NOBODY = JSON.stringify({ actors: [] });
   const run = async () => {
