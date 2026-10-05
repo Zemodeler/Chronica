@@ -102,3 +102,36 @@ describe("reviews kept between bursts", () => {
     expect(Array.isArray(result.world.cognitionReviews)).toBe(true);
   });
 });
+
+describe("the kept reviews stay small, and an old save still loads", () => {
+  // Plan item 7.
+  it("holds at most 200 reviews, a few thousand bytes each at worst, however many people were asked", () => {
+    const world = { ...seed(), elapsedStep: 20 };
+    const base = actorFor(world);
+    const memory = createCognitionMemory([], 20);
+    for (let index = 0; index < 500; index += 1) memory.remember({ ...base, characterId: `person-${index}`, name: `Person ${index}` }, world, clock, `reason ${index}`, 50);
+    const kept = memory.snapshot(20);
+    expect(kept).toHaveLength(200);
+    expect(JSON.stringify(kept).length).toBeLessThan(40_000);
+  });
+
+  it("forgets reviews past the interval, so a long game does not grow its save", () => {
+    const world = { ...seed(), elapsedStep: 20 };
+    const memory = createCognitionMemory([], 20);
+    memory.remember(actorFor(world), world, clock, "same order", 50);
+    expect(memory.snapshot(20)).toHaveLength(1);
+    expect(memory.snapshot(200)).toHaveLength(0);
+  });
+
+  it("loads a save written before the reviews were kept, with none", () => {
+    const old = structuredClone(firstPunicWarScenario.initialWorld) as Record<string, unknown>;
+    delete old.cognitionReviews;
+    expect(WorldStateSchema.parse(old).cognitionReviews).toEqual([]);
+  });
+
+  it("refuses more than the world's cap on load, so a corrupt save cannot carry a thousand", () => {
+    const world = seed();
+    const review = { characterId: "a", context: "00000000", reason: "00000000", atStep: 1, weight: 1, version: 1 };
+    expect(WorldStateSchema.safeParse({ ...world, cognitionReviews: Array.from({ length: 201 }, () => review) }).success).toBe(false);
+  });
+});

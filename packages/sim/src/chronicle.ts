@@ -542,7 +542,7 @@ export interface ChronicleResult {
    * facts it was written from with the weight each carried, and whether the
    * thread was news from afar. And how many facts were carried, not told.
    */
-  readonly inspection?: { readonly entries: readonly { readonly title: string; readonly facts: readonly { readonly id: string; readonly kind: string; readonly weight: number }[]; readonly reported: boolean }[]; readonly carriedCount: number };
+  readonly inspection?: { readonly entries: readonly { readonly title: string; readonly facts: readonly { readonly id: string; readonly kind: string; readonly weight: number }[]; readonly reported: boolean }[]; readonly carriedCount: number; /** Passages that overstated an order part and were replaced. */ readonly overstated: number; readonly passages: number };
 }
 
 interface Thread {
@@ -1689,6 +1689,8 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
     }
   };
   let retries = 0;
+  /** Passages whose prose said more than the world shows, replaced by the engine's line: how often the historian still overstates (alarm, plan 2). */
+  let overstated = 0;
   await mapWithLimit(threads, CHRONICLE_CONCURRENCY, async (thread, index): Promise<void> => {
     // The answer to the order is news by definition: the player gave it this
     // turn. Shown the last report's titles, the historian judged "Clepsina
@@ -1721,6 +1723,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
         const body = passage === undefined ? null : faithful(thread, passage.body.trim());
         const contradicted = passage !== undefined && thread.outcome !== null
           && (body !== passage.body.trim() || claimsItDone(passage.title, thread.outcome.status));
+        if (contradicted) overstated += 1;
         entry = passage === undefined
           ? (answering ? plainly(thread) : null)
           : entryOf(thread, contradicted ? headlineOf(thread.facts) ?? period : passage.title,
@@ -1758,6 +1761,8 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
       reported: entry.factIds.length > 0 && entry.factIds.every((id) => reportedIds.has(id)),
     })),
     carriedCount: carried.length,
+    overstated,
+    passages: threads.length,
   };
   return { entries: told, calls: threads.length + retries, carried, inspection };
 }

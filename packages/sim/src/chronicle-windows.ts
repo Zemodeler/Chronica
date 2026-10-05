@@ -54,6 +54,8 @@ export interface WindowWriterInput {
   readonly untold?: { readonly facts: readonly Fact[]; readonly significanceByFactId: ReadonlyMap<string, number> } | undefined;
   /** Called with each passage as it is written, in the order of the record. Awaited, so passages are handed out in order. */
   readonly onEntry?: ((entry: ChronicleEntry, window: number) => Promise<void>) | undefined;
+  /** Told with each window's overstatement count, always (not only for the inspector): the alarm that says whether the claim check needs tightening. */
+  readonly onOverstated?: ((overstated: number, passages: number, window: number) => void) | undefined;
   /** Dev inspector (6.1): what each window's entries were made of, as `composeChronicle` reports it. */
   readonly onInspection?: ((inspection: NonNullable<Awaited<ReturnType<typeof composeChronicle>>["inspection"]>, window: number) => void) | undefined;
 }
@@ -203,7 +205,10 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
         },
       });
       calls += out.calls;
-      if (out.inspection !== undefined) input.onInspection?.(out.inspection, window.index);
+      if (out.inspection !== undefined) {
+        input.onInspection?.(out.inspection, window.index);
+        if (out.inspection.overstated > 0) input.onOverstated?.(out.inspection.overstated, out.inspection.passages, window.index);
+      }
       return out.entries;
     } catch (error) {
       // The record is not the world. A window that could not be written is

@@ -296,6 +296,7 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
       recentTitles: job.recentTitles,
       untold: job.untold,
       // Dev inspector (6.1): what each window's entries were made of, with CHRONICA_INSPECT=1.
+      onOverstated: (overstated: number, passages: number, window: number) => { console.warn(`[burst ${burstId}] window ${window}: ${overstated} of ${passages} passage(s) said more than the world shows and were replaced by the engine's line`); },
       ...(process.env.CHRONICA_INSPECT === "1" ? { onInspection: (inspection: unknown, window: number) => { console.info(`[burst ${burstId}] window ${window} inspection: ${JSON.stringify(inspection)}`); } } : {}),
       onEntry: async (entry, window) => {
         ordinal += 1;

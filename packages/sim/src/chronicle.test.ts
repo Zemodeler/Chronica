@@ -1381,3 +1381,26 @@ describe("the dev inspector", () => {
     expect(result.inspection!.carriedCount).toBe(0);
   });
 });
+
+describe("the overstatement alarm", () => {
+  // Plan item 2: how often the historian says more than the world shows, counted even when the engine's line replaces it.
+  const compose = (body: string, status: "unanswered" | "achieved") => composeChronicle({
+    port: { complete: () => Promise.resolve(JSON.stringify({ entries: [{ thread: 1, title: "The crossing", body }] })) },
+    clock, observer: { kind: "character", id: "marcus-atilius" }, observerPolityId: "rome",
+    facts: [{ ...fact({ summary: "The consul ordered the legion carried over." }), sourceActionId: "order-1-p0" }],
+    from: { day: 0, minute: 0 }, to: { day: 30, minute: 0 }, narrative: [], frictions: [],
+    orderOutcome: () => ({ line: '"Carry the legion over" -- nothing came of it.', status }),
+  });
+
+  it("counts a passage that says the legion arrived when the part came to nothing, and prints the engine's line instead", async () => {
+    const result = await compose("The legion arrived at Messana on the third day.", "unanswered");
+    expect(result.inspection!.overstated).toBe(1);
+    expect(result.inspection!.passages).toBe(1);
+    expect(result.entries[0]!.body).toContain("nothing came of it");
+  });
+
+  it("counts nothing when the part is done, or the passage says no more than was done", async () => {
+    expect((await compose("The legion arrived at Messana on the third day.", "achieved")).inspection!.overstated).toBe(0);
+    expect((await compose("The consul ordered the legion over, and it set about the work.", "unanswered")).inspection!.overstated).toBe(0);
+  });
+});
