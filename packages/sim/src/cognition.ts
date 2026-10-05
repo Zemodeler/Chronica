@@ -627,9 +627,9 @@ function describeWars(character: Character, world: WorldState): string[] {
   // the consul's in Sicily, and his colleague, told nothing, advocated. A man
   // holding a magistracy of a power at war is told when none of its armies is
   // within reach of the enemy -- raising one, or sending one, is somebody's.
-  // A magistracy, not a seat in a council or a priesthood: a senator does not raise legions.
+  // A magistracy, not a seat in a council, a priesthood or the censorship: a senator or a censor does not raise legions.
   const magistrate = world.material.officeSeats.some((seat) => seat.status === "held" && seat.holderCharacterId === character.id
-    && !/(senat|council|elder|priest|member|assembly)/i.test(seat.officeId));
+    && !/(senat|council|elder|priest|member|assembly|censor)/i.test(seat.officeId));
   if (magistrate) {
     // Armies, not fleets: ships and armies do not give battle to each other.
     const afloat = (force: WorldState["material"]["forces"][number]): boolean => force.personnel.length > 0 && force.personnel.every((group) => /ship|galley|fleet|naval|trireme|quinquereme/i.test(group.categoryId));

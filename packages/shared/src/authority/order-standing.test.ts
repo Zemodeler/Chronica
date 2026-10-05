@@ -31,7 +31,12 @@ describe("an order between magistrates", () => {
   });
 
   it("still binds a Roman who holds no magistracy", () => {
-    expect(standing("gaius-genucius", "manius-curius").standing).toBe("binding");
+    // Curius now sits as censor, a magistracy of his own; a Roman with no seat but the Senate's is the case meant.
+    const state = world();
+    const plain = state.characters.find((character) => character.alive && character.polityId === "rome" && character.id !== "gaius-genucius"
+      && !state.material.officeSeats.some((seat) => seat.holderCharacterId === character.id && seat.status === "held" && !/senat/i.test(seat.officeId)));
+    expect(plain).toBeDefined();
+    expect(standing("gaius-genucius", plain!.id).standing).toBe("binding");
   });
 
   it("does not bind a magistrate above the one giving it", () => {

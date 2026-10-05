@@ -4,6 +4,7 @@ import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, typ
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
 import { createIdFactory } from "./ports";
+import { coastalProvinceIds } from "./narrator";
 import { runDeterministicTick } from "./tick";
 import { answerSiege, siegeDecision } from "./siege-decisions";
 
@@ -125,7 +126,8 @@ describe("the sea out of season", () => {
   it("costs a fleet kept at sea off another's coast its ships, and one laid up in its own harbour none", () => {
     const opening = WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
     const hulls = opening.material.forces.find((force) => force.id === "allied-greek-hulls")!.personnel.reduce((sum, group) => sum + group.fit, 0);
-    const home = opening.material.forces.find((force) => force.id === "allied-greek-hulls")!.locationId;
+    // Their old berth, Rhegium, is now the Campanians' (at war with Rome): the fleet is laid up in a harbour Rome holds.
+    const home = opening.map.provinces.find((province) => province.controllerPolityId === "rome" && coastalProvinceIds(opening).has(province.id))!.id;
     expect(winterAt(home)).toBe(hulls);
     expect(winterAt(PUNIC_IDS.carthage)).toBeLessThan(hulls);
   });

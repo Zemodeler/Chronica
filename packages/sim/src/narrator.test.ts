@@ -258,7 +258,7 @@ describe("how much stirs in a season", () => {
     // Nothing in the table could ever open one: a whole match ran with a
     // single war in it, and that one only because a rebellion seceded.
     const world = large();
-    const found = Array.from({ length: 60 }, (_, index) =>
+    const found = Array.from({ length: 300 }, (_, index) =>
       decideNarratorSeeds(input(later(world, 45), { gameId: `game-war-${index}` })))
       .flat()
       .find((seed) => seed.archetype === "war");

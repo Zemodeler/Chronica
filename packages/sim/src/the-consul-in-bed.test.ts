@@ -52,9 +52,10 @@ describe("a war nobody is fighting", () => {
   it("is put to a magistrate of the power whose armies are nowhere near the enemy", () => {
     // Legio I in Sicily; the Campanians hold Rhegium; nobody Roman is near them.
     const world = opening();
-    const away: WorldState = { ...world, material: { ...world.material, forces: world.material.forces.map((force) => (force.id === "roman-field-army" ? { ...force, locationId: PUNIC_IDS.lilybaeum } : force)) } };
+    const away: WorldState = { ...world, material: { ...world.material, // Every Roman force, the allied hulls berthed at Rhegium too: any of them within reach would be an army of theirs.
+      forces: world.material.forces.map((force) => (force.polityId === "rome" ? { ...force, locationId: PUNIC_IDS.lilybaeum } : force)) } };
     const text = renderCharacterPortrait("gnaeus-cornelius", "Gnaeus Cornelius Blasio", away, clock);
-    expect(text).toMatch(/No army of their power stands within reach of Campanian legion of Rhegium/);
+    expect(text).toMatch(/No army of their power stands within reach of Campanian Legion/);
     // Not to a senator, who raises no legions.
     expect(renderCharacterPortrait("manius-curius", "Manius Curius Dentatus", away, clock)).not.toMatch(/No army of their power/);
   });

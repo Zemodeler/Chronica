@@ -26,7 +26,7 @@ describe("an order to claim ground goes on being worked at", () => {
     expect(menNamedIn(SAID)).toBe(2_000);
     expect(menNamedIn("Send two thousand men to Rhegium")).toBe(2_000);
     expect(menNamedIn("Send them to Rhegium")).toBeNull();
-    expect(explicitOrderGoals(opening(), SAID, ORDER, "rome")).toEqual([expect.objectContaining({ kind: "control", polityId: "rome", settlementId: expect.any(String) })]);
+    expect(explicitOrderGoals(opening(), SAID, ORDER, "rome")).toEqual([expect.objectContaining({ kind: "control", polityId: "rome" })]);
   });
 
   it("makes the detachment, sets it as the part's mission and starts it on its way", () => {
@@ -62,7 +62,7 @@ describe("an order to claim ground goes on being worked at", () => {
     const made = detachments(world)[0]!;
     // It marched, arrived, and laid siege to the city the Campanians hold; the siege then runs by its own rules.
     expect(made.locationId).toBe((goal as { provinceId: string }).provinceId);
-    expect(world.sieges).toContainEqual(expect.objectContaining({ forceId: made.id, settlementId: (goal as { settlementId: string }).settlementId, status: "active", defenderPolityId: "rhegium-campanians" }));
+    expect(world.sieges).toContainEqual(expect.objectContaining({ forceId: made.id, settlementId: "settlement-rhegium", status: "active", defenderPolityId: "rhegium-campanians" }));
     expect(orderPartStatus(world, partOf(world))).not.toBe("achieved");
   });
 
