@@ -28,8 +28,14 @@ import { applyWarDamage, deriveDefaultProvinceMaterial, findProvinceMaterial } f
  * phase 2 with no caller anywhere in the engine; this is its first one.
  */
 
-/** Coin a settlement of one size unit is worth to whoever sacks it. */
-const SPOILS_PER_SETTLEMENT_SIZE = 45;
+/**
+ * Coin a settlement of one size unit is worth to whoever sacks it: four months
+ * of what its four thousand people can be made to pay (`reckonTaxCapacity`),
+ * as a besieged city's loot is counted (`sim/sieges.ts`). A city of ten units
+ * stripped of half of it is some 70 talents, as Carthago Nova's silver was
+ * counted in hundreds.
+ */
+const SPOILS_PER_SETTLEMENT_SIZE = 80_000;
 
 /** A sack takes this share of what is left, never the last of it. */
 const SACK_SHARE = 0.5;
@@ -144,6 +150,7 @@ export function sackTheProvince(world: WorldState, input: SackInput): Seizure {
     id: input.transactionId,
     atStep: input.atStep,
     kind: "spoils",
+    external: "plunder",
     amount: taken,
     destinationAccountId: destination,
     cause: input.cause,

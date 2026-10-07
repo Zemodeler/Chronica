@@ -74,7 +74,7 @@ const THE_ORDER: readonly WorldDelta[] = [
   {
     op: "obligation_upsert", localId: "from_spoils", obligationRef: null, kind: "army_pay",
     label: "The soldiers' share of what is taken", payerAccountRef: CHEST, recipientAccountRef: null,
-    amount: 300, cadenceDays: 30, priority: 900, active: true,
+    amount: 30_000, cadenceDays: 30, priority: 900, active: true,
     reason: "They are to be paid out of what they take, not out of the treasury.",
   },
   {
@@ -113,11 +113,11 @@ describe("paying an army out of what it takes", () => {
 
   it("pays the men while the chest holds out, and stops when it does not", () => {
     const ordered = applyDeltas(atRhegium(), THE_ORDER, context(atRhegium())).world;
-    expect(balance(ordered, CHEST)).toBe(400);
+    expect(balance(ordered, CHEST)).toBe(40_000);
 
-    // 400 in the chest against 300 a month: one month paid, the next not.
+    // 40 000 in the chest against 30 000 a month: one month paid, the next not.
     const first = months(ordered, 1);
-    expect(balance(first, CHEST)).toBe(100);
+    expect(balance(first, CHEST)).toBe(10_000);
     expect(first.material.obligations.find((o) => o.id === army(first).payObligationId)!.missedPeriods).toBe(0);
 
     const second = months(first, 1);
@@ -140,7 +140,7 @@ describe("paying an army out of what it takes", () => {
     expect(taken.rejected).toHaveLength(0);
     expect(taken.world.map.provinces.find((p) => p.id === RHEGIUM)!.controllerPolityId).toBe("rome");
     // Into the army's chest, because the army that took it has one.
-    expect(balance(taken.world, CHEST)).toBeGreaterThan(400);
+    expect(balance(taken.world, CHEST)).toBeGreaterThan(40_000);
     expect(taken.world.material.transactions.some((transaction) => transaction.kind === "spoils")).toBe(true);
   });
 
@@ -154,7 +154,8 @@ describe("paying an army out of what it takes", () => {
 
     // Rich for a while on what Rhegium had, and then not. Nothing else is
     // paying them: this is the whole of the arrangement the player chose.
-    const after = months(plundered, 12);
+    // (what Rhegium had is counted in the talents now: it lasts as many months as it is worth wages, and then a few more.)
+    const after = months(plundered, Math.ceil(balance(plundered, CHEST) / 30_000) + 4);
     expect(after.material.obligations.find((o) => o.id === army(after).payObligationId)!.missedPeriods).toBeGreaterThan(0);
     expect(army(after).payArrearsPeriods).toBeGreaterThan(0);
     expect(army(after).moraleBps).toBeLessThan(army(plundered).moraleBps);

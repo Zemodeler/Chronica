@@ -55,19 +55,19 @@ describe("a man and his land", () => {
     expect(world.material.holdings.find((holding) => holding.id === "curius-sabine-farm")?.legalHolderCharacterId).toBe("manius-curius");
     const before = balance(world, "curius-purse");
     const month = runDeterministicTick({ world, toDay: 30, ids: createIdFactory("land-tick"), warfare: definition.warfare }).world;
-    expect(balance(month, "curius-purse")).toBe(before + 40);
+    expect(balance(month, "curius-purse")).toBe(before + 1_200);
     // An estate authored in the scenario is the same kind of thing as one bought in play.
-    expect(estateTerms(world, LATIUM, "slight")?.monthlyYield).toBe(40);
+    expect(estateTerms(world, LATIUM, "slight")?.monthlyYield).toBe(1_200);
   });
 
   it("lets a private citizen improve his own estate from his own purse, lawfully", () => {
     const world = opening();
-    const terms = improvementTerms(world, LATIUM, 40, "slight")!;
+    const terms = improvementTerms(world, LATIUM, 1_200, "slight")!;
     const result = applyDeltas(world, [IMPROVE_THE_FARM], as("manius-curius"));
     expect(result.rejected).toEqual([]);
     expect(result.breaches).toEqual([]);
     expect(balance(result.world, "curius-purse")).toBe(balance(world, "curius-purse") - terms.cost);
-    expect(yieldOf(result.world, "curius-sabine-farm")).toBe(40 + terms.added);
+    expect(yieldOf(result.world, "curius-sabine-farm")).toBe(1_200 + terms.added);
   });
 
   it("refuses works nobody can pay for, as the world refusing", () => {
@@ -88,8 +88,8 @@ describe("a man and his land", () => {
       world = result.world;
     }
     expect(refused).toBe(true);
-    // A tenth of what a market in Latium would bring in: an estate is a man's living.
-    expect(yieldOf(world, "curius-sabine-farm")).toBeLessThanOrEqual(600);
+    // A tenth of what a market in Latium would bring in, three tenths of a state's share: an estate is a man's living.
+    expect(yieldOf(world, "curius-sabine-farm")).toBeLessThanOrEqual(18_000);
   });
 
   it("lets him buy land with his own money, at the engine's price", () => {
@@ -135,7 +135,7 @@ describe("a man and his land", () => {
     };
     const redirected: WorldDelta = {
       op: "income_source_upsert", incomeSourceRef: "rome-tributum", kind: "tax", label: "The tributum on Roman citizens",
-      beneficiaryAccountRef: "carthage-treasury", amount: 1_100, cadenceDays: 30, counterpartyPolityId: null, active: true,
+      beneficiaryAccountRef: "carthage-treasury", amount: 110_000, cadenceDays: 30, counterpartyPolityId: null, active: true,
       reason: "Carthage takes Rome's taxes.",
     };
     for (const delta of [handedAnIncome, rewritten, redirected]) {
@@ -145,13 +145,13 @@ describe("a man and his land", () => {
       // estate, an office, a payment -- rather than a rule of the world.
       expect(result.rejected[0]!.kind).toBe("reference");
     }
-    expect(yieldOf(world, "curius-sabine-farm")).toBe(40);
+    expect(yieldOf(world, "curius-sabine-farm")).toBe(1_200);
 
     // A government still levies what it levies; the tick bounds what the land bears.
-    const raised: WorldDelta = { ...redirected, beneficiaryAccountRef: "rome-treasury", amount: 1_500, reason: "The Senate raises the tributum." };
+    const raised: WorldDelta = { ...redirected, beneficiaryAccountRef: "rome-treasury", amount: 150_000, reason: "The Senate raises the tributum." };
     const levied = applyDeltas(world, [raised], as("gaius-genucius"));
     expect(levied.rejected).toEqual([]);
-    expect(levied.world.material.incomeSources.find((source) => source.id === "rome-tributum")?.amount).toBe(1_500);
+    expect(levied.world.material.incomeSources.find((source) => source.id === "rome-tributum")?.amount).toBe(150_000);
   });
 
   it("does not let a private man improve his farm out of the treasury", () => {

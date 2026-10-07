@@ -685,8 +685,8 @@ describe("what a soldier costs", () => {
     }));
 
   it("is told to whoever keeps the treasury, so new legions are priced at Rome's rate rather than guessed", () => {
-    // Twenty thousand men at 35 a thousand is 700 a month, of an income near 1 800.
-    expect(forConsul("gaius-genucius")).toContain("Our soldiers are paid 35/month for every 1,000 men.");
+    // Twenty thousand men at ten thousand a thousand is 200 000 a month, of an income near 160 000: four more legions are more than Rome can keep.
+    expect(forConsul("gaius-genucius")).toContain("Our soldiers are paid 10,000/month for every 1,000 men.");
   });
 });
 

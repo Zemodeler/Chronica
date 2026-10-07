@@ -73,13 +73,33 @@ export function provinceWorth(world: WorldState, provinceId: string, giver: stri
   return province.controllerPolityId !== giver ? Math.round(base / 2) : base;
 }
 
+/** Below this a power's means are counted as this much, so an indemnity on a pauper is not priced in thousands of points: eight talents. */
+export const INDEMNITY_MEANS_FLOOR = 50_000;
+
+/**
+ * What a power can be asked to pay: what its chest holds and a year of what
+ * it takes in. An indemnity was priced off the chest alone, which held a few
+ * months of revenue, so the most a beaten power was asked for was a tenth of
+ * that -- where the peace of 241 took 3,200 talents from Carthage over ten
+ * years. Counted with a year's revenue the same shares come out in talents,
+ * and the price in points of a given share of a power's means is what it
+ * always was.
+ */
+export function meansOf(world: WorldState, polityId: string): number {
+  const chest = world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === polityId && account.status === "active");
+  if (chest === undefined) return 0;
+  const yearly = world.material.incomeSources
+    .filter((source) => source.active && source.beneficiaryAccountId === chest.id && source.cadenceSteps > 0)
+    .reduce((sum, source) => sum + ((source.amount * source.collectionRateBps) / 10_000) * (365 / source.cadenceSteps), 0);
+  return Math.round(Math.max(0, chest.balance) + yearly);
+}
+
 /** What a clause costs the side giving it up, in the currency of a war going badly. */
 export function priceOf(world: WorldState, clause: PeaceClause, giver: string): number {
   if (clause.kind === "cession") return provinceWorth(world, clause.provinceId, giver);
   if (clause.kind === "indemnity") {
     if (clause.payerPolityId !== giver) return 0;
-    const treasury = world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === giver);
-    return Math.round((25 * clause.amount * clause.periods) / Math.max(500, treasury?.balance ?? 0));
+    return Math.round((25 * clause.amount * clause.periods) / Math.max(INDEMNITY_MEANS_FLOOR, meansOf(world, giver)));
   }
   if (clause.kind === "hostage") return world.characters.find((character) => character.id === clause.characterRef)?.polityId === giver ? 8 : 0;
   if (clause.kind === "undertaking") return clause.byPolityId === giver ? 10 : 0;

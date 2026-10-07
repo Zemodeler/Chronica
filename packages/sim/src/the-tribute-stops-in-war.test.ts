@@ -42,7 +42,7 @@ const agreement = (id: string, kind: PolityAgreement["kind"], polityId: string, 
 });
 const indemnity = (id: string, payer: string, recipient: string, treatyId: string): MoneyObligation => ({
   id, kind: "tribute", label: "Indemnity owed by Carthage to the Roman Republic", payerAccountId: payer, recipientAccountId: recipient,
-  amount: 500, cadenceSteps: 30, nextDueStep: 30, priority: 450, arrears: 0, missedPeriods: 0, active: true, consequenceRef: treatyId, remainingPeriods: 10,
+  amount: 50_000, cadenceSteps: 30, nextDueStep: 30, priority: 450, arrears: 0, missedPeriods: 0, active: true, consequenceRef: treatyId, remainingPeriods: 10,
 });
 
 /** Carthage at peace with Rome, paying it an indemnity. */
@@ -77,11 +77,12 @@ describe("the tribute stops in war", () => {
       ...world,
       polityAgreements: openWar(world.polityAgreements, { id: "war-2", polityId: "carthage", otherPolityId: "rome", terms: "Again.", atStep: 0, sourceMessageId: null, reason: "No answer came." }),
     };
-    const romeBefore = balance(atWarAgain, "rome-treasury");
     const ticked = tick(atWarAgain, 30).world;
     expect(ticked.material.obligations.find((obligation) => obligation.id === "indemnity-1")!.active).toBe(false);
     expect(ticked.material.transactions.some((transaction) => transaction.cause.id === "indemnity-1")).toBe(false);
-    expect(balance(ticked, "rome-treasury")).toBeLessThanOrEqual(romeBefore + 5_000);
+    // Rome took in exactly what it would have with no indemnity at all: none was paid.
+    const without: WorldState = { ...atWarAgain, material: { ...atWarAgain.material, obligations: atWarAgain.material.obligations.filter((obligation) => obligation.id !== "indemnity-1") } };
+    expect(balance(ticked, "rome-treasury")).toBe(balance(tick(without, 30).world, "rome-treasury"));
   });
 
   it("makes a tributary pay: a tenth of what its lands yield, every month", () => {

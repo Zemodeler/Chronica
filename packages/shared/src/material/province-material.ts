@@ -50,12 +50,23 @@ const MANPOWER_FRACTION_OF_POPULATION = 0.08;
  */
 const MEN_OF_AGE_PER_YEAR = 0.012;
 /**
- * What a head pays in a month, before the rate and the reach of the power that
- * taxes it. It was half a coin when a province counted only its townsfolk; the
- * country people counted since pay a tenth of that each, so what the land
- * yields is what it was.
+ * What a head can be made to pay in a month, before the rate and the reach of
+ * the power that taxes it, in drachmae.
+ *
+ * It was half a coin a townsman when a province counted only its townsfolk, in
+ * a world where a legion's pay for a month was thirty-five: every figure of the
+ * state was a hundredth or a thousandth of what it was. A legionary draws ten
+ * drachmae a month (`LEGIONARY_PAY_GROSS`) and one legion with its ala costs
+ * the treasury sixty thousand, so the land has to be able to bear sums of that
+ * order. Fifty a townsman a month, and a tenth of that for each of the country
+ * people counted since: some five a head across a province, of which the
+ * extraction share (`TAX_EXTRACTION_BPS`) lets a power take a tenth and
+ * stability a share of the tenth, so a calm province can bear about four
+ * drachmae a head a year. Rome's million then can bear some 700 talents a year
+ * and the Republic asks for a third of it: two or three hundred, against the
+ * 3,200 Carthage was made to pay in 241.
  */
-const TAX_CAPACITY_PER_POPULATION = 0.5 / (1 + COUNTRY_FOLK_PER_TOWNSMAN);
+const TAX_CAPACITY_PER_POPULATION = 50 / (1 + COUNTRY_FOLK_PER_TOWNSMAN);
 const BASELINE_PRODUCTIVE_CAPACITY_BPS = 10_000;
 const BASELINE_FOOD_SECURITY_BPS = 8_000;
 const BASELINE_STABILITY_BPS = 7_000;

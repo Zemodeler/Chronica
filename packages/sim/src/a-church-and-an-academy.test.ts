@@ -146,16 +146,20 @@ describe("build an academy", () => {
 
 describe("anything else anybody makes", () => {
   it("pays its owner, scaled to what the province can yield", () => {
+    // A market in Latium clears some sixty thousand a month at the scale of the
+    // ancient accounts, and costs fifteen months of that to found: more than the
+    // treasury holds at the opening, so Rome is given the money to build it.
+    const flush = (): WorldState => ({ ...world(), material: { ...world().material, accounts: world().material.accounts.map((account) => (account.id === "rome-treasury" ? { ...account, balance: 5_000_000 } : account)) } });
     const made = order([{
       op: "generic_entity_create", localId: "market", kind: "market", label: "The Forum Boarium",
       ownerRef: { kind: "polity", id: "rome" }, provinceId: LATIUM,
       effects: [{ quantity: "income", band: "marked" }], reason: "A cattle market.",
-    }]);
+    }], flush());
     // Founding it costs a venture's months of what it clears, so it is measured
     // by what it adds each month rather than by the balance a season later.
     const gained = (state: WorldState) => balance(after(state, 120).world, "rome-treasury") - balance(after(state, 30).world, "rome-treasury");
-    expect(gained(made)).toBeGreaterThan(gained(order([])));
-    expect(balance(made, "rome-treasury")).toBeLessThan(balance(world(), "rome-treasury"));
+    expect(gained(made)).toBeGreaterThan(gained(order([], flush())));
+    expect(balance(made, "rome-treasury")).toBeLessThan(balance(flush(), "rome-treasury"));
   });
 
   it("makes a harsh law felt across the whole realm, and the province settles lower", () => {

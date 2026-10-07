@@ -187,13 +187,13 @@ describe("paying with what there is", () => {
   it("repays what the debtor has, when he has less than he offers", () => {
     const opened = act("gaius-genucius", [{
       op: "loan_open", localId: "debt", lenderKind: "foreign", lenderRef: null, borrowerAccountRef: "gaius-purse",
-      principal: 5_000, interestBps: 100, cadenceDays: 30, terms: "A banker's loan", collateralHoldingRef: null, reason: "He borrows.",
+      principal: 50_000, interestBps: 100, cadenceDays: 30, terms: "A banker's loan", collateralHoldingRef: null, reason: "He borrows.",
     }]);
-    const spent = act("gaius-genucius", [{ op: "money_transfer", fromAccountRef: "gaius-purse", toAccountRef: null, amount: 5_000, reason: "Spent." }], opened.world);
+    const spent = act("gaius-genucius", [{ op: "money_transfer", fromAccountRef: "gaius-purse", toAccountRef: null, amount: 50_000, reason: "Spent." }], opened.world);
     const loanId = spent.world.material.loans[0]!.id;
-    const repaid = act("gaius-genucius", [{ op: "loan_settle", loanRef: loanId, action: "repay", amount: 5_000, reason: "All of it." }], spent.world);
+    const repaid = act("gaius-genucius", [{ op: "loan_settle", loanRef: loanId, action: "repay", amount: 50_000, reason: "All of it." }], spent.world);
     expect(repaid.rejected).toEqual([]);
-    expect(repaid.world.material.loans[0]!.outstanding).toBe(5_000 - 1_200);
+    expect(repaid.world.material.loans[0]!.outstanding).toBe(50_000 - 36_000);
     expect(balance(repaid.world, "gaius-purse")).toBe(0);
   });
 });

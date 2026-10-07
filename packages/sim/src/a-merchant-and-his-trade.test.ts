@@ -77,7 +77,7 @@ function withTheVenture(): WorldState {
 }
 
 /** Leptines' purse gained this month, less what his estate paid him. */
-const tradeReturn = (before: WorldState, after: WorldState): number => balance(after, "leptines-purse") - balance(before, "leptines-purse") - 90;
+const tradeReturn = (before: WorldState, after: WorldState): number => balance(after, "leptines-purse") - balance(before, "leptines-purse") - 2_700;
 /** What his cargoes brought in, less the next cargoes bought, since `before`: his purse's trade rows. */
 const cargoReturn = (before: WorldState, after: WorldState): number => after.material.transactions.slice(before.material.transactions.length)
   .filter((row) => (row.destinationAccountId === "leptines-purse" && row.kind === "income" && row.cause.kind === "scheduled_income" && row.cause.explanation.startsWith("Sale of the cargo"))
@@ -220,12 +220,12 @@ describe("a merchant and his trade", () => {
     const refused = apply(opening(), [privately], as("leptines-syracuse"));
     expect(refused.rejected.map((rejection) => rejection.kind)).toContain("reference");
 
-    const forTheCity = { ...(privately as unknown as Record<string, unknown>), localId: "the_harbour", label: "A harbour", sponsorRef: { kind: "polity", id: "syracuse" }, fundingAccountRef: "syracuse-treasury", completionOutcome: { kind: "income_source", label: "Harbour dues", amount: 100_000, provinceId: SYRACUSE, beneficiaryAccountRef: "syracuse-treasury", cadenceDays: 30 } } as unknown as WorldDelta;
+    const forTheCity = { ...(privately as unknown as Record<string, unknown>), localId: "the_harbour", label: "A harbour", sponsorRef: { kind: "polity", id: "syracuse" }, fundingAccountRef: "syracuse-treasury", completionOutcome: { kind: "income_source", label: "Harbour dues", amount: 10_000_000, provinceId: SYRACUSE, beneficiaryAccountRef: "syracuse-treasury", cadenceDays: 30 } } as unknown as WorldDelta;
     const built = apply(opening(), [forTheCity], as("hieron-ii"));
     expect(built.rejected).toEqual([]);
     const finished = tick(built.world, 30).world;
     const dues = finished.material.incomeSources.find((source) => source.label === "Harbour dues")!;
-    // A great market's share of Syracuse, not the hundred thousand the answer promised.
-    expect(dues.amount).toBeLessThan(5_000);
+    // A great market's share of Syracuse (a seventh of what its province can yield), not the ten million the answer promised.
+    expect(dues.amount).toBeLessThanOrEqual(300_000);
   });
 });

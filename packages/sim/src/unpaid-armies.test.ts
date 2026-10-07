@@ -33,8 +33,8 @@ const opening = (): WorldState => {
     ...world,
     material: {
       ...world.material,
-      accounts: world.material.accounts.map((account) => (account.id === "mamertine-treasury" ? { ...account, balance: 600 } : account)),
-      incomeSources: world.material.incomeSources.map((source) => (source.id === "mamertine-tolls" ? { ...source, amount: 90 } : source)),
+      accounts: world.material.accounts.map((account) => (account.id === "mamertine-treasury" ? { ...account, balance: 70_000 } : account)),
+      incomeSources: world.material.incomeSources.map((source) => (source.id === "mamertine-tolls" ? { ...source, amount: 10_500 } : source)),
     },
   };
 };

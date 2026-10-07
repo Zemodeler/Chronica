@@ -41,7 +41,7 @@ import type { IdFactory } from "./ports";
  */
 
 /** A man's bounty and kit, per thousand men, in the world's money: about a month and a half of a legion's pay. */
-export const LEVY_COST_PER_THOUSAND = 30;
+export const LEVY_COST_PER_THOUSAND = 15_000;
 /** Men who can be at the standard the day a levy is called. */
 export const MUSTER_AT_ONCE = 1_000;
 /** Men a muster brings in a day beyond those. */
