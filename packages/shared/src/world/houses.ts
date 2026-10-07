@@ -43,6 +43,10 @@ export const MerchantHouseSchema = z
     losses: z.number().int().nonnegative().max(1_000_000).default(0),
     /** What it has lent to treasuries and not yet been repaid, a reading and never a ledger (the loans are the ledger). */
     lentSinceStep: ElapsedStepSchema.nullable().default(null),
+    /** The day the house was first found with a head and nobody to follow him: its line is looked to until one is named (`house-succession.ts`). */
+    heirSoughtAtStep: ElapsedStepSchema.nullable().optional(),
+    /** The power that held the house's seat when the house last looked: a change is a city that has changed hands (`house-seat.ts`). Unset, it is `polityId`. */
+    seatPolityId: EntityIdSchema.nullable().optional(),
   })
   .strict();
 export type MerchantHouse = z.infer<typeof MerchantHouseSchema>;

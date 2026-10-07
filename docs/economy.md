@@ -340,7 +340,7 @@ tithe); v49 adds goods, hubs, flows, customs and Rome's two pacts; v50 adds the 
   `coinage.ts`, `money-audit.ts`, `trade-summary.ts` (the slice's trade lines and news), `slice.ts`.
 - Readers for the treasury: `packages/shared/src/material/regions-view.ts`, `trade-view.ts`, `books.ts`.
 - Scenario data: `packages/db/src/punic-wars-scenario.ts`, `punic-wars-taxes.ts`, `punic-wars-houses.ts` (the merchant houses).
-- The people who manage it: `packages/sim/src/fiscal-officers.ts`, `merchant-houses.ts`, `house-voyages.ts`; the kit for their tests is `fiscal-test-kit.ts`.
+- The people who manage it: `packages/sim/src/fiscal-officers.ts`, `merchant-houses.ts`, `house-voyages.ts`, `house-succession.ts`, `house-seat.ts`; the kit for their tests is `fiscal-test-kit.ts`.
 - The sanity run: `scripts/economy-sanity.mts` (`npm run sanity:economy -- 10 [--war]`) runs the real monthly tick with a
   model that never acts and checks the targets together: nothing unexplained, populations steady, grain in band,
   development diverging, price levels bounded.
@@ -415,8 +415,52 @@ voyage had: a chance of loss (90 to 400 bps by sea and days, 350 more where war 
 venture closed), the crew's share (6%, the `the_unnamed` door), and the duty of the power it lands in, less any pact (the `market`
 door both ways, and into `customsDue`). Houses pay a household (1.1% of the purse a month, `the_unnamed`) and a liturgy to their
 treasury (6% of what each cargo clears over its cost, an ordinary transfer: a power's tax rolls count none of it) so their capital stays bounded. The head ages and dies by the ordinary mortality; the estate
-passes by `settleEstate`; the house goes on under the heir he named, and is wound up with nobody to follow him. Cargoes sold or lost
+passes by `settleEstate`; the house goes on under the heir he named, and is wound up with nobody to follow him (and who is named, below). Cargoes sold or lost
 two months ago are dropped from the world's list.
+
+**Who follows the head** (`packages/sim/src/house-succession.ts`, looked to once a month before the cargoes, for any head whose named heir is
+dead, carried off or gone to another power, so the second head of a house has an heir named within the month if a man can be had):
+
+1. *A kinsman.* The nearest living man of the head's blood or marriage in the family graph (sons, brothers, cousins and nephews, sons-in-law, to the third
+   degree; of full age, not past 58, of the head's power, not barred) who is fit for a counting-house (`merchantFit`: 30% wealth drive, 25% honesty,
+   30% stewardship, 15% care for risk; at least 36) with honesty 28 or more, and whom the head thinks no ill of (his opinion above -25). Sons before brothers,
+   brothers before the rest, then the fitter, then the elder. He is named heir; nothing else changes.
+2. *Adoption.* Where there is no such kinsman the house asks, at most eight in turn: the man who keeps its books under a `steward` or `agent` contract; its
+   freedmen; its clients (social links); then the men of its power with no office, no army, no sons of their own and no great standing (those of its own city
+   first). Each must be younger than the head, fit (48), honest (28) and not disliked (opinion above -20). Each answers by his own nature: a willingness of
+   35 + 0.45 (wealth - 50) + 0.35 (status - 50) + 0.2 (family - 50) + 0.15 (duty - 50) + half his opinion of the head (to 30) + a bond (freedman 20, steward 15,
+   client 10), and he accepts when a roll fixed by the house, head and man (not drawn afresh each month) falls under it. The man who accepts takes the head's
+   name (Rome: his own praenomen with the head's nomen and cognomen, and the order the name gives; elsewhere "son of" the head), becomes the head's child in the
+   family graph, is tied to him by a `kin` social link and a life contract of `adoption_or_heir_designation`, is paid a son's portion out of the head's purse (3%,
+   400 to 6,000: a transfer between purses) and his contract of service ends. The head names him heir. When the head dies the estate goes to the heir he named, and
+   so the purse and every cargo afloat are his; the house is his from that month and he, in turn, has an heir named within the month.
+3. *A new man*, which is the rare branch: only where there is neither, only after the head has gone half a year unfollowed, and then by one throw a year weighted
+   by what the house is worth and the head's standing (1,200 + capital/80 + prestige/8 of 10,000: about three in ten for a house of 150,000, never under 5 or over
+   60 in a hundred). On a pass the head either takes a factor found in his market by the hiring-market machinery (`hireAtThePlace`, younger than the head, adopted as
+   in 2) or sends for a young man of another branch of the family (19 to 24, with 3,000 of his own, tied to the head as a relative and named as in 1; the brief asked for a minor
+   kinsman: a boy could not keep the books, so he is of age). Each arrives with an endowment, the one door by which the books let a man bring money into the world.
+4. *Wound up.* A head who dies with nobody named leaves an estate with nobody to take it: `settleEstate` sends the coin to his power's treasury, closes the cargoes
+   and leaves the debts unpaid, and the house is ended. A head who is the last of his line is therefore ended only by his death, never by his having no heir yet.
+
+In the Punic opening a house is made of a head and an heir with no family about them, so kinsmen exist only where the engine has made them (the kinsmen brought in
+under 3, whose families then become kin to the house). Sixty months of the Punic opening, with the lives as they fall: two heirs died among the seventeen houses and
+both were made good (one adopted, a man of Carthage; one a young man of another branch brought in); no head died, so none was wound up. The worst case, every house's heir
+dead in the second month and every head in the twentieth: three adoptions, one kinsman (of the family a new man had founded) and twenty-five new men over the sixty months
+(the pools of men free of office and army are thin in a world whose people are mostly notable), fourteen houses followed their heads, and three were wound up (their new men
+had not come by the throw before the head died).
+
+**Where the house sits** (`packages/sim/src/house-seat.ts`). A house is its head's. Each month its `polityId` is the power its head belongs to (so a
+head who changes his allegiance takes the house's lending, its liturgy and its customs with him: lending reads `polityId`, a cargo's liturgy and duty read the
+owner's), and its seat follows the city it trades from. The house remembers who held its city (`seatPolityId`); when that is no longer who holds it:
+
+- the head's own power holds it now, or it is an ally's garrison in a city whose owner is still the head's: nothing moves;
+- a power at war with the head's has taken it: the head and his named heir go to the nearest port market of his own power that is not occupied (the house is seated there)
+  and the move costs an eighth of the purse (freight, bribes, goods left on the quay, by the door of the men nobody names); where the power has no such market the
+  house is plundered and ended, half of the head's purse to the treasury of the power that took the city (a confiscation) and the cargoes lost;
+- a power not at war with the head's holds it (ceded, sold, left by a peace): the house stays, and the head's allegiance and his heir's go with the city, so
+  it lends, pays its liturgy and its customs to the new holder; but a head whose duty is 65 or more will not change his power and goes, as above, to a market of his own.
+
+Tests: `a-house-finds-an-heir.test.ts`, `a-house-follows-its-city.test.ts`.
 
 **Merchants improve the trade, not only their purses.** A hub with houses has a *lift*, `1 + 0.5 x min(1, capital / 800,000)`
 (`merchantLiftByHub`): trade flows (`trade-flows.ts`) carry up to that much more on its routes and what its merchants can send out

@@ -22,6 +22,8 @@ import {
   type WorldState,
   MAX_VENTURES_PER_HOUSE,
 } from "@chronica/shared";
+import { keepTheSeats } from "./house-seat";
+import { keepTheLine } from "./house-succession";
 import { CREW_SHARE_BPS, dutyOnCargoBps, voyageLossBps } from "./house-voyages";
 import type { IdFactory } from "./ports";
 
@@ -312,7 +314,18 @@ const nameOfProvince = (world: WorldState, id: string): string => {
  *  3. With room in its fleet (`MAX_VENTURES_PER_HOUSE`) and money to spare it buys goods out of a hub's stock
  *     and sends them where the price is best (`pairsFor`), and the cargo is a `TradeVenture` like any other.
  */
-export function keepMerchantHouses(world: WorldState, toDay: number, ids: IdFactory): { world: WorldState; facts: FactProposalDraft[] } {
+export function keepMerchantHouses(start: WorldState, toDay: number, ids: IdFactory): { world: WorldState; facts: FactProposalDraft[] } {
+  // Before the cargoes, the house's own affairs: its seat and power follow its head, and a head with nobody to follow him has one
+  // named (`house-seat.ts`, `house-succession.ts`). Only houses whose month has come.
+  const due = new Set(economyOf(start).houses.filter((house) => house.status === "trading" && toDay - house.actedAtStep >= 30).map((house) => house.id));
+  if (due.size === 0) return { world: start, facts: [] };
+  const line = keepTheLine(start, toDay, ids, due);
+  const seats = keepTheSeats(line.world, toDay, ids, due);
+  const cargoes = keepTheCargoes(seats.world, toDay, ids);
+  return { world: cargoes.world, facts: [...line.facts, ...seats.facts, ...cargoes.facts] };
+}
+
+function keepTheCargoes(world: WorldState, toDay: number, ids: IdFactory): { world: WorldState; facts: FactProposalDraft[] } {
   const memory = economyOf(world);
   const standing = memory.houses.filter((house) => house.status === "trading");
   if (standing.length === 0) return { world, facts: [] };
