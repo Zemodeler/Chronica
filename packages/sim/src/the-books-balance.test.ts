@@ -126,7 +126,7 @@ describe("the books balance", { timeout: 120_000 }, () => {
     expect(unexplainedTotal(auditMoney({ ...paying, elapsedStep: 30 }, paid.world))).toBe(0);
     // A chest that holds less pays what it holds (with the tithe that came in the same month): nothing is made up.
     const poor = month(bound(25_000, 200_000));
-    expect(poor.world.material.transactions.find((transaction) => transaction.cause.id === "syracuse-tribute" && transaction.destinationAccountId === "carthage-treasury")?.amount).toBeLessThanOrEqual(25_000 + 62_000);
+    expect(poor.world.material.transactions.find((transaction) => transaction.cause.id === "syracuse-tribute" && transaction.destinationAccountId === "carthage-treasury")?.amount).toBeLessThanOrEqual(25_000 + 192_000);
   });
 
   it("explains the customs trade pays too: a year of goods crossing borders under tariffs, a pact and an embargo, nothing unexplained", () => {

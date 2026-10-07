@@ -694,7 +694,7 @@ const WRITTEN_OUT: ReadonlySet<string> = new Set(["rome", "carthage", "syracuse"
 
 const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
   schemaVersion: 3,
-  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 51, libraryVersion: 1 },
+  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 52, libraryVersion: 1 },
   elapsedStep: 0,
   instant: { day: 0, minute: 0 },
   // How the powers tax their ground, where the age said so (v48). Every other
@@ -971,10 +971,10 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
       // VISION §7's whole economy -- income, expenditure, surplus -- had no
       // subject. A republic that cannot run out of money is not a republic
       // anybody has to govern.
-      { id: "rome-treasury", owner: { kind: "polity", id: "rome" }, currencyId: "drachma", balance: 900_000, status: "active", visibility: "polity" },
-      { id: "carthage-treasury", owner: { kind: "polity", id: "carthage" }, currencyId: "drachma", balance: 6_000_000, status: "active", visibility: "polity" },
-      { id: "syracuse-treasury", owner: { kind: "polity", id: "syracuse" }, currencyId: "drachma", balance: 520_000, status: "active", visibility: "polity" },
-      { id: "mamertine-treasury", owner: { kind: "polity", id: "mamertines" }, currencyId: "drachma", balance: 250_000, status: "active", visibility: "polity" },
+      { id: "rome-treasury", owner: { kind: "polity", id: "rome" }, currencyId: "drachma", balance: 2_790_000, status: "active", visibility: "polity" },
+      { id: "carthage-treasury", owner: { kind: "polity", id: "carthage" }, currencyId: "drachma", balance: 18_600_000, status: "active", visibility: "polity" },
+      { id: "syracuse-treasury", owner: { kind: "polity", id: "syracuse" }, currencyId: "drachma", balance: 1_612_000, status: "active", visibility: "polity" },
+      { id: "mamertine-treasury", owner: { kind: "polity", id: "mamertines" }, currencyId: "drachma", balance: 775_000, status: "active", visibility: "polity" },
       // The chest each army carries. Empty at the opening -- nobody has taken
       // anything yet -- but real, because it is where plunder lands and what
       // an army paid out of what it takes is paid from. Without one, an order
@@ -1267,26 +1267,29 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
      *
      * Every figure is in drachmae at the scale of the ancient accounts (v47;
      * a talent is 6 000): the revenues here were a hundredth of what a power
-     * of the age took in. Rome's own citizens and public land bring in about
-     * 130 000 a month, some 260 talents a year, and with the rents of the
-     * land taken from the Bruttians and Samnites 160 000; Carthage, whose
-     * harbour dues and African tribute come to about 470 000 a month, takes
-     * in over 900 talents; Syracuse's tithe is 62 000 a month, 125 talents;
-     * and the Mamertines' tolls on the strait 17 500. What a province can
-     * bear (`TAX_CAPACITY_PER_POPULATION`) is scaled with them, so each of
-     * these asks the same share of its land as before.
+     * of the age took in. Since v52 every one is 3.1 times what v47 wrote
+     * (`REVENUE_SCALE`), to meet the rule that 10 000 men cost Rome a fifth
+     * of its income and 20 000 two fifths: Rome's own citizens and public land
+     * bring in about 400 000 a month, and with the rents of the land taken
+     * from the Bruttians and Samnites 500 000, a thousand talents a year;
+     * Carthage, whose harbour dues and African tribute come to about
+     * 1 457 000 a month, takes in some 2 900 talents; Syracuse's tithe is
+     * 192 000 a month and the Mamertines' tolls on the strait 54 250 (77 500
+     * at 70% collected). What a province can bear (`TAX_CAPACITY_PER_POPULATION`)
+     * is scaled with them, so each of these asks the same share of its land
+     * as before. The pay below was not raised: a man still draws ten.
      */
     incomeSources: [
-      { id: "rome-tributum", kind: "tax", label: "The tributum on Roman citizens", beneficiaryAccountId: "rome-treasury", originKind: "polity", originId: "rome", amount: 110_000, cadenceSteps: 30, nextDueStep: 30, collectionRateBps: 9_000, active: true },
-      { id: "rome-ager-publicus", kind: "land", label: "Rents of the public land", beneficiaryAccountId: "rome-treasury", originKind: "polity", originId: "rome", amount: 33_000, cadenceSteps: 30, nextDueStep: 30, active: true },
+      { id: "rome-tributum", kind: "tax", label: "The tributum on Roman citizens", beneficiaryAccountId: "rome-treasury", originKind: "polity", originId: "rome", amount: 340_000, cadenceSteps: 30, nextDueStep: 30, collectionRateBps: 9_000, active: true },
+      { id: "rome-ager-publicus", kind: "land", label: "Rents of the public land", beneficiaryAccountId: "rome-treasury", originKind: "polity", originId: "rome", amount: 102_000, cadenceSteps: 30, nextDueStep: 30, active: true },
       // The allies pay Rome no tribute, but the land Rome took from them when
       // it beat them is Rome's, rented out or cut for timber. Each rent runs
       // through its ally's country, so a revolt cuts it off.
-      { id: "rome-sila-forest", kind: "land", label: "Timber and pitch of the Sila forest, taken from the Bruttians in 272", beneficiaryAccountId: "rome-treasury", originKind: "polity", originId: "rome", counterpartyPolityId: "bruttians", amount: 15_000, cadenceSteps: 30, nextDueStep: 30, active: true },
-      { id: "rome-samnite-land", kind: "land", label: "Rents of the land taken from the Samnites", beneficiaryAccountId: "rome-treasury", originKind: "polity", originId: "rome", counterpartyPolityId: "samnites", amount: 15_000, cadenceSteps: 30, nextDueStep: 30, active: true },
-      { id: "carthage-harbour-dues", kind: "trade", label: "Harbour dues at Carthage", beneficiaryAccountId: "carthage-treasury", originKind: "polity", originId: "carthage", amount: 300_000, cadenceSteps: 30, nextDueStep: 30, active: true },
-      { id: "carthage-african-tribute", kind: "tribute", label: "Tribute of the African subjects", beneficiaryAccountId: "carthage-treasury", originKind: "polity", originId: "carthage", amount: 200_000, cadenceSteps: 30, nextDueStep: 30, collectionRateBps: 8_500, active: true },
-      { id: "syracuse-tax", kind: "tax", label: "The Syracusan tithe", beneficiaryAccountId: "syracuse-treasury", originKind: "polity", originId: "syracuse", amount: 62_000, cadenceSteps: 30, nextDueStep: 30, active: true },
+      { id: "rome-sila-forest", kind: "land", label: "Timber and pitch of the Sila forest, taken from the Bruttians in 272", beneficiaryAccountId: "rome-treasury", originKind: "polity", originId: "rome", counterpartyPolityId: "bruttians", amount: 46_000, cadenceSteps: 30, nextDueStep: 30, active: true },
+      { id: "rome-samnite-land", kind: "land", label: "Rents of the land taken from the Samnites", beneficiaryAccountId: "rome-treasury", originKind: "polity", originId: "rome", counterpartyPolityId: "samnites", amount: 46_000, cadenceSteps: 30, nextDueStep: 30, active: true },
+      { id: "carthage-harbour-dues", kind: "trade", label: "Harbour dues at Carthage", beneficiaryAccountId: "carthage-treasury", originKind: "polity", originId: "carthage", amount: 930_000, cadenceSteps: 30, nextDueStep: 30, active: true },
+      { id: "carthage-african-tribute", kind: "tribute", label: "Tribute of the African subjects", beneficiaryAccountId: "carthage-treasury", originKind: "polity", originId: "carthage", amount: 620_000, cadenceSteps: 30, nextDueStep: 30, collectionRateBps: 8_500, active: true },
+      { id: "syracuse-tax", kind: "tax", label: "The Syracusan tithe", beneficiaryAccountId: "syracuse-treasury", originKind: "polity", originId: "syracuse", amount: 192_000, cadenceSteps: 30, nextDueStep: 30, active: true },
       // What the estates above pay their owners, month by month.
       ...([
         ["curius-sabine-farm", "The Sabine farm", "curius-purse", 1_200],
@@ -1300,7 +1303,7 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
         id: `${holdingId}-yield`, kind: "land" as const, label: `Yield of ${title}`, beneficiaryAccountId: purse,
         originKind: "holding" as const, originId: holdingId, amount, cadenceSteps: 30, nextDueStep: 30, active: true,
       })),
-      { id: "mamertine-tolls", kind: "trade", label: "Tolls on the strait", beneficiaryAccountId: "mamertine-treasury", originKind: "polity", originId: "mamertines", amount: 25_000, cadenceSteps: 30, nextDueStep: 30, collectionRateBps: 7_000, active: true },
+      { id: "mamertine-tolls", kind: "trade", label: "Tolls on the strait", beneficiaryAccountId: "mamertine-treasury", originKind: "polity", originId: "mamertines", amount: 77_500, cadenceSteps: 30, nextDueStep: 30, collectionRateBps: 7_000, active: true },
     ],
     /**
      * And what it costs them to stand still.

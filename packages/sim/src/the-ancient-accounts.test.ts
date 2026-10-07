@@ -89,34 +89,38 @@ describe("the treasury pays an army what its men are owed", () => {
 });
 
 describe("the powers open at the scale of the ancient accounts", () => {
-  it("has Rome taking in a few hundred talents a year, and its legion costing a fifth of it", () => {
+  it("has Rome taking in a thousand talents a year (v52: the rule that 10,000 men cost a fifth of it), and its legion costing an eighth of it", () => {
     const world = opening();
     const income = monthly(world, "rome-treasury");
-    expect(income * 12 / DRACHMAE_PER_TALENT).toBeGreaterThan(200);
-    expect(income * 12 / DRACHMAE_PER_TALENT).toBeLessThan(500);
+    // 500,000 a month: the figure the rule `N men cost N/500 per cent` fixes (an-army-costs-its-share.test.ts).
+    expect(income).toBe(500_000);
+    expect(income * 12 / DRACHMAE_PER_TALENT).toBeGreaterThan(620);
+    expect(income * 12 / DRACHMAE_PER_TALENT).toBeLessThan(1_550);
+    // The legion's 4,500 with the allies' grain: 65,000 against 500,000 -- thirteen in a hundred.
     const army = world.material.obligations.find((obligation) => obligation.id === "rome-legion-pay")!.amount;
-    expect(army / income).toBeGreaterThan(0.25);
-    expect(army / income).toBeLessThan(0.5);
+    expect(army / income).toBeGreaterThan(0.12);
+    expect(army / income).toBeLessThan(0.14);
     // Solvent: what it owes each month is less than it takes in.
     expect(owed(world, "rome-treasury")).toBeLessThan(income);
     expect(balance(world, "rome-treasury")).toBeGreaterThan(3 * (income - owed(world, "rome-treasury")) / 2);
   });
 
-  it("has Carthage the richest, over nine hundred talents a year and a thousand in its chest", () => {
+  it("has Carthage the richest, over twenty-eight hundred talents a year and three thousand in its chest (nine hundred and a thousand before v52's factor of 3.1)", () => {
     const world = opening();
     const income = monthly(world, "carthage-treasury");
-    expect(income * 12 / DRACHMAE_PER_TALENT).toBeGreaterThan(900);
-    expect(balance(world, "carthage-treasury") / DRACHMAE_PER_TALENT).toBeGreaterThanOrEqual(1_000);
+    expect(income * 12 / DRACHMAE_PER_TALENT).toBeGreaterThan(2_790);
+    expect(balance(world, "carthage-treasury") / DRACHMAE_PER_TALENT).toBeGreaterThanOrEqual(3_100);
     expect(income).toBeGreaterThan(2 * monthly(world, "rome-treasury"));
     expect(owed(world, "carthage-treasury")).toBeLessThan(income / 3);
   });
 
-  it("has Syracuse and the Mamertines paying their men out of what they take in, with little to spare", () => {
+  it("has Syracuse and the Mamertines paying their standing men out of what they take in, a fifth and a quarter of it (v52)", () => {
     const world = opening();
-    expect(monthly(world, "syracuse-treasury")).toBe(62_000);
-    expect(owed(world, "syracuse-treasury")).toBeLessThan(monthly(world, "syracuse-treasury"));
-    expect(owed(world, "syracuse-treasury")).toBeGreaterThan(0.5 * monthly(world, "syracuse-treasury"));
-    expect(monthly(world, "mamertine-treasury")).toBe(17_500);
+    // Every authored revenue rose by the same factor as Rome's; the men they pay did not.
+    expect(monthly(world, "syracuse-treasury")).toBe(192_000);
+    expect(owed(world, "syracuse-treasury") / monthly(world, "syracuse-treasury")).toBeGreaterThan(0.2);
+    expect(owed(world, "syracuse-treasury") / monthly(world, "syracuse-treasury")).toBeLessThan(0.25);
+    expect(monthly(world, "mamertine-treasury")).toBe(54_250);
     expect(owed(world, "mamertine-treasury")).toBe(14_000);
   });
 
@@ -126,10 +130,10 @@ describe("the powers open at the scale of the ancient accounts", () => {
       const burden = burdens.get(polityId)!;
       expect(burden.asked / burden.bearable, polityId).toBeLessThan(0.5);
     }
-    // A million Romans bear some 700 talents a year, a calm province four drachmae a head.
+    // A million Romans bear some 2,200 talents a year (700 before v52's factor of 3.1), a calm province twelve drachmae a head.
     const rome = burdens.get("rome")!;
-    expect(rome.bearable * 12 / DRACHMAE_PER_TALENT).toBeGreaterThan(500);
-    expect(rome.bearable * 12 / DRACHMAE_PER_TALENT).toBeLessThan(900);
+    expect(rome.bearable * 12 / DRACHMAE_PER_TALENT).toBeGreaterThan(1_550);
+    expect(rome.bearable * 12 / DRACHMAE_PER_TALENT).toBeLessThan(2_790);
   });
 
   it("makes a senator worth about a hundred thousand, as the census had him, and a legionary's year 120", () => {
@@ -147,11 +151,11 @@ describe("an indemnity is counted in talents", () => {
     const world = opening();
     const means = meansOf(world, "carthage");
     // Its chest, and a year of its harbour dues and what its African subjects pay.
-    expect(Math.abs(means - (6_000_000 + (300_000 + 200_000 * 0.85) * (365 / 30)))).toBeLessThanOrEqual(1);
-    expect(means / DRACHMAE_PER_TALENT).toBeGreaterThan(1_500);
+    expect(Math.abs(means - (18_600_000 + (930_000 + 620_000 * 0.85) * (365 / 30)))).toBeLessThanOrEqual(1);
+    expect(means / DRACHMAE_PER_TALENT).toBeGreaterThan(4_650);
     const asked = Math.round(means * 0.1);
-    expect(asked / DRACHMAE_PER_TALENT).toBeGreaterThan(150);
-    expect(asked / DRACHMAE_PER_TALENT).toBeLessThan(400);
+    expect(asked / DRACHMAE_PER_TALENT).toBeGreaterThan(465);
+    expect(asked / DRACHMAE_PER_TALENT).toBeLessThan(1_240);
     expect(inTalents(asked)).toMatch(/talents$/);
     // Priced by the share of what the payer can bear, as before: a tenth of its means, three times over, is 7.5 points of the war going badly.
     expect([7, 8]).toContain(termPrice(world, { kind: "indemnity", amount: asked, periods: 3 }, "carthage", "rome"));

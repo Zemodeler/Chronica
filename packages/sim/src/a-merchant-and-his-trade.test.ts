@@ -231,7 +231,7 @@ describe("a merchant and his trade", () => {
     const finished = tick(built.world, 30).world;
     const dues = finished.material.incomeSources.find((source) => source.label === "Harbour dues")!;
     // A great market's share of Syracuse (a seventh of what its province can yield), not the ten million the answer promised.
-    // (Syracuse's province is the most developed in the opening, and what it can yield is reckoned from that: 2,155,968 a month, so 323,395.)
-    expect(dues.amount).toBeLessThanOrEqual(325_000);
+    // (Syracuse's province is the most developed in the opening, and what it can yield is reckoned from that: 6,683,500 a month, so 1,002,525 -- 2,155,968 and 323,395 before v52 raised the land's yield by 3.1.)
+    expect(dues.amount).toBeLessThanOrEqual(1_005_000);
   });
 });

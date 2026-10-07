@@ -28,10 +28,10 @@ const HANNO = { kind: "character" as const, id: "hanno" };
 const NORTHEAST = FIRST_PUNIC_IDS.messana;
 const WEST = FIRST_PUNIC_IDS.lilybaeum;
 
-// This scenario keeps its purses at the old scale, a hundredth of the state's since the ancient accounts were counted properly (`TAX_CAPACITY_PER_POPULATION`), and a rule is priced off the province it stands in: so a man is given a hundred times what he had.
+// This scenario keeps its purses at the old scale, a hundredth of the state's since the ancient accounts were counted properly (`TAX_CAPACITY_PER_POPULATION`), and a rule is priced off the province it stands in: so a man is given three hundred and ten times what he had (a hundred, and the factor of 3.1 v52 raised the land's yield by).
 const world = (): WorldState => {
   const start = ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(firstPunicWarScenario.initialWorld)), 0);
-  return { ...start, material: { ...start.material, accounts: start.material.accounts.map((account) => (account.owner.kind === "character" ? { ...account, balance: account.balance * 100 } : account)) } };
+  return { ...start, material: { ...start.material, accounts: start.material.accounts.map((account) => (account.owner.kind === "character" ? { ...account, balance: account.balance * 310 } : account)) } };
 };
 const balance = (state: WorldState, id: string): number => state.material.accounts.find((account) => account.id === id)!.balance;
 
@@ -161,7 +161,7 @@ describe("what a rule costs", () => {
 
   it("will not take more than half of what a man holds, or set him in debt, unless his order said to pay", () => {
     const poor = withEntity(world(), { id: "dole" });
-    const scarce: WorldState = { ...poor, material: { ...poor.material, accounts: poor.material.accounts.map((account) => (account.id === "marcus-purse" ? { ...account, balance: 3_000 } : account)) } };
+    const scarce: WorldState = { ...poor, material: { ...poor.material, accounts: poor.material.accounts.map((account) => (account.id === "marcus-purse" ? { ...account, balance: 9_300 } : account)) } };
     const entity = scarce.genericEntities.find((candidate) => candidate.id === "dole")!;
     const refs = readableRefsFor(scarce, MARCUS, entity);
     const checked = validateMechanic(dole("marcus-purse"), scarce, refs, offices);

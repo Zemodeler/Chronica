@@ -67,7 +67,20 @@ const MEN_OF_AGE_PER_YEAR = 0.012;
  * and the Republic asks for a third of it: two or three hundred, against the
  * 3,200 Carthage was made to pay in 241.
  */
-const TAX_CAPACITY_PER_POPULATION = 50 / (1 + COUNTRY_FOLK_PER_TOWNSMAN);
+/**
+ * How much more the land yields than v47 first counted it, and the single dial
+ * the whole state's income turns on (v52). A rule of the game fixes it: **a
+ * 20,000-man army costs 40% of Rome's income, a 10,000-man army 20%** -- N men
+ * in the field cost N/500 per cent of a month's revenue. Pay is the Polybian ten
+ * drachmae a man (`SOLDIER_PAY_PER_THOUSAND`) and stays so, so the income had to
+ * rise: Rome took in 162,000 a month, a legion with its ala 65,000 of it, and the
+ * rule asks for 500,000. That is a factor of about three (3.1 here; the authored
+ * sources, chests and tributes of every power in `punic-wars-scenario.ts` rise by
+ * the same factor, so Carthage and Syracuse stand to Rome as they did). Private
+ * fortunes do NOT rise with it: `PRIVATE_WEALTH_SCALE` divides it out again.
+ */
+export const REVENUE_SCALE = 3.1;
+const TAX_CAPACITY_PER_POPULATION = (50 * REVENUE_SCALE) / (1 + COUNTRY_FOLK_PER_TOWNSMAN);
 const BASELINE_PRODUCTIVE_CAPACITY_BPS = 10_000;
 const BASELINE_FOOD_SECURITY_BPS = 8_000;
 const BASELINE_STABILITY_BPS = 7_000;

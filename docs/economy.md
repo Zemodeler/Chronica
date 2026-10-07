@@ -1,7 +1,7 @@
 # The economy
 
 How money, land, goods, trade and coin work in the simulation, and where each piece lives. It was built in
-five phases over scenario versions 47 to 50 (v51 then wrote down how each great power taxes). This is what
+five phases over scenario versions 47 to 50 (v51 then wrote down how each great power taxes, and v52 set the income to the army-cost rule). This is what
 stands; the order it was built in is in the git log (`4442400` to `8035315`).
 
 ## Principles
@@ -49,15 +49,36 @@ thousand men, a warship `WARSHIP_PAY_PER_HULL = 500`, and the army's bread is pr
 (`ordinaryGrainPrice`): one pay rate, one grain price (`packages/shared/src/world/economy.ts`).
 
 What a province can bear is `taxCapacity`, `reckonTaxCapacity` in `packages/shared/src/material/province-material.ts`:
-population times `50 / (1 + 9)` (a townsman bears fifty, each country person a ninth of a townsman's share), times
+population times `50 x REVENUE_SCALE / (1 + 9)` (a townsman bears fifty times the factor, each country person a ninth of
+a townsman's share; `REVENUE_SCALE = 3.1` since v52, see below), times
 productive capacity, less war damage, times a development factor. A power may raise `TAX_EXTRACTION_BPS = 1_000` (a
 tenth) of the stability-weighted capacity, and asking under `CUSTOMARY_TAX_BURDEN = 0.5` of it costs no order
 (`packages/shared/src/material/taxation.ts`).
 
-The Punic opening (`packages/db/src/punic-wars-scenario.ts`): Rome takes in about 162,000 a month (tributum 110,000 at
-90% collected, public land 33,000, the Sila forest and Samnite rents 15,000 each) with a chest of 900,000; Carthage
-470,000 (harbour dues 300,000, African tribute 200,000 at 85%) with 6,000,000 (1,000 talents); Syracuse 62,000 with
-520,000; the Mamertines 17,500 with 250,000. A peace's indemnity is a tenth of `meansOf` (`packages/sim/src/peace.ts`):
+**The army-cost rule (v52).** A rule of the game: *a 20,000-man army costs 40% of Rome's income, a 10,000-man army 20%*,
+that is N men cost N/500 per cent of a month's revenue. Pay stayed the Polybian 10 a man (`SOLDIER_PAY_PER_THOUSAND`; 100,000
+a month for 10,000 men, 200,000 for 20,000), so the revenue rose, not the pay: Rome took in 162,000 a month under v47 to v51
+and a legion with its ala (65,000) cost 40% of it; it now takes in **500,000**. Every land's yield (`REVENUE_SCALE = 3.1`) and
+every authored source, chest and tribute rose by the same factor, so Carthage and Syracuse stand to Rome as they did, and
+`PRIVATE_WEALTH_SCALE` (estates, ventures) divides the factor out again, so a senator is still worth about 100,000.
+`an-army-costs-its-share.test.ts` puts the Roman treasury through the real tick with 10,000 and 20,000 men on the roll and
+reads 20% and 40% (the takings of the first month run a few points under the nominal figure: the Treasury's officers, and
+Rhegium, which is the Campanians'). The legion's 4,500 now cost 13%; a year of 20,000 men leaves the chest higher, 100,000 men
+(a fifth of Rome's people) put it in arrears in the sixth month. Asked/bearable is unchanged by the factor (Rome 0.35,
+Carthage 0.23, Syracuse 0.37, the Mamertines 0.18), so every opening burden is still under the customary half.
+
+| Power | Monthly revenue (collected) | Chest | 10,000 men | 20,000 men |
+| --- | --- | --- | --- | --- |
+| Rome | 500,000 | 2,790,000 | 20% | 40% |
+| Carthage | 1,457,000 | 18,600,000 (3,100 talents) | 6.9% | 13.7% |
+| Syracuse | 192,000 | 1,612,000 | 52% | 104% (cannot) |
+| the Mamertines | 54,250 | 775,000 | 184% | 369% (cannot) |
+
+The Punic opening (`packages/db/src/punic-wars-scenario.ts`): Rome takes in 500,000 a month (tributum 340,000 at
+90% collected, public land 102,000, the Sila forest and Samnite rents 46,000 each) with a chest of 2,790,000; Carthage
+1,457,000 (harbour dues 930,000, African tribute 620,000 at 85%) with 18,600,000 (3,100 talents); Syracuse 192,000 with
+1,612,000; the Mamertines 54,250 with 775,000 (these figures are 3.1 times those of v47 to v51: 162,000, 470,000, 62,000,
+17,500). A peace's indemnity is a tenth of `meansOf` (`packages/sim/src/peace.ts`):
 the chest plus a year of active income at its collection rate, so a beaten Carthage is asked for hundreds of talents a
 year. `INDEMNITY_MEANS_FLOOR = 50_000` bounds the price of a clause for a poor power.
 

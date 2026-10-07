@@ -151,7 +151,7 @@ describe("orders about things that are not war", () => {
     expect(result.engineRefusals).toEqual([]);
     expect(result.world.material.loans.at(-1)!.outstanding).toBe(400_000);
     // Money from outside the world really does come from outside it.
-    expect(result.world.material.accounts.find((a) => a.id === "rome-treasury")!.balance).toBe(1_300_000);
+    expect(result.world.material.accounts.find((a) => a.id === "rome-treasury")!.balance).toBe(3_190_000);
   });
 });
 

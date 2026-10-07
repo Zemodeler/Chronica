@@ -67,7 +67,7 @@ describe("taxes the land can bear", () => {
 
     const year = aYearOf(opening());
     expect(year.facts).not.toContain("tax_shortfall");
-    // The tributum and the land rents, as authored: about 160 000 a month. The
+    // The tributum and the land rents, as authored: 500 000 a month at the opening of v52 (160 000 before the factor of 3.1). The
     // allies pay no tribute (v32); two of the rents come from land Rome took
     // from the Bruttians and Samnites.
     // What Rome levies at home is gathered by the Treasury of Saturn (v35):
@@ -75,13 +75,13 @@ describe("taxes the land can bear", () => {
     // three in a hundred more than a middling hand. The rents from the
     // Bruttians' and Samnites' country are paid, not gathered.
     const treasury = 1 + ((60 - 50) / 50) * 0.15;
-    // Rhegium and its country are now the Campanians', in a war with Rome, so they no longer pay Rome's tax: 5 183 a month less.
-    // The Treasury's officers are men with tempers: what they are like at the work shaves 762 off the middling hand's 60.
-    expect(year.monthly[0]).toBe(Math.round(99_000 * treasury) + Math.round(33_000 * treasury) + 15_000 + 15_000 - 5_183 - 762);
+    // Rhegium and its country are now the Campanians', in a war with Rome, so they no longer pay Rome's tax: some 16 000 a month less (5 183 before v52).
+    // The Treasury's officers are men with tempers: what they are like at the work shaves some 2 400 off the middling hand's 60 (762 before v52); 18 379 in all with Rhegium.
+    expect(year.monthly[0]).toBe(Math.round(306_000 * treasury) + Math.round(102_000 * treasury) + 46_000 + 46_000 - 18_379);
   });
 
   it("does not collect a tenfold tributum: the collectors raise what the land can bear, and say so", () => {
-    const pressed = aYearOf(withTributum(opening(), 1_100_000));
+    const pressed = aYearOf(withTributum(opening(), 3_410_000));
     const bearable = taxBurdens(opening()).get("rome")!.bearable;
     // What Rome's own lands can bear, plus the rents it draws from its allies'
     // country, which that ceiling does not govern.
@@ -94,20 +94,20 @@ describe("taxes the land can bear", () => {
 
   it("sours order when a power presses hard, and still pays: tripling the tributum is a real choice, not a trap", () => {
     const calm = aYearOf(opening());
-    const tripled = aYearOf(withTributum(opening(), 330_000));
+    const tripled = aYearOf(withTributum(opening(), 1_020_000));
     expect(romanStability(tripled.world)).toBeLessThan(romanStability(calm.world) - 1_000);
     expect(tripled.monthly.reduce((a, b) => a + b, 0)).toBeGreaterThan(calm.monthly.reduce((a, b) => a + b, 0));
   });
 
   it("gets less and less out of a land pressed past what it bears", () => {
-    const crushed = aYearOf(withTributum(opening(), 550_000));
+    const crushed = aYearOf(withTributum(opening(), 1_700_000));
     // The collectors bring in what there is, and there is less every month.
     expect(crushed.monthly[11]!).toBeLessThan(crushed.monthly[0]! / 2);
     // A tax five times the old one raised no more over the year than one three
     // times it, give or take a twentieth: both are pressed to what the land
     // bears, and a land whose people now grow bears the same few coins more
     // under either. (Seventy-odd provinces settle one by one, not two.)
-    const tripled = aYearOf(withTributum(opening(), 330_000));
+    const tripled = aYearOf(withTributum(opening(), 1_020_000));
     expect(crushed.monthly.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(tripled.monthly.reduce((a, b) => a + b, 0) * 1.05);
   });
 
@@ -178,11 +178,11 @@ describe("taxes the land can bear", () => {
     const burdens = taxBurdens(world);
     // Carthage's harbour dues are larger than its tribute, and ride the same ceiling:
     // a treasury could be given a trade income of any size while it did not.
-    expect(burdens.get("carthage")!.asked).toBe(300_000 + Math.round(200_000 * 0.85));
-    expect(burdens.get("mamertines")!.asked).toBe(Math.round(25_000 * 0.7));
+    expect(burdens.get("carthage")!.asked).toBe(930_000 + Math.round(620_000 * 0.85));
+    expect(burdens.get("mamertines")!.asked).toBe(Math.round(77_500 * 0.7));
     expect(burdens.get("carthage")!.asked / burdens.get("carthage")!.bearable).toBeLessThan(CUSTOMARY_TAX_BURDEN);
     // A harbour dues of a hundred times the size is collected only as far as the land bears.
-    const greedy: WorldState = { ...world, material: { ...world.material, incomeSources: world.material.incomeSources.map((source) => (source.id === "carthage-harbour-dues" ? { ...source, amount: 30_000_000 } : source)) } };
+    const greedy: WorldState = { ...world, material: { ...world.material, incomeSources: world.material.incomeSources.map((source) => (source.id === "carthage-harbour-dues" ? { ...source, amount: 93_000_000 } : source)) } };
     expect(taxBurdens(greedy).get("carthage")!.collectedShare).toBeLessThan(0.1);
   });
 });

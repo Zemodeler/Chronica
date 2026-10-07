@@ -260,6 +260,9 @@ export const PUNIC_WARS_VERSIONS: readonly BuiltInScenarioVersion[] = [
   // Version 51 writes down how each great power taxed its lands, province by province,
   // where the sources say (punic-wars-taxes.ts), over the defaults of v48.
   { version: 51, notes: "The powers tax their lands as the age did. Rome takes the tributum from its citizens by a land levy at the ordinary rate, with the rents of the public land beside it, and the allies of the foedus owe it men and not coin (a light tribute of men from the Etruscan cities, Umbrians, Picentes, Marsi and Paeligni, Samnites, Lucanians, Bruttians and the Apulian cities, who keep no treasury for a levy to fill). Every Sicilian province pays a tithe of its harvest, as it did under Carthage, under Hiero and under the lex Hieronica, whoever holds it. Carthage taxes its rural Libyan provinces by a levy half as heavy again as the ordinary one, which costs them order." },
+  // Version 52 sets the state to the rule that an army costs its share of the income:
+  // 10,000 men a fifth of Rome's revenue, 20,000 two fifths (docs/economy.md).
+  { version: 52, notes: "The treasuries are richer, in proportion. A land bears about three times what it did, and every power's authored revenue, chest and tribute rises with it: Rome takes in 500,000 a month where it took 162,000, Carthage some 1,460,000, Syracuse 192,000, the Mamertines 54,000 net of their collection, so that Carthage and Syracuse stand to Rome as they did. A soldier is paid as before, ten drachmae a month, and so an army of ten thousand now costs Rome a fifth of its income and an army of twenty thousand two fifths: a long war of that size can be kept up and is felt. Private fortunes are unchanged." },
 ];
 
 /** The version the code seeds: the last one written down. */

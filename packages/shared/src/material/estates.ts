@@ -1,6 +1,6 @@
 import type { WorldState } from "../world/world-state";
 import type { EffectBand } from "../world/standing-effects";
-import { provinceTaxCapacity } from "./province-material";
+import { REVENUE_SCALE, provinceTaxCapacity } from "./province-material";
 
 /**
  * What land is worth to the man who owns it.
@@ -23,7 +23,7 @@ import { provinceTaxCapacity } from "./province-material";
  * senator with a marked estate, a purse of the same size and a venture or two
  * is worth what the census said: about a hundred thousand.
  */
-export const PRIVATE_WEALTH_SCALE = 0.3;
+export const PRIVATE_WEALTH_SCALE = 0.3 / REVENUE_SCALE;
 
 /** Of the province's monthly tax capacity: what an estate of each size yields its owner each month. */
 const ESTATE_YIELD_SHARE: Record<EffectBand, number> = { slight: 0.002 * PRIVATE_WEALTH_SCALE, marked: 0.005 * PRIVATE_WEALTH_SCALE, great: 0.012 * PRIVATE_WEALTH_SCALE };
