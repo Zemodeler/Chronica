@@ -76,6 +76,17 @@ export const EconomyMemorySchema = z
       rateBps: z.number().int().min(0).max(MAX_TAX_RATE_BPS),
     }).strict()).max(200).default([]),
     /**
+     * How a province has always been taxed, whoever holds it: the custom of the
+     * country (the tithe of Sicily, the heavy levy on Libya). It stands between
+     * a province's own word (its row) and its holder's default, and is written
+     * only by a scenario: it stays with the ground when the ground changes hands.
+     */
+    provinceTaxPolicies: z.array(z.object({
+      provinceId: EntityIdSchema,
+      regime: TaxRegimeSchema,
+      rateBps: z.number().int().min(0).max(MAX_TAX_RATE_BPS),
+    }).strict()).max(400).default([]),
+    /**
      * When a power last heard that its countryside lies waste, and of how many
      * districts, so the news comes once a war and not once a month: again only
      * when more of its ground has been laid waste, and never within two years.
@@ -136,6 +147,7 @@ export const EMPTY_ECONOMY_MEMORY: EconomyMemory = {
   contingentsSent: [],
   civilWars: [],
   taxPolicies: [],
+  provinceTaxPolicies: [],
   wasteNews: [],
   markets: [],
   marketNews: [],

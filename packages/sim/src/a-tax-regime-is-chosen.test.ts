@@ -144,7 +144,8 @@ describe("a tax regime is chosen", () => {
     // Taxed more heavily by a chosen policy, a province is a sullener place for it, province by province.
     expect(ordinary.provinceStabilityShiftBps!.get(LATIUM)).toBeLessThan(0);
     expect(heavy.provinceStabilityShiftBps!.get(LATIUM)!).toBeLessThan(ordinary.provinceStabilityShiftBps!.get(LATIUM)!);
-    expect(taxBurdens(base).get("rome")!.provinceStabilityShiftBps!.size).toBe(0);
+    const unpoliced: WorldState = { ...base, economy: { ...base.economy!, taxPolicies: [], provinceTaxPolicies: [] } };
+    expect(taxBurdens(unpoliced).get("rome")!.provinceStabilityShiftBps!.size).toBe(0);
     // And the treasury sees it in the month's collection.
     const collected = (world: WorldState): number => runDeterministicTick({ world: { ...world, elapsedStep: 30, instant: { day: 30, minute: 0 } }, toDay: 30, ids: createIdFactory("lever"), warfare: definition.warfare, clock: definition.clock })
       .world.material.transactions.filter((txn) => txn.kind === "tax" && txn.destinationAccountId === "rome-treasury").reduce((sum, txn) => sum + txn.amount, 0);
@@ -188,9 +189,11 @@ describe("a tax regime is chosen", () => {
     expect(nameless.rejected.length).toBeGreaterThan(0);
   });
 
-  it("opens Syracuse taxing its grain by a tithe, as the lex Hieronica did, and every other power by the old levy", () => {
+  it("opens Syracuse taxing its grain by a tithe, as the lex Hieronica did, Rome by its tributum and its allies in men", () => {
     const world = opening();
-    expect(world.economy?.taxPolicies).toEqual([{ polityId: "syracuse", regime: "tithe", rateBps: 1_000 }]);
+    expect(world.economy?.taxPolicies).toContainEqual({ polityId: "syracuse", regime: "tithe", rateBps: 1_000 });
+    expect(world.economy?.taxPolicies).toContainEqual({ polityId: "rome", regime: "land_levy", rateBps: 1_000 });
+    expect(world.economy?.taxPolicies.filter((policy) => policy.regime === "men").map((policy) => policy.polityId)).toContain("samnites");
     const syracuse = taxBurdens(world).get("syracuse")!;
     expect(Object.keys(syracuse.bearableByRegime ?? {})).toEqual(["tithe"]);
     expect(Object.keys(taxBurdens(world).get("rome")!.bearableByRegime ?? {})).toEqual(["land_levy"]);

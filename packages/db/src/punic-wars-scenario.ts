@@ -5,6 +5,7 @@ import { POLITY_META, PUNIC_WARS_GRAPH_EDGES, PUNIC_WARS_GRAPH_POLITIES, PUNIC_W
 import { foundingPeople, knownRulerId, romanSenators, withFinerSkills } from "./punic-wars-rulers";
 import { WORLD_PRESSURES, withWorldPolitics } from "./punic-wars-politics";
 import { houseFamilies, rosterPeople } from "./punic-wars-rosters";
+import { withRegionalTaxes } from "./punic-wars-taxes";
 
 /**
  * The Mediterranean and the Near East of 270 BCE, on the generated map: provinces and powers
@@ -22,6 +23,9 @@ const italianPolities = [
   ["umbrians", "Umbrians"], ["picentes", "Picentes"], ["marsi-paeligni", "Marsi and Paeligni"], ["samnites", "Samnites"],
   ["lucanians", "Lucanians"], ["bruttians", "Bruttians"], ["apulian-cities", "Apulian cities"], ["messapians", "Messapians"],
 ] as const;
+
+/** Rome's allies by foedus, who owe it men and not money (v51). */
+const ALLIES_IN_MEN: readonly string[] = ["etruscan-cities", "umbrians", "picentes", "marsi-paeligni", "samnites", "lucanians", "bruttians", "apulian-cities"];
 
 /**
  * The coinages of 270 BCE (v50), with the silver in one unit of each against
@@ -609,7 +613,7 @@ const WRITTEN_OUT: ReadonlySet<string> = new Set(["rome", "carthage", "syracuse"
 
 const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
   schemaVersion: 3,
-  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 50, libraryVersion: 1 },
+  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 51, libraryVersion: 1 },
   elapsedStep: 0,
   instant: { day: 0, minute: 0 },
   // How the powers tax their ground, where the age said so (v48). Every other
@@ -639,7 +643,13 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
   // small denomination, as numismatists give them, and are approximations.
   economy: {
     coinages: PUNIC_COINAGES,
-    taxPolicies: [{ polityId: "syracuse", regime: "tithe", rateBps: 1_000 }],
+    taxPolicies: [
+      // v51. Rome's tributum fell on its citizens by the land they held, with the rents of the public land beside it.
+      { polityId: "rome", regime: "land_levy", rateBps: 1_000 },
+      { polityId: "syracuse", regime: "tithe", rateBps: 1_000 },
+      // The allies of the foedus paid in soldiers and not in coin: a tribute of men, light, since the contingents they send are paid by them.
+      ...ALLIES_IN_MEN.map((polityId) => ({ polityId, regime: "men" as const, rateBps: 500 })),
+    ],
     customsRates: [
       { polityId: "athens", rateBps: 200 },
       { polityId: "carthage", rateBps: 1_000 },
@@ -1323,12 +1333,12 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
  * with the drill and experience the armies standing on the first morning
  * already have (`SEASONED_ARMIES`). Everyone else's armies stay flat.
  */
-const initialWorld: WorldState = WorldStateSchema.parse(formArmies(
+const initialWorld: WorldState = WorldStateSchema.parse(withRegionalTaxes(formArmies(
   // v43: the wider world's grudges, peaces, claims and aims (punic-wars-politics.ts).
   withWorldPolitics({ ...unformedWorld, establishments: [...PUNIC_ESTABLISHMENTS], doctrines: [...PUNIC_DOCTRINES] }),
   0,
   { seasoned: (force) => SEASONED_ARMIES[force.id] },
-));
+)));
 
 export const punicWarsScenario = { definition, initialWorld } as const;
 

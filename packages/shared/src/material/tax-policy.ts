@@ -57,18 +57,22 @@ export const UNIFORM_LEVY: TaxPolicy = { regime: "land_levy", rateBps: DEFAULT_T
 export const clampTaxRate = (rateBps: number): number => Math.max(0, Math.min(MAX_TAX_RATE_BPS, Math.round(rateBps)));
 
 /**
- * The policy a province is taxed by: its own, where its row names one, else
- * the power's default, else the uniform levy. A row that names a regime only
+ * The policy a province is taxed by: its own, where its row names one, else the custom of the country
+ * (`provinceTaxPolicies`), else the power's default, else the uniform levy. A row that names a regime only
  * takes the power's rate (or the default one), and a row that names a rate
  * only takes the power's regime.
  *
  * Whose default: the power that holds it now, not the one that owns it, since
  * an occupier governs the ground whoever's it is.
  */
-export function taxPolicyIndex(world: Pick<WorldState, "economy">): (province: Pick<Province, "controllerPolityId">, row?: Pick<ProvinceMaterial, "taxRegime" | "taxRateBps">) => TaxPolicy {
-  const defaults = new Map((economyOf(world).taxPolicies ?? []).map((policy) => [policy.polityId, policy]));
+export function taxPolicyIndex(world: Pick<WorldState, "economy">): (province: Pick<Province, "id" | "controllerPolityId">, row?: Pick<ProvinceMaterial, "taxRegime" | "taxRateBps">) => TaxPolicy {
+  const memory = economyOf(world);
+  const defaults = new Map((memory.taxPolicies ?? []).map((policy) => [policy.polityId, policy]));
+  // The custom of the country, between the province's own word and its holder's default.
+  const customary = new Map((memory.provinceTaxPolicies ?? []).map((policy) => [policy.provinceId, policy]));
   return (province, row) => {
-    const own = province.controllerPolityId === null ? undefined : defaults.get(province.controllerPolityId);
+    const held = province.controllerPolityId === null ? undefined : defaults.get(province.controllerPolityId);
+    const own = customary.get(province.id) ?? held;
     if (row?.taxRegime === undefined && row?.taxRateBps === undefined) {
       return own === undefined ? UNIFORM_LEVY : { regime: own.regime, rateBps: own.rateBps, explicit: true };
     }
