@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { BlocInterestSchema, ChamberPowerSchema, FranchiseSchema, QuestionConcernSchema } from "./political-parts";
+import { GoodIdSchema } from "./world/good-ids";
 
 // Named, so every JSON schema generated for a prompt states it once and points
 // at it: inlined, it was 73 copies of the same string in the orchestrator's.
@@ -1241,6 +1242,13 @@ export const TradeVentureSchema = z
     cargo: z.object({
       /** What the goods cost: what is sold at the other end, at a margin. */
       cost: MoneyAmountSchema,
+      /**
+       * The good it carries (`world/markets.ts`): the margin is the gap
+       * between that good's price at the two ends. Absent on a cargo sailed
+       * before goods had markets, which is taken to be whichever pays best
+       * between its ports.
+       */
+      good: GoodIdSchema.optional(),
       sailedAtStep: ElapsedStepSchema,
       arrivesAtStep: ElapsedStepSchema,
       /** Cargoes landed so far. */

@@ -1,5 +1,6 @@
 import type { MoneyTransaction, ProvinceMaterial } from "../material-state";
 import type { WorldState } from "../world/world-state";
+import { sackTheMarket } from "../world/markets";
 import { applyWarDamage, deriveDefaultProvinceMaterial, findProvinceMaterial, scarredBy } from "./province-material";
 
 /**
@@ -195,8 +196,10 @@ export function sackTheProvince(world: WorldState, input: SackInput): Seizure {
     ? withMoney.material.provinceMaterial.map((row) => (row.provinceId === input.provinceId ? damaged : row))
     : [...withMoney.material.provinceMaterial, damaged];
 
+  // And the market it belonged to: a share of its stock plundered, and some of the people put to the sword or sold, sold.
+  const sacked: WorldState = { ...withMoney, material: { ...withMoney.material, capturableValues, provinceMaterial } };
   return {
-    world: { ...withMoney, material: { ...withMoney.material, capturableValues, provinceMaterial } },
+    world: sackTheMarket(sacked, input.provinceId, material.population - damaged.population, Math.min(1, sackShare)),
     taken,
     intoAccountId: destination,
   };

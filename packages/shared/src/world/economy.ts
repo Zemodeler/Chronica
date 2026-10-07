@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { ElapsedStepSchema, EntityIdSchema, MAX_TAX_RATE_BPS, TaxRegimeSchema } from "../material-state";
+import { GOODS, MAX_MARKET_HUBS, MarketHubSchema, goodSpec, marketPriceBps, openingMarkets, type GoodId } from "./markets";
+import { provinceOf } from "./movement";
 import type { WorldState } from "./world-state";
 
 /**
@@ -75,6 +77,16 @@ export const EconomyMemorySchema = z
      * when more of its ground has been laid waste, and never within two years.
      */
     wasteNews: z.array(z.object({ polityId: EntityIdSchema, atStep: ElapsedStepSchema, districts: z.number().int().nonnegative().default(0) }).strict()).max(200).default([]),
+    /**
+     * The markets: for each hub (some sixty on the Punic map), the stock, the
+     * target and the price of each of six goods (`world/markets.ts`). Empty
+     * until the land is first reckoned, when they open with a season's
+     * reserve (`ensureMarkets`); which provinces trade in which hub is
+     * geography, derived from the map and not stored.
+     */
+    markets: z.array(MarketHubSchema).max(MAX_MARKET_HUBS).default([]),
+    /** When a power last heard that grain had gone far too dear or too cheap in its country, so the news is told once a year and not once a month. */
+    marketNews: z.array(z.object({ polityId: EntityIdSchema, kind: z.enum(["shortage", "glut"]), atStep: ElapsedStepSchema }).strict()).max(200).default([]),
   })
   .strict();
 export type EconomyMemory = z.infer<typeof EconomyMemorySchema>;
@@ -92,6 +104,8 @@ export const EMPTY_ECONOMY_MEMORY: EconomyMemory = {
   civilWars: [],
   taxPolicies: [],
   wasteNews: [],
+  markets: [],
+  marketNews: [],
 };
 
 export const economyOf = (world: Pick<WorldState, "economy">): EconomyMemory => world.economy ?? EMPTY_ECONOMY_MEMORY;
@@ -134,18 +148,16 @@ export function inTalents(drachmae: number): string {
   return talents >= 1 ? `${Math.round(talents).toLocaleString("en-GB")} talents` : `${Math.round(drachmae).toLocaleString("en-GB")} drachmae`;
 }
 
-/** Food security at which grain sells at its ordinary price. */
-const ORDINARY_FOOD_BPS = 8_000;
-
 /**
- * What grain costs in a province, as basis points of its ordinary price:
- * 10 000 in a fed year, dearer as food runs short, cheaper in a glut. Read off
- * food security, so it needs no market and no storage, and bounded to between
- * half and three times the ordinary price.
+ * A world with its markets opened, if they were not: the stocks a world that
+ * has never been reckoned would start with (`openingMarkets`). The monthly
+ * pass does this itself the first time it runs; readers and tests that want a
+ * market to read or stress ask for it here. A world that has markets is
+ * returned as it is.
  */
-export function grainPriceBps(foodSecurityBps: number): number {
-  const ratio = ORDINARY_FOOD_BPS / Math.max(1_000, foodSecurityBps);
-  return Math.max(5_000, Math.min(30_000, Math.round(ratio * 10_000)));
+export function ensureMarkets(world: WorldState, monthsToHarvest = 6): WorldState {
+  if (world.economy?.markets !== undefined && world.economy.markets.length > 0) return world;
+  return { ...world, economy: { ...(world.economy ?? EMPTY_ECONOMY_MEMORY), markets: openingMarkets(world, monthsToHarvest) } };
 }
 
 /**
@@ -157,32 +169,36 @@ export function ordinaryGrainPrice(soldierPayPerThousand: number | null | undefi
 }
 
 /**
- * The one price of bread for an army, where food security is what it is: the
- * power's ordinary price times what grain costs in a country as hungry as that
- * (`grainPriceBps`). `sim/grain.ts` used to read a second price off food
- * security of its own, from 1 to 3 times, beside this module's from 0.5 to 3:
- * a famine that made bread dear to the treasury did not make it dear to the
- * legion. Until grain has a market, this is the only price there is.
+ * The one price of bread for an army, at the grain price of the market it
+ * buys in (basis points of ordinary, `marketPriceBps`): the power's ordinary
+ * price times what grain costs there. `sim/grain.ts` used to read a second
+ * price off food security of its own, from 1 to 3 times, beside this
+ * module's from 0.5 to 3: a famine that made bread dear to the treasury did
+ * not make it dear to the legion. Both now read the market's stock.
  */
-export function grainPriceFor(soldierPayPerThousand: number | null | undefined, foodSecurityBps: number): number {
-  return (ordinaryGrainPrice(soldierPayPerThousand) * grainPriceBps(foodSecurityBps)) / 10_000;
+export function grainPriceFor(soldierPayPerThousand: number | null | undefined, grainBps: number): number {
+  return (ordinaryGrainPrice(soldierPayPerThousand) * grainBps) / 10_000;
 }
 
 /**
- * What grain costs across a power's ground, weighted by the people who eat it.
+ * What grain costs across a power's ground, weighted by the people who eat it:
+ * each province pays the price of its hub's market (`marketPriceBps`).
  * 10 000 for a power with no ground or no reckoning yet.
  */
-export function polityGrainPriceBps(world: Pick<WorldState, "map" | "material">, polityId: string): number {
-  const held = new Set(world.map.provinces.filter((province) => province.controllerPolityId === polityId).map((province) => province.id));
+export function polityGrainPriceBps(world: Pick<WorldState, "map" | "material" | "economy">, polityId: string): number {
+  if (!hasMarkets(world)) return 10_000;
   let people = 0;
   let weighted = 0;
   for (const row of world.material.provinceMaterial) {
-    if (!held.has(row.provinceId) || row.population <= 0) continue;
+    if (row.population <= 0 || provinceOf(world, row.provinceId)?.controllerPolityId !== polityId) continue;
     people += row.population;
-    weighted += row.population * grainPriceBps(row.foodSecurityBps);
+    weighted += row.population * marketPriceBps(world, row.provinceId, "grain");
   }
   return people === 0 ? 10_000 : Math.round(weighted / people);
 }
+
+/** Whether the land has been reckoned and the markets opened. */
+export const hasMarkets = (world: Pick<WorldState, "economy">): boolean => (world.economy?.markets?.length ?? 0) > 0;
 
 /**
  * How much of a soldier's keep is bread, by what the obligation pays for: a
@@ -210,19 +226,44 @@ export function victualledAmount(amount: number, kind: string, grainBps: number)
  * What a trade route earns against its ordinary take, as basis points: a
  * merchant carrying from a cheap market to a dear one does well, the other way
  * badly. Half the price gap is his, bounded to between 0.7 and 1.5 times.
+ * Prices are in basis points of the good's own base, so any good's two prices
+ * will do (`bestGapGood` picks the one that pays most).
  */
-export function tradePremiumBps(fromGrainBps: number, toGrainBps: number): number {
-  return Math.max(7_000, Math.min(15_000, Math.round(10_000 + (toGrainBps - fromGrainBps) / 2)));
+export function tradePremiumBps(fromPriceBps: number, toPriceBps: number): number {
+  return Math.max(7_000, Math.min(15_000, Math.round(10_000 + (toPriceBps - fromPriceBps) / 2)));
 }
 
-/** Grain price in one province, 10 000 where nothing is reckoned for it. */
-export function provinceGrainPriceBps(world: Pick<WorldState, "material">, provinceId: string): number {
-  const row = world.material.provinceMaterial.find((candidate) => candidate.provinceId === provinceId);
-  return row === undefined || row.population <= 0 ? 10_000 : grainPriceBps(row.foodSecurityBps);
+/**
+ * Between two provinces' markets, the good that pays most to carry from the
+ * first to the second, and the two prices (basis points of base) it fetches:
+ * the one whose price at the far end most exceeds its price at the near end,
+ * weighed by the root of its base price so that a cheap bulk good does not
+ * beat a dear one on its percentage alone. With no good dearer at the far end
+ * it is the least bad one; between equal markets, grain (as every old venture
+ * was). Ties to the good listed first.
+ */
+export function bestGapGood(world: Pick<WorldState, "economy" | "map">, fromProvinceId: string, toProvinceId: string, among: readonly GoodId[] = GOODS.map((spec) => spec.id)): { readonly good: GoodId; readonly fromBps: number; readonly toBps: number } {
+  let best: { good: GoodId; fromBps: number; toBps: number } = { good: "grain", fromBps: 10_000, toBps: 10_000 };
+  let bestGap = -Infinity;
+  for (const good of among) {
+    const fromBps = marketPriceBps(world, fromProvinceId, good);
+    const toBps = marketPriceBps(world, toProvinceId, good);
+    const gap = (toBps - fromBps) * Math.sqrt(goodSpec(good).basePrice);
+    if (gap > bestGap + 1e-9) {
+      bestGap = gap;
+      best = { good, fromBps, toBps };
+    }
+  }
+  return best;
+}
+
+/** Grain price in one province's market, 10 000 where nothing is reckoned for it. */
+export function provinceGrainPriceBps(world: Pick<WorldState, "economy" | "map">, provinceId: string): number {
+  return marketPriceBps(world, provinceId, "grain");
 }
 
 /** What grain costs where this account's owner buys it: his power's ground, or where he stands. */
-export function grainPriceForAccount(world: Pick<WorldState, "map" | "material" | "characters">, accountId: string): number {
+export function grainPriceForAccount(world: Pick<WorldState, "map" | "material" | "characters" | "economy">, accountId: string): number {
   const owner = world.material.accounts.find((account) => account.id === accountId)?.owner;
   if (owner?.kind === "polity") return polityGrainPriceBps(world, owner.id);
   if (owner?.kind === "character") {
@@ -233,6 +274,6 @@ export function grainPriceForAccount(world: Pick<WorldState, "map" | "material" 
 }
 
 /** One payment of this obligation as the market makes it today: its bread share at the payer's grain price. */
-export function obligationAmountNow(world: Pick<WorldState, "map" | "material" | "characters">, obligation: { readonly amount: number; readonly kind: string; readonly payerAccountId: string }): number {
+export function obligationAmountNow(world: Pick<WorldState, "map" | "material" | "characters" | "economy">, obligation: { readonly amount: number; readonly kind: string; readonly payerAccountId: string }): number {
   return victualledAmount(obligation.amount, obligation.kind, grainPriceForAccount(world, obligation.payerAccountId));
 }
