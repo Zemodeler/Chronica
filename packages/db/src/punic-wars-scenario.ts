@@ -23,6 +23,49 @@ const italianPolities = [
   ["lucanians", "Lucanians"], ["bruttians", "Bruttians"], ["apulian-cities", "Apulian cities"], ["messapians", "Messapians"],
 ] as const;
 
+/**
+ * The coinages of 270 BCE (v50), with the silver in one unit of each against
+ * the Attic drachma (about 4.3 g, 10,000). Approximations from the standard
+ * numismatic weights; the engine only uses them to price a debasement and a
+ * crossing from one coin to another, and to show a sum as local coin.
+ *
+ *  - Rome and the allies of its foedus (Italy used the Romano-Campanian silver
+ *    didrachm of about 6.8 g, at roughly nine parts in ten fine, beside the
+ *    heavy bronze aes grave): about 6.3 g of silver to the didrachm, or 3.2 g to
+ *    the unit, 7,300. The Roman as is a bronze coin whose worth is its token
+ *    value, not its metal, so the allowance is made for silver alone.
+ *  - Carthage: the silver shekel and the Sicilo-Punic tetradrachm struck on the
+ *    Attic weight, but most of its currency was electrum and billon issues
+ *    well below it; 9,000 is the average of the two, and the least certain.
+ *  - Syracuse, with the Mamertines and the Campanians of Rhegium, who
+ *    struck on the Sicilian standard: Hieron's silver, a little under Attic
+ *    weight, 9,500.
+ *  - Egypt and Cyrene: the Ptolemaic tetradrachm of 14.3 g, a lighter standard
+ *    than the Attic, 3.6 g to the unit, 8,300.
+ *  - The Greek cities, leagues and the Macedonian and Seleucid kings strike on
+ *    the Attic standard, 10,000: nobody in particular controls it.
+ *  - Everything else (Gauls, Iberians, Thracians, Massalia, the Arabian
+ *    peoples) is foreign silver by weight, 10,000.
+ */
+const PUNIC_COINAGES: readonly { id: string; name: string; issuerPolityId: string | null; silverBps: number; polityIds: string[] }[] = [
+  {
+    id: "roman_aes_and_silver", name: "Roman aes and silver", issuerPolityId: "rome", silverBps: 7_300,
+    polityIds: ["rome", "etruscan-cities", "umbrians", "picentes", "marsi-paeligni", "samnites", "lucanians", "bruttians", "apulian-cities"],
+  },
+  { id: "carthaginian_shekel", name: "Carthaginian shekel", issuerPolityId: "carthage", silverBps: 9_000, polityIds: ["carthage"] },
+  { id: "syracusan_silver", name: "Syracusan litra and drachma", issuerPolityId: "syracuse", silverBps: 9_500, polityIds: ["syracuse", "mamertines", "rhegium-campanians"] },
+  { id: "ptolemaic_silver", name: "Ptolemaic silver", issuerPolityId: "ptolemaic-egypt", silverBps: 8_300, polityIds: ["ptolemaic-egypt", "cyrene"] },
+  {
+    id: "attic_drachma", name: "Attic drachma", issuerPolityId: null, silverBps: 10_000,
+    polityIds: [
+      "athens", "macedon", "seleucid-empire", "rhodes", "pergamon", "sparta", "argos", "elis", "megalopolis", "messenia", "epirus", "acarnania",
+      "achaean-league", "aetolian-league", "arcadian-league", "boeotian-league", "phocian-league", "ionian-islands", "ionia-communities", "aeolis-communities",
+      "cycladic-islanders", "cretan-cities-east", "cretan-cities-west", "euxine-greek-cities", "hellespont-propontic-cities", "heraclea-pontica",
+    ],
+  },
+  { id: "foreign_silver", name: "Foreign silver", issuerPolityId: null, silverBps: 10_000, polityIds: [] },
+];
+
 /** The powers this scenario writes out itself, apart from the map's list of who holds what. */
 const AUTHORED_POLITY_IDS: ReadonlySet<string> = new Set(["rome", "carthage", "syracuse", "mamertines", "rhegium-campanians", ...italianPolities.map(([id]) => id)]);
 
@@ -566,7 +609,7 @@ const WRITTEN_OUT: ReadonlySet<string> = new Set(["rome", "carthage", "syracuse"
 
 const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
   schemaVersion: 3,
-  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 49, libraryVersion: 1 },
+  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 50, libraryVersion: 1 },
   elapsedStep: 0,
   instant: { day: 0, minute: 0 },
   // How the powers tax their ground, where the age said so (v48). Every other
@@ -587,7 +630,15 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
   // million drachmae a year from its harbour); the Ptolemies' import duties on
   // oil and wine ran to a quarter of the price. Every other power lays none:
   // nothing is known of what its harbours charged.
+  //
+  // And the moneys of the age (v50), at the silver they held, against the Attic
+  // drachma of 4.3 g (10,000). The engine counts every sum in silver by weight
+  // and these only say what a power's mint strikes it into, what a debasement
+  // would move, and what the money-changers take for crossing from one coin to
+  // another (`world/coinage.ts`). The weights are the coinage's principal
+  // small denomination, as numismatists give them, and are approximations.
   economy: {
+    coinages: PUNIC_COINAGES,
     taxPolicies: [{ polityId: "syracuse", regime: "tithe", rateBps: 1_000 }],
     customsRates: [
       { polityId: "athens", rateBps: 200 },

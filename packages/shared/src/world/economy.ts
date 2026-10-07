@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ElapsedStepSchema, EntityIdSchema, MAX_TAX_RATE_BPS, TaxRegimeSchema } from "../material-state";
 import { GOODS, MAX_MARKET_HUBS, MarketHubSchema, goodSpec, marketPriceBps, openingMarkets, type GoodId } from "./markets";
+import { CoinageSchema, MAX_COINAGES, priceLevelBpsOf } from "./coinage";
 import { provinceOf } from "./movement";
 import type { WorldState } from "./world-state";
 
@@ -112,6 +113,13 @@ export const EconomyMemorySchema = z
      * last heard that grain had come by sea to its dear markets (`otherPolityId` is the first power it came from).
      */
     tradeNews: z.array(z.object({ polityId: EntityIdSchema, otherPolityId: EntityIdSchema, kind: z.enum(["resumed", "cut", "relief"]), atStep: ElapsedStepSchema }).strict()).max(200).default([]),
+    /**
+     * The world's coinages (`world/coinage.ts`): what each power's mint
+     * strikes, its silver content against the Attic drachma, its price level
+     * and what it fetches among the money-changers. Empty: one silver
+     * everywhere, no exchange, no price level.
+     */
+    coinages: z.array(CoinageSchema).max(MAX_COINAGES).default([]),
   })
   .strict();
 export type EconomyMemory = z.infer<typeof EconomyMemorySchema>;
@@ -135,6 +143,7 @@ export const EMPTY_ECONOMY_MEMORY: EconomyMemory = {
   customsDue: [],
   tradeLanes: [],
   tradeNews: [],
+  coinages: [],
 };
 
 export const economyOf = (world: Pick<WorldState, "economy">): EconomyMemory => world.economy ?? EMPTY_ECONOMY_MEMORY;
@@ -223,7 +232,21 @@ export function polityGrainPriceBps(world: Pick<WorldState, "map" | "material" |
     people += row.population;
     weighted += row.population * marketPriceBps(world, row.provinceId, "grain");
   }
-  return people === 0 ? 10_000 : Math.round(weighted / people);
+  // What the people pay is the hub's price in the coin the power strikes: a debased coin buys less bread (`priceLevelBpsOf`).
+  return people === 0 ? 10_000 : Math.round((weighted / people) * priceLevelBpsOf(world, polityId) / 10_000);
+}
+
+/**
+ * What a good costs in a province's market in the coin of the power that holds
+ * the province: the hub's price (`marketPriceBps`, which is the silver price
+ * the markets settle among themselves) times the price level its coinage has
+ * built (`priceLevelBpsOf`). The army's bread, a ruler's slice and what a
+ * subject pays read this; the markets' own trade between hubs reads the
+ * silver price, so inflation in one country is not mistaken for a profit.
+ */
+export function nominalPriceBps(world: Pick<WorldState, "economy" | "map">, provinceId: string, good: GoodId): number {
+  const level = priceLevelBpsOf(world, provinceOf(world, provinceId)?.controllerPolityId ?? null);
+  return Math.round((marketPriceBps(world, provinceId, good) * level) / 10_000);
 }
 
 /** Whether the land has been reckoned and the markets opened. */
@@ -288,7 +311,7 @@ export function bestGapGood(world: Pick<WorldState, "economy" | "map">, fromProv
 
 /** Grain price in one province's market, 10 000 where nothing is reckoned for it. */
 export function provinceGrainPriceBps(world: Pick<WorldState, "economy" | "map">, provinceId: string): number {
-  return marketPriceBps(world, provinceId, "grain");
+  return nominalPriceBps(world, provinceId, "grain");
 }
 
 /** What grain costs where this account's owner buys it: his power's ground, or where he stands. */

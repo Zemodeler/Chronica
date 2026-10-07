@@ -4,6 +4,8 @@ import type { Office } from "../characters/character";
 import type { WorldState } from "../world/world-state";
 import { accountLabel } from "./account-names";
 import { obligationAmountNow } from "../world/economy";
+import { coinageOfAccount, coinagesOf, faceAmount } from "../world/coinage";
+import type { MoneyAccount } from "../material-state";
 import { taxWhy, type WhyReading } from "../knowledge/why";
 
 /**
@@ -46,6 +48,30 @@ export interface LedgerLine {
   readonly detail: readonly { readonly label: string; readonly monthly: number }[];
 }
 
+/**
+ * The coin an account's money is in, for a ledger to show local coin beside its
+ * silver equivalent (phase E; the UI draws it in phase F). Balances are always
+ * silver units; `face` is what the balance reads as in the coin's own measure
+ * (silver units over the coin's silver content). Absent where the world keeps
+ * no coinages.
+ */
+export interface AccountCoin {
+  readonly coinageId: string;
+  readonly name: string;
+  /** Silver in one unit of the coin against the Attic drachma, 10 000 being as much. */
+  readonly silverBps: number;
+  /** The balance in the coin's own face amount. */
+  readonly face: number;
+  /** The balance in silver units: the number every other figure of the books is in. */
+  readonly silverEquivalent: number;
+}
+
+function coinOfAccount(world: WorldState, account: MoneyAccount): { readonly coinage?: AccountCoin } {
+  if (coinagesOf(world).length === 0) return {};
+  const coin = coinageOfAccount(world, account);
+  return { coinage: { coinageId: coin.id, name: coin.name, silverBps: coin.silverBps, face: faceAmount(account.balance, coin), silverEquivalent: account.balance } };
+}
+
 export interface Books {
   readonly income: readonly LedgerLine[];
   readonly expenditure: readonly LedgerLine[];
@@ -57,7 +83,7 @@ export interface Books {
   /** If nothing changes, days until what is in hand is spent. Null when it is not being spent down. */
   readonly runsOutInDays: number | null;
   /** Everything they can actually open, with its balance. */
-  readonly accounts: readonly { readonly id: string; readonly label: string; readonly balance: number }[];
+  readonly accounts: readonly { readonly id: string; readonly label: string; readonly balance: number; readonly coinage?: AccountCoin }[];
   /** True when these are a government's books rather than one man's purse. */
   readonly theirGovernments: boolean;
   /**
@@ -164,7 +190,7 @@ export function readTheBooks(
       return scope === "own" ? own : !own;
     })
     .sort((a, b) => b.balance - a.balance);
-  const accounts = open.map((account) => ({ id: account.id, label: accountLabel(world, account), balance: account.balance }));
+  const accounts = open.map((account) => ({ id: account.id, label: accountLabel(world, account), balance: account.balance, ...coinOfAccount(world, account) }));
   const readable = new Set(accounts.map((account) => account.id));
 
   const income = fold(

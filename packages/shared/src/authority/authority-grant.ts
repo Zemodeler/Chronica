@@ -146,6 +146,7 @@ export const DOMAIN_POWER_BY_ACTION: Readonly<Record<string, AuthorityPower>> = 
   regime_change: "override",
   public_benefaction: "spend",
   tax_policy_set: "spend",
+  coinage_debase: "spend",
   office_seat_set: "appoint",
   agreement_open: "negotiate",
   agreement_close: "negotiate",

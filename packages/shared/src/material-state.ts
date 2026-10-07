@@ -54,6 +54,12 @@ export const MoneyAccountSchema = z.object({
   id: EntityIdSchema,
   owner: AccountOwnerSchema,
   currencyId: EntityIdSchema,
+  /**
+   * The coinage the money in it is struck in (`world/coinage.ts`). Absent: the
+   * coinage of the owner's power, or foreign silver. The balance itself is
+   * always in silver units, whatever coin it is held in.
+   */
+  coinageId: EntityIdSchema.optional(),
   balance: MoneyAmountSchema,
   status: z.enum(["active", "locked", "closed"]),
   visibility: VisibilitySchema,
@@ -204,11 +210,13 @@ export type MoneyReservation = z.infer<typeof MoneyReservationSchema>;
  * from a sacked town; credit from a banker the world does not name; the
  * thousands nobody names, who are paid wages, and who bring what they have
  * saved when they take service; bread bought from the country at large; money
- * an order sends abroad; and the means a man arrives in the world with. A
- * one-sided transaction that names none of them is money from nowhere
+ * an order sends abroad (which is also where a money-changer's cut on a sum
+ * crossing from one coinage to another goes); the seigniorage a mint earns by
+ * striking the same silver into more coin; and the means a man arrives in the
+ * world with. A one-sided transaction that names none of them is money from nowhere
  * (`sim/money-audit.ts`).
  */
-export const EXTERNAL_MONEY_KINDS = ["harvest", "market", "plunder", "credit", "the_unnamed", "bread", "abroad", "endowment"] as const;
+export const EXTERNAL_MONEY_KINDS = ["harvest", "market", "plunder", "credit", "the_unnamed", "bread", "abroad", "seigniorage", "endowment"] as const;
 export const ExternalMoneyKindSchema = z.enum(EXTERNAL_MONEY_KINDS);
 export type ExternalMoneyKind = z.infer<typeof ExternalMoneyKindSchema>;
 

@@ -17,6 +17,9 @@ export const AccountViewSchema = z.object({
   id: EntityIdSchema,
   label: z.string().trim().min(1),
   balance: MoneyAmountSchema,
+  /** The coin the balance is held in and what it reads as in that coin (`material/books.ts` `AccountCoin`); the balance itself is silver units. */
+  coinageName: z.string().trim().min(1).optional(),
+  faceBalance: MoneyAmountSchema.optional(),
   permissions: z.array(AccountPermissionSchema),
   status: z.enum(["active", "locked", "closed"]),
   recentChanges: z.array(MoneyChangeViewSchema),

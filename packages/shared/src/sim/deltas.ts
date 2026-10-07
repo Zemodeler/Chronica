@@ -1681,6 +1681,25 @@ const TaxPolicySetSchema = z.object({
 }).strict();
 
 /**
+ * A mint strikes its coin with less silver in it, or more (`world/coinage.ts`).
+ * Only the issuer's own government may. Lowering the silver content earns the
+ * treasury a one-off seigniorage and, over the months after, raises prices in
+ * the countries that use the coin and lowers what it fetches abroad; raising it
+ * back (a reform) costs the silver to re-strike what is called in. Name either
+ * the silver content to strike at (`targetSilverBps`, 10,000 being an Attic
+ * drachma's) or the change to make to it (`stepBps`, negative to debase); no
+ * single act moves it by more than a quarter, and no coin is struck below four
+ * in ten of the silver it began with.
+ */
+const CoinageDebaseSchema = z.object({
+  op: z.literal("coinage_debase"),
+  coinageId: EntityIdSchema,
+  targetSilverBps: z.number().int().min(1_000).max(30_000).nullable().default(null).describe("silver to strike at (10,000 = an Attic drachma); or null"),
+  stepBps: z.number().int().min(-2_500).max(2_500).nullable().default(null).describe("change to the silver, negative debases, positive re-coins; or null"),
+  reason: ReasonSchema,
+}).strict();
+
+/**
  * A man put in a post in an army: made optio, centurion, legate. No act could
  * set one, so a man in the ranks could rise only when the man over him died
  * (E15). Judged by who gives the post (`appointedBy`): the centurion his
@@ -2101,6 +2120,7 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   RegimeChangeSchema,
   PublicBenefactionSchema,
   TaxPolicySetSchema,
+  CoinageDebaseSchema,
 ]).meta({ id: "WorldDelta" });
 export type WorldDelta = z.infer<typeof WorldDeltaSchema>;
 export type WorldDeltaOp = WorldDelta["op"];
@@ -2170,6 +2190,7 @@ export const WORLD_DELTA_OPS = [
   "regime_change",
   "public_benefaction",
   "tax_policy_set",
+  "coinage_debase",
 ] as const satisfies readonly WorldDeltaOp[];
 
 /**
@@ -2259,4 +2280,6 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   public_benefaction: "fiscal",
   // How a power's provinces are taxed is the fiscal power at its plainest.
   tax_policy_set: "fiscal",
+  // What the mint strikes is the treasury's own: the fiscal power, and only the issuer's.
+  coinage_debase: "fiscal",
 };
