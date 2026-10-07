@@ -329,7 +329,7 @@ Numismatic Society notes on Carthaginian coinage; Polybius; Wikipedia, "Pay (Rom
 
 v47 puts money at the age's scale and tags every door; v48 adds development, scars and tax regimes (Syracuse opens on a
 tithe); v49 adds goods, hubs, flows, customs and Rome's two pacts; v50 adds the coinages. v51 (taxes by province in
-`punic-wars-taxes.ts`) sits on them, v52 sets the income to the army-cost rule and v53 gives the allies chests. Notes for each are in `packages/db/src/built-in-versions.ts`.
+`punic-wars-taxes.ts`) sits on them, v52 sets the income to the army-cost rule and v53 gives the allies chests; v54 seats the merchant houses and v55 writes who may do what (government, H1). Notes for each are in `packages/db/src/built-in-versions.ts`.
 
 ## Where things live
 
@@ -496,6 +496,22 @@ a man's competence.
 **Five charges**, levers a department may be given (`customs`, `mint`, `markets`, `credit`, `census`), each a multiplier near one by the skill of the men who keep it, and exactly one where nobody has been given it:
 the share of the duty that reaches the chest (up to a fifth either way: `customs.ts`); the gain from a coin struck lighter, and how much of its bad name sticks to its premium (`apply-deltas.ts`, `coinage.ts`); how far a
 hub's prices stray, and the hoards a famine price brings out (`markets.ts`); the interest the state is asked (`loan_open`); and what the tax roll and the muster count of the people (`material/taxation.ts`). Tests: `the-new-levers-bite`.
+
+### Per culture (H1, v55)
+
+The table above is the common run; the research's charges (`docs/plans/government.md`, "H1 as built") are written over it as data on the offices (`packages/db/src/punic-wars-charges.ts`) and on the form templates
+(`sim/src/constitutions.ts`). What the player and the rules meet in each:
+
+- **Rome.** The consul lays the tribute within custom beside his colleague; a rate past custom, a *new* tax (a tithe where there was a land levy), the tariff, every loan, the coin, bread and the treaties are the Senate's:
+  he moves them there. The quaestors keep the books (the rate within custom; every draw is the Senate's), the censors the tariff within a tenth, the census and the harbour dues, the aediles the city's bread and the markets,
+  the dictator all but the chest. No department keeps the mint (none existed in 270). Allies of the foedus have no war or peace of their own.
+- **Carthage.** The head of the state is the two suffetes, who carry everything to the Council of Elders (the tribute, the coin, the loans, the chest, the treaties and the war); the officers of the accounts keep the books, the
+  harbour dues, the census and the mint within custom; the commander in Sicily is a general (the levy, the army's coin, the field chest; the peace is the elders').
+- **Kings.** Hiero and the Ptolemies hold it all alone; Egypt's dioiketes keeps the royal revenues, the dues, the royal bank and the rolls within custom and no further, its oikonomoi the granaries. A tribal chief has no
+  standing tax and tolls his own route.
+- **The men at the books** (`fiscal-officers.ts`) do only what their charge lets them: what is the chamber's they lay before it as a motion (a consul puts it), carry out what it carries and leave what is none of theirs.
+  A quaestor of Rome cannot strike the coin lighter; a rate past custom is asked of the Senate, and the Senate may refuse it. Tests: `the-quaestor-asks-the-senate`, `a-magistrate-lays-no-new-tax`,
+  `the-charges-follow-the-constitution`, `every-power-has-a-head-who-can-act`, `the-charges-match-the-sources`.
 
 ## Tests that pin behaviour
 

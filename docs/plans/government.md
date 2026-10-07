@@ -477,3 +477,118 @@ is `ActMark` here (`world/act-marks.ts`): a row for each power and act, replaced
 
 `a-treasurer-decides`, `a-consul-cannot-draw-the-treasury-alone`, `two-consuls-do-not-both-tax`, `a-tribune-stops-a-levy`, `the-senate-decrees-the-tribute`, `a-reform-changes-who-may-act`,
 `the-new-levers-bite`, `no-modern-words` (sim) and `competence.test.ts` (shared); the kit is `competence-test-kit.ts`.
+
+## H1 as built
+
+Phase H1 of the plan for the offices of a state. The research above is written down as the charges of the offices (data, `Office.charge`), Carthage has its right head, five economic charges are given to the
+departments that history supports them to, the men at a power's books act through their competence (they lay before the chamber what is the chamber's), and every change of the constitution moves the charges
+with it. The words are the age's: `no-modern-words.test.ts` now scans the charges file and the fiscal officers' file too.
+
+### Where it lives
+
+| Piece | File |
+|---|---|
+| The charges of Rome, Carthage and Syracuse, with the confidence of each line in the comment | `packages/db/src/punic-wars-charges.ts` (applied to the scenario's offices in `punic-wars-scenario.ts`) |
+| What the form templates say differently: the tribal chief, the Hellenistic courts (dioiketes, oikonomoi, the king's friends) and the departments they seed | `packages/sim/src/constitutions.ts` (`TRIBAL_CHIEF`, `HELLENISTIC_COURTS`, `withDepartments`) |
+| The chambers' powers said outright (Rome's Senate and assemblies, Carthage's Council) | `packages/db/src/punic-wars-scenario.ts` (`powers`) |
+| The seeded departments | `punic-wars-scenario.ts` (`SEEDED_DEPARTMENTS`) |
+| The foedus rule, the augurs' stop, which chamber an act names first | `packages/shared/src/authority/competence.ts` |
+| A new tax is the chamber's | `packages/sim/src/apply/competence-gate.ts` (`gatedAct`) |
+| The men at the books act through their competence | `packages/sim/src/fiscal-officers.ts` (`weigh`, `footingOf`, `motionsByPower`) |
+
+### How competence reads, 270 BCE
+
+`A` alone, `C` with a colleague, `B` by the body, `-` forbidden; a figure is what he may do on that footing (`1200` is 12 in a hundred, `1m` a month of what the power takes in).
+
+| Office | rate | customs | coin | loans | bread | pacts | war | peace | levy | chest |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Rome: consul (head, two) | C 1200, past it B | B | B | B | B | B | B | B | C | C 2m, then B |
+| quaestor (four) | C 1200, past it B | B | - | B | - | - | - | - | - | B (the Senate's gate) |
+| aedile, curule and plebeian | - | - | - | - | C 1m, past it B | - | - | - | - | B |
+| censor (two) | - | C 1000, past it B | - | - | - | - | - | - | - | B |
+| praetor | - | - | - | - | - | - | - | - | A | B |
+| dictator | A | A | B | B | A | B | A | B | A | B |
+| tribune | - (may stop the rate, customs, coin, loans, bread, levy, appointments, the chest) | | | | | | | | | |
+| augur | - (may stop the assembly: appointments) | | | | | | | | | |
+| Carthage: suffete (head, two) | B | C 1000, past it B | B | B | B | B | B | B | B | B |
+| general (Hanno) | - | - | A 0 (coin for the army's pay, not the silver), past it B | - | - | - | - | B | A | A 1m, then B |
+| officer of the accounts (three) | C 1200, past it B | C 1000, past it B | C 0, past it B | B | - | - | - | - | - | B |
+| Syracuse: king | A | A | A | A | A | A | A | A | A | A |
+| strategos (three) | - | - | - | - | - | - | - | - | C | - |
+| Egypt: king | A | A | A | A | A | A | A | A | A | A |
+| dioiketes | A 1200 | A 2500 | - | A 1m | A 2m | - | - | - | - | A 2m |
+| oikonomos (three) | - | - | - | - | A 1m | - | - | - | - | - |
+
+The king holds it all alone because no chamber that binds holds any power of his state (his friends are advisory, the assembly of Syracuse is kept in form), which is read from the parts, so no line is written for
+him: a reform that sets a chamber over him takes the charge from him. The Seleucid dioiketes is Egypt's; Macedon has the king and his friends (and none of the research's evidence for a finance officer, so none is invented).
+
+### Carthage's head
+
+The scenario named `carthaginian-strategos` (the commander in Sicily) as Carthage's `headOfficeId`, so the constitution read him as head of state and the two suffetes as ordinary magistrates. The research says the
+suffetes are the civil heads and the general is chosen for the term of a war and answers to the Hundred and Four on his return (Aristotle, Politics 2.11; Polybius 6.51). v55: `headOfficeId` is `carthaginian-suffete`;
+the strategos is a general (the levy, the army's coin, the field chest; war forbidden, peace laid before the elders); the officers of the accounts and the Council read as in the table. What follows from it:
+the men who rule Carthage (`readDepartments(...).rulers`) are the two suffetes, so the letters to Carthage and the peace it signs go to them (the peace table's speaker, `diplomaticAnswererOf`); Hanno is a general of
+the Messana thread, and no longer a member of the standing cast, which has Carthage's voice from the rules. (Open decision: a +10 to a general in an open thread would put him back, at the cost of the rotation of
+the world's other people: `plans.test.ts` leans on it.) Succession: suffetes are elected for a year by the citizens (`carthaginian-election`) as before; the strategos is named by the Council (`carthaginian-appointment`) and
+holds for the term of the war.
+
+### The chambers, said outright
+
+Rome's Senate lists `laws, war, taxes, constitution, judgment, coinage, finance, treaties, levy` (everything but the elections), the centuriate assembly `elections, laws, war, treaties, judgment`, the tribal `elections,
+laws, judgment`; Carthage's Council `laws, war, taxes, constitution, coinage, finance, treaties, levy`. Nothing changes of what each chamber could decide (a chamber that named none of the four newer powers held
+them by the old bundle), but each now says so by name, which is how `bodyFor` finds the chamber an act is laid before. `bodyFor` now takes the *first* power an act names before the next: an appointment is the people's
+(`elections`) though the Senate also holds the laws. War stays with the Senate in the engine (Polybius has the people vote it on the Senate's motion: the people stand second, in the list, and a simplification the
+doc names under thin evidence, item 1); the people ratify treaties (`treaties` is theirs too, after the Senate).
+
+### A new tax is the Senate's
+
+`gatedAct` weighs a `tax_policy_set` of a regime the power did not lay before (a land levy turned into a tithe, a tribute of men into coin) as a figure past every `within`: no magistrate lays a new tax, whatever the
+rate, and a king, whose line has no figure, does. A rate within custom is still a magistrate's. The fiscal officers' shift of a famine year's levy to a tithe is the same act and asks the Senate (`a-magistrate-lays-no-new-tax.test.ts`).
+
+### The foedus and the augurs
+
+A power bound to a leader by foedus (`leaderOf`) has no war or peace of its own for any office of its constitution; the line reads "Rome makes the war and the peace of those bound to it by the foedus", and the
+apply layer already held it to it (the ally's trade pacts stand: the research says they may trade). If it breaks with Rome the line is read from the parts again. An augur's office (a priesthood that vetoes) *may stop*
+the naming of men to office, as an omen stops the assembly of the day; the gate does not weigh appointments, so it is a reading for the office view and nothing in the engine stops an election by it yet.
+
+### Departments
+
+| Department | Levers (new in bold) | Staffed by | Note |
+|---|---|---|---|
+| The Treasury of Saturn | tax roll, **credit** | quaestors | the Senate gates `spend` |
+| The Censorship | audit, public works, **census**, **customs** | censors | the harbour dues let to the publicani (M-L): simplification |
+| The Aediles | grain, **markets** | curule and plebeian aediles | |
+| (the mint) | | | none: in 270 a consul or the Senate ordered a striking, and the tresviri monetales are probably later (government.md, source 6): none is invented |
+| The Office of the Accounts | tax roll, public works, **customs**, **credit**, **census**, **mint** | officers of the accounts | the Council gates `spend` and the mint; the board's duties are only sketched (L-M) |
+| The Strategoi of Syracuse | **levy**, **supply** | strategoi | the king's chest, mint and tithe stay his |
+| The Royal Revenues (Egypt) | tax roll, **customs**, **credit** (the royal bank), **census** | dioiketes | made with the offices by the template |
+| The Royal Granaries (Egypt) | grain | oikonomoi | |
+| The King's Revenues (Seleucids) | tax roll, **customs** | dioiketes | |
+
+A form template may seed departments with its offices (`ConstitutionTemplate.departments`): they are made when a power's government is founded or recast, with ids the same on every replay, and a recast ends
+the department whose every office it abolished (its work goes back to whoever governs). So a coup in Carthage ends the Office of the Accounts with its officers.
+
+### The men at the books, through their competence (open decision 3 of H0)
+
+`decideFiscal` weighs each thing the officer would do (the rate, the customs, a loan, the coin, a pact, the lifting of an embargo) against `mayAct` for him, at the figure he would do it at:
+
+- **his own** (alone, or with a colleague): done, as before;
+- **the chamber's**: a motion is opened before the chamber that holds the power (`political_procedure_open`, a council deliberation about the power, in the words "that the tribute of Rome be laid at 14 in a
+  hundred", the same words the gate lays a player's order in), sponsored by a magistrate who may convene it (the quaestor does not convene the Senate; a consul puts it, and the account says so). Once: not while it waits
+  on the vote, and not for 120 days after one failed (`MOTION_REST_DAYS`);
+- **decreed**: a motion that carried is carried out the next month the officer looks, as far as the decree goes (a figure no higher than the one voted) and within 120 days;
+- **none of his**: left. A quaestor of Rome has no say in the coin, so Rome never strikes it lighter by rule (the Senate did in the Second Punic War; that is a consul's to move).
+
+What the chamber votes it votes (`holdVotes`: its blocs, its referral, the assembly's advice), so an AI's tribute can fail in the Council and go to the people, which is the research's reading of Carthage; a rejected motion
+rests. The burst applies the officer's motions as the power's standing business (`sanctioned`); `StatecraftInput` gains an optional `offices` (the scenario's offices) so `mayAct` reads the offices written by hand.
+
+### Not in H1
+
+The officers' routine for justice, rites, works and the census (H2), the Senate's gates on war and provinces, the Hundred and Four, the king's friends costing a ruler legitimacy (H3), accounts at the close of office (H4),
+the office view (H5). Subject Greek cities under Macedon's garrisons and Italian allies' other treaties (an ally's *foreign pacts* beyond war and peace) are not read as forbidden: `foedus` is the only agreement that does it.
+
+### Tests
+
+`the-quaestor-asks-the-senate`, `a-magistrate-lays-no-new-tax`, `the-charges-follow-the-constitution` (a dictator, a coup in Carthage, a throne with no heir, a league's reform, an ally that breaks with Rome),
+`every-power-has-a-head-who-can-act`, `the-charges-match-the-sources` (the data block above, line by line for Rome and Carthage), and the changed `a-treasurer-decides`, `two-consuls-do-not-both-tax`,
+`the-new-levers-bite` (Rome's seeded charges stripped for the baseline: `bare-of-charges.ts`), `a-quaestor-keeps-the-books`, `the-books-balance-with-houses` (the chambers sit each month) and `no-modern-words`.
