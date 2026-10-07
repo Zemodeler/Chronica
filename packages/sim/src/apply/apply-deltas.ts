@@ -172,6 +172,8 @@ import { assessExecution, daysInHand, domainOfWork, throughHand } from "../deleg
 import { chooseOverseer } from "../overseers";
 import { PLOT_WORDS, plotOdds, plotResolvesIn } from "../plots";
 import { kinOf, remember, teach } from "../grievances";
+import { lessonsOfPeace } from "../state-lessons";
+import { feel } from "../moods";
 import { INTENT_LIFETIME_DAYS } from "../intents";
 import { watchReading } from "../watch";
 import type { ApplyContext, ApplyResult, AppliedDelta, AssumedDetail, AuthorityBreach, RejectedDelta } from "./context";
@@ -780,7 +782,26 @@ function actorIsAnswerableFor(delta: WorldDelta, scope: AuthorityScope, world: W
   return scopePolityId === actorPolityId;
 }
 
+/**
+ * A hired company is paid at least the going rate for the men or hulls asked for. An answer that forgot the pay ("0 down and 0 a month")
+ * was refused, and "hire twenty ships" came to nothing for want of a number the player never had to give; the pay is filled in
+ * at the going rate instead, and the treasury and the order's own budget decide whether it can be found.
+ */
+function fillHirePay(world: WorldState, deltas: readonly WorldDelta[], context: ApplyContext): void {
+  for (const delta of deltas) {
+    if (delta.op !== "service_contract_open" || delta.company === null || delta.company === undefined) continue;
+    const category = warfareWith(world, context.warfare).troopCategories.find((candidate) => candidate.id === delta.company!.categoryId);
+    if (category === undefined) continue;
+    const months = Math.max(1, Math.round((delta.termDays ?? 90) / 30));
+    const owed = Math.ceil(hireFloorPerMonth(category) * months * delta.company.strength);
+    const paid = delta.advance + delta.monthlyPay * months;
+    if (paid >= hireFloorPerMonth(category) * months) continue; // it keeps at least one, and the captain brings what it keeps
+    (delta as { advance: number }).advance = Math.max(0, owed - delta.monthlyPay * months);
+  }
+}
+
 export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], given: ApplyContext): ApplyResult {
+  fillHirePay(world, deltas, given);
   const context: ApplyContext = given.batchStart === undefined ? { ...given, batchStart: world } : given;
   const groups = hiringGroups(deltas, context.atomicGroups);
   if (groups.length === 0) return applyUngroupedDeltas(world, deltas, context);
@@ -1766,6 +1787,16 @@ function setOutOn(
   return applyOne(setOut, { ...delta, locationId: undefined }, context, assignedIds, resolve, emitFact, emitAccount);
 }
 
+/**
+ * A band kept at one man's own expense -- his clients, his retainers, men paid from his purse -- as against an army of the state.
+ * What such men do is his doing and not the state's: Pompey's legions of 83 BC and Crassus's of 71 were private armies, and a
+ * noble's followers who burned a neighbour's farms had made a feud, not a war between two commonwealths. The injured power may
+ * demand redress -- from the man, or from the state if it takes his side -- but no war between the powers is declared by it.
+ */
+function isPrivateBand(_world: WorldState, force: WorldState["material"]["forces"][number]): boolean {
+  return force.outlaw !== true && force.private === true;
+}
+
 function applyOne(
   world: WorldState,
   delta: WorldDelta,
@@ -1954,6 +1985,64 @@ function applyOne(
       if (!(error instanceof DeltaRejection)) throw error;
       return replied;
     }
+  };
+
+  /**
+   * An attack is the war's beginning. Whoever is attacked -- a power at peace, a truce, a sworn ally -- the war is opened by the
+   * act itself, and what the actor may command is judged as it always is (a breach where it is beyond him). The engine does not
+   * refuse an attack for want of a declaration the player never made: "attack that village" starts the war.
+   */
+  /**
+   * What a private attack brings: the injured power's demand for redress, as the fetials made it. It asks that the man be delivered
+   * to it (the noxal surrender -- Mancinus was given up to Numantia) or, where the man is the player's own, that the damage be made
+   * good; and says that if the state will do neither it holds the deed to be the state's own, and the war follows (`onRefusal`, which
+   * the tick carries out on a refusal or on silence). Accepting hands the man over, or pays.
+   */
+  const demandRedress = (band: WorldState["material"]["forces"][number], injuredPolityId: string, where: string): WorldState => {
+    const offender = world.characters.find((character) => character.id === band.commanderCharacterId);
+    const senderId = diplomaticAnswererOf(world, injuredPolityId, context.offices, null);
+    if (offender === undefined || senderId === null || offender.polityId === injuredPolityId || band.polityId === injuredPolityId) return world;
+    if (world.diplomacy.some((message) => message.status === "awaiting_reply" && message.fromPolityId === injuredPolityId && message.toPolityId === band.polityId && message.subject.startsWith("Redress for"))) return world;
+    const named = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
+    const ownMan = context.playerCharacterId === offender.id;
+    const demand = {
+      op: "diplomatic_message_send", localId: `redress_${band.id}`.slice(0, 60), kind: "ultimatum",
+      fromPolityId: injuredPolityId, fromCharacterRef: senderId, toPolityId: band.polityId, toCharacterRef: null,
+      subject: `Redress for the attack on ${where}`.slice(0, 240),
+      terms: `${offender.name}'s own men fell on ${where}. ${named(band.polityId)} may ${ownMan ? "make good the damage" : "deliver him to us, or make good the damage"} within thirty days. If it will do neither, we shall hold the deed to be its own, and make war.`.slice(0, 1_100),
+      replyWithinDays: 30, inReplyToRef: null, visibility: "public", onRefusal: "war",
+      clauses: ownMan
+        ? [{ kind: "indemnity", payerPolityId: band.polityId, amount: 100, cadenceDays: 30, periods: 1 }]
+        : [{ kind: "hostage", characterRef: offender.id, heldByPolityId: injuredPolityId }],
+      reason: `${offender.name}'s band attacked in ${where}.`.slice(0, 240),
+    } as unknown as WorldDelta;
+    try {
+      return applyOne(world, demand, context, assignedIds, resolve, emitFact, emitAccount);
+    } catch {
+      // The demand could not be written down; the attack stands, and the injured power has still been told of it.
+      return world;
+    }
+  };
+
+  const beginWarByAttack = (attacker: WorldState["material"]["forces"][number], defenderPolityId: string, where: string): WorldState => {
+    const named = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
+    const opened = applyOne(world, {
+      op: "agreement_open", localId: `attack_${attacker.id}_${atStep}`.slice(0, 60), kind: "war",
+      polityId: attacker.polityId, otherPolityId: defenderPolityId,
+      terms: `War begun by ${attacker.name}'s attack at ${where}.`.slice(0, 600), forDays: null, sourceMessageRef: null, visibility: "public",
+      reason: `${attacker.name} attacked in ${where}.`.slice(0, 240),
+    }, context, assignedIds, resolve, emitFact, emitAccount);
+    emitFact({
+      localId: `war_by_attack_${attacker.id}`.slice(0, 60),
+      kind: "war_declared",
+      summary: `${named(attacker.polityId)} made war on ${named(defenderPolityId)}, beginning it with ${attacker.name}'s attack at ${where}.`,
+      affectedRefs: [{ kind: "polity", id: attacker.polityId }, { kind: "polity", id: defenderPolityId }, { kind: "force", id: attacker.id }],
+      visibility: "public",
+      discoveryState: "public",
+      knowableInDays: 0,
+      significance: 70,
+    });
+    return opened;
   };
 
   switch (delta.op) {
@@ -2243,7 +2332,8 @@ function applyOne(
         completionOutcome,
       }, context.playerCharacterId ?? null);
       const doerId = overseerId ?? sponsorId;
-      const hand = doerId === null ? null : assessExecution(world, doerId, domainOfWork(delta.kind, delta.label));
+      // Not a march, a sailing or a crossing: how fast an army moves is the ground's business (km a day), not the diligence of whoever signed the order.
+      const hand = doerId === null || delta.kind === "march" || delta.kind === "sailing" || delta.kind === "crossing" ? null : assessExecution(world, doerId, domainOfWork(delta.kind, delta.label));
       // A public work paid from a power's chest costs what whoever is in
       // charge of its works can make it cost: a seventh less, or more.
       const fundingOwner = fundingId === null ? undefined : world.material.accounts.find((account) => account.id === fundingId)?.owner;
@@ -2306,7 +2396,8 @@ function applyOne(
         completionOutcome,
         linkedEntityIds: [],
         startedAtStep: atStep,
-        targetCompletionStep: atStep + Math.max(...delta.milestones.map((milestone) => milestone.dueInDays)),
+        // In these hands: a veteran's work is done early and an incompetent's late.
+        targetCompletionStep: atStep + Math.max(...milestones.map((milestone) => milestone.requiredAtElapsedOffset)),
         completedAtStep: null,
         provenanceEventIds: [],
       };
@@ -2392,8 +2483,9 @@ function applyOne(
         const taken = source.personnel.map((group, index) => ({ ...group, fit: shares[index]!, unavailable: [] })).filter((group) => group.fit > 0);
         const remaining = source.personnel.map((group, index) => ({ ...group, fit: group.fit - shares[index]! }));
         const emptied = remaining.every((group) => group.fit <= 0);
+        const paidByAMan = payObligationId !== null && world.material.accounts.find((account) => account.id === world.material.obligations.find((obligation) => obligation.id === payObligationId)?.payerAccountId)?.owner.kind === "character";
         const detached: Force = {
-          id, name: delta.name, polityId: forcePolityId, ...(delta.outlaw === true ? { outlaw: true } : {}),
+          id, name: delta.name, polityId: forcePolityId, ...(delta.outlaw === true ? { outlaw: true } : {}), ...(paidByAMan && delta.outlaw !== true ? { private: true } : {}),
           commanderCharacterId: commanderId, controllerCharacterId: controllerId, locationId: source.locationId, positionId: null,
           authorizedStrength: drawn, personnel: taken,
           moraleBps: source.moraleBps, cohesionBps: source.cohesionBps, fatigueBps: source.fatigueBps,
@@ -2444,11 +2536,14 @@ function applyOne(
         emitFact({ localId: `levy_short_${id}`.slice(0, 60), kind: "levy_short", summary: levy.short, affectedRefs: [{ kind: "province", id: delta.locationId }, { kind: "polity", id: forcePolityId }], visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 45 });
       }
       const levied = levy.world;
+      // Paid from a man's own purse, it is his band and not the state's.
+      const paidByAMan = payerAccountId !== null && world.material.accounts.find((account) => account.id === payerAccountId)?.owner.kind === "character";
       const force = {
         id,
         name: delta.name,
         polityId: forcePolityId,
         ...(delta.outlaw === true ? { outlaw: true } : {}),
+        ...(paidByAMan && delta.outlaw !== true ? { private: true } : {}),
         commanderCharacterId: commanderId,
         controllerCharacterId: controllerId,
         locationId: delta.locationId,
@@ -3010,7 +3105,7 @@ function applyOne(
       // Getting an army to where its enemy stands is movement, and movement is
       // somebody's decision. A battle is what happens once they are both there.
       if (attacker.locationId !== defender.locationId) {
-        reject(`${attacker.name} stands in ${world.map.provinces.find((p) => p.id === attacker.locationId)?.name ?? attacker.locationId} and ${defender.name} in ${world.map.provinces.find((p) => p.id === defender.locationId)?.name ?? defender.locationId}; they cannot fight until one of them marches.`);
+        reject(`${attacker.name} is at ${world.map.provinces.find((p) => p.id === attacker.locationId)?.name ?? attacker.locationId} and ${defender.name} at ${world.map.provinces.find((p) => p.id === defender.locationId)?.name ?? defender.locationId}: the armies cannot meet in battle until one of them has marched to the other.`);
       }
       const living = (force: typeof attacker): number => force.personnel.reduce((sum, category) => sum + category.fit, 0);
       if (living(attacker) === 0 || living(defender) === 0) reject("An army with no men left in it cannot fight.");
@@ -3030,15 +3125,24 @@ function applyOne(
       // An ally bound by foedus stands in its leader's peaces as well as its own.
       const standing = attacker.outlaw === true || defender.outlaw === true ? [] : agreementsBetweenSides(world.polityAgreements, attacker.polityId, defender.polityId);
       const peaceBetween = standing.find((agreement) => agreement.kind === "peace" || agreement.kind === "truce" || agreement.kind === "alliance" || agreement.kind === "non_aggression" || agreement.kind === "foedus");
-      if (peaceBetween !== undefined && !standing.some((agreement) => agreement.kind === "war")) {
-        reject(`${attacker.polityId} and ${defender.polityId} stand in ${AGREEMENT_KIND_IN_WORDS[peaceBetween.kind]}; break it or declare war before giving battle.`);
-      }
+      // ...and one that stands in a peace, a truce or an alliance with it breaks that by attacking: the war opens just the same,
+      // below, and nothing is refused for the declaration the player did not make.
+      void peaceBetween;
       // With neither peace nor war between them, the attack is the war's
       // beginning, and the war is opened by it. Legio I stormed Messana with
       // Rome and the Mamertines at war on no account, so nothing afterwards
       // knew they were enemies: not the Mamertines, not the siege, not the
       // record, which had only a breach nobody would read.
-      const outlawed = attacker.outlaw === true || defender.outlaw === true;
+      const privateBand = isPrivateBand(world, attacker) || isPrivateBand(world, defender);
+      const outlawed = attacker.outlaw === true || defender.outlaw === true || privateBand;
+      if (privateBand && attacker.polityId !== defender.polityId && !atWar(world.polityAgreements, attacker.polityId, defender.polityId)) {
+        emitFact({
+          localId: `private_attack_${attacker.id}`.slice(0, 60), kind: "private_attack",
+          summary: `${attacker.name}, a band kept at one man's own cost, fell on ${defender.name}. It is a quarrel of private men and not a war between ${polityName(world, attacker.polityId)} and ${polityName(world, defender.polityId)}, though the injured power may demand redress.`,
+          affectedRefs: [{ kind: "force", id: attacker.id }, { kind: "force", id: defender.id }, { kind: "polity", id: defender.polityId }], visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 55,
+        });
+        world = demandRedress(isPrivateBand(world, attacker) ? attacker : defender, isPrivateBand(world, attacker) ? defender.polityId : attacker.polityId, world.map.provinces.find((province) => province.id === attacker.locationId)?.name ?? attacker.locationId);
+      }
       if (!outlawed && attacker.polityId !== defender.polityId && !atWar(world.polityAgreements, attacker.polityId, defender.polityId)) {
         const where = world.map.provinces.find((province) => province.id === attacker.locationId)?.name ?? attacker.locationId;
         const opened = applyOne(world, {
@@ -5053,6 +5157,18 @@ function applyOne(
         reject(`${force.name} were ordered to raid ${province.name} and did not: it is ${polityName(force.polityId)}'s own land, and its farmers are ${polityName(force.polityId)}'s own people. No farm was burned and nothing was taken.`);
       }
       if (province.controllerPolityId !== null && force.outlaw !== true && province.controllerPolityId !== force.polityId
+        && !atWar(world.polityAgreements, force.polityId, province.controllerPolityId)) {
+        // A raid by the state's army on a country not at war with it is the war's beginning (see beginWarByAttack); by a man's
+        // own band it is his quarrel, not the state's war (see isPrivateBand).
+        if (!isPrivateBand(world, force)) return applyOne(beginWarByAttack(force, province.controllerPolityId, province.name), delta, context, assignedIds, resolve, emitFact, emitAccount);
+        emitFact({
+          localId: `private_attack_${force.id}`.slice(0, 60), kind: "private_attack",
+          summary: `${force.name}, a band kept at one man's own cost, raided ${province.name}. It is a quarrel of private men and not a war between ${polityName(force.polityId)} and ${polityName(province.controllerPolityId)}, though the injured power may demand redress.`,
+          affectedRefs: [{ kind: "force", id: force.id }, { kind: "polity", id: province.controllerPolityId }], visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 55,
+        });
+        world = demandRedress(force, province.controllerPolityId, province.name);
+      }
+      if (province.controllerPolityId !== null && force.outlaw !== true && !isPrivateBand(world, force) && province.controllerPolityId !== force.polityId
         && sameConfederation(world.polityAgreements, force.polityId, province.controllerPolityId)
         && !atWar(world.polityAgreements, force.polityId, province.controllerPolityId)) {
         reject(`${force.name} were ordered to raid ${province.name} and did not: ${polityName(province.controllerPolityId)} are sworn allies of ${polityName(leaderOf(world.polityAgreements, province.controllerPolityId) ?? province.controllerPolityId)}, and nobody burns an ally's farms without first going to war with it.`);
@@ -5136,9 +5252,14 @@ function applyOne(
       // power does not write to itself", and the petition was lost.
       // A letter to a power, naming nobody, goes to the one person who answers
       // for that power's relations (`letters.ts`), not to all of its people.
-      const recipientId = delta.toCharacterRef === null
-        ? diplomaticAnswererOf(world, letterToId, context.offices, senderId)
-        : required(delta.toCharacterRef, "The named recipient");
+      // An answer goes back to whoever wrote the letter it answers, when that
+      // is one of the power it is sent to: a counter-offer to the player's own
+      // letter was handed to the consul instead, and the player never saw it.
+      const repliedTo = delta.inReplyToRef === null ? undefined : world.diplomacy.find((message) => message.id === required(delta.inReplyToRef!, "The letter this answers"));
+      const writerOfRepliedTo = repliedTo?.fromCharacterId == null ? undefined : world.characters.find((character) => character.id === repliedTo.fromCharacterId && character.alive && character.polityId === letterToId);
+      const recipientId = delta.toCharacterRef !== null
+        ? required(delta.toCharacterRef, "The named recipient")
+        : writerOfRepliedTo?.id ?? diplomaticAnswererOf(world, letterToId, context.offices, senderId);
       if (recipientId !== null && !world.characters.some((character) => character.id === recipientId)) {
         reject(`No character "${recipientId}" exists to receive this.${nearestTo(recipientId)}`, "reference");
       }
@@ -5317,8 +5438,24 @@ function applyOne(
           score: -10, dimensions: { fear: 15, affection: -15, trust: -10 },
         }], atStep, boundedId("ultimatum", messageId))
         : replied;
-      const settled = delta.answer === "accepted" ? bindTheAcceptance(threatened, answered)
-        : delta.answer === "refused" || delta.answer === "ignored" ? carryOutTheThreat(threatened, answered) : threatened;
+      // How an answer sits with the men: giving way to a demand shames the one who gave way and flatters the one who made it;
+      // defying one angers him; a peace refused galls its sender a little (`moods.ts`).
+      const sender = message.fromCharacterId;
+      const sentBy = world.characters.some((character) => character.id === sender && character.alive);
+      const aboutPeace = message.kind === "peace_offer" || (message.proposes ?? []).includes("peace");
+      const felt = !sentBy ? threatened
+        : message.kind === "ultimatum" || message.kind === "warning" || message.kind === "tribute_demand"
+          ? (delta.answer === "accepted" ? feel(answerer === null ? threatened : feel(threatened, answerer, "yielded", atStep), sender, "won_a_point", atStep)
+            : delta.answer === "refused" ? feel(threatened, sender, "defied_by", atStep) : threatened)
+          : aboutPeace && delta.answer === "refused" ? feel(threatened, sender, "refused_peace", atStep) : threatened;
+      // And what the two men think of each other, as men: a yes warms them, a no cools them a little.
+      const between = answerer === null || !sentBy || (delta.answer !== "accepted" && delta.answer !== "refused") ? felt
+        : remember(felt, [
+          { subjectCharacterId: sender, targetCharacterId: answerer, label: `${characterName(world, answerer)} ${delta.answer === "accepted" ? "agreed to" : "turned down"} his letter "${message.subject}"`.slice(0, 200), score: delta.answer === "accepted" ? 6 : -3, dimensions: delta.answer === "accepted" ? { affection: 4, trust: 4 } : { affection: -3, trust: -2 } },
+          { subjectCharacterId: answerer, targetCharacterId: sender, label: `He ${delta.answer === "accepted" ? "said yes to" : "said no to"} ${characterName(world, sender)}`.slice(0, 200), score: delta.answer === "accepted" ? 3 : -1, dimensions: delta.answer === "accepted" ? { affection: 2, trust: 2 } : { affection: -1 } },
+        ], atStep, boundedId("answer", messageId));
+      const settled = delta.answer === "accepted" ? bindTheAcceptance(between, answered)
+        : delta.answer === "refused" || delta.answer === "ignored" ? carryOutTheThreat(between, answered) : between;
       // Taken in, or the refusal remembered, whatever else the letter offered (`submission.ts`).
       return ruled === null ? settled : carryOutUnion(settled, ruled, atStep, emitFact);
     }
@@ -5476,7 +5613,9 @@ function applyOne(
       const clauses = delta.kind === "peace" ? [...written, ...servesInTerms(world, delta.terms, partyId, otherPartyId, written)] : written;
       const carried = carryOutClauses(world, clauses, agreementId, partyId, otherPartyId, required, context, emitFact, sourceMessageId);
       // A peace settles what each side holds of the other's (`settleOccupations`).
-      const bound = delta.kind !== "peace" ? carried : { ...carried, map: { ...carried.map, provinces: settleOccupations(carried.map.provinces, partyId, otherPartyId, atStep) } };
+      // What ending the war teaches the men who ruled through it (`state-lessons.ts`).
+      const learned = delta.kind === "peace" || delta.kind === "truce" ? lessonsOfPeace(carried, partyId, otherPartyId, atStep) : carried;
+      const bound = delta.kind !== "peace" ? learned : { ...learned, map: { ...learned.map, provinces: settleOccupations(learned.map.provinces, partyId, otherPartyId, atStep) } };
       // A power that surrendered in it is no more, and is party to nothing.
       if ((delta.clauses ?? []).some((clause) => clause.kind === "submission")) return {
         ...bound,
@@ -5633,8 +5772,15 @@ function applyOne(
       const place = settlement?.name ?? province.name;
       if (defenderId === null || defenderId === force.polityId) reject(`${place} is not held against ${force.name}: there is nothing there to besiege.`);
       // Laid by an army at war with the city, as an assault would be.
-      if (!atWar(world.polityAgreements, force.polityId, defenderId)) {
-        reject(`${name(force.polityId)} is not at war with ${name(defenderId)}: a siege of ${place} is an act of war, and the war is declared first ("agreement_open").`);
+      // A siege is an act of war: laid on a city not at war with it, it opens the war (see beginWarByAttack).
+      if (!atWar(world.polityAgreements, force.polityId, defenderId) && force.outlaw !== true) {
+        if (!isPrivateBand(world, force)) return applyOne(beginWarByAttack(force, defenderId, place), delta, context, assignedIds, resolve, emitFact, emitAccount);
+        emitFact({
+          localId: `private_attack_${force.id}`.slice(0, 60), kind: "private_attack",
+          summary: `${force.name}, a band kept at one man's own cost, laid siege to ${place}. It is a quarrel of private men and not a war between ${name(force.polityId)} and ${name(defenderId)}, though the injured power may demand redress.`,
+          affectedRefs: [{ kind: "force", id: force.id }, { kind: "polity", id: defenderId }], visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 55,
+        });
+        world = demandRedress(force, defenderId, place);
       }
       // Laid once: the same army at the same city is the siege already under way,
       // and an order naming works for it raises them there.

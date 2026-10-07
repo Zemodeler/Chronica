@@ -92,6 +92,37 @@ export function leverAptitude(character: Pick<Character, "skills">, lever: Lever
   return total / skills.length;
 }
 
+/**
+ * What a person is like at the work of an office, apart from what they are
+ * good at: the whole of their mind bearing on the job, in points of skill.
+ *
+ * Two officers equally skilled do not run a department alike. The disciplined
+ * and dutiful keep it in order; the honest are not skimming it; one who wants
+ * the standing the post gives works to be seen at it; a greedy man with a weak
+ * conscience takes his share out of the lever's yield, and the department
+ * runs a little worse for it; a slack, impulsive one lets it drift. Up to
+ * fourteen points either way -- enough to see, never enough to make a fool of
+ * a gifted man or a genius of a dull one.
+ */
+export function officeTemper(character: Pick<Character, "mind">): number {
+  // Whatever of a mind was never written is the middling man's: no better or worse at the work for it.
+  const temperament: Partial<Record<string, number>> = character.mind?.temperament ?? {};
+  const drives: Partial<Record<string, number>> = character.mind?.drives ?? {};
+  const discipline = temperament.discipline ?? 50;
+  const honesty = temperament.honesty ?? 50;
+  const caution = temperament.caution ?? 50;
+  const duty = drives.duty ?? 50;
+  const wealth = drives.wealth ?? 50;
+  const status = drives.status ?? 50;
+  const conscientiousness = (discipline - 50) * 0.16 + (duty - 50) * 0.1 + (honesty - 50) * 0.05;
+  const zeal = (status - 50) * 0.04;
+  // Appetite for gain against a conscience: nothing from a man who is honest, a good deal from one who is not.
+  const skimming = Math.max(0, wealth - 55) * (1 - honesty / 100) * 0.22;
+  // Caution costs speed in a department that has to move and saves it from the worst mistakes: a small net drag at the extremes.
+  const hesitation = Math.abs(caution - 50) * 0.02;
+  return Math.max(-14, Math.min(14, Math.round(conscientiousness + zeal - skimming - hesitation)));
+}
+
 /** Whose department it is: a power's, or one man's household. */
 export const DepartmentScopeSchema = z
   .object({ kind: z.enum(["polity", "household"]), id: EntityIdSchema })
@@ -360,7 +391,7 @@ export function readDepartments(world: DepartmentWorld): DepartmentReader {
     return { department: null, people, head: people[0] ?? null };
   };
 
-  const skillOf = (person: Character, lever: LeverId): number => leverAptitude(person, lever) + workload(person.id);
+  const skillOf = (person: Character, lever: LeverId): number => leverAptitude(person, lever) + workload(person.id) + officeTemper(person);
 
   const friction = (people: readonly Character[]): number => {
     let pairs = 0;

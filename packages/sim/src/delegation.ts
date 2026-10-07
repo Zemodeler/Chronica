@@ -93,6 +93,16 @@ export function domainOfWork(kind: string, label: string): AuthorityDomain {
   return WORK_WORDS.find(([, words]) => words.test(said))?.[0] ?? "civil";
 }
 
+/**
+ * How a particular person carries out somebody else's work.
+ *
+ * Nobody here is a type. Cost, time, waste and what goes missing are each a
+ * smooth function of the person's own skill, seasoning, zeal, caution,
+ * discipline and honesty, so no two people are the same hand: a careful man
+ * with middling skill and a driven one with the same skill cost different
+ * sums and take different times, and the words the prompt gets name only what
+ * is actually marked in them.
+ */
 export interface ExecutionHand {
   readonly characterId: string;
   readonly name: string;
@@ -110,10 +120,36 @@ export interface ExecutionHand {
   readonly words: string;
 }
 
-/** Nobody is charged more than half again, or robbed of more than a fifth. */
-const MAX_WASTE_BPS = 5_000;
-const MAX_DELAY_BPS = 6_000;
+/** Nobody is charged more than seven-tenths again, or robbed of more than a fifth. */
+const MAX_WASTE_BPS = 7_000;
+const MAX_DELAY_BPS = 9_000;
 const MAX_SKIM_BPS = 2_000;
+
+/** Seasoning: nothing at eighteen, all of it by about fifty-eight. */
+const seasoningOf = (ageYears: number): number => Math.max(0, Math.min(1, (ageYears - 18) / 40));
+
+/**
+ * Who this particular person is as a workman, in words the prompt can use.
+ *
+ * Each clause appears only where that trait is marked in them, so two people
+ * with the same skill read differently if their temperaments differ.
+ */
+function workmanInWords(competence: number, seasoning: number, zeal: number, caution: number, discipline: number, fidelity: number, skimming: boolean): string {
+  const marked = [
+    seasoning >= 0.6 && competence >= 55 ? "has done this many times" : seasoning <= 0.25 ? "new to this kind of work" : "",
+    zeal >= 0.7 ? (competence < 55 ? "in a hurry to be seen succeeding, and it shows in the bills" : "driven, and quick") : zeal <= 0.25 ? "in no hurry about anything" : "",
+    caution >= 65 ? "careful to the point of slowness" : caution <= 30 ? "inclined to rush a decision" : "",
+    discipline >= 65 ? "meticulous" : discipline <= 35 ? "slapdash" : "",
+    skimming ? "not to be left alone with money" : fidelity >= 75 ? "straight about it" : "",
+  ].filter((part) => part !== "");
+  return `${bandWord(competence)} at this kind of work${marked.length === 0 ? "" : `; ${marked.join(", ")}`}`;
+}
+
+/** Honesty and duty against the pull of wanting things. */
+function fidelityOf(mind: Character["mind"]): number {
+  const appetite = Math.max(mind.drives.wealth, mind.drives.status);
+  return Math.max(0, Math.min(100, Math.round((mind.temperament.honesty * 0.5) + (mind.drives.duty * 0.3) + ((100 - appetite) * 0.2))));
+}
 
 export function assessExecution(world: WorldState, characterId: string, domain: AuthorityDomain): ExecutionHand | null {
   const character = world.characters.find((candidate) => candidate.id === characterId);
@@ -132,34 +168,50 @@ export function assessExecution(world: WorldState, characterId: string, domain: 
   // Fidelity is honesty and duty against the pull of wanting things. A man
   // with no appetites is faithful whatever his honesty, and a greedy honest
   // man is mostly faithful; it takes both to make a thief.
-  const appetite = Math.max(mind.drives.wealth, mind.drives.status);
-  const fidelity = Math.max(0, Math.min(100,
-    Math.round((mind.temperament.honesty * 0.5) + (mind.drives.duty * 0.3) + ((100 - appetite) * 0.2)),
-  ));
+  const fidelity = fidelityOf(mind);
 
   // Below the middle of the range it costs more and takes longer; above it,
   // a little less. Nobody does a job for nothing by being good at it.
   const shortfall = Math.max(0, 50 - competence);
   const surplus = Math.max(0, competence - 50);
-  const wasteBps = Math.min(MAX_WASTE_BPS, Math.round(shortfall * 90) - Math.round(surplus * 20));
-  const delayBps = Math.min(MAX_DELAY_BPS, Math.round(shortfall * 110) - Math.round(surplus * 30));
+  const zeal = Math.max(0, Math.min(1, ((character.traits.includes("ambitious") ? Math.max(70, mind.drives.status) : mind.drives.status) - 30) / 60));
+  const seasoning = seasoningOf(character.ageYearsAtStart + Math.floor(world.instant.day / 365));
+  const { caution, discipline } = mind.temperament;
+  const skilled = competence / 100;
+  // Skill sets the base; what the person is like moves it, smoothly:
+  //  - experience is worth most to those with the skill to use it, in time and in money;
+  //  - zeal hurries the work, and a hurry without skill is paid for in waste;
+  //  - caution costs time and saves money; a slapdash man wastes, a meticulous one does not;
+  //  - a clumsy man's whole job goes worse, not only the part he is clumsy at.
+  let wasteBps = Math.round(shortfall * 90) - Math.round(surplus * 20)
+    - Math.round(seasoning * skilled * 1_400)
+    + Math.round(zeal * (1 - skilled) * 3_000)
+    + Math.round((50 - discipline) * 14)
+    - Math.round((caution - 50) * 8);
+  let delayBps = Math.round(shortfall * 110) - Math.round(surplus * 30)
+    - Math.round(seasoning * skilled * 2_400)
+    - Math.round(zeal * 2_200)
+    + Math.round((caution - 50) * 25)
+    + Math.round((50 - discipline) * 12);
+  if (competence < 35) { wasteBps = Math.round(wasteBps * 1.3); delayBps = Math.round(delayBps * 1.3); }
+  wasteBps = Math.min(MAX_WASTE_BPS, wasteBps);
+  delayBps = Math.min(MAX_DELAY_BPS, delayBps);
 
   // A thief needs both the inclination and a weak enough conscience, and even
   // then takes a cut rather than the sum: a man who empties the chest is
-  // caught the same week and knows it.
-  const skimBps = fidelity >= 45 ? 0 : Math.min(MAX_SKIM_BPS, Math.round((45 - fidelity) * 40));
+  // caught the same week and knows it. One who is good at the work takes more:
+  // he knows how to make it look like the work.
+  const skimBps = fidelity >= 45 ? 0 : Math.min(MAX_SKIM_BPS, Math.round((45 - fidelity) * 40 * (0.6 + skilled * 0.9)));
 
-  const care = mind.temperament.discipline >= 65 ? "meticulous" : mind.temperament.discipline <= 35 ? "slapdash" : "workmanlike";
-  const honestyWord = skimBps > 0 ? ", and not to be left alone with money" : fidelity >= 75 ? ", and straight about it" : "";
   return {
     characterId,
     name: character.name,
     competence,
     fidelity,
-    wasteBps: Math.max(-2_000, wasteBps),
-    delayBps: Math.max(-3_000, delayBps),
+    wasteBps: Math.max(-3_000, wasteBps),
+    delayBps: Math.max(-4_500, delayBps),
     skimBps,
-    words: `${bandWord(competence)} at this kind of work and ${care} about it${honestyWord}`,
+    words: workmanInWords(competence, seasoning, zeal, caution, discipline, fidelity, skimBps > 0),
   };
 }
 

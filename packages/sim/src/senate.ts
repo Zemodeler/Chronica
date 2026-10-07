@@ -27,6 +27,7 @@ import {
   type VotingBloc,
   type WorldState,
 } from "@chronica/shared";
+import { ballotsOfBloc, seatsOf, votesBySeat, type Ballot } from "./ballots";
 import { carryOutEnactment } from "./enact";
 import type { IdFactory } from "./ports";
 import { concernsOf } from "./questions";
@@ -271,8 +272,10 @@ export interface BlocLeaning {
   readonly lean: number;
   /** How most of it votes. */
   readonly choice: "yes" | "no" | "abstain";
-  /** Its weight, divided by its lean (`splitOfBloc`). */
+  /** Its weight, divided by its lean (`splitOfBloc`), or by each seat's own vote where the chamber votes by seat. */
   readonly split: BlocSplit;
+  /** Every seat's own vote, where the chamber votes by seat (`ballots.ts`). */
+  readonly ballots?: readonly Ballot[];
   readonly reasons: readonly string[];
 }
 
@@ -339,6 +342,12 @@ export function blocLeanings(world: WorldState, procedure: PoliticalProcedure, i
   });
   // Ordinary declarations represent a chamber's opinion, not an unlimited
   // bonus proportional to the number of named senators in the scenario.
+  // Where each seat of a council is somebody, a named man who has spoken is bound by what he said.
+  const ownWords = new Map<string, "support" | "oppose">();
+  for (const position of positions) {
+    if (position.supporterKind === "character" && signOf(position.position) !== 0) ownWords.set(position.supporterId, position.position === "support" ? "support" : "oppose");
+  }
+  const seatMap = votesBySeat(institution) ? seatsOf(world, institution, new Set(ownWords.keys())) : null;
   const houseShift = speakers.length === 0 ? 0 : Math.round(speakers.reduce((sum, speaker) => sum + speaker.signed, 0) / speakers.length * Math.min(MAX_SPEAKERS, speakers.length));
   // A trial leans as its court is run (`trials.ts`); a command kept or a
   // triumph asked, as the man's war went (`command-tenure.ts`).
@@ -374,8 +383,15 @@ export function blocLeanings(world: WorldState, procedure: PoliticalProcedure, i
     if (forIt.length > 0) reasons.push(`${forIt.join(", ")} spoke for it`);
     if (againstIt.length > 0) reasons.push(`${againstIt.join(", ")} spoke against it`);
     const score = clampScore(lean);
-    const split = splitOfBloc(bloc, score);
-    return { bloc, lean: score, choice: choiceOf(split), split, reasons: reasons.map((reason) => reason.slice(0, 200)) };
+    // A council votes seat by seat: the bloc is the faction's pull, and each member answers it as himself.
+    const ballots = seatMap === null ? undefined : ballotsOfBloc(seatMap.get(bloc.id) ?? [], bloc, score, procedure, concerns, ownWords);
+    const split = ballots === undefined ? splitOfBloc(bloc, score) : {
+      yes: ballots.filter((ballot) => ballot.choice === "yes").length,
+      no: ballots.filter((ballot) => ballot.choice === "no").length,
+      abstain: ballots.filter((ballot) => ballot.choice === "abstain").length,
+    };
+    if (ballots !== undefined) reasons.push("each member voted as himself: by what he said, what he is, and what the question asks of him");
+    return { bloc, lean: score, choice: choiceOf(split), split, ...(ballots === undefined ? {} : { ballots }), reasons: reasons.map((reason) => reason.slice(0, 200)) };
   });
 }
 
@@ -393,6 +409,10 @@ function countVote(id: string, procedure: PoliticalProcedure, institution: Gover
   return {
     id,
     motionId: procedure.id,
+    // The named members' own votes: who voted how.
+    ballots: leanings.flatMap((leaning) => (leaning.ballots ?? [])
+      .filter((ballot) => ballot.seat.characterId !== null)
+      .map((ballot) => ({ characterId: ballot.seat.characterId!, name: ballot.seat.name, blocId: leaning.bloc.id, choice: ballot.choice, supportScore: ballot.lean }))),
     // A divided bloc is recorded as its parts, each with the weight that went that way.
     votes: leanings.flatMap((leaning) => (["yes", "no", "abstain"] as const)
       .filter((choice) => leaning.split[choice] > 0)
@@ -427,12 +447,17 @@ const theBloc = (name: string): string => (/^the\s/iu.test(name) ? `the${name.sl
 
 /** "the patrician houses for, the plebeian new men 27 against and 13 abstaining" */
 function howTheyVoted(leanings: readonly BlocLeaning[]): string {
-  return leanings.map((leaning) => {
+  const blocs = leanings.map((leaning) => {
     const parts = (["yes", "no", "abstain"] as const).filter((choice) => leaning.split[choice] > 0);
     return parts.length <= 1
       ? `${theBloc(leaning.bloc.name)} ${CHOICE_WORDS[leaning.choice]}`
       : `${theBloc(leaning.bloc.name)} ${parts.map((choice) => `${leaning.split[choice]} ${CHOICE_WORDS[choice]}`).join(" and ")}`;
   }).join(", ");
+  // Where the seats vote for themselves, the men who are named: who stood where.
+  const named = leanings.flatMap((leaning) => (leaning.ballots ?? []).filter((ballot) => ballot.seat.characterId !== null));
+  const by = (choice: "yes" | "no" | "abstain"): string[] => named.filter((ballot) => ballot.choice === choice).sort((x, y) => Math.abs(y.lean) - Math.abs(x.lean)).slice(0, 5).map((ballot) => ballot.seat.name);
+  const sides = ([["for", by("yes")], ["against", by("no")]] as const).filter(([, names]) => names.length > 0).map(([word, names]) => `${names.join(", ")} ${word}`);
+  return sides.length === 0 ? blocs : `${blocs}; among the named, ${sides.join("; ")}`;
 }
 
 /** How the house leans on a question, in words, for whoever may lobby it. */

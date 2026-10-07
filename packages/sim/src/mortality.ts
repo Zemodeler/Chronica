@@ -12,6 +12,7 @@ import {
   stableHash,
   vacateOfficesOf,
   deriveRelationDimension,
+  ageNudge,
   driftMind,
   type Character,
   type FactProposalDraft,
@@ -19,6 +20,7 @@ import {
   type WorldState,
   type WorldStoryline,
 } from "@chronica/shared";
+import { teach } from "./grievances";
 import { bearChild, birthChance, CHILDBED_MORTALITY_BPS } from "./births";
 import type { IdFactory } from "./ports";
 
@@ -157,10 +159,29 @@ function openPerilFor(world: WorldState, characterId: string): WorldStoryline | 
  * what happened to him, the traits it no longer bears out let go, and the
  * lessons spent (`mind-drift.ts`).
  */
-function grownBy(character: Character): Partial<Character> {
-  if (character.lessons === undefined || character.lessons.length === 0) return {};
-  const grown = driftMind(character.mind, character.traits, character.lessons);
+function grownBy(character: Character, due: number, interval: number): Partial<Character> {
+  // The birthdays since the last review move a man a little whether or not anything happened to him.
+  const years = ageNudge(character.id, currentAgeYears(character, due - interval), currentAgeYears(character, due));
+  if ((character.lessons === undefined || character.lessons.length === 0) && Object.keys(years).length === 0) return {};
+  const grown = driftMind(character.mind, character.traits, character.lessons ?? [], years);
   return { mind: grown.mind, traits: [...grown.traits], lessons: [] };
+}
+
+/**
+ * A ruler's anniversaries on his throne: each year he has held it is a lesson
+ * in what holding it does to a man (`ruled_long`). Taught on the review the
+ * year turns over in, so it is the same however the clock is stepped.
+ */
+function teachReign(world: WorldState, characterId: string, due: number, interval: number): WorldState {
+  const person = world.characters.find((candidate) => candidate.id === characterId);
+  if (person === undefined || person.polityId === null) return world;
+  const rulerOffice = world.constitutions?.find((constitution) => constitution.polityId === person.polityId)?.rulerOfficeId ?? null;
+  if (rulerOffice === null) return world;
+  const seat = world.material.officeSeats.find((candidate) => candidate.officeId === rulerOffice && candidate.holderCharacterId === characterId && candidate.status === "held");
+  if (seat === undefined || seat.termStartedAtStep === null) return world;
+  const now = Math.floor((due - seat.termStartedAtStep) / 365);
+  const before = Math.floor((due - interval - seat.termStartedAtStep) / 365);
+  return now >= 1 && now > before ? teach(world, characterId, "ruled_long", due) : world;
 }
 
 /**
@@ -211,9 +232,10 @@ export function reviewLives(input: LifeReviewInput): LifeReviewResult {
       world = {
         ...world,
         characters: world.characters.map((candidate) => (candidate.id === living.id
-          ? { ...candidate, nextLifeReviewAtStep: due + interval, ...grownBy(candidate) }
+          ? { ...candidate, nextLifeReviewAtStep: due + interval, ...grownBy(candidate, due, interval) }
           : candidate)),
       };
+      world = teachReign(world, living.id, due, interval);
       if (stage === undefined) continue;
 
       // Rates are per year in basis points; a review covers `interval` days.

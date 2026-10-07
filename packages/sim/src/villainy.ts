@@ -171,6 +171,19 @@ export function decideVillainy(input: VillainyInput): StatecraftDecision[] {
   return decisions;
 }
 
+/**
+ * A rival does not have to hate the player to move against him. An ambitious
+ * man of the player's own power who stands as high as he does, wants the same
+ * rungs, and owes him nothing, is a threat by being in the way: the climb is
+ * contested by men who act, not only by a model that remembers to.
+ */
+function isRivalOf(rival: Character, player: Character): boolean {
+  return rival.polityId !== null && rival.polityId === player.polityId
+    && rival.traits.includes("ambitious") && rival.mind.drives.status >= 65
+    && rival.prestigeBps >= player.prestigeBps - 1_500
+    && opinionOf(rival, player.id) <= 0;
+}
+
 /** A man who does not let a slight go, and one who hates the player this much, moves against him. */
 const VENGEFUL_AT = 65;
 const HATRED_AT = -30;
@@ -198,13 +211,14 @@ function vendettas(input: VillainyInput, plotting: Set<string>): StatecraftDecis
   const decisions: StatecraftDecision[] = [];
   const enemies = world.characters
     .filter((enemy) => enemy.alive && enemy.id !== player.id && !input.playedByModel.has(enemy.id) && !plotting.has(enemy.id) && enemy.polityId !== null)
-    .filter((enemy) => enemy.mind.drives.revenge >= VENGEFUL_AT && opinionOf(enemy, player.id) <= HATRED_AT)
+    .filter((enemy) => (enemy.mind.drives.revenge >= VENGEFUL_AT && opinionOf(enemy, player.id) <= HATRED_AT) || isRivalOf(enemy, player))
     // Within reach of him: his own people, or men where he is.
     .filter((enemy) => enemy.polityId === player.polityId || enemy.locationProvinceId === player.locationProvinceId)
     .sort((a, b) => opinionOf(a, player.id) - opinionOf(b, player.id) || a.id.localeCompare(b.id));
   for (const enemy of enemies.slice(0, 1)) {
     if (stableHash([input.gameId, "vendetta", enemy.id, String(month)]) % 12 >= twelfths) continue;
-    const why = `${enemy.name} has not forgiven ${player.name}, and means him harm`;
+    const hates = enemy.mind.drives.revenge >= VENGEFUL_AT && opinionOf(enemy, player.id) <= HATRED_AT;
+    const why = hates ? `${enemy.name} has not forgiven ${player.name}, and means him harm` : `${enemy.name} wants what ${player.name} is climbing toward, and means to have him out of the way`;
     const purse = world.material.accounts.find((account) => account.id === enemy.personalAccountId);
     const spend = Math.max(0, Math.min(200, Math.round((purse?.balance ?? 0) * 0.1)));
     const { cruelty, boldness } = enemy.mind.temperament;

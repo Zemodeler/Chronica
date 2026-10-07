@@ -128,7 +128,7 @@ export function StandingPanel({ standing, state, constitution, laws, peace, game
         id: "treaties",
         title: "Treaties",
         marked: state.abroad.powers.some((power) => power.posture === "war" || power.letters.length > 0),
-        content: <TreatiesSheet abroad={state.abroad} onWriteTo={onWriteTo} onOpenLetters={onOpenLetters} />,
+        content: <TreatiesSheet abroad={state.abroad} peace={peace} gameId={gameId} onChanged={onChanged} onWriteTo={onWriteTo} onOpenLetters={onOpenLetters} />,
       }]
       : []),
     ...(peace != null && gameId !== undefined && (peace.tables.length > 0 || peace.wars.length > 0)

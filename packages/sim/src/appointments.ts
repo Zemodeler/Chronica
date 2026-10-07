@@ -7,6 +7,7 @@ import {
   isMagistracy,
   labelNamesOffice,
   leverAptitude,
+  officeTemper,
   seatCharacterInOffice,
   type Character,
   type LeverId,
@@ -108,8 +109,8 @@ export function fillAppointments(input: FillAppointmentsInput): { readonly world
     // it is -- an admiral by a soldier's gifts, not by his standing.
     const domain = domainOfWork("office", office.label);
     const fitness = (character: Character): number => levers === undefined || levers.length === 0
-      ? assessExecution(world, character.id, domain)?.competence ?? 0
-      : levers.reduce((sum, lever) => sum + leverAptitude(character, lever), 0) / levers.length;
+      ? (assessExecution(world, character.id, domain)?.competence ?? 0) + officeTemper(character)
+      : levers.reduce((sum, lever) => sum + leverAptitude(character, lever), 0) / levers.length + officeTemper(character);
     const candidates = world.characters.filter((character) => character.alive
       && character.polityId === office.polityId
       && character.id !== player

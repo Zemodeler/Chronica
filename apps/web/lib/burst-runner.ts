@@ -66,6 +66,7 @@ export interface BurstJob {
   readonly recentTitles: Awaited<ReturnType<typeof titlesOfRecentReports>>;
   readonly orderText: string | null;
   readonly spanDays: number | undefined;
+  readonly continuation: boolean;
   readonly answeredDecision: AnsweredDecision | undefined;
   /** The decision this burst answers, closed with the commit. */
   readonly resolvesDecision: { readonly id: string; readonly optionId: string } | undefined;
@@ -89,6 +90,8 @@ export async function prepareBurst(
     readonly characterId: string;
     readonly orderText: string | null;
     readonly spanDays?: number | undefined;
+    /** A further stretch of a cut-off turn. */
+    readonly continuation?: boolean | undefined;
     readonly answeredDecision?: AnsweredDecision | undefined;
     readonly resolvesDecision?: { readonly id: string; readonly optionId: string } | undefined;
     readonly askedAs?: string | undefined;
@@ -181,6 +184,7 @@ export async function prepareBurst(
       },
       orderText: input.orderText,
       spanDays: input.spanDays,
+      continuation: input.continuation === true,
       answeredDecision: input.answeredDecision,
       resolvesDecision: input.resolvesDecision,
       askedAs: input.askedAs,
@@ -218,7 +222,7 @@ export function phrase(progress: BurstProgress): ProgressLine {
 
 export interface RunHooks {
   /** Free, and outside the burst: reports on what already happened rather than causing anything. */
-  readonly afterCommit?: ((db: ChronicaDatabase, job: BurstJob, world: WorldState) => Promise<void>) | undefined;
+  readonly afterCommit?: ((db: ChronicaDatabase, job: BurstJob, world: WorldState, stopReason: string) => Promise<void>) | undefined;
   /** Also shown on the terminal, when there is one. */
   readonly onProgress?: ((line: ProgressLine) => void) | undefined;
 }
@@ -237,6 +241,37 @@ export interface RunHooks {
  * And a burst that is getting somewhere slowly is told to stop at
  * `burstDeadlineMs`: between hops, keeping what it has done.
  */
+/** The most stretches a cut-off turn goes on in, and the fewest days worth starting one for. */
+const MAX_LEGS = 8;
+const MIN_LEG_DAYS = 3;
+
+/**
+ * A turn cut off by its time limit goes on where it stopped, as a further
+ * stretch of the same span with no order of its own, up to `MAX_LEGS` in all:
+ * the player is not asked to give the order again to see the march finish.
+ * Returns the jobs run, in order.
+ */
+export async function runBurstWithContinuations(db: ChronicaDatabase, job: BurstJob, hooks: RunHooks = {}): Promise<BurstJob[]> {
+  const ran: BurstJob[] = [];
+  let current = job;
+  for (let leg = 1; leg <= MAX_LEGS; leg += 1) {
+    ran.push(current);
+    const cut: { days: number | null } = { days: null };
+    await runBurstToCommit(db, current, {
+      ...hooks,
+      afterCommit: async (database, finished, world, stopReason) => {
+        await hooks.afterCommit?.(database, finished, world, stopReason);
+        if (stopReason === "deadline" && finished.spanDays !== undefined) cut.days = finished.spanDays - (world.instant.day - finished.view.world.instant.day);
+      },
+    });
+    if (cut.days === null || cut.days < MIN_LEG_DAYS || leg === MAX_LEGS) break;
+    const next = await prepareBurst(db, { gameId: current.gameId, orderText: null, spanDays: cut.days, continuation: true, userId: current.userId, playerId: current.playerId, characterId: current.actorRef.id });
+    if (next.status !== "ready") break;
+    current = next.job;
+  }
+  return ran;
+}
+
 export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hooks: RunHooks = {}): Promise<void> {
   const { gameId, burstId, userId, actorRef, actorPolityId, view, offices } = job;
   // Set once the row says the burst is no longer running -- reaped by a page
@@ -277,7 +312,11 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
     const requests = createRequestLedger(allowanceFromEnv(process.env.CHRONICA_REQUEST_ALLOWANCE));
     const port = meteredPort(counted, requests);
     const turnStartedAt = performance.now();
-    const deadline = burstDeadlineMs(process.env, adapter.free === true);
+    const turnStartedMs = Date.now();
+    // Time the player is asked to wait: 75 s for a week, 4 minutes for a month. Past it the remaining days pass without
+    // anybody being asked; the hard deadline is only for a round that hangs.
+    const budgetMs = turnBudgetMs(job.spanDays, process.env);
+    const deadline = budgetMs === null ? burstDeadlineMs(process.env, adapter.free === true) : budgetMs + HARD_STOP_AFTER_MS;
     const deadlineAt = deadline === null ? null : Date.now() + deadline;
     const from = view.world.instant;
     const clock = view.scenarioClock;
@@ -295,6 +334,7 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
       recentSubjects: job.recentSubjects,
       recentTitles: job.recentTitles,
       untold: job.untold,
+      ...(budgetMs === null ? {} : { skipRetries: () => Date.now() - turnStartedMs > budgetMs }),
       // Dev inspector (6.1): what each window's entries were made of, with CHRONICA_INSPECT=1.
       onOverstated: (overstated: number, passages: number, window: number) => { console.warn(`[burst ${burstId}] window ${window}: ${overstated} of ${passages} passage(s) said more than the world shows and were replaced by the engine's line`); },
       ...(process.env.CHRONICA_INSPECT === "1" ? { onInspection: (inspection: unknown, window: number) => { console.info(`[burst ${burstId}] window ${window} inspection: ${JSON.stringify(inspection)}`); } } : {}),
@@ -342,6 +382,9 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
         actorPolityId,
         orderText: job.orderText,
         ...(job.spanDays === undefined ? {} : { spanDays: job.spanDays }),
+        ...(job.continuation ? { continuation: true } : {}),
+        // The world's own people are asked while the order is read: the player's wait is the longer of the two, not the sum.
+        prefetch: budgetMs !== null,
         onProgress: (progress: BurstProgress) => say(phrase(progress)),
         onWindowClosed: writer.closed,
         ...(job.answeredDecision === undefined ? {} : { answeredDecision: job.answeredDecision }),
@@ -352,6 +395,7 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
         // Stop between hops once the burst has run too long, or once the row
         // says it has been given up; what was done so far is kept.
         shouldStop: () => reaped || (deadlineAt !== null && Date.now() > deadlineAt),
+        ...(budgetMs === null ? {} : { outOfTime: () => Date.now() - turnStartedMs > budgetMs }),
         ...(cognitionShardsFromEnv() === undefined ? {} : { budget: { ...DEFAULT_BUDGET, cognitionShards: cognitionShardsFromEnv() } }),
       });
     } catch (error) {
@@ -391,11 +435,12 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
         // A turn cut short for want of calls says so, rather than passing the
         // engine's limit off as the world's quiet (R52, R80). What was left
         // stays on the order, and the next order takes it up.
-        ...(result.stopReason === "budget_exhausted" ? ["The report stops here: not everybody concerned could be heard this time. What is still open stays in hand for your next order."] : []),
+        ...(result.stopReason === "budget_exhausted" || result.stopReason === "deadline" ? ["This report ends here for now; what is still open stays in hand for your next order."] : []),
       ], result.orderFactIds, result.world.instant.day * 1440 + result.world.instant.minute);
     // What the turn changed, read from the two worlds: whatever the prose chose to tell (4.5).
     const changedEntry = whatChangedEntry({ before: view.world, after: result.world, polityId: actorPolityId, characterId: actorRef.kind === "character" ? actorRef.id : null }, result.world.instant.day * 1440 + result.world.instant.minute);
-    const openEntry = openThreadsEntry(result.world, actorRef.kind === "character" ? actorRef.id : null, result.world.instant.day * 1440 + result.world.instant.minute);
+    // A turn cut by its time limit goes on in a further stretch, which ends with what is still open.
+    const openEntry = result.stopReason === "deadline" ? null : openThreadsEntry(result.world, actorRef.kind === "character" ? actorRef.id : null, result.world.instant.day * 1440 + result.world.instant.minute);
     const entries: ChronicleEntry[] = [
       ...answered,
       ...(changedEntry === null ? [] : [changedEntry]),
@@ -515,7 +560,7 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
 
     if (hooks.afterCommit !== undefined) {
       try {
-        await hooks.afterCommit(db, job, result.world);
+        await hooks.afterCommit(db, job, result.world, result.stopReason);
       } catch (error) {
         console.warn(`[burst ${burstId}] after the commit:`, error);
       }
@@ -542,6 +587,20 @@ export function workNotDone(result: Pick<BurstResult, "skipped" | "parseFailures
   ];
 }
 
+/** What the player waits: 75 s for a week, rising to 4 minutes for a month, from the order to the last commit being 40 s or so beyond it. */
+export function turnBudgetMs(spanDays: number | undefined, env: Readonly<Record<string, string | undefined>> = process.env): number | null {
+  const set = env.CHRONICA_TURN_BUDGET_MS?.trim();
+  if (set !== undefined && set.length > 0) {
+    const ms = Number(set);
+    return Number.isFinite(ms) && ms > 0 ? ms : null;
+  }
+  if (env.CHRONICA_HAND_RESPONDER?.trim() !== "codex") return null;
+  const span = spanDays ?? 14;
+  return Math.round(Math.min(240, Math.max(60, 75 + (span - 7) * 6.5)) * 1000);
+}
+/** A round that hangs is stopped this long after the time was spent. */
+const HARD_STOP_AFTER_MS = 90_000;
+
 /**
  * How long the simulation may run before it is told to stop, in ms, or null
  * for no deadline. `CHRONICA_BURST_DEADLINE_MS` overrides it (0 turns it
@@ -554,6 +613,7 @@ export function burstDeadlineMs(env: Readonly<Record<string, string | undefined>
     const ms = Number(raw);
     return Number.isFinite(ms) && ms > 0 ? ms : null;
   }
+  // A turn answered by the Codex subscription is held to what a player will wait for; one answered by a person waits on the person.
   if (freeAdapter ?? (env.CHRONICA_AI_MODE === "hand")) return null;
   return BURST_DEADLINE_MS;
 }

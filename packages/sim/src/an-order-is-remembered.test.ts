@@ -179,14 +179,14 @@ describe("a part that waited on a vote", () => {
 
 describe("a part carried out with nothing to check it against", () => {
   // Plan chronicle-and-order-truth, phase 1.4: no "done" without evidence.
-  it("reads as ordered, effect not observed, never as done", () => {
+  it("reads as ordered; no sign of it yet, never as done", () => {
     const part = {
       said: "Make the allies ready", workRefs: [], refusal: null, goals: [], spend: null, attribution: "tagged" as const,
       note: null, whyNot: null, factIds: [], closedAtStep: null, refusedAtStep: null, actsCarried: 1, actsRefused: 0, stages: [],
     };
     const status = orderPartStatus(world(), part);
     expect(status).toBe("carried_unverified");
-    expect(orderPartLabel(status, part)).toBe("ordered, effect not observed");
+    expect(orderPartLabel(status, part)).toBe("ordered; no sign of it yet");
   });
 });
 

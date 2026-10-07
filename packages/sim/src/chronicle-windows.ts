@@ -37,6 +37,8 @@ import { lineOf } from "./order-outcomes";
  */
 
 export interface WindowWriterInput {
+  /** True once the turn has spent its time: the last passages are written without retries. */
+  readonly skipRetries?: (() => boolean) | undefined;
   readonly port: SimModelPort;
   readonly clock: ScenarioClock;
   readonly observer: OrderPartyRef;
@@ -68,6 +70,13 @@ export interface WindowWriter {
 }
 
 const keyOf = (ref: OrderPartyRef): string => `${ref.kind}:${ref.id}`;
+
+const LEFT_OFF_THE_PAGE: ReadonlySet<string> = new Set(["senate_speech", "group_formed", "group_dissolved", "office_created", "office_lapsed", "custom_formed", "benefaction", "public_benefaction", "birth"]);
+/** Small acts of public generosity, told by what they say rather than what the world called them. */
+const GENEROSITY_TALK = /\b(grain dole|a dole of grain|public games|games at (his|her) own cost|gave the people .{0,30}games|from (his|her) own purse (on|for|to) (a |the )?(public|grain|games|building))\b/i;
+const SENATE_BUSINESS = /^(motion_|council_|senate_|senatorial_)/;
+/** A matter of the chamber put in other words ("canvassed senators for the pending motion"). */
+const SENATE_TALK = /\b(motion|senators?|senate vote|canvass(ed|ing)?)\b/i;
 
 export function createWindowWriter(input: WindowWriterInput): WindowWriter {
   const { port, clock, observer, observerPolityId, offices } = input;
@@ -156,7 +165,10 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
     span = { from: span?.from ?? window.from, to: window.to };
     // Routine speeches remain in the factual ledger. The chamber's opening,
     // changed positions, vetoes and final count tell the political story.
-    const facts = [...pool, ...window.facts].filter((fact) => fact.kind !== "senate_speech");
+    // The engine's own bookkeeping (a party formed, an office made, a custom set) and
+    // the Senate's votes are not the player's page: the vote that answers his own
+    // order is told by the order's line, not as a chamber's business.
+    const facts = [...pool, ...window.facts].filter((fact) => !LEFT_OFF_THE_PAGE.has(fact.kind) && !((SENATE_BUSINESS.test(fact.kind) || SENATE_TALK.test(fact.summary) || GENEROSITY_TALK.test(fact.summary)) && !orderFactIds.has(fact.id) && !fact.affectedEntities.some((entity) => entity.id === observer.id)));
     pool = [];
     try {
       const out = await composeChronicle({
@@ -180,6 +192,7 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
         recentSubjects: [...chosenSubjects, ...said.map((entry) => entry.subjects.map(keyOf)), ...input.recentSubjects],
         recentTitles: [...[...said].reverse().map((entry) => entry.title), ...input.recentTitles],
         maxFarThreads: farRoom(),
+        skipRetries: input.skipRetries,
         onSelected: (selection) => {
           pool = [...pool, ...selection.carried];
           farTold += selection.farTold;
@@ -296,6 +309,7 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
           recentTitles: [...[...said].reverse().map((entry) => entry.title), ...input.recentTitles],
           maxEntries: WINDOW_MAX_ENTRIES,
           maxFarThreads: farRoom(),
+        skipRetries: input.skipRetries,
           fallback: true,
         }).catch((error: unknown) => {
           console.error("[chronicle] the closing passage could not be written:", error);

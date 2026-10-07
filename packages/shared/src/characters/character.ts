@@ -8,7 +8,7 @@ import {
   SignedScoreSchema,
 } from "../material-state";
 import { CharacterMindSchema, NEUTRAL_MIND } from "./mind";
-import { LessonSchema, MAX_LESSONS } from "./mind-drift";
+import { LessonSchema, MAX_LESSONS, MAX_MOODS, MoodSchema } from "./mind-drift";
 import { WatchPredicateSchema } from "../world/watch";
 
 /**
@@ -295,6 +295,8 @@ export const CharacterSchema = z
     mind: CharacterMindSchema.default(NEUTRAL_MIND),
     /** What has happened to him since his last life review, which that review moves his mind by (`mind-drift.ts`). */
     lessons: z.array(LessonSchema).max(MAX_LESSONS).optional(),
+    /** What he feels just now, for a few weeks (`mind-drift.ts`, `sim/moods.ts`). */
+    moods: z.array(MoodSchema).max(MAX_MOODS).optional(),
 
     /** Named heir, where the succession law uses one. */
     heirCharacterId: EntityIdSchema.nullable(),

@@ -30,6 +30,7 @@ const JSON_MODE_OPERATIONS = new Set<AiOperation>([
   "reconcile_facts",
   "repair_deltas",
   "write_mechanic",
+  "voice_letters",
 ]);
 
 /**

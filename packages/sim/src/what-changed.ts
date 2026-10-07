@@ -42,15 +42,23 @@ export function whatChanged(input: WhatChangedInput): string[] {
   const nameOf = (world: WorldState, id: string | null): string => id === null ? "nobody" : world.characters.find((character) => character.id === id)?.name ?? id;
   for (const seat of after.material.officeSeats) {
     const was = before.material.officeSeats.find((candidate) => candidate.id === seat.id);
+    // Seats of other powers fill and empty all the time: the world's business, not this turn's.
+    const holderId = seat.status === "held" ? seat.holderCharacterId : was?.status === "held" ? was.holderCharacterId : null;
+    if (input.polityId !== null && after.characters.find((character) => character.id === holderId)?.polityId !== input.polityId) continue;
     const holder = seat.status === "held" ? seat.holderCharacterId : null;
     const held = was === undefined ? null : was.status === "held" ? was.holderCharacterId : null;
-    if (holder !== held) lines.push(`${seat.officeId.replace(/-/g, " ")}: ${nameOf(before, held)} to ${nameOf(after, holder)}.`);
+    // A seat filled from nothing is the world settling, not a turn of this one's; his own seat and a change of hands are told.
+    if (holder !== held && (held !== null || holder === input.characterId)) {
+      const office = seat.officeId.replace(/-/g, " ");
+      lines.push(holder === null ? `${office}: ${nameOf(before, held)} no longer holds it.` : `${office}: ${nameOf(before, held)} to ${nameOf(after, holder)}.`);
+    }
   }
 
   for (const project of after.projects) {
     const was = before.projects.find((candidate) => candidate.id === project.id);
     if (project.status === "completed" && was !== undefined && was.status !== "completed") lines.push(`Finished: ${project.label}.`);
-    else if (was === undefined && project.status !== "completed") lines.push(`Begun: ${project.label}.`);
+    // A march is the army's movement, told as where it stands; its bookkeeping label is not an event.
+    else if (was === undefined && project.status !== "completed" && !/ marches (to|on|towards) /i.test(project.label)) lines.push(`Begun: ${project.label}.`);
   }
   return lines.slice(0, 12);
 }

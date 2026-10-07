@@ -79,6 +79,8 @@ export const DiplomaticMessageSchema = z
     /** Set when this message is itself a counter-offer to an earlier one. */
     inReplyToMessageId: EntityIdSchema.nullable().default(null),
     negotiation: NegotiationProposalSchema.optional(),
+    /** Worded by the model for the player, once (`sim/letter-voice.ts`): a rule-written letter is not asked of it again. */
+    voicedByModel: z.boolean().optional(),
     /** Stable business and its original owner, kept across counteroffers. */
     negotiationId: EntityIdSchema.optional(),
     negotiationOwnerCharacterId: EntityIdSchema.optional(),

@@ -113,7 +113,9 @@ describe("a merchant and his trade", () => {
     // His own city: no foreign power at the far end to cut it.
     expect(result.world.material.incomeSources.find((source) => source.id === venture.incomeSourceId)!.counterpartyPolityId).toBeNull();
     const month = tick(result.world, 30).world;
-    expect(tradeReturn(result.world, month)).toBe(terms.monthlyReturn);
+    // The quoted return and the month's are read from the opening's department and the month's, and the officers' own natures are part of both:
+    // they may differ by the odd coin of rounding between the two readings.
+    expect(Math.abs(tradeReturn(result.world, month) - terms.monthlyReturn)).toBeLessThanOrEqual(1);
   });
 
   // Between two ports a venture is a cargo (play-test L9): no monthly trickle,

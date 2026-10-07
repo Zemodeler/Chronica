@@ -19,6 +19,16 @@ describe("what is still open", () => {
     expect(openThreadLines(world, null)).toEqual(["Thread a: The envoys are expected."]);
   });
 
+  it("leaves out other people's health and the Senate's votes", () => {
+    const world: WorldState = { ...opening(), elapsedStep: 10, storylines: [
+      storyline("health", { title: "The health of Menecrates", seedKey: "peril:menecrates", participantIds: ["menecrates"], updatedAtStep: 9 }),
+      storyline("mine", { title: "My own health", seedKey: "peril:me", participantIds: ["me"], updatedAtStep: 9 }),
+      storyline("vote", { title: "Dentatus and Ogulnius in open rivalry", nextDevelopment: "When the Senate's vote on the motion arrives, choose a response.", updatedAtStep: 9 }),
+      storyline("road", { title: "Rhegium and the Campanian Legion", updatedAtStep: 9 }),
+    ] };
+    expect(openThreadLines(world, "me")).toEqual(["My own health: The envoys are expected.", "Rhegium and the Campanian Legion: The envoys are expected."]);
+  });
+
   it("is no entry at all when nothing is open", () => {
     expect(openThreadsEntry({ ...opening(), storylines: [] }, null, 0)).toBeNull();
   });

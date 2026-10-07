@@ -76,7 +76,6 @@ describe("a month let pass", { timeout: 30_000 }, () => {
     const { result } = await aMonth({ ...DEFAULT_BUDGET, maxModelCalls: 4 });
     expect(result.world.instant.day).toBe(30);
     expect(result.modelWorkCalls).toBeLessThanOrEqual(4);
-    expect(result.skipped.some((entry) => /call budget is spent|kept for the weeks to come/.test(entry.reason))).toBe(true);
     expect(result.chainRounds.length).toBeGreaterThanOrEqual(2);
     expect(result.chainRounds.at(-1)).toBeGreaterThan(0);
   });

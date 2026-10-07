@@ -12,6 +12,9 @@ export interface RefiledPart {
 /** Words every order is made of, which tell nothing about what it is for. */
 const FILLER = new Set(["that", "this", "with", "from", "into", "have", "make", "sure", "them", "they", "their", "there", "will", "shall", "would", "could", "should", "about", "which", "when", "then", "than", "only", "does", "tell", "send", "order", "ordered", "world", "own"]);
 
+/** Words that are part of many powers' names and so name none of them. */
+const GENERIC_POWER_WORDS = new Set(["citie", "cities", "kingd", "kingdom", "repub", "republic", "confe", "confederation", "leagu", "league", "tribe", "peopl", "people", "state", "city"]);
+
 /** Words to compare by: lower case, five-letter stems, the small words left out. */
 function stems(text: string): Set<string> {
   return new Set(text.toLowerCase().split(/[^\p{L}]+/u).filter((word) => word.length >= 4 && !FILLER.has(word)).map((word) => word.slice(0, 5)));
@@ -71,10 +74,12 @@ export function theOrdersOwnParts(
     // Held for later -- "when a punitive force is raised, send it" -- is the
     // order's own structure, whatever words it was put in.
     const heldForLater = (part.deferredActs ?? []).length > 0 || (part.afterParts ?? []).length > 0 || part.whenForceExists != null;
-    const bare = own.length === 0 && !heldForLater && part.goals.length === 0 && part.spend === null;
+    // A part the answer itself refused (a "whyNot") is the player's to be told of, never quietly filed away as the world's.
+    const bare = own.length === 0 && !heldForLater && part.goals.length === 0 && part.spend === null && part.whyNot === null;
     if (bare) {
       const ours = stems(part.said);
-      const emptyPower = context.emptyPowers.find((name) => [...stems(name)].some((stem) => ours.has(stem)));
+      // Only a word that names the power ("etruscan") says the part is about it: "cities" or "kingdom" is in half the order.
+      const emptyPower = context.emptyPowers.find((name) => [...stems(name)].some((stem) => !GENERIC_POWER_WORDS.has(stem) && ours.has(stem)));
       const business = context.worldBusiness.find((text) => saysWhatWasSaid(part.said, text));
       if (emptyPower !== undefined) {
         refiled.push({ part, why: `it gives ${emptyPower} what the world was asked to give it, not anything the order asked for` });

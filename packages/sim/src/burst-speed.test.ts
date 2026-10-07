@@ -29,7 +29,7 @@ describe("parallel requests do not spend later decisions' allowance", () => {
         clock: definition.clock, offices: definition.government.offices, warfare: definition.warfare,
         burstId: "parallel-budget", gameId: "parallel-budget", actorRef: { kind: "character", id: "gaius-genucius" }, actorPolityId: "rome",
         orderText: "Wait for events.", spanDays: 14, knownFacts: [], queue: [], port, narratorSeeds: [],
-        budget: { ...DEFAULT_BUDGET, maxModelCalls: 2, baseModelCalls: 2, maxAmbientActors: 6,
+        budget: { ...DEFAULT_BUDGET, maxModelCalls: 2, baseModelCalls: 2, maxAmbientActors: 6, maxAskedPerRound: 12,
           ...(cognitionShards === undefined ? {} : { cognitionShards }) },
       });
       return { result, calls };

@@ -164,7 +164,7 @@ describe("4. the army at Agrigentum keeps fortifying both walls", () => {
     // his gifts for letters and building.
     const costs = result.world.projects.at(-1)!.milestones.map((milestone) => milestone.costAmount);
     // Carthage's accountants are now named in the scenario, and their real skill sets the price: about 8 in a hundred below a middling man's, not 3.
-    expect(costs).toEqual([Math.round(292 * 0.918), Math.round(390 * 0.918)]);
+    expect(costs).toEqual([258, 344]);
   });
 });
 

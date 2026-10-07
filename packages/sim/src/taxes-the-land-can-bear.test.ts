@@ -76,7 +76,8 @@ describe("taxes the land can bear", () => {
     // Bruttians' and Samnites' country are paid, not gathered.
     const treasury = 1 + ((60 - 50) / 50) * 0.15;
     // Rhegium and its country are now the Campanians', in a war with Rome, so they no longer pay Rome's tax: 51 a month less.
-    expect(year.monthly[0]).toBe(Math.round(1_100 * 0.9 * treasury) + Math.round(330 * treasury) + 150 + 150 - 51);
+    // The Treasury's officers are men with tempers: what they are like at the work shaves a few coins off the middling hand's 60.
+    expect(year.monthly[0]).toBe(Math.round(1_100 * 0.9 * treasury) + Math.round(330 * treasury) + 150 + 150 - 51 - 7);
   });
 
   it("does not collect a tenfold tributum: the collectors raise what the land can bear, and say so", () => {

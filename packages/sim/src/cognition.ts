@@ -1,3 +1,5 @@
+import { LARGE_MATTERS, letterVerdict } from "./letter-verdict";
+import { conductInWords } from "./nature";
 import { z } from "zod";
 import {
   CognitionOutputSchema,
@@ -74,11 +76,12 @@ import { describeNeighbourhood } from "./board";
 function shownSchema(): string {
   const schema = z.toJSONSchema(CognitionOutputSchema, { io: "input" }) as Record<string, unknown>;
   const actor = (schema.properties as { actors?: { items?: { properties?: Record<string, unknown>; required?: string[] } } } | undefined)?.actors?.items;
-  if (actor?.properties !== undefined) delete actor.properties.reasoning;
+  // One sentence of why, which the Chronicle tells as the person's own reason (`burst.ts`); the long form stays unasked.
+  if (actor?.properties !== undefined) actor.properties.reasoning = { type: "string", minLength: 1, maxLength: 240, description: "One sentence: why this person chose as they did." };
   const proposal = actor?.properties?.proposal as { properties?: Record<string, unknown>; required?: string[] } | undefined;
   if (proposal?.properties !== undefined) delete proposal.properties.narrativeSummary;
   if (proposal?.required !== undefined) proposal.required = proposal.required.filter((key) => key !== "narrativeSummary");
-  if (actor?.required !== undefined) actor.required = actor.required.filter((key) => key !== "reasoning");
+  if (actor?.required !== undefined && !actor.required.includes("reasoning")) actor.required.push("reasoning");
   // A person hands on no part of an order: parts are the orchestrator's.
   const delegation = (proposal?.properties?.delegations as { items?: { properties?: Record<string, unknown> } } | undefined)?.items;
   if (delegation?.properties !== undefined) delete delegation.properties.part;
@@ -208,7 +211,9 @@ export function foldStrayProposalKeys(value: unknown): unknown {
 export const COGNITION_SYSTEM_PROMPT = `You are several people in a historical world, reasoning separately.
 
 Keep answers compact: write the decision and its meaningful consequences, not a
-review of the supplied context. Do not write reasoning or narrativeSummary.
+review of the supplied context. For each person write "reasoning": one sentence,
+under 35 words, saying why they chose as they did, in plain words -- the
+Chronicle tells it as their reason. Do not write narrativeSummary.
 Usually one concise fact records one distinct event; do not restate the same
 event as several facts. Preserve motives that explain a choice, important spoken
 words, secrecy, affected people and consequences: these feed the Chronicle.
@@ -390,7 +395,7 @@ export interface CognitionResult {
  * several people at once, so a section that grows by ten lines grows the call by
  * thirty, and a prompt nobody can hold in view is worse than a thin one.
  */
-const ACTOR_CAPS = { beliefs: 8, pressures: 6, commitments: 6, relations: 6, ambitions: 4, arrangements: 3, drives: 3, skills: 3, storylines: 2, intents: 3 } as const;
+const ACTOR_CAPS = { beliefs: 5, pressures: 4, commitments: 4, relations: 4, ambitions: 3, arrangements: 3, drives: 3, skills: 3, storylines: 2, intents: 2 } as const;
 
 /** Scores at the ends of the scale say something; a 50 says nothing worth a line. */
 const NOTABLE_HIGH = 65;
@@ -798,6 +803,9 @@ export function renderCharacterPortrait(
     lines.push(describeBody(character, world));
     lines.push(...describeTraits(character));
     lines.push(...describeMind(character));
+    // How they decide, in the terms the engine will hold them to (`nature.ts`).
+    const conduct = conductInWords(world, character);
+    if (conduct.length > 0) lines.push("How they decide:", ...conduct.map((line) => `  - ${line}`));
     lines.push(...describeCharge(character, world));
     // What they want, with the plan for it where they have one. Its own
     // block because a plan needs the calendar, and a mind does not.
@@ -956,7 +964,12 @@ export function renderCharacterPortrait(
       "Letters awaiting their answer:",
       // A letter from the enemy says so: a power at war was answered as though
       // the letter came from a neutral, because nothing on it said otherwise.
-      ...letters.map((message) => `  - [${message.id}] ${message.kind} from ${polityName(message.fromPolityId)}${enemyPowers.has(message.fromPolityId) ? " (the enemy: their power is at war with it)" : ""}, by ${name(message.fromCharacterId)} — ${message.subject}: ${message.terms}`),
+      ...letters.flatMap((message) => {
+        const line = `  - [${message.id}] ${message.kind} from ${polityName(message.fromPolityId)}${enemyPowers.has(message.fromPolityId) ? " (the enemy: their power is at war with it)" : ""}, by ${name(message.fromCharacterId)} — ${message.subject}: ${message.terms}`;
+        // On the large matters his nature has already decided, and he is to word it, not overturn it (`letter-verdict.ts`).
+        const verdict = character !== undefined && LARGE_MATTERS.has(message.kind) ? letterVerdict(world, message, character) : null;
+        return verdict === null ? [line] : [line, `      By who you are, you ${verdict.accepted ? "say YES" : "say NO"} to this (${verdict.why}). Answer it so, in your own words; the engine will not carry out the opposite.`];
+      }),
     );
   }
 

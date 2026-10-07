@@ -242,7 +242,7 @@ export function goalEvidence(world: WorldState, goal: OrderGoal): string | null 
     case "procedure_passed": return "the vote passed";
     case "audit_finding": return "the inquiry reached a finding";
     case "answer_from": return "an answer came";
-    case "agreement_open": return `agreement in force between ${polity(goal.polityId)} and ${polity(goal.withPolityId)}`;
+    case "agreement_open": return goal.agreementKind === "war" ? `${polity(goal.polityId)} is at war with ${polity(goal.withPolityId)}` : `${goal.agreementKind.replace(/_/g, " ")} in force between ${polity(goal.polityId)} and ${polity(goal.withPolityId)}`;
     case "out_of_service": return `${person(goal.characterId)} out of the army`;
     case "contract_active": return "the hire stands";
     case "plot_outcome": return "the plot ran its course";

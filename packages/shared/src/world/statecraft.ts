@@ -29,6 +29,8 @@ export const StatecraftActSchema = z.enum([
   "besiege",
   "fall_back",
   "answer_letter",
+  "letter",
+  "dispatch",
   "hold",
 ]);
 export type StatecraftAct = z.infer<typeof StatecraftActSchema>;

@@ -163,6 +163,7 @@ describe("an officer who hates the man he serves", () => {
   })).skill(SYRACUSE, "tax_roll");
 
   it("does the work slowly and badly, unless duty holds him to it", () => {
-    expect(treasury(hates(20))).toBe(treasury(hates(90)) - 5);
+    // He sulks, and he is also the less dutiful officer at his desk: at least the five points sulking costs.
+    expect(treasury(hates(20))).toBeLessThanOrEqual(treasury(hates(90)) - 5);
   });
 });

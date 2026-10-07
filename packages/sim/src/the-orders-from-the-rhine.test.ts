@@ -249,12 +249,12 @@ describe("the world's own generals are as good as the world says", () => {
 });
 
 describe("Quintus raids the Samnites", () => {
-  it("refuses to burn an ally's country without a war, in words the player hears", () => {
+  it("burns an ally's country and the war begins with it: the raid is not refused for a declaration he never made", () => {
     // The Samnites are Rome's allies by foedus at the opening.
     const result = order("quintus-agrippinus", [{ op: "force_raid", forceRef: "silver-shields", provinceId: SAMNIUM, reason: "Into the Samnite hills." }]);
-    expect(result.rejected).toHaveLength(1);
-    expect(result.rejected[0]!.kind).toBe("world");
-    expect(result.rejected[0]!.reason).toContain("sworn allies");
+    expect(result.rejected).toEqual([]);
+    expect(result.factProposals.some((fact) => fact.kind === "war_declared")).toBe(true);
+    expect(result.world.polityAgreements.some((agreement) => agreement.kind === "war" && [agreement.polityId, agreement.otherPolityId].includes("samnites"))).toBe(true);
   });
 
   it("refuses to burn his own country", () => {

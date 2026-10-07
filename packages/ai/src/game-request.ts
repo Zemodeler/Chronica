@@ -28,8 +28,9 @@ function withoutReasoning(node: unknown): unknown {
   for (const [key, value] of Object.entries(node)) out[key] = withoutReasoning(value);
   const properties = out.properties;
   if (typeof properties === "object" && properties !== null && "reasoning" in properties && "proposal" in properties) {
-    delete (properties as Record<string, unknown>).reasoning;
-    if (Array.isArray(out.required)) out.required = (out.required as string[]).filter((name) => name !== "reasoning");
+    // One sentence of why: the Chronicle tells it as the person's own reason.
+    (properties as Record<string, unknown>).reasoning = { type: "string", minLength: 1, maxLength: 240, description: "One sentence: why this person chose as they did." };
+    if (Array.isArray(out.required) && !out.required.includes("reasoning")) out.required.push("reasoning");
   }
   // Cognition's prose summary is also unused, as in its prompt's shownSchema.
   if (typeof properties === "object" && properties !== null && "narrativeSummary" in properties && "deltas" in properties && !("intent" in properties)) {

@@ -857,7 +857,7 @@ describe("battle", () => {
     const before = world();
     const { roman, punic } = sides(before);
     const result = applyDeltas(before, [give(roman.id, punic.id)], context());
-    expect(result.rejected[0]!.reason).toContain("until one of them marches");
+    expect(result.rejected[0]!.reason).toContain("until one of them has marched");
     expect(result.rejected[0]!.kind).toBe("world");
   });
 
@@ -1194,9 +1194,8 @@ describe("what the powers have standing between them", () => {
     expect(twice.rejected).toHaveLength(1);
   });
 
-  it("refuses a battle between powers at peace until somebody breaks it", () => {
-    // How most wars start, but not something the world should slide into
-    // without anybody having decided it.
+  it("fights a battle between powers at peace, the attack breaking the peace and opening the war", () => {
+    // How most wars start. The player who orders the attack has decided it; nothing is refused for a declaration he did not make.
     const state = world();
     const roman = state.material.forces.find((force) => force.polityId === "rome")!;
     const facing: WorldState = {
@@ -1210,9 +1209,10 @@ describe("what the powers have standing between them", () => {
     const engage: WorldDelta = { op: "force_engage", forceRef: "legio-i", targetForceRef: "carthaginian-army", posture: "offer_battle", tactic: null, reason: "Force the issue." };
     const refused = applyDeltas(atPeace.world, [engage], context());
 
-    expect(refused.rejected.some((rejection) => rejection.reason.includes("stand in peace"))).toBe(true);
-    const war = applyDeltas(refused.world, [declare("war", { localId: "war-2" }), engage], context());
-    expect(war.rejected).toHaveLength(0);
+    expect(refused.rejected.map((entry) => entry.reason)).toEqual([]);
+    expect(refused.factProposals.some((fact) => fact.kind === "war_declared")).toBe(true);
+    // The war is already open, so declaring it again is refused; the battle needs no declaring.
+    expect(applyDeltas(refused.world, [declare("war", { localId: "war-2" })], context()).rejected).toHaveLength(1);
   });
 });
 

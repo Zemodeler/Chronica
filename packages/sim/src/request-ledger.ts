@@ -25,6 +25,7 @@ const CLASS_OF: Readonly<Record<SimOperation, RequestClass>> = {
   compose_chronicle: "chronicle",
   simulate_cognition: "ambient",
   write_mechanic: "ambient",
+  voice_letters: "ambient",
 };
 
 export const requestClassOf = (operation: SimOperation): RequestClass => CLASS_OF[operation];

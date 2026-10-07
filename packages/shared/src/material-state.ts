@@ -472,11 +472,23 @@ export const BlocVoteSchema = z.object({
 });
 export type BlocVote = z.infer<typeof BlocVoteSchema>;
 
+/** How one named member of a chamber voted, where the chamber votes by seat (`ballots.ts`). */
+export const BallotSchema = z.object({
+  characterId: EntityIdSchema,
+  name: z.string().trim().min(1).max(120),
+  blocId: EntityIdSchema,
+  choice: z.enum(["yes", "no", "abstain"]),
+  supportScore: SignedScoreSchema,
+}).strict();
+export type Ballot = z.infer<typeof BallotSchema>;
+
 export const VoteRecordSchema = z
   .object({
     id: EntityIdSchema,
     motionId: EntityIdSchema,
     votes: z.array(BlocVoteSchema).min(1),
+    /** The named members' own votes, where each seat votes for itself. The bloc totals above still sum every seat. */
+    ballots: z.array(BallotSchema).max(400).optional(),
     yesWeight: z.number().int().nonnegative(),
     noWeight: z.number().int().nonnegative(),
     abstainWeight: z.number().int().nonnegative(),
@@ -989,6 +1001,11 @@ export const ForceSchema = z.object({
    * old country's included, and no government's grant reaches it.
    */
   outlaw: z.boolean().optional(),
+  /**
+   * Kept at one man's own cost -- his clients, his retainers, men paid from his purse -- and so his own and not the state's. What such a
+   * band does is a quarrel of private men: it attacks without a war between the powers being declared by it.
+   */
+  private: z.boolean().optional(),
   commanderCharacterId: EntityIdSchema,
   controllerCharacterId: EntityIdSchema,
   locationId: EntityIdSchema,

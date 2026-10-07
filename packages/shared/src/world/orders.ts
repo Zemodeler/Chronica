@@ -448,6 +448,13 @@ export function orderPartStatus(world: WorldState, part: OrderPart, options: { r
   }
   if (statuses.length === 0) {
     if (part.refusal !== null) return "refused";
+    // An army sent to where an order wants it, and on its way: under way, not "nothing came of it".
+    const onTheRoad = relevantGoals.some((goal) => {
+      if (goal.kind !== "force_at") return false;
+      const name = world.material.forces.find((force) => force.id === goal.forceId)?.name.toLowerCase();
+      return name !== undefined && world.projects.some((project) => project.status !== "completed" && project.status !== "failed" && /march|sail|mov/i.test(project.label) && project.label.toLowerCase().includes(name));
+    });
+    if (reading === "not_yet" && onTheRoad) return "under_way";
     if (reading === "not_yet") return "unanswered";
     // One-off work requires an executed act. A fact is an account of the
     // answer, not proof that the requested change happened.
@@ -458,7 +465,14 @@ export function orderPartStatus(world: WorldState, part: OrderPart, options: { r
   }
   const worst = statuses.reduce((least, status) => (RANK[status] < RANK[least] ? status : least));
   // Its work is finished and what it was for is not so: finishing was not enough.
-  if (reading === "not_yet" && (worst === "achieved" || worst === "partly_done")) return "failed";
+  // ...unless something of it was carried out: raised to the strength allowed, short of the strength asked, is partly done.
+  // ...but only for work that claimed to put the thing there. A hired fleet "ready to carry the army to Messana" is done when it is
+  // hired; the army not yet at Messana is what comes next, not a failure (`partly_done`).
+  if (reading === "not_yet" && (worst === "achieved" || worst === "partly_done")) {
+    const claimedToMoveIt = work.some((ref) => ref.kind === "project" && (world.projects.find((project) => project.id === ref.id)?.completionOutcome?.kind ?? "force_move") === "force_move");
+    const something = work.length > 0 || (part.actsCarried > 0 && part.actsRefused === 0);
+    return !claimedToMoveIt && something && part.actsRefused === 0 ? "partly_done" : "failed";
+  }
   return worst === "achieved" && part.actsRefused > 0 ? "partly_done" : worst;
 }
 
@@ -552,7 +566,7 @@ export const ORDER_PART_STATUS_LABEL: Record<OrderPartStatus, string> = {
   failed: "failed",
   refused: "refused",
   unanswered: "nothing came of it",
-  carried_unverified: "ordered, effect not observed",
+  carried_unverified: "ordered; no sign of it yet",
   already_so: "already so when ordered",
   stalled: "accepted, but nothing done for weeks",
 };

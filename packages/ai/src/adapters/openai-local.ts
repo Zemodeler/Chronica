@@ -33,6 +33,7 @@ const JSON_MODE_OPERATIONS = new Set<AiOperation>([
   "reconcile_facts",
   "repair_deltas",
   "write_mechanic",
+  "voice_letters",
 ]);
 
 /** Default low-effort operation table; actual effort comes from the shared game contract. */
@@ -49,6 +50,7 @@ const LOW_EFFORT_OPERATIONS = new Set<AiOperation>([
   "reconcile_facts",
   "repair_deltas",
   "write_mechanic",
+  "voice_letters",
 ]);
 
 // Model assignments per tier. Override via env vars if needed.
@@ -92,6 +94,7 @@ const MAX_COMPLETION_TOKENS: Partial<Record<AiOperation, number>> = {
   compose_chronicle: 4_000,
   repair_deltas: 4_000,
   write_mechanic: 2_000,
+  voice_letters: 2_000,
 };
 
 // Responses-API budget for the tool loop: one step, not the whole turn. Set

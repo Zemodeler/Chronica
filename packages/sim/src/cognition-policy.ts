@@ -111,12 +111,38 @@ export const DECISION_EVENTS: ReadonlySet<string> = new Set([
   "treaty_breached", "call_to_arms", "rising", "civil_war", "promise_broken", "character_death",
 ]);
 
+/**
+ * Commanders whose army is on the road to a place an open order named: each
+ * day's step along it is progress, not a new choice. They are asked again when
+ * they arrive, or when something happens to them (a battle, a letter, a plan
+ * falling due). A commander asked every day of a march was most of what a
+ * month's order cost.
+ */
+export function marchingCommanders(world: WorldState): ReadonlySet<string> {
+  const commanders = new Set<string>();
+  for (const order of world.orders) {
+    for (const part of order.parts) {
+      if (part.closedAtStep !== null) continue;
+      const places = [
+        ...part.goals.flatMap((goal) => goal.kind === "force_at" ? [{ forceId: goal.forceId, provinceId: goal.provinceId }] : []),
+        ...part.stages.flatMap((stage) => stage.status !== "waiting" ? [] : stage.waitsOn.flatMap((wait) => wait.kind === "force_at" ? [{ forceId: wait.forceId, provinceId: wait.provinceId }] : [])),
+      ];
+      for (const place of places) {
+        const force = world.material.forces.find((candidate) => candidate.id === place.forceId);
+        if (force !== undefined && force.locationId !== place.provinceId) commanders.add(force.commanderCharacterId);
+      }
+    }
+  }
+  return commanders;
+}
+
 /** Only actionable transitions: no dates, countdown prose, daily income or routine siege progress. */
-function decisionState(actor: RoutedActor, world: WorldState): string {
+function decisionState(actor: RoutedActor, world: WorldState, marching: ReadonlySet<string> = marchingCommanders(world)): string {
   const id = actor.characterId;
+  const onTheRoad = marching.has(id);
   const person = world.characters.find((candidate) => candidate.id === id);
   return JSON.stringify([
-    person === undefined ? null : [person.alive, person.polityId, person.officeId, person.locationProvinceId, person.healthBps < 3500, person.healthBps < 1500],
+    person === undefined ? null : [person.alive, person.polityId, person.officeId, onTheRoad ? null : person.locationProvinceId, person.healthBps < 3500, person.healthBps < 1500],
     world.characterPressures.filter((pressure) => pressure.characterId === id && pressure.status === "active")
       .map((pressure) => [pressure.id, pressure.intensity >= 60]),
     world.orderAttempts.filter((attempt) => attempt.recipientRef.id === id).map((attempt) => {
@@ -126,7 +152,7 @@ function decisionState(actor: RoutedActor, world: WorldState): string {
     world.projects.filter((project) => project.overseerCharacterId === id || project.sponsorEntityRef.id === id)
       .map((project) => [project.id, project.status, project.milestones.map((milestone) => milestone.status)]),
     world.material.forces.filter((force) => force.commanderCharacterId === id || force.controllerCharacterId === id || force.memberCharacterIds.includes(id))
-      .map((force) => [force.id, force.locationId, force.provisionStatus, force.hold, force.commanderCharacterId]),
+      .map((force) => [force.id, onTheRoad ? null : force.locationId, force.provisionStatus, force.hold, force.commanderCharacterId]),
     world.diplomacy.filter((message) => message.toCharacterId === id || (message.toCharacterId === null && message.toPolityId === person?.polityId))
       .map((message) => [message.id, message.status, message.deliveredOnDay == null || message.deliveredOnDay <= world.instant.day,
         message.replyDueByStep != null && world.instant.day >= message.replyDueByStep]),
@@ -156,6 +182,10 @@ export function createCognitionPolicy() {
         && (DECISION_EVENTS.has(fact.kind) || (significance.get(fact.id) ?? 0) >= 60)
         && fact.affectedEntities.some((entity) => entity.id === actor.characterId || interests.entities.has(entity.id) || interests.polities.has(entity.id)));
       return decisionNews || world.instant.day - previous.day >= (detail === "personal" ? 7 : 14);
+    },
+    /** The day this person was last asked, or null when they have not been this burst or the last. */
+    lastAskedDay(characterId: string): number | null {
+      return last.get(characterId)?.day ?? null;
     },
     remember(actor: RoutedActor, world: WorldState, facts: readonly { readonly id: string }[], due: readonly DueStep[] = []): void {
       const seen = new Set(last.get(actor.characterId)?.facts);

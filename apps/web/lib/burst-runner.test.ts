@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { burstDeadlineMs, workNotDone } from "./burst-runner";
+import { burstDeadlineMs, turnBudgetMs, workNotDone } from "./burst-runner";
 import { BURST_DEADLINE_MS } from "./burst-status";
 import { SAVE_NEEDS_REPAIR, unopenableSave } from "./save-errors";
 
@@ -38,5 +38,19 @@ describe("a save that will not open", () => {
     expect(unopenableSave(named("ScenarioDefinitionUnreadableError"))).toBe(SAVE_NEEDS_REPAIR);
     expect(unopenableSave(new Error("the database is down"))).toBeNull();
     expect(unopenableSave("a string")).toBeNull();
+  });
+});
+
+describe("the time a turn is given", () => {
+  const codex = { CHRONICA_HAND_RESPONDER: "codex" };
+  it("is a minute and a quarter for a week and four minutes for a month", () => {
+    expect(turnBudgetMs(7, codex)).toBe(75_000);
+    expect(turnBudgetMs(30, codex)).toBe(224_500);
+    expect(turnBudgetMs(14, codex)).toBe(120_500);
+    expect(turnBudgetMs(365, codex)).toBe(240_000);
+  });
+  it("is unlimited for a provider that answers in its own time, and can be set by hand", () => {
+    expect(turnBudgetMs(30, {})).toBeNull();
+    expect(turnBudgetMs(30, { CHRONICA_TURN_BUDGET_MS: "60000" })).toBe(60_000);
   });
 });

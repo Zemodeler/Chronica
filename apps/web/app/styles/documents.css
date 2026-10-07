@@ -664,6 +664,7 @@
   .peace-table__watching { font-style: italic; }
   .peace-table__said { padding: .45rem .7rem; border-left: 3px solid var(--bronze-deep); background: color-mix(in srgb, var(--papyrus-shade) 70%, transparent); font-family: var(--font-serif); color: var(--ink); }
   .peace-table__said.is-error { border-left-color: var(--seal); }
+  .peace-table__support,
   .peace-table__standing { display: flex; align-items: center; gap: .75rem; color: var(--ink-faded); font-family: var(--font-serif); }
   .peace-table__budget { color: var(--ink-faded); font-family: var(--font-serif); }
   .peace-table__budget strong, .peace-table__total strong { color: var(--ink); font-variant-numeric: tabular-nums; }

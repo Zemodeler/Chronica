@@ -4,6 +4,7 @@ import {
   ownerOf,
   stableHash,
   warStanding,
+  warWeariness,
   type FactProposalDraft,
   type Office,
   type PeaceTable,
@@ -363,9 +364,23 @@ export interface PeaceSessionView {
   readonly words: string | null;
 }
 
+/**
+ * How much of its people still back a war, 0-100: what is left once the war's
+ * weariness (`warWeariness`) is taken off. Only our own is read; how tired the
+ * other side is lies behind its walls.
+ */
+export const supportAtHome = (world: WorldState, ours: string, theirs: string): { readonly support: number; readonly why: readonly string[] } => {
+  const weariness = warWeariness(world, ours, theirs);
+  return { support: 100 - weariness.score, why: weariness.parts };
+};
+
 export interface PeaceTableView {
   readonly id: string;
+  readonly theirId: string;
   readonly theirLabel: string;
+  /** Home support for the war, 0-100, and what wears it down. */
+  readonly support: number;
+  readonly supportWhy: readonly string[];
   readonly status: PeaceTable["status"];
   /** How the war stands from our side, -100 to 100, and what it rests on. */
   readonly warScore: number;
@@ -392,7 +407,7 @@ export interface PeaceTablesView {
   readonly purse: number;
   readonly tables: readonly PeaceTableView[];
   /** Wars his power is in with no table yet: talks may be proposed. */
-  readonly wars: readonly { readonly enemyId: string; readonly label: string; readonly warScore: number }[];
+  readonly wars: readonly { readonly enemyId: string; readonly label: string; readonly warScore: number; readonly warParts: readonly string[]; readonly support: number; readonly supportWhy: readonly string[] }[];
 }
 
 /** Whether a man may put terms for his power: its ruler, or the man who answers its letters. */
@@ -421,9 +436,13 @@ export function readPeaceTables(world: WorldState, characterId: string, offices:
     const lastOurs = [...table.sessions].reverse().find((session) => session.byPolityId === ours);
     const counter = lastOurs?.answer === "countered" && (lastOurs.counterTerms?.length ?? 0) > 0 ? lastOurs.counterTerms! : null;
     const people = [ours, theirs].map((side) => ({ side, id: diplomaticAnswererOf(world, side, offices) })).filter((entry): entry is { side: string; id: string } => entry.id !== null && entry.id !== characterId);
+    const home = supportAtHome(world, ours, theirs);
     return {
       id: table.id,
+      theirId: theirs,
       theirLabel: nameOf(world, theirs),
+      support: home.support,
+      supportWhy: home.why,
       status: table.status,
       warScore: standing.score,
       warParts: standing.parts,
@@ -451,7 +470,9 @@ export function readPeaceTables(world: WorldState, characterId: string, offices:
     .filter((agreement) => agreement.status === "active" && agreement.kind === "war" && [agreement.polityId, agreement.otherPolityId].includes(ours) && !seated.has(agreement.id))
     .map((agreement) => {
       const enemy = agreement.polityId === ours ? agreement.otherPolityId : agreement.polityId;
-      return { enemyId: enemy, label: nameOf(world, enemy), warScore: warStanding(world, ours, enemy).score };
+      const standing = warStanding(world, ours, enemy);
+      const home = supportAtHome(world, ours, enemy);
+      return { enemyId: enemy, label: nameOf(world, enemy), warScore: standing.score, warParts: standing.parts, support: home.support, supportWhy: home.why };
     });
   return { speaks: speaksForAtTable(world, characterId, offices), purse, tables: views, wars };
 }

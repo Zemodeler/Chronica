@@ -20,7 +20,7 @@ import { formatCoins } from "@chronica/billing";
 import { buildStation, formatWorldDate, PlayerDecisionSchema, seesAccount, type OrderPartyRef, type WorldState } from "@chronica/shared";
 import { nameOfSubject, whoSeeksThePlayer, type AnsweredDecision } from "@chronica/sim";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
-import { dateLabel, prepareBurst, runBurstToCommit, type BurstJob } from "./burst-runner";
+import { dateLabel, prepareBurst, runBurstWithContinuations, type BurstJob } from "./burst-runner";
 import { ABANDONED_ERROR, livenessAt, toBurstStatus, type BurstStatusView } from "./burst-status";
 import { requiredDatabaseUrl } from "./database-url";
 import { openInitiatedDialogue } from "./dialogue-service";
@@ -71,6 +71,8 @@ export async function resolveContext(gameId: string, shared = false): Promise<Si
 
 /** How far the player may ask the world to run at once, in days. */
 export const TIME_SPANS = [7, 30, 90, 180, 365] as const;
+/** What an order with no span chosen is given. */
+export const DEFAULT_ORDER_SPAN_DAYS = 14;
 
 export type StartOutcome =
   | { readonly status: "started"; readonly burstId: string }
@@ -99,7 +101,8 @@ export async function startDetachedBurst(
   const context = await resolveContext(gameId);
   if (context === null) return { status: "error", message: "You are not playing in this game." };
   try {
-    return await launch(context, { gameId, orderText, spanDays: options.spanDays, idempotencyKey: options.idempotencyKey });
+    // An order with no span chosen is a fortnight: "until things settle" ran to ninety days and a march a day at a time.
+    return await launch(context, { gameId, orderText, spanDays: options.spanDays ?? (orderText === null ? undefined : DEFAULT_ORDER_SPAN_DAYS), idempotencyKey: options.idempotencyKey });
   } finally {
     await context.close();
   }
@@ -127,7 +130,7 @@ async function launch(
   after(async () => {
     const detached = createDatabase(requiredDatabaseUrl());
     try {
-      await runBurstToCommit(detached.db, job, { afterCommit: openConversations });
+      await runBurstWithContinuations(detached.db, job, { afterCommit: openConversations });
     } finally {
       await detached.close();
     }

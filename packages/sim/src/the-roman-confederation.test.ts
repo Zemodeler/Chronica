@@ -100,12 +100,12 @@ describe("the allies of Rome", () => {
     expect(atWar(result.world.polityAgreements, "samnites", "rhegium-campanians")).toBe(false);
   });
 
-  it("are not attacked by Rome while the foedus stands", () => {
+  it("are attacked by Rome when the consul chooses, and the attack is the war", () => {
     const result = order("gaius-genucius", [{
       op: "force_engage", forceRef: "roman-field-army", targetForceRef: "samnite-levy", posture: "offer_battle", reason: "Punish the Samnites.",
     }], aCampInBruttium());
-    expect(result.rejected).toHaveLength(1);
-    expect(result.rejected[0]!.reason).toContain("foedus");
+    expect(result.rejected).toEqual([]);
+    expect(result.factProposals.some((fact) => fact.kind === "war_declared")).toBe(true);
   });
 
   it("are defended by the consul's army camped beside them", () => {

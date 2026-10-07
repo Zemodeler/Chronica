@@ -1,3 +1,4 @@
+import { lessonsOfBreach } from "./state-lessons";
 import {
   adjustPolityLegitimacy,
   agreementsBetween,
@@ -324,7 +325,7 @@ function brokenPeace(world: WorldState, war: PolityAgreement): { world: WorldSta
     material: { ...world.material, polityLegitimacy: adjustPolityLegitimacy(world.material.polityLegitimacy, breaker, -600, `Broke its ${broken.kind} with ${nameOf(world, victim)}`, `broken-${war.id}`) },
   };
   return {
-    world: addGrievance(next, victim, breaker, `${breakerName} broke the ${broken.kind}`, war.sinceStep),
+    world: lessonsOfBreach(addGrievance(next, victim, breaker, `${breakerName} broke the ${broken.kind}`, war.sinceStep), breaker, victim, war.sinceStep),
     facts: [{
       localId: `faith_broken_${war.id}`.slice(0, 60),
       kind: "peace_broken",

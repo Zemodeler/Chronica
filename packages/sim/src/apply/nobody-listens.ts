@@ -161,6 +161,7 @@ export function nobodyListens(
       return COMMANDING_FIELDS.some((field) => delta[field] !== undefined) ? ignoredBy(delta.forceRef) : null;
     case "force_engage":
     case "force_raid":
+    case "siege_lay":
     case "force_reinforce":
       return ignoredBy(delta.forceRef);
     // A post is given by whoever gives it (`appointersOf`); named by anybody

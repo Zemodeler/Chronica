@@ -1,3 +1,4 @@
+import { lessonsOfSieges } from "./state-lessons";
 import {
   takenBy,
   SIEGE_BASE_DAYS,
@@ -389,7 +390,9 @@ export function pressSieges(given: WorldState, toDay: number, options: PressSieg
   const pressed: WorldState = { ...world, sieges, map: { ...world.map, provinces }, material: { ...world.material, forces: [...forces, ...world.material.forces.filter((force) => yielded.includes(force.id))] } };
   const after = sackCities(reconcileCapitals(disbandForces(pressed, new Set(yielded), null)), sacked, toDay);
   const honoured = honourSieges(after.world, deeds, toDay, options.playerCharacterId ?? null);
-  return { world: honoured.world, facts: [...facts, ...after.facts, ...honoured.facts], battles };
+  // The power that lost a city, and the man who sacked one, learn from it (`state-lessons.ts`).
+  const learned = lessonsOfSieges(honoured.world, toDay, new Set(sacked.map((sack) => sack.provinceId)));
+  return { world: learned, facts: [...facts, ...after.facts, ...honoured.facts], battles };
 }
 
 /** Of a sacked city's people, this share killed or sold. */

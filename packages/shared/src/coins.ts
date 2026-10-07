@@ -31,6 +31,8 @@ export const AiOperationSchema = z.enum([
   "repair_deltas",
   /** Writes the standing rule behind an arrangement somebody set going, once; the engine runs it thereafter (`world/mechanic.ts`). */
   "write_mechanic",
+  /** Writes the letters powers send the player in the sender's own voice, from what the rules decided they say (`sim/letter-voice.ts`). */
+  "voice_letters",
 ]);
 export type AiOperation = z.infer<typeof AiOperationSchema>;
 

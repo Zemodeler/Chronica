@@ -2,7 +2,10 @@
 
 import { useState, type ReactNode } from "react";
 import { spanInWords, type Abroad, type PolityAgreementKind, type TreatyLine, type TreatyMoment, type TreatyPosture, type TreatyPower } from "@chronica/shared";
+import type { PeaceTablesView } from "@chronica/sim";
 import { Era } from "../../../components/ui/era";
+import { Tabs, type TabSection } from "../../../components/ui/tabs";
+import { WarTab } from "./peace-table-sheet";
 import { Tip, TipCard } from "../../../components/ui/tip";
 
 /**
@@ -43,8 +46,12 @@ function postureLine(power: TreatyPower, polityLabel: string): string {
   }
 }
 
-export function TreatiesSheet({ abroad, onWriteTo, onOpenLetters }: {
+export function TreatiesSheet({ abroad, onWriteTo, onOpenLetters, peace, gameId, onChanged }: {
   readonly abroad: Abroad;
+  /** The peace tables his power sits at; with `gameId`, they give a war its tab. */
+  readonly peace?: PeaceTablesView | null | undefined;
+  readonly gameId?: string | undefined;
+  readonly onChanged?: (() => void) | undefined;
   /** Start a letter to them at the desk; absent for those who cannot give orders. */
   readonly onWriteTo?: ((polityLabel: string) => void) | undefined;
   readonly onOpenLetters?: (() => void) | undefined;
@@ -106,7 +113,14 @@ export function TreatiesSheet({ abroad, onWriteTo, onOpenLetters }: {
       </nav>
 
       {chosen !== null && (
-        <Dossier key={chosen.polityId} power={chosen} ask={ask} onWriteTo={onWriteTo} onOpenLetters={onOpenLetters} />
+        <Dossier
+          key={chosen.polityId}
+          power={chosen}
+          ask={ask}
+          war={peace != null && gameId !== undefined ? <WarTab gameId={gameId} peace={peace} enemyId={chosen.polityId} onChanged={onChanged ?? (() => undefined)} /> : undefined}
+          onWriteTo={onWriteTo}
+          onOpenLetters={onOpenLetters}
+        />
       )}
     </div>
   );
@@ -156,12 +170,18 @@ function PowerCard({ power, chosen, onChoose, ask }: {
   );
 }
 
-function Dossier({ power, ask, onWriteTo, onOpenLetters }: {
+function Dossier({ power, ask, war, onWriteTo, onOpenLetters }: {
   readonly power: TreatyPower;
   readonly ask: Ask;
+  /** Where the player is at war with this power: its war tab. */
+  readonly war?: ReactNode;
   readonly onWriteTo?: ((polityLabel: string) => void) | undefined;
   readonly onOpenLetters?: (() => void) | undefined;
 }) {
+  const sections: TabSection[] = [
+    { id: "treaties", title: "Treaties", content: <DossierBody power={power} ask={ask} onWriteTo={onWriteTo} onOpenLetters={onOpenLetters} /> },
+    ...(war !== undefined && power.posture === "war" ? [{ id: "war", title: "War", marked: true, content: war }] : []),
+  ];
   return (
     <article className="treaties__dossier" aria-label={`${power.label}: where you stand`}>
       <header className="dossier__header">
@@ -169,6 +189,19 @@ function Dossier({ power, ask, onWriteTo, onOpenLetters }: {
         <h3 className="dossier__title"><PowerTip power={power} ask={ask} /></h3>
         {power.regard !== null && <p className="dossier__regard"><RegardTip power={power} ask={ask} /></p>}
       </header>
+      <Tabs label={`${power.label}: where you stand`} sections={sections} />
+    </article>
+  );
+}
+
+function DossierBody({ power, ask, onWriteTo, onOpenLetters }: {
+  readonly power: TreatyPower;
+  readonly ask: Ask;
+  readonly onWriteTo?: ((polityLabel: string) => void) | undefined;
+  readonly onOpenLetters?: (() => void) | undefined;
+}) {
+  return (
+    <>
 
       {power.letters.length > 0 && (
         <section className="dossier__section dossier__letters">
@@ -219,7 +252,7 @@ function Dossier({ power, ask, onWriteTo, onOpenLetters }: {
           <button type="button" className="btn" onClick={() => onWriteTo(power.label)}>Write to {power.label}</button>
         </footer>
       )}
-    </article>
+    </>
   );
 }
 

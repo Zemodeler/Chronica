@@ -55,7 +55,8 @@ describe("a man and his land", () => {
     expect(world.material.holdings.find((holding) => holding.id === "curius-sabine-farm")?.legalHolderCharacterId).toBe("manius-curius");
     const before = balance(world, "curius-purse");
     const month = runDeterministicTick({ world, toDay: 30, ids: createIdFactory("land-tick"), warfare: definition.warfare }).world;
-    expect(balance(month, "curius-purse")).toBe(before + 40);
+    // 40 before the men who gather the rents were people with tempers of their own; one more now, from how the Treasury's officers are.
+    expect(balance(month, "curius-purse")).toBe(before + 41);
     // An estate authored in the scenario is the same kind of thing as one bought in play.
     expect(estateTerms(world, LATIUM, "slight")?.monthlyYield).toBe(40);
   });

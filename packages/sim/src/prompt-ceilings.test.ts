@@ -31,7 +31,8 @@ describe("the system prompts stay the size they are", () => {
 
   it("the historian, the repairer and the reconciler: prose only", () => {
     // Raised 4.5k -> 5.2k (2026-10-04) for two register exemplars (plan chronicle-and-order-truth, 3.3).
-    expect(CHRONICLE_SYSTEM_PROMPT.length).toBeLessThan(5_200);
+    // Raised 5.2k -> 7k (2026-10-06): the passage is a campaign-journal paragraph, not a note, and the register exemplars are longer to show it.
+    expect(CHRONICLE_SYSTEM_PROMPT.length).toBeLessThan(7_000);
     expect(DELTA_REPAIR_SYSTEM_PROMPT.length).toBeLessThan(1_300);
     expect(FACT_RECONCILE_SYSTEM_PROMPT.length).toBeLessThan(1_400);
   });

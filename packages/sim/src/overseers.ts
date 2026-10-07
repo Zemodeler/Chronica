@@ -76,7 +76,8 @@ export function chooseOverseer(
     const hand = assessExecution(world, character.id, domain);
     if (hand === null) return Number.NEGATIVE_INFINITY;
     // Able first, honest second, and not a man already carrying three works.
-    return hand.competence + (hand.fidelity - 50) / 5 - LOAD_PENALTY * (load.get(character.id) ?? 0);
+    // What the work would really cost in these hands, not only how skilled they are: waste, delay and what goes missing.
+    return hand.competence + (hand.fidelity - 50) / 5 - hand.wasteBps / 250 - hand.delayBps / 400 - hand.skimBps / 50 - LOAD_PENALTY * (load.get(character.id) ?? 0);
   };
   const best = (candidates: readonly Character[]): Character | null =>
     [...candidates].sort((a, b) => score(b) - score(a) || a.id.localeCompare(b.id))[0] ?? null;
