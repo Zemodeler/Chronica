@@ -279,7 +279,7 @@ export function routeAttention(input: AttentionInput): AttentionResult {
     // dormant decides the matter by silence.
     if (world.diplomacy.some(
       (message) =>
-        message.status === "awaiting_reply" && message.putToRecipientOnDay == null && isDelivered(message, world.instant.day) && !isBackgroundLetter(message, input.ownPolityId) &&
+        message.status === "awaiting_reply" && message.putToRecipientOnDay == null && message.heldAnswer === undefined && isDelivered(message, world.instant.day) && !isBackgroundLetter(message, input.ownPolityId) &&
         (message.toCharacterId === character.id || (message.toCharacterId === null && character.polityId !== null && message.toPolityId === character.polityId)),
     )) {
       score += 30;
@@ -518,7 +518,7 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
     }
     if (world.diplomacy.some(
       (message) =>
-        message.status === "awaiting_reply" && message.putToRecipientOnDay == null && isDelivered(message, world.instant.day) && !isBackgroundLetter(message, input.ownPolityId) &&
+        message.status === "awaiting_reply" && message.putToRecipientOnDay == null && message.heldAnswer === undefined && isDelivered(message, world.instant.day) && !isBackgroundLetter(message, input.ownPolityId) &&
         (message.toCharacterId === character.id || (message.toCharacterId === null && character.polityId !== null && message.toPolityId === character.polityId)),
     )) {
       score += 28;

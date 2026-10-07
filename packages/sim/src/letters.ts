@@ -1,5 +1,5 @@
 import { offerMetadata } from "./treaty-duties";
-import { formatWorldDate, isDelivered, settlePeaceTalks, tradeAddresseeFinder, type DiplomaticMessage, type Office, type ScenarioClock, type WorldState } from "@chronica/shared";
+import { WorldDeltaSchema, formatWorldDate, isDelivered, settlePeaceTalks, tradeAddresseeFinder, type DiplomaticMessage, type Office, type ScenarioClock, type WorldDelta, type WorldState } from "@chronica/shared";
 
 /**
  * Who answers a letter sent to a power.
@@ -87,7 +87,7 @@ export function lettersOwed(world: WorldState, clock: ScenarioClock, excludeIds:
   const polityName = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
   const owed = new Map<string, string>();
   for (const message of world.diplomacy) {
-    if (message.status !== "awaiting_reply" || message.putToRecipientOnDay != null || message.toCharacterId === null) continue;
+    if (message.status !== "awaiting_reply" || message.putToRecipientOnDay != null || message.toCharacterId === null || message.heldAnswer !== undefined) continue;
     if (!isDelivered(message, world.instant.day) || isBackgroundLetter(message, ownPolityId)) continue;
     const reader = world.characters.find((character) => character.id === message.toCharacterId);
     if (reader === undefined || !reader.alive || excluded.has(reader.id) || owed.has(reader.id)) continue;
@@ -125,6 +125,8 @@ export function nextReplyDueKey(world: WorldState, afterKey: number): number | u
     .flatMap((message) => [
       ...(message.replyDueByStep === null ? [] : [message.replyDueByStep * 1440]),
       ...(message.deliveredOnDay == null ? [] : [message.deliveredOnDay * 1440]),
+      // The day an answer decided at send time comes back: the walk stops there, and it is given (`heldAnswersDue`).
+      ...(message.heldAnswer === undefined ? [] : [message.heldAnswer.comesOnDay * 1440]),
     ])
     .filter((key) => key > afterKey)
     .sort((a, b) => a - b)[0];
@@ -142,11 +144,53 @@ export function aLetterWaitsOnItsReader(world: WorldState, excludeIds: readonly 
   const excluded = new Set(excludeIds);
   const today = world.instant.day;
   return world.diplomacy.some((message) => {
-    if (message.status !== "awaiting_reply" || message.toCharacterId === null || excluded.has(message.toCharacterId)) return false;
+    if (message.status !== "awaiting_reply" || message.toCharacterId === null || excluded.has(message.toCharacterId) || message.heldAnswer !== undefined) return false;
     if (isBackgroundLetter(message, ownPolityId) && message.putToRecipientOnDay == null) return false;
     // Still on the road: its arrival is on the calendar (`nextReplyDueKey`).
     if (!isDelivered(message, today)) return false;
     if (message.putToRecipientOnDay != null) return message.replyDueByStep !== null && message.replyDueByStep <= today;
     return world.characters.some((character) => character.id === message.toCharacterId && character.alive);
   });
+}
+
+/** An answer decided when the letter was sent, now come back to the writer: whose it is, and the acts it is made of. */
+export interface HeldAnswerDue {
+  readonly messageId: string;
+  readonly readerId: string;
+  readonly deltas: readonly WorldDelta[];
+}
+
+/**
+ * Letters whose answer was decided at send time (`letter-reply.ts`) and whose day has come.
+ *
+ * The model was called when the player wrote, and what it had the reader say was
+ * kept on the letter until the road there and back had been walked. Now the
+ * story is at that day, and the answer is given as the reader's own act, judged
+ * by the engine as any other act of his would be.
+ */
+export function heldAnswersDue(world: WorldState, day: number = world.instant.day): readonly HeldAnswerDue[] {
+  return world.diplomacy.flatMap((message): HeldAnswerDue[] => {
+    if (message.status !== "awaiting_reply" || message.heldAnswer === undefined || message.heldAnswer.comesOnDay > day || message.toCharacterId === null) return [];
+    // A reader who has died on the road gives no answer: the letter is as any unanswered one, and his successor is asked.
+    const reader = world.characters.find((character) => character.id === message.toCharacterId);
+    if (reader === undefined || !reader.alive) return [{ messageId: message.id, readerId: message.toCharacterId, deltas: [] }];
+    const deltas = message.heldAnswer.deltas.flatMap((raw) => {
+      const read = WorldDeltaSchema.safeParse(raw);
+      return read.success ? [read.data] : [];
+    });
+    return [{ messageId: message.id, readerId: message.toCharacterId, deltas }];
+  });
+}
+
+/** The letter put back as it was before it was answered ahead of time: awaiting its reader, who is asked as anybody is. */
+export function withoutHeldAnswer(world: WorldState, messageId: string): WorldState {
+  if (!world.diplomacy.some((message) => message.id === messageId && message.heldAnswer !== undefined)) return world;
+  return {
+    ...world,
+    diplomacy: world.diplomacy.map((message) => {
+      if (message.id !== messageId) return message;
+      const { heldAnswer: _given, ...rest } = message;
+      return rest;
+    }),
+  };
 }

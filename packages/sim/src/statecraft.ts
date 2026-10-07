@@ -689,7 +689,7 @@ function allianceAgainstThreats(
  * (`letter-craft.ts`), in a tone the writer's mind picks.
  */
 export function answerByRule(world: WorldState, message: DiplomaticMessage, input: StatecraftInput, rulerOf: (polityId: string) => Character | undefined): StatecraftDecision | null {
-  if (message.status !== "awaiting_reply" || !isDelivered(message, world.instant.day)) return null;
+  if (message.status !== "awaiting_reply" || !isDelivered(message, world.instant.day) || message.heldAnswer !== undefined) return null;
   if (input.excludedPolityIds.has(message.toPolityId) || message.fromCharacterId === input.playerCharacterId) return null;
   // Letters between powers are the rules' and are basic; a letter to the player's circle is the model's (`letter-voice.ts`, `cognition.ts`).
   const playerPolity = input.playerCharacterId === null ? null : world.characters.find((character) => character.id === input.playerCharacterId)?.polityId ?? null;

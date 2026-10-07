@@ -5608,7 +5608,9 @@ function applyOne(
           reason: `${delta.answerText}`.slice(0, 240),
         }, context, assignedIds, resolve, emitFact, emitAccount);
       }
-      const answered = { ...message, status: "answered" as const, answer: delta.answer, answerText: delta.answerText, answeredAtStep: atStep };
+      // An answer decided at send time and held for its day is spent the moment it is given, by whoever gives it (`letter-reply.ts`).
+      const { heldAnswer: _spent, ...unheld } = message;
+      const answered = { ...unheld, status: "answered" as const, answer: delta.answer, answerText: delta.answerText, answeredAtStep: atStep };
       const repliedBeforeTable: WorldState = {
         ...world,
         diplomacy: world.diplomacy.map((candidate) => (candidate.id === messageId ? answered : candidate)),

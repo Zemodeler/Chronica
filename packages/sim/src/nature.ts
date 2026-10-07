@@ -5,7 +5,7 @@ import { writeLetter } from "./letter-craft";
 import { moodInWords } from "./moods";
 import { quirksOf } from "./quirks";
 import { perceivedRatio } from "./perceive";
-import { LARGE_MATTERS, letterVerdict } from "./letter-verdict";
+import { letterVerdict } from "./letter-verdict";
 import { hasGrievance } from "./treaties";
 import { dispositionOf, leastOdds, peaceReluctance } from "./disposition";
 
@@ -29,7 +29,10 @@ import { dispositionOf, leastOdds, peaceReluctance } from "./disposition";
  *   not carried out, and the reason is written down so the model and the
  *   player can see it was his nature that stopped it.
  *
- * Small acts are never gated; only the ones that change a nation.
+ * Small acts are never gated; only the ones that change a nation. And a letter's
+ * answer is not one of them: the model decides what a man says to a letter, with
+ * his nature as counsel (`adviceOnALetter`), and only what he cannot do is held
+ * (`holdAnswerToAuthority`).
  */
 
 /** What an act of war needs of the man who makes it: his own odds, his own honour. */
@@ -57,26 +60,38 @@ export function conductInWords(world: WorldState, character: Character): string[
 }
 
 /**
- * A model's answer to a letter on a large matter, brought into line with who the
- * answerer is. The model may word it, not reverse it: a frightened king does not
- * say yes to a war, nor a proud one to a humiliation. The words are replaced
- * with the rule's own, so the answer reads as what it now is. Anything else is
- * returned as it came.
+ * A model's answer to a letter, held to what the answerer cannot do, and to nothing else.
+ *
+ * The model decides every answer to a letter and writes it. What his interests
+ * and nature say is put before it as counsel (`adviceOnALetter`), and it may
+ * take it or not: a frightened king may say yes to a war if the model has a
+ * reason, a proud one may swallow a humiliation. Only an impossibility is held
+ * by the engine, and there is one such for a letter: written to somebody who
+ * does not decide it (an offer of trade, a notice of embargo), a man cannot say
+ * yes or no for the power that does. Whatever the model had him say, he only
+ * says who decides, the terms he might have sent back are dropped, and the act
+ * is "countered" -- the engine's own refusal, with the reason written down.
+ * Anything else (an answerer without the authority to bind his power to what
+ * he accepted, a purse too empty to pay) is judged by `applyDeltas` itself when
+ * the answer is applied, as any other act of his would be.
  */
-export function bindAnswerToNature(world: WorldState, actorId: string, act: WorldDelta): { readonly act: WorldDelta; readonly brought: string | null } {
-  if (act.op !== "diplomatic_message_answer" || (act.answer !== "accepted" && act.answer !== "refused")) return { act, brought: null };
+export function holdAnswerToAuthority(world: WorldState, actorId: string, act: WorldDelta): { readonly act: WorldDelta; readonly brought: string | null } {
+  if (act.op !== "diplomatic_message_answer" || (act.answer !== "accepted" && act.answer !== "refused" && act.answer !== "countered")) return { act, brought: null };
   const message = world.diplomacy.find((candidate) => candidate.id === act.messageRef);
   const actor = world.characters.find((character) => character.id === actorId);
-  if (message === undefined || actor === undefined || !LARGE_MATTERS.has(message.kind)) return { act, brought: null };
+  if (message === undefined || actor === undefined || (message.kind !== "trade_offer" && message.kind !== "embargo_notice")) return { act, brought: null };
   const verdict = letterVerdict(world, message, actor);
-  // Written to somebody who does not decide it, he only says who does, whatever the model had him say.
-  if (verdict === null || (verdict.redirect === undefined && (act.answer === "accepted") === verdict.accepted)) return { act, brought: null };
+  if (verdict?.redirect === undefined) return { act, brought: null };
+  // Already what it has to be: a "countered" that sends back no terms of his own. The words stay the model's.
+  if (act.answer === "countered" && act.counterTrade === undefined) return { act, brought: null };
   const nameOf = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
   const letter = writeLetter(actor, world.instant.day, verdict.intent, { us: nameOf(message.toPolityId), them: nameOf(message.fromPolityId), reason: verdict.reason, ...verdict.extra }, "{us} answers {them}", verdict.weak);
-  // A pact he would sign on terms of his own is answered "countered" with them, which sends them back as an offer (`counterTrade`).
-  const answer = verdict.redirect !== undefined || verdict.counter !== undefined ? "countered" : verdict.accepted ? "accepted" : "refused";
-  const bound = WorldDeltaSchema.parse({ ...act, answer, answerText: letter.body, refusedClauses: [], addedTerms: null, ...(verdict.counter === undefined ? {} : { counterTrade: verdict.counter }), reason: letter.body.slice(0, 240) });
-  return { act: bound, brought: `${actor.name} would not have answered "${message.subject}" as the model had him: it is not in him (${verdict.why}).` };
+  // His own words stand where they already point to the one who decides; otherwise the rule's, so the answer reads as what it now is.
+  const pointsThere = act.answer === "countered" && act.answerText.includes(verdict.redirect.name);
+  const words = pointsThere ? act.answerText : letter.body;
+  const { counterTrade: _dropped, ...rest } = act;
+  const held = WorldDeltaSchema.parse({ ...rest, answer: "countered", answerText: words, refusedClauses: [], addedTerms: null, reason: words.slice(0, 240) });
+  return { act: held, brought: `${actor.name} could not answer "${message.subject}" as the model had him: it is not his to decide (${verdict.why}).` };
 }
 
 const rulerOfPolity = (world: WorldState, polityId: string): Character | undefined => readDepartments(world).rulers(polityId).find((ruler) => ruler.alive);

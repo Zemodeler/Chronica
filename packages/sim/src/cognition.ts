@@ -1,4 +1,4 @@
-import { LARGE_MATTERS, letterVerdict } from "./letter-verdict";
+import { LARGE_MATTERS, adviceOnALetter, letterVerdict } from "./letter-verdict";
 import { conductInWords } from "./nature";
 import { z } from "zod";
 import {
@@ -954,7 +954,7 @@ export function renderCharacterPortrait(
   const polityName = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
   const letters = world.diplomacy.filter(
     (message) =>
-      message.status === "awaiting_reply" && isDelivered(message, world.instant.day) &&
+      message.status === "awaiting_reply" && isDelivered(message, world.instant.day) && message.heldAnswer === undefined &&
       (message.toCharacterId === characterId || (message.toCharacterId === null && character?.polityId != null && message.toPolityId === character.polityId)),
   );
   const enemyPowers = new Set(character?.polityId == null ? [] : enemiesOf(world.polityAgreements, character.polityId));
@@ -966,13 +966,9 @@ export function renderCharacterPortrait(
       // the letter came from a neutral, because nothing on it said otherwise.
       ...letters.flatMap((message) => {
         const line = `  - [${message.id}] ${message.kind} from ${polityName(message.fromPolityId)}${enemyPowers.has(message.fromPolityId) ? " (the enemy: their power is at war with it)" : ""}, by ${name(message.fromCharacterId)} — ${message.subject}: ${message.terms}`;
-        // On the large matters his nature has already decided, and he is to word it, not overturn it (`letter-verdict.ts`).
+        // On the large matters his interests and nature say what they say, as counsel; the answer is the model's (`letter-verdict.ts`).
         const verdict = character !== undefined && LARGE_MATTERS.has(message.kind) ? letterVerdict(world, message, character) : null;
-        if (verdict === null) return [line];
-        // Trade: a pact he would sign on his own terms, or one written to the wrong man, is neither a yes nor a no (`trade-verdict.ts`).
-        if (verdict.redirect !== undefined) return [line, `      This is not yours to decide: ${verdict.redirect.name} answers for your power in such matters. Answer "countered", saying so; the engine will not carry out a yes or a no.`];
-        if (verdict.counter !== undefined) return [line, `      By who you are, you would not sign this as written (${verdict.why}). Answer "countered" with counterTrade set to the terms you would sign: customs capped at ${verdict.counter.tariffCapBps ?? "no cap"}${verdict.counter.exempt.length > 0 ? `, ${verdict.counter.exempt.join(", ")} free` : ""}.`];
-        return [line, `      By who you are, you ${verdict.accepted ? "say YES" : "say NO"} to this (${verdict.why}). Answer it so, in your own words; the engine will not carry out the opposite.`];
+        return verdict === null ? [line] : [line, adviceOnALetter(verdict)];
       }),
     );
   }

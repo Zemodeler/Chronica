@@ -199,20 +199,33 @@ a revision from the pact in force, one point tighter, bread free when the writer
   The answerer's yes opens the pact through `bindTheAcceptance`; accepted over a pact already standing it revises that pact in
   place (the same record, new terms, the new letter as its source). Lifting an embargo is a pact offer: a pact opened over an
   embargo ends it. A refusal opens nothing.
-- **The answer** is `trade-verdict.ts`, deterministic, the same every time it is asked: the customs given up (the cap against
+- **The answer is the model's, and the verdict is counsel.** A letter is answered by the model at the moment it is sent (below).
+  `trade-verdict.ts` is what the rules would say, and is put in the answerer's section as "what your interests and nature say"
+  (`adviceOnALetter`); the model's yes, no or terms of its own stand, even against it. Only one thing is held by the engine: a
+  letter to somebody who does not decide it is answered "countered", pointing to the one who does (`holdAnswerToAuthority`).
+  The rules still answer, unchanged, letters between powers nobody plays (`answerByRule`), never one to or from the player.
+- **The verdict** is `trade-verdict.ts`, deterministic, the same every time it is asked: the customs given up (the cap against
   the answerer's own rate, times 0.6 plus 0.8 of the share of its inbound trade that comes from the writer; each good let in
   free costs 150), against what he will bear (700 bp, plus 6 a point of trust, 5 of his liking, 700 for a hand that is not
   greedy, 300 for the sociable, 350 where its own bread is short; less where he laid an embargo himself). A war refuses; trust
   of -40 or worse refuses. Past what he bears but within 900 he answers "countered" with `counterTrade`: the cap raised in
   hundreds until he can keep it, most-favoured dropped, only bread free. The engine sends that back as a `trade_offer` of his
-  own; a counter is not countered again, so a bargain is at most two letters. Model-played rulers are held to the same verdict
-  (`bindAnswerToNature`, and the line in the cognition portrait).
+  own; a counter is not countered again, so a bargain is at most two letters. The model is told all this in the portrait line, and
+  may take it or not.
+- **Answered at send time, delivered on its day.** `POST /letters` applies the `diplomatic_message_send` and then calls the
+  model once for the reader (`answerALetterNow`, `letter-reply.ts`; `apps/web/lib/letter-answer-now.ts`), whoever he is -- a far
+  king, a clerk -- through the coin gate. The answer is decided then and kept on the letter (`heldAnswer`); the letter stays
+  `awaiting_reply`, so nothing is opened by sending. On `comesOnDay` -- the road there and the road back -- the burst gives it as
+  the reader's own act (`heldAnswersDue`, `releaseHeldAnswers`), and a yes opens the pact then. The player is told "the answer will
+  come in N days"; the commit records `modelCalls: 1`. If the call fails or the coins are short the letter stays pending as it
+  always did, the player is told so, and the reader is asked in the next round that is paid for (`lettersOwed`).
 - **Embargo is announced.** An embargo is one power's own act, so it cannot be accepted into being. `embargo_notice` is a
   threat of the ultimatum's kind (`onRefusal: "embargo"`): what it asks is yielded to, which lays nothing, or it is refused or
   goes unanswered and the sender lays the embargo it named (`carryOutTheThreat`, and `tick.ts` for silence, which breaks any
   pact that stood at `EMBARGO_BREACH_TRUST`). The answerer yields when the pain (his trade with the sender, more where bread is
   short) outweighs his pride. A bare embargo is still `agreement_open`.
-- Tests: `a-trade-pact-is-written-for` (sim), `trade-proposal.test.tsx` (web).
+- Tests: `a-trade-pact-is-written-for` and `a-letter-is-always-answered-by-the-model` (sim), `trade-proposal.test.tsx` and
+  `letter-answer-now.test.ts` (web).
 
 ## Coinages (phase E, v50)
 

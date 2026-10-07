@@ -12,10 +12,12 @@ import { tradeVerdict } from "./trade-verdict";
  *
  * This is the substance. The world AI words it from templates for letters
  * between powers nobody is playing (`statecraft.ts`); the model words it for the
- * player (`letter-voice.ts`); and when the model is answering for somebody it is
- * held to it, as a ruler is held to his nature in the large matters
- * (`nature.ts`): it may say it as he would say it, but not say yes where he
- * would say no. Pure and deterministic.
+ * player (`letter-voice.ts`). Where the model answers for somebody -- and it
+ * answers every letter the player writes, at the moment he sends it
+ * (`letter-reply.ts`) -- this is counsel, not command: it is put before the
+ * model as what his interests and nature say (`adviceOnALetter`), and the
+ * model's yes or no, or terms of its own, stand. Only the one impossibility is
+ * held by the engine (`holdAnswerToAuthority`). Pure and deterministic.
  */
 export interface Verdict {
   readonly accepted: boolean;
@@ -39,6 +41,26 @@ export const STEP_DAYS = 30;
 
 /** Kinds of letter whose answer is the answerer's nature at work in a large matter. */
 export const LARGE_MATTERS = new Set<DiplomaticMessage["kind"]>(["ultimatum", "warning", "protest", "tribute_demand", "peace_offer", "peace_talks", "alliance_offer", "military_aid_request", "trade_offer", "embargo_notice"]);
+
+/**
+ * What the rules would say to a letter, as counsel to the one who answers it.
+ *
+ * Said to the model in the answerer's own section, in terms of what his
+ * interests and nature make of the matter. It is advice and the line says so:
+ * the answer is his, and he may go against it with a reason. The one thing
+ * said as a bar is a letter written to somebody who does not decide it, for the
+ * engine will not take his yes or no there (`holdAnswerToAuthority`).
+ */
+export function adviceOnALetter(verdict: Verdict): string {
+  if (verdict.redirect !== undefined) {
+    return `      This is not yours to decide: ${verdict.redirect.name} answers for your power in such matters. Answer "countered", saying so and naming him; the engine will not carry out a yes or a no from you here.`;
+  }
+  if (verdict.counter !== undefined) {
+    const free = verdict.counter.exempt.length > 0 ? `, ${verdict.counter.exempt.join(", ")} free` : "";
+    return `      What your interests and nature say: you would not sign this as written (${verdict.why}). Terms you could keep: customs capped at ${verdict.counter.tariffCapBps ?? "no cap"}${free}. This is counsel, and the answer is yours: take it, or answer otherwise and give your reason. To deal on other terms, answer "countered" with counterTrade set to them.`;
+  }
+  return `      What your interests and nature say: ${verdict.accepted ? "yes" : "no"} (${verdict.why}). This is counsel, and the answer is yours: follow it, or go against it with a reason, in your own words.`;
+}
 
 export function letterVerdict(world: WorldState, message: DiplomaticMessage, answerer: Character): Verdict | null {
   const day = world.instant.day;

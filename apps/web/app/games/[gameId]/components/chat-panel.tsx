@@ -259,9 +259,9 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
       const res = await fetch(`/api/games/${encodeURIComponent(gameId)}/letters`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ toCharacterId: correspondentId, body: words, proposal: request }),
       });
-      const data = await res.json().catch(() => ({})) as { error?: string };
+      const data = await res.json().catch(() => ({})) as { error?: string; notes?: readonly { words: string }[] };
       if (!res.ok) { setLetterError(data.error ?? "The letter did not go. Try again."); return; }
-      setLetterSent(`Your proposal is on its way to ${correspondentName}. Nothing is agreed until it is answered.`);
+      setLetterSent(`${data.notes?.[0]?.words ?? `Your proposal is on its way to ${correspondentName}.`} Nothing is agreed until it is answered.`);
       setProposing(null);
       void Promise.allSettled([fetchDirectory(), onWorldChanged?.()]);
     } catch {
@@ -296,7 +296,7 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
     if (waiting !== undefined) setReply(waiting.asksYesOrNo ? "accepted" : "countered");
   }
 
-  /** A letter to somebody out of the region: it goes now, and is answered when the world next moves. */
+  /** A letter to somebody out of the region: it goes now, the one it is written to answers it at once, and it comes back on the day the road allows. */
   async function sendLetter(event: FormEvent) {
     event.preventDefault();
     const body = letterBody.trim();
@@ -308,10 +308,10 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
       const res = await fetch(`/api/games/${encodeURIComponent(gameId)}/letters`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ toCharacterId: correspondentId, body }),
       });
-      const data = await res.json().catch(() => ({})) as { error?: string };
+      const data = await res.json().catch(() => ({})) as { error?: string; notes?: readonly { words: string }[] };
       if (!res.ok) { setLetterError(data.error ?? "The letter did not go. Your words are still here; try again."); return; }
       setLetterBody("");
-      setLetterSent(`Your letter is on its way to ${correspondentName}. They will answer when the world next moves.`);
+      setLetterSent(data.notes?.[0]?.words ?? `Your letter is on its way to ${correspondentName}.`);
       void Promise.allSettled([fetchDirectory(), onWorldChanged?.()]);
     } catch {
       setLetterError("The letter did not go. Your words are still here; try again.");
@@ -332,14 +332,14 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reply, words, ...(reply === "accepted" && letter.offers.length > 1 ? { agreementKind } : {}) }),
       });
-      const data = await res.json().catch(() => ({})) as { error?: string };
+      const data = await res.json().catch(() => ({})) as { error?: string; notes?: readonly { words: string }[] };
       if (!res.ok) { setLetterError(data.error ?? "The answer did not go. Your words are still here; try again."); return; }
       const sender = { id: letter.fromCharacterId, name: personById.get(letter.fromCharacterId)?.name ?? letter.fromLabel.split(",")[0]! };
       setLetterBody("");
       choosePerson(sender);
       void Promise.allSettled([fetchDirectory(), onWorldChanged?.()]);
       setLetterSent(reply === "countered"
-        ? `Your answer is on its way. ${sender.name} will write back when the world next moves.`
+        ? (data.notes?.[0]?.words ?? `Your answer is on its way. ${sender.name} will write back.`)
         : `Your answer is sent: you have ${reply === "accepted" ? "accepted" : "refused"} it.`);
     } catch {
       setLetterError("The answer did not go. Your words are still here; try again.");
@@ -611,7 +611,7 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
                   <p className="mirror__note">
                     {reply === "countered" ? letter.offers.some((offer) => offer.kind === "peace")
                       ? "Your terms travel to them for an answer. Peace takes effect only when both sides agree."
-                      : "It goes out now, and they will answer it when the world next moves."
+                      : "It goes out now. They are asked for their answer at once, and it comes back on the day the road allows."
                       : "Your answer goes out now, and holds from the day it is sent."}
                   </p>
                   <div className="letters-form__actions letters-form__actions--start">
@@ -639,7 +639,7 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
                       {focused.opinionLabel !== null && <><dt>What you think of them</dt><dd>{focused.opinionLabel}</dd></>}
                       {focused.how === "public" && <><dt>Known</dt><dd>By repute; you have never dealt with them.</dd></>}
                     </dl>
-                    {focused.reach === "letter" && <p className="letters__reach-line">Not here: written to, and answering when the world next moves.</p>}
+                    {focused.reach === "letter" && <p className="letters__reach-line">Not here: written to. They are asked at once, and their answer comes back on the day the road allows.</p>}
                     {focused.ladder.length > 0 && (
                       <div className="letters-form">
                         <p className="mirror__note">They owe you no answer. To be heard in person:</p>
@@ -704,7 +704,7 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
                       {page.subject !== null && !page.body.startsWith(page.subject.replace(/…$/, "")) && <p className="letters__page-subject">{page.subject}</p>}
                       {page.previousRejection != null && <p><strong>Your earlier peace terms were rejected.</strong> {page.previousRejection.reason}</p>}
                       <p>{page.body}</p>
-                      {page.awaiting && page.fromYou && <p className="letters__page-note">Not yet answered. The answer comes when the world next moves.</p>}
+                      {page.awaiting && page.fromYou && <p className="letters__page-note">Not yet answered. The answer comes when the road has been walked, there and back; if none was had at sending, when the world next moves.</p>}
                       {page.lapsed != null && <p className="letters__page-note">{page.lapsed}.</p>}
                       {answerable !== undefined && (
                         <button type="button" className="word-button" onClick={() => chooseLetter(answerable.id)}>Answer this letter</button>

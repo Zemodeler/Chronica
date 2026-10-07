@@ -142,6 +142,22 @@ export const DiplomaticMessageSchema = z
      */
     deliveredOnDay: ElapsedStepSchema.nullable().optional(),
     /**
+     * The answer already decided, for a letter the player wrote: the model was
+     * called when it was sent, as it is when he speaks with a man in the room,
+     * and what it had the reader say is kept here until the story reaches the
+     * day it can come back -- the road there, and the road back. On that day
+     * the engine applies these acts as the reader's own (`letter-reply.ts`);
+     * until then the letter is still awaiting its reply, and nobody is asked
+     * about it a second time. The acts are kept as written and read again
+     * when they are applied, so a world that has changed since is judged as it
+     * then stands.
+     */
+    heldAnswer: z.object({
+      decidedOnDay: ElapsedStepSchema,
+      comesOnDay: ElapsedStepSchema,
+      deltas: z.array(z.record(z.string(), z.unknown())).min(1).max(3),
+    }).strict().optional(),
+    /**
      * Written over the government's name by a man whose office does not make
      * treaties. Accepted, it binds nothing until the chamber that makes them
      * ratifies it -- as Rome's people threw out Catulus's first terms with

@@ -93,7 +93,7 @@ import { misfiledWorldActs, whyMisfiled } from "./apply/misfiled";
 import { hasSomethingNew, playersPeopleFirst, routeAmbientActors, routeAttention } from "./attention";
 import { DEFAULT_SHARDING, renderCharacterPortrait, runCognition } from "./cognition";
 import { createCognitionMemory } from "./cognition-memory";
-import { bindAnswerToNature, natureObjects } from "./nature";
+import { holdAnswerToAuthority, natureObjects } from "./nature";
 import { decideDispatches } from "./dispatches";
 import { VOICE_CAP, lettersToVoice, voiceLetters } from "./letter-voice";
 import { DECISION_EVENTS, createCognitionPolicy, marchingCommanders, playerInterests } from "./cognition-policy";
@@ -125,7 +125,7 @@ import { readableRefsFor } from "./mechanics/refs";
 import { runMechanics } from "./mechanics/run-mechanics";
 import { validateMechanic } from "./mechanics/validate-mechanic";
 import { writeMechanic } from "./mechanics/write-mechanic";
-import { aLetterWaitsOnItsReader, addressWaitingLetters, lettersOwed, markLettersPut, nextReplyDueKey } from "./letters";
+import { aLetterWaitsOnItsReader, addressWaitingLetters, heldAnswersDue, lettersOwed, markLettersPut, nextReplyDueKey, withoutHeldAnswer } from "./letters";
 import { dueSteps, emptyPlanTally, layPlan, markWoken, nextPlanDay, settleOverdueSteps, settleRoutineSteps, takeSteps, type PlanTally } from "./plans";
 import { claimPromisesKept } from "./promises";
 import { goalsOfAct, mergeGoals, refResolver, resolveGoal } from "./order-goals";
@@ -1708,8 +1708,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     if (actorRef.kind === "character" && actorRef.id !== input.actorRef.id && pass.calls !== "none" && intentParts.length === 0 && proposal.deltas.length > 0) {
       const kept: WorldDelta[] = [];
       for (const act of proposal.deltas) {
-        // A letter answered against his nature is answered as he would: the model words it, it does not reverse it.
-        const bound = bindAnswerToNature(world, actorRef.id, act);
+        // A letter is answered as the model has him answer it, his nature only counsel (`adviceOnALetter`); what is not his to decide is held (`holdAnswerToAuthority`).
+        const bound = holdAnswerToAuthority(world, actorRef.id, act);
         if (bound.brought !== null) skipped.push({ stage: "nature", reason: bound.brought });
         const objection = natureObjects(world, actorRef.id, bound.act);
         if (objection === null) { kept.push(bound.act); continue; }
@@ -3745,6 +3745,33 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   // new chain.
   let idleRounds = 0;
 
+  /**
+   * Answers the model gave when a letter was sent, now that the story has reached the day they come back (`letter-reply.ts`).
+   *
+   * Given as the reader's own act and not the world's, so the engine judges it as it would anything he did: an
+   * acceptance opens what it offered, a counter sends its terms back, and the neighbours hear of it as news. What the
+   * engine will not carry out as written leaves the letter as any unanswered one -- its reader is asked in the next round.
+   */
+  const releaseHeldAnswers = async (): Promise<void> => {
+    for (const due of heldAnswersDue(world)) {
+      if (due.deltas.length > 0) {
+        const before = newFacts.length;
+        await applyProposal(
+          { ...ProposalSchema.parse({ narrativeSummary: "A letter is answered.", facts: [] }), deltas: [...due.deltas] },
+          { kind: "character", id: due.readerId },
+          0,
+          false,
+          [],
+          { calls: "none" },
+        );
+        stampWorkFacts(before);
+      }
+      if (world.diplomacy.some((message) => message.id === due.messageId && message.status === "awaiting_reply" && message.heldAnswer !== undefined)) {
+        world = withoutHeldAnswer(world, due.messageId);
+        skipped.push({ stage: "cognition", reason: `the answer decided for "${due.messageId}" when it was sent could not be given on its day; its reader is asked again` });
+      }
+    }
+  };
   // What the player's open order parts read as when the burst began, and how many facts there were (5.8).
   const orderStateOf = (state: WorldState): string => state.orders.filter((order) => order.actorCharacterId === (input.actorRef.kind === "character" ? input.actorRef.id : null))
     .flatMap((order) => order.parts.filter((part) => part.closedAtStep === null).map((part) => `${order.id}:${part.said}:${orderPartStatus(state, part)}`)).sort().join("|");
@@ -3763,6 +3790,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // chronicled, and the rest of the span is the next order's.
     if (input.shouldStop?.() === true) {
       stopReason = "deadline";
+  // An answer whose day has already come is given before anything else is asked.
+  if (playerDecision === null) await releaseHeldAnswers();
       break;
     }
     // Time is walked in hops, and a hop that nobody answers costs nothing but
@@ -3848,6 +3877,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       chainStartIterations = iterations;
       chainNewsFrom = factsSeenByLastRound;
       chainNewsAfterKey = lastRoundKey;
+    await releaseHeldAnswers();
     }
     // News to this chain if word of it reached any of those who answer since
     // the chain's last look -- by the road, not the day it happened.

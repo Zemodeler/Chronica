@@ -201,9 +201,10 @@ describe("a power writes before it fights", () => {
 });
 
 import { WorldDeltaSchema } from "@chronica/shared";
-import { bindAnswerToNature } from "./nature";
+import { holdAnswerToAuthority } from "./nature";
+import { adviceOnALetter, letterVerdict } from "./letter-verdict";
 
-describe("when the model answers a letter for a person, it words their answer and does not reverse it", () => {
+describe("when the model answers a letter for a person, the rules advise and the model decides", () => {
   function aQuarrel(): { answerer: string; sender: string } {
     for (const reading of readBoard(seeded).values()) {
       const ruler = readDepartments(seeded).rulers(reading.polityId).find((r) => r.alive);
@@ -213,19 +214,22 @@ describe("when the model answers a letter for a person, it words their answer an
     throw new Error("no quarrel on the board");
   }
 
-  it("turns a daring ruler's model-written 'yes' to an ultimatum into the refusal he would give, and leaves an honest 'no' alone", () => {
+  it("leaves a daring ruler's model-written 'yes' to an ultimatum as the model wrote it, and says what his nature would have said as counsel", () => {
     const { answerer, sender } = aQuarrel();
     const who = rulerOf(seeded, answerer).id;
     const daring = withMind(seeded, who, BRUTE, BRUTE_DRIVES, 98);
     const message = { id: "ult-1", kind: "ultimatum", fromPolityId: sender, fromCharacterId: rulerOf(daring, sender).id, toPolityId: answerer, toCharacterId: who, subject: "Give it back", terms: "Give it back or war.", sentAtStep: 0, replyDueByStep: 400, status: "awaiting_reply", answer: null, answerText: null, answeredAtStep: null, inReplyToMessageId: null, visibility: "polity", onRefusal: "war" } as unknown as DiplomaticMessage;
     const world = { ...daring, instant: { day: 500, minute: 0 }, diplomacy: [message] };
     const yes = WorldDeltaSchema.parse({ op: "diplomatic_message_answer", messageRef: "ult-1", answer: "accepted", answerText: "We shall of course comply, with great respect.", agreementKind: null, reason: "Respect." });
-    const bound = bindAnswerToNature(world, who, yes);
-    expect(bound.act).toMatchObject({ op: "diplomatic_message_answer", answer: "refused" });
-    expect((bound.act as { answerText: string }).answerText).not.toContain("comply");
-    expect(bound.brought).toMatch(/not in him/);
-    const no = WorldDeltaSchema.parse({ op: "diplomatic_message_answer", messageRef: "ult-1", answer: "refused", answerText: "Never.", agreementKind: null, reason: "Never." });
-    expect(bindAnswerToNature(world, who, no)).toEqual({ act: no, brought: null });
+    // The model said yes where his nature says no: the answer stands, whole.
+    expect(holdAnswerToAuthority(world, who, yes)).toEqual({ act: yes, brought: null });
+    // What his nature says is put to the model as counsel, in so many words, and not as an order.
+    const verdict = letterVerdict(world, message, world.characters.find((c) => c.id === who)!)!;
+    expect(verdict.accepted).toBe(false);
+    const advice = adviceOnALetter(verdict);
+    expect(advice).toMatch(/interests and nature say: no/);
+    expect(advice).toMatch(/counsel/);
+    expect(advice).not.toMatch(/engine will not/);
   });
 
   it("does not touch an answer on a small matter or a plain letter", () => {
@@ -233,7 +237,7 @@ describe("when the model answers a letter for a person, it words their answer an
     const who = rulerOf(seeded, answerer).id;
     const message = { id: "l-1", kind: "letter", fromPolityId: sender, fromCharacterId: rulerOf(seeded, sender).id, toPolityId: answerer, toCharacterId: who, subject: "Greetings", terms: "Greetings.", sentAtStep: 0, replyDueByStep: null, status: "awaiting_reply", answer: null, answerText: null, answeredAtStep: null, inReplyToMessageId: null, visibility: "polity" } as unknown as DiplomaticMessage;
     const yes = WorldDeltaSchema.parse({ op: "diplomatic_message_answer", messageRef: "l-1", answer: "accepted", answerText: "Gladly.", agreementKind: null, reason: "Friendly." });
-    expect(bindAnswerToNature({ ...seeded, diplomacy: [message] }, who, yes).brought).toBeNull();
+    expect(holdAnswerToAuthority({ ...seeded, diplomacy: [message] }, who, yes).brought).toBeNull();
   });
 });
 

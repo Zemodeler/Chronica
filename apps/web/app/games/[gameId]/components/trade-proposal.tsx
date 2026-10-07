@@ -176,7 +176,7 @@ export function TradeProposalForm({ power, toId, toName, initialKind, posting, e
           <p className="mirror__note">
             {embargo
               ? "Nothing is shut by sending it. If they refuse, or send no answer by the day, your markets are shut to theirs."
-              : "Sending it agrees nothing. They answer when the world next moves, and only a yes makes the pact. They may answer with other terms."}
+              : "Sending it agrees nothing. They are asked for their answer at once, and it comes back on the day the road allows; only a yes makes the pact. They may answer with other terms."}
           </p>
         </>
       )}

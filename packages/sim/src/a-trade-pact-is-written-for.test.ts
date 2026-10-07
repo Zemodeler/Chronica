@@ -5,11 +5,11 @@ import {
 } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
-import { bindAnswerToNature } from "./nature";
+import { holdAnswerToAuthority } from "./nature";
 import { createIdFactory } from "./ports";
 import { answerByRule, type StatecraftInput } from "./statecraft";
 import { runDeterministicTick } from "./tick";
-import { letterVerdict } from "./letter-verdict";
+import { adviceOnALetter, letterVerdict } from "./letter-verdict";
 import { trustOf } from "./treaties";
 import { agreement, opening, withAgreements, withCustoms } from "./trade-test-kit";
 
@@ -239,33 +239,49 @@ describe("a letter to the wrong man", () => {
     expect(put(generous(world()), offer({})).message.decidedBy).toBeUndefined();
   });
 
-  it("holds a model's yes to a pact it was not his to give, as it holds a frightened man's yes to a war", () => {
+  it("holds a model's yes to a pact it was not his to give: the one hard impossibility the engine keeps", () => {
     const state = generous(world());
     const wrong = general(state);
     const { message, arrived } = put(state, offer({ toCharacterRef: wrong.id }));
     const model = WorldDeltaSchema.parse({ op: "diplomatic_message_answer", messageRef: message.id, answer: "accepted", answerText: "Agreed, gladly.", reason: "Agreed." });
-    const bound = bindAnswerToNature(arrived, wrong.id, model);
-    expect(bound.act).toMatchObject({ op: "diplomatic_message_answer", answer: "countered" });
-    expect(bound.brought).toMatch(/not in him/);
+    const held = holdAnswerToAuthority(arrived, wrong.id, model);
+    expect(held.act).toMatchObject({ op: "diplomatic_message_answer", answer: "countered" });
+    expect(held.act).not.toHaveProperty("counterTrade");
+    expect(held.brought).toMatch(/not his to decide/);
+    // Terms of his own, from a man who does not decide it, are dropped as well; only the pointing is left.
+    const terms = WorldDeltaSchema.parse({ op: "diplomatic_message_answer", messageRef: message.id, answer: "countered", answerText: "Write to Hieron II instead.", reason: "Not mine.", counterTrade: { tariffCapBps: 900, mostFavoured: false, exempt: [], goods: [] } });
+    expect(holdAnswerToAuthority(arrived, wrong.id, terms).act).not.toHaveProperty("counterTrade");
+    // And the same yes from the one who does decide is not held.
+    expect(holdAnswerToAuthority(arrived, HIERON, model)).toEqual({ act: model, brought: null });
   });
 });
 
 describe("a model's answer to an offer of trade", () => {
-  it("is turned into the terms he would sign, when he would not sign what was asked", () => {
+  it("stands as the model wrote it when it is not what his books say: the verdict is only counsel", () => {
     const { message, arrived } = put(generous(world()), offer({ trade: { tariffCapBps: 500, mostFavoured: true, exempt: ["grain", "textiles"], goods: [] } }));
     const model = WorldDeltaSchema.parse({ op: "diplomatic_message_answer", messageRef: message.id, answer: "accepted", answerText: "Agreed in every part.", reason: "Agreed." });
-    const bound = bindAnswerToNature(arrived, HIERON, model);
-    expect(bound.act).toMatchObject({ answer: "countered", counterTrade: { mostFavoured: false } });
-    const after = applyDeltas(arrived, [bound.act], { ...context(HIERON, arrived.instant), now: arrived.instant });
+    // By his books he would sign on other terms: that is what the model is told.
+    const verdict = letterVerdict(arrived, arrived.diplomacy.find((m) => m.id === message.id)!, hieron(arrived))!;
+    expect(verdict.counter).toBeDefined();
+    expect(adviceOnALetter(verdict)).toMatch(/counsel/);
+    // But the model had him accept, and he accepts: the answer is not turned into a counter.
+    const held = holdAnswerToAuthority(arrived, HIERON, model);
+    expect(held).toEqual({ act: model, brought: null });
+    const after = applyDeltas(arrived, [held.act], { ...context(HIERON, arrived.instant), now: arrived.instant });
     expect(after.rejected).toEqual([]);
-    expect(pactBetween(after.world)).toBeUndefined();
-    expect(after.world.diplomacy.at(-1)).toMatchObject({ kind: "trade_offer", fromPolityId: "syracuse" });
+    expect(pactBetween(after.world)).toMatchObject({ trade: { tariffCapBps: 500, mostFavoured: true } });
   });
 
-  it("is left as it came when it is what he would say", () => {
+  it("opens no pact when the model refuses what his books would have signed", () => {
     const { message, arrived } = put(generous(world()), offer({}));
-    const model = WorldDeltaSchema.parse({ op: "diplomatic_message_answer", messageRef: message.id, answer: "accepted", answerText: "Agreed.", reason: "Agreed." });
-    expect(bindAnswerToNature(arrived, HIERON, model).brought).toBeNull();
+    const verdict = letterVerdict(arrived, arrived.diplomacy.find((m) => m.id === message.id)!, hieron(arrived))!;
+    expect(verdict.accepted).toBe(true);
+    const model = WorldDeltaSchema.parse({ op: "diplomatic_message_answer", messageRef: message.id, answer: "refused", answerText: "Not now.", reason: "Not now." });
+    const held = holdAnswerToAuthority(arrived, HIERON, model);
+    expect(held.act).toEqual(model);
+    const after = applyDeltas(arrived, [held.act], { ...context(HIERON, arrived.instant), now: arrived.instant });
+    expect(pactBetween(after.world)).toBeUndefined();
+    expect(after.world.diplomacy.find((m) => m.id === message.id)).toMatchObject({ status: "answered", answer: "refused" });
   });
 });
 

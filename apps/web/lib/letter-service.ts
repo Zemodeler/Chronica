@@ -1,9 +1,11 @@
 import "server-only";
 
-import { WorldRevisionConflictError, commitBurst, factRowOf, failBurst, findRunningBurst, getWorldView, instantSortKeyOf, startBurst } from "@chronica/db";
-import { PROPOSAL_REPLY_DAYS, composeProposal, inTheSameRegion, lettersAwaitingYou, offeredAgreementKinds, peaceOfferMetadata, readTradeDesk, whoMayBeReached, type Office, type TradeProposalRequest, type WorldDelta, type WorldState } from "@chronica/shared";
-import { applyDeltas, createIdFactory, materializeFacts } from "@chronica/sim";
-import { livenessAt } from "./burst-status";
+import { createAiAdapter, createTimedPort } from "@chronica/ai";
+import { WorldRevisionConflictError, commitBurst, factRowOf, failBurst, findRunningBurst, getWorldView, heartbeatBurst, instantSortKeyOf, listRecentFacts, startBurst } from "@chronica/db";
+import { FactSchema, PROPOSAL_REPLY_DAYS, composeProposal, inTheSameRegion, lettersAwaitingYou, offeredAgreementKinds, peaceOfferMetadata, readTradeDesk, whoMayBeReached, type Office, type Fact, type TradeProposalRequest, type WorldDelta, type WorldState } from "@chronica/shared";
+import { allowanceFromEnv, applyDeltas, createIdFactory, createRequestLedger, materializeFacts, meteredPort, type SimModelPort } from "@chronica/sim";
+import { HEARTBEAT_MS, livenessAt } from "./burst-status";
+import { answerNewLetters, type LetterSendNote } from "./letter-answer-now";
 import { resolveContext } from "./simulation-service";
 
 /**
@@ -16,17 +18,25 @@ import { resolveContext } from "./simulation-service";
  * once, however far off, so a letter to Syracuse was answered before the ink
  * dried. Now both are what they are: a letter goes out now, as one
  * `diplomatic_message_send` or `diplomatic_message_answer` applied by the
- * engine that applies every other one, and the person it is written to
- * answers it when the world next moves (`lettersOwed` wakes them).
+ * engine that applies every other one, each committed as a burst of its own,
+ * like an army's new name (`force-revision-service.ts`).
  *
- * Neither needs a model, so each is committed as a burst of its own, like an
- * army's new name (`force-revision-service.ts`).
+ * And the model is always called: between the player and the people of the
+ * world, writing is asking, as speaking is. For each letter the player writes
+ * the person it is written to is asked for his answer at once (`letter-reply.ts`
+ * through `answerNewLetters`), whoever he is and however far off. The answer is
+ * decided then and kept on the letter; it is given, with its effects, on the
+ * day the story reaches the road there and back, and the player is told how
+ * many days that is. If the call fails or the coins are short the letter goes
+ * as it always went, and the person is asked in the next round that is paid
+ * for (`lettersOwed`); the player is told that plainly. The burst's commit says
+ * how many calls it made.
  */
 
 export type LetterReply = "accepted" | "refused" | "countered";
 
 export type LetterOutcome =
-  | { readonly status: "sent" }
+  | { readonly status: "sent"; readonly notes: readonly LetterSendNote[] }
   | { readonly status: "error"; readonly code: 400 | 401 | 403 | 404 | 409; readonly message: string };
 
 const refuse = (code: 400 | 401 | 403 | 404 | 409, message: string): LetterOutcome => ({ status: "error", code, message });
@@ -254,6 +264,8 @@ async function withLetterBurst(
 
     const burstId = await startBurst(db, { gameId, playerUserId: userId, orderText: act.orderText.slice(0, 2_000) });
     if (burstId === null) return refuse(409, BUSY);
+    // The model is called while this burst is open: it says it is alive, as a turn does, or a slow answer would see it given up.
+    const heartbeat = setInterval(() => { void heartbeatBurst(db, burstId).catch(() => undefined); }, HEARTBEAT_MS);
     try {
       const ids = createIdFactory(burstId);
       const result = applyDeltas(view.world, act.deltas, {
@@ -278,31 +290,38 @@ async function withLetterBurst(
         return refuse(403, "That is not yours to answer in your government's name. Give it as an order at the desk if you mean to anyway.");
       }
 
+      // The letters just written are answered now, by the model, whoever they are written to (`letter-answer-now.ts`).
+      const rules = { warfare: view.scenarioWarfare, terrains: view.scenarioMap?.terrains, successionRules: view.scenarioGovernment?.successionRules, wealth: view.scenarioWealth, gameId };
+      const answered = await answerNewLetters({
+        before: view.world, after: result.world, writerId: characterId, clock: view.scenarioClock, offices,
+        port: await modelPort(db, userId, gameId), knownFacts: await recentFactsOf(db, gameId), rules, ids,
+      });
+      const world = answered.world;
       const materialized = materializeFacts({
-        proposals: result.factProposals,
-        now: result.world.instant,
-        atStep: result.world.elapsedStep,
+        proposals: [...result.factProposals, ...answered.factProposals],
+        now: world.instant,
+        atStep: world.elapsedStep,
         ids,
         causalDepth: 0,
-        assignedIds: result.assignedIds,
+        assignedIds: new Map([...result.assignedIds, ...answered.assignedIds]),
       });
-      const at = instantSortKeyOf(result.world);
+      const at = instantSortKeyOf(world);
       await commitBurst(db, {
         gameId,
         expectedRevision: view.revision,
-        world: result.world,
+        world,
         burstId,
         facts: materialized.facts.map((fact) => factRowOf(fact, materialized.significanceByFactId.get(fact.id) ?? 0)),
         rediscoveredFacts: [],
         scheduled: [],
         firedEventIds: [],
-        burst: { iterations: 0, modelCalls: 0, outcome: "applied", stopReason: "order_applied", accumulatedSignificance: materialized.significance },
+        burst: { iterations: 0, modelCalls: answered.calls, outcome: "applied", stopReason: "order_applied", accumulatedSignificance: materialized.significance },
         checkpoints: [{
           kind: "recorded",
           title: act.title.slice(0, 200),
           body: act.body,
           factIds: materialized.facts.map((fact) => fact.id),
-          storylineIds: result.world.storylines.filter((storyline) => act.subjectIds.length > 1 && act.subjectIds.every((id) => storyline.participantIds.includes(id))).map((storyline) => storyline.id),
+          storylineIds: world.storylines.filter((storyline) => act.subjectIds.length > 1 && act.subjectIds.every((id) => storyline.participantIds.includes(id))).map((storyline) => storyline.id),
           subjects: act.subjectIds.map((id) => ({ kind: "character" as const, id })),
           tags: [],
           changes: [],
@@ -311,13 +330,39 @@ async function withLetterBurst(
           toInstantSortKey: at,
         }],
       });
-      return { status: "sent" };
+      return { status: "sent", notes: answered.notes };
     } catch (error) {
       await failBurst(db, burstId, error instanceof Error ? error.message : String(error)).catch(() => {});
       if (error instanceof WorldRevisionConflictError) return refuse(409, "The world moved while this was being written. Try again.");
       throw error;
+    } finally {
+      clearInterval(heartbeat);
     }
   } finally {
     await close();
+  }
+}
+
+/** The port the answer is asked through: coin-gated, timed and metered as a turn's is. Null where no model can be reached at all. */
+async function modelPort(db: Parameters<typeof createTimedPort>[0]["db"], userId: string, gameId: string): Promise<SimModelPort | null> {
+  try {
+    const timed = createTimedPort({ db, userId, gameId, adapter: createAiAdapter() });
+    return meteredPort(timed.port, createRequestLedger(allowanceFromEnv(process.env.CHRONICA_REQUEST_ALLOWANCE)));
+  } catch (error) {
+    console.warn(`[game ${gameId}] no model could be reached to answer a letter:`, error);
+    return null;
+  }
+}
+
+/** What has been put on record lately, for the reader to weigh the letter against. */
+async function recentFactsOf(db: Parameters<typeof listRecentFacts>[0], gameId: string): Promise<readonly Fact[]> {
+  try {
+    const rows = await listRecentFacts(db, gameId);
+    return rows.flatMap((row) => {
+      const parsed = FactSchema.safeParse(row.fact);
+      return parsed.success ? [parsed.data] : [];
+    });
+  } catch {
+    return [];
   }
 }

@@ -1386,6 +1386,8 @@ export function runDeterministicTick(given: TickInput): TickResult {
   const unread = (message: (typeof recovered.diplomacy)[number]): boolean => {
     if (message.toCharacterId === null || message.toCharacterId === input.playerCharacterId) return false;
     // Put to him, and the burst never got round to asking him what he said:
+    // Answered already, and on its way back to the writer: the answer is given on its day, whatever the term (`letter-reply.ts`).
+    if (message.heldAnswer !== undefined) return true;
     // his turn is owed him, and his silence is not yet his (E06).
     if (message.putToRecipientOnDay != null) return isOwedATurn(recovered, message.toCharacterId);
     return recovered.characters.some((character) => character.id === message.toCharacterId && character.alive);
