@@ -9,6 +9,7 @@ import {
   allOffices,
   allSuccessionRules,
   boundedId,
+  chamberHolds,
   createPressure,
   findOfficeSeatForRole,
   interestLean,
@@ -194,8 +195,13 @@ export const ADVICE_DAYS = 30;
 function powersNeeded(world: WorldState, procedure: PoliticalProcedure, concerns: readonly QuestionConcern[]): Set<ChamberPower> {
   const needed = new Set<ChamberPower>();
   for (const concern of concerns) {
-    if (concern === "war" || concern === "peace" || concern === "levy") needed.add("war");
-    if (concern === "taxes" || concern === "spending") needed.add("taxes");
+    if (concern === "war") needed.add("war");
+    // The four newer powers were once parts of war and taxes (`chamberHolds`): a chamber that names none of them holds them as it did.
+    if (concern === "peace") needed.add("treaties");
+    if (concern === "levy") needed.add("levy");
+    if (concern === "taxes") needed.add("taxes");
+    if (concern === "spending") needed.add("finance");
+    if (concern === "coinage") needed.add("coinage");
     if (concern === "punishment") needed.add("judgment");
   }
   const enactment = world.enactments.find((candidate) => candidate.procedureId === procedure.id);
@@ -217,8 +223,7 @@ export function isAdvisoryFor(world: WorldState, procedure: PoliticalProcedure):
   if (institution === undefined) return false;
   if (institution.advisory === true) return true;
   if (institution.powers === undefined) return false;
-  const powers = new Set(institution.powers);
-  return [...powersNeeded(world, procedure, concernsOf(world, procedure))].some((power) => !powers.has(power));
+  return [...powersNeeded(world, procedure, concernsOf(world, procedure))].some((power) => !chamberHolds(institution.powers, power));
 }
 
 /** A question whose outcome nobody may write: counted by a chamber whose count binds. */

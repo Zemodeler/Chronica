@@ -174,6 +174,8 @@ const brokenPactNote = (world: WorldState, a: string, b: string): string =>
 
 import { trespassOf } from "../trespass";
 import { SOVEREIGN_AGREEMENTS, chamberThatDecides, fleesHisMaster, listensAnyway, nobodyListens, nobodyRises, notHisToSpend } from "./nobody-listens";
+import { competenceGate, noteTheAct } from "./competence-gate";
+import { creditRateBps, mintFactor } from "../levers";
 import { isOwnBusiness } from "./own-business";
 import { asGarrison, isGarrison, proportionalDraw } from "./detachments";
 import { hireAtThePlace } from "./hiring-market";
@@ -1129,6 +1131,28 @@ function applyUngroupedDeltas(world: WorldState, deltas: readonly WorldDelta[], 
       if (context.sanctionedDeltas?.has(written) === true && !authority.authorized) {
         authority = { ...authority, authorized: true, reason: "Carried by the vote it waited on." };
       }
+      // Who may do it, read from the constitution (`competence-gate.ts`): his own to do, a colleague's to stop, the chamber's to decide.
+      const gate = answerable && context.actorRef.kind === "character" ? competenceGate({ delta, written, world: current, context, resolve, authority, ofTheOrder }) : null;
+      if (gate?.kind === "authorize") authority = gate.authority;
+      else if (gate !== null) {
+        const motion = gate.kind === "refer" && ofTheOrder ? gate.motion ?? layBeforeTheChamber(delta, current, context.actorRef.id, resolve) : null;
+        let declined = "";
+        if (motion !== null) {
+          const moved = applyUngroupedDeltas(current, [motion], { ...context, atomicGroups: undefined, assignedIds, orderDeltas: new Set([motion]) });
+          declined = moved.rejected.length > 0 ? ` ${moved.rejected[0]!.reason}` : "";
+          if (moved.applied.length > 0) {
+            current = moved.world;
+            for (const [handle, id] of moved.assignedIds) assignedIds.set(handle, id);
+            applied.push(...moved.applied);
+            factProposals.push(...moved.factProposals);
+            breaches.push(...moved.breaches);
+            rejected.push({ delta, written, reason: `${gate.reason} He moved it in the chamber instead, and it waits on the vote.`, kind: "ignored", ofTheOrder });
+            continue;
+          }
+        }
+        rejected.push({ delta, written, reason: `${gate.reason}${declined}`, kind: "ignored", ofTheOrder });
+        continue;
+      }
       // An act outside one's authority happens only if the men, money or
       // ground it needs answer to the actor. Otherwise nobody moves.
       if (context.actorRef.kind === "character") {
@@ -1178,6 +1202,7 @@ function applyUngroupedDeltas(world: WorldState, deltas: readonly WorldDelta[], 
       const beforeAct = current;
       current = recordUnrecordedMoney(beforeAct, applyOne(current, delta, ofTheOrder ? { ...context, forTheOrder: true } : context, assignedIds, resolve, emitFact, emitAccount), delta, context);
       current = chargeVotedBudget(beforeAct, current, authority, delta);
+      current = noteTheAct(beforeAct, current, delta, context, resolve);
       current = reconcileCapitals(current);
       // A tribune's person is sacrosanct.
       const sacrilege = context.actorRef.kind === "character" ? sacrilegeOf(delta, beforeAct, current, context.actorRef.id, context.offices, () => context.ids.next("cause")) : null;
@@ -3689,9 +3714,11 @@ function applyOne(
       const debasing = struck < coinage.silverBps;
       // Debasing, the same silver makes more coin: the mint keeps the difference as seigniorage. Re-coining
       // higher, the silver has to be found: what is called in is brought up to the new fineness at the treasury's cost.
+      // A good master of the mint gets more out of the one and spends less on the other (the `mint` charge).
+      const minting = mintFactor(readDepartments(world), issuerId);
       const sum = debasing
-        ? Math.round((recoined * (coinage.silverBps - struck)) / coinage.silverBps)
-        : Math.round((recoined * (struck - coinage.silverBps)) / coinage.silverBps);
+        ? Math.round((recoined * (coinage.silverBps - struck) * minting) / coinage.silverBps)
+        : Math.round((recoined * (struck - coinage.silverBps)) / (coinage.silverBps * minting));
       const treasury = world.material.accounts.find((account) => account.id === treasuryId)!;
       if (!debasing && treasury.balance < sum) reject(`Bringing ${coinage.name} up to ${struck} would cost ${sum}, and ${treasury.id} holds ${treasury.balance}.`);
       const moved = debasing
@@ -4498,6 +4525,8 @@ function applyOne(
         ...delta, lenderKind: "character" as const, lenderRef: offer.lenderId, principal: delta.principal > 0 ? Math.min(delta.principal, offer.amount) : offer.amount,
         interestBps: offer.interestBps, cadenceDays: 30, collateralHoldingRef: offer.collateralHoldingId ?? delta.collateralHoldingRef,
       };
+      // A state is asked for what its credit is worth (the `credit` charge): the man who keeps it keeps its good name with the lenders.
+      const rateBps = creditRateBps(world, readDepartments(world), borrowerId, taken.interestBps);
       const periods = offer?.periods ?? LOAN_TERM_PERIODS;
 
       const lenderId = taken.lenderRef === null ? null : required(taken.lenderRef, "The lender");
@@ -4547,7 +4576,7 @@ function applyOne(
       // already modelled by whatever models an unpaid army.
       const serviceObligationId = context.ids.next("obligation");
       // Paid back in instalments over its term: interest and a share of the principal (`debts.ts`).
-      const servicing = loanInstalment(principal, taken.interestBps, periods);
+      const servicing = loanInstalment(principal, rateBps, periods);
       const obligation = {
         id: serviceObligationId,
         kind: "debt_service" as const,
@@ -4573,7 +4602,7 @@ function applyOne(
         borrowerAccountId: borrowerId,
         principal,
         outstanding: principal,
-        interestBps: taken.interestBps,
+        interestBps: rateBps,
         cadenceSteps: taken.cadenceDays,
         serviceObligationId,
         terms: taken.terms,

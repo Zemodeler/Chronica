@@ -65,6 +65,8 @@ const CONCERN_PULL: Readonly<Record<QuestionConcern, Readonly<Record<string, num
   religion: { faith: 0.12, duty: 0.04 },
   levy: { duty: 0.1, boldness: 0.04 },
   grain: { sociability: 0.08, duty: 0.04, wealth: -0.04 },
+  // A man who loves silver is for a heavy coin; one who thinks of his neighbours dislikes seeing it cheapened.
+  coinage: { wealth: -0.06, duty: 0.04 },
   widen_franchise: { sociability: 0.08, status: -0.08 },
   narrow_franchise: { sociability: -0.08, status: 0.08 },
   strengthen_ruler: { duty: 0.06, security: 0.08, status: -0.06 },

@@ -1,4 +1,4 @@
-import { allOffices, coinageById, deriveRelationDimension, familyLinksOf, stableHash, type ChamberPower, type GovernmentInstitution, type Office, type WorldDelta, type WorldState } from "@chronica/shared";
+import { allOffices, chamberHolds, coinageById, deriveRelationDimension, familyLinksOf, stableHash, type ChamberPower, type GovernmentInstitution, type Office, type WorldDelta, type WorldState } from "@chronica/shared";
 
 /**
  * An order nobody is obliged to carry out does not happen.
@@ -452,6 +452,6 @@ export const SOVEREIGN_AGREEMENTS: ReadonlySet<string> = new Set(["war", "peace"
  */
 export function chamberThatDecides(world: WorldState, polityId: string, power: ChamberPower): GovernmentInstitution | undefined {
   const binding = world.material.institutions.filter((institution) => institution.polityId === polityId && institution.advisory !== true
-    && (institution.powers === undefined || institution.powers.includes(power)));
+    && chamberHolds(institution.powers, power));
   return binding.find((institution) => institution.powers?.includes(power) === true) ?? binding[0];
 }

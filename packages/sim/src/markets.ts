@@ -22,7 +22,11 @@ import {
   type ScenarioClock,
   type WorldState,
   addFlows,
+  chargeSkill,
+  readDepartments,
+  skillShare,
 } from "@chronica/shared";
+import { dampenedPrice, priceSwing } from "./levers";
 
 /**
  * The monthly market step (phase C of the economy rework).
@@ -55,6 +59,9 @@ export const CUT_OFF_INFLOW = 0.25;
 /** A hub's price answers use and output a month late, and not further than this either way. */
 const DEMAND_RESPONSE_RANGE = [0.55, 1.25] as const;
 const SUPPLY_RESPONSE_RANGE = [0.6, 1.5] as const;
+/** Grain this dear is a famine's price, and a well-kept market brings out what its hoarders hold: the share of the shortfall a month, at the best. */
+export const HOARD_PRICE_BPS = 14_000;
+export const HOARD_RELEASE_BPS = 600;
 /** A province's bread readout moves this far toward what its hub's grain says each month, up and down (basis points). */
 export const FOOD_STEP_DOWN_BPS = 2_500;
 export const FOOD_STEP_UP_BPS = 1_500;
@@ -189,9 +196,14 @@ export function marketMonth(book: Book, input: MonthInput): void {
   }
   const toHarvest = monthsToHarvest(input.day, input.clock, input.harvestMonth);
   const calendar = input.clock !== undefined;
+  // The clerks of each hub's power keep its weights and measures and its hoarders in check (the `markets` charge).
+  const reader = readDepartments(input.world);
   for (const hubId of geography.hubs) {
     const hub = book.get(hubId);
     if (hub === undefined) continue;
+    const holder = provinceById.get(hubId)?.controllerPolityId ?? null;
+    const swing = holder === null ? 1 : priceSwing(reader, holder);
+    const hoarders = holder === null ? 0 : Math.max(0, skillShare(chargeSkill(reader, holder, "markets"), 1));
     const used = demandOf.get(hubId)!;
     const made = supplyOf.get(hubId)!;
     const cut = input.cut.has(hubId);
@@ -217,7 +229,11 @@ export function marketMonth(book: Book, input: MonthInput): void {
       hub.stock[index] = Math.max(0, stock);
       hub.target[index] = target;
       hub.demand[index] = used[index]!;
-      hub.price[index] = priceBpsFrom(spec, hub.stock[index]!, target);
+      // At a famine's price the hoarders are made to open their stores, as far as the clerks of the markets can make them.
+      if (index === GRAIN && hoarders > 0 && hub.price[index]! >= HOARD_PRICE_BPS) {
+        hub.stock[index] = Math.min(MAX_STOCK_MONTHS * Math.max(1, used[index]!), hub.stock[index]! + Math.max(0, target - hub.stock[index]!) * (HOARD_RELEASE_BPS / 10_000) * hoarders);
+      }
+      hub.price[index] = dampenedPrice(priceBpsFrom(spec, hub.stock[index]!, target), swing);
       if (index === GRAIN) grainFed = wanted > 0 ? Math.min(1, eaten / wanted) : 1;
     }
     // What the hub's grain says of how well its people are fed: against what they need to reach the harvest.

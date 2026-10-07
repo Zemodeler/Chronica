@@ -265,7 +265,7 @@ function askOfQuestion(delta: Extract<WorldDelta, { op: "political_procedure_ope
 }
 
 /** What an intercession may name: the levy, the treasury, the chambers, the seats -- or all of his acts in the city. */
-type Interceded = "levy" | "spending" | "motion" | "appointment" | "all";
+type Interceded = "levy" | "spending" | "motion" | "appointment" | "tax" | "all";
 
 /**
  * A tribune's word standing against this act, or null.
@@ -305,6 +305,11 @@ function interceded(
       case "service_contract_open": return publicMoney(delta.employerAccountRef) ? "spending" : null;
       case "political_procedure_open": return delta.type === "nomination" ? null : "motion";
       case "office_seat_set": return "appointment";
+      // The tribute and the coin are acts of the magistrate's that his colleague (par potestas) or a tribune may stop.
+      case "tax_policy_set":
+      case "coinage_debase": return "tax";
+      case "loan_open": return publicMoney(delta.borrowerAccountRef) ? "spending" : null;
+      case "public_benefaction": return publicMoney(delta.payerAccountRef) ? "spending" : null;
       case "force_modify": {
         const force = world.material.forces.find((candidate) => candidate.id === id(delta.forceRef));
         return force?.locationId === city && COMMANDING.some((field) => delta[field] !== undefined) ? "all" : null;
@@ -321,9 +326,15 @@ function interceded(
     const tribuneId = entity.ownerRef.id;
     const tribune = world.characters.find((character) => character.id === tribuneId && character.alive);
     const office = seatsOf(tribuneId).find((held) => held.tribunician === true && held.polityId === polityId);
-    if (tribune === undefined || office === undefined) continue;
+    // Or a colleague of equal power: either consul may stop what the other does (par potestas, intercessio).
+    const colleagueOffice = tribuneId === actorId ? undefined : seatsOf(tribuneId).find((held) => magistracies.some((own) => own.id === held.id));
+    if (tribune === undefined || (office === undefined && colleagueOffice === undefined)) continue;
     const actor = world.characters.find((character) => character.id === actorId)?.name ?? "The magistrate";
-    return `${tribune.name}, as ${office.label}, has interceded against ${actor}${act === "all" ? "" : `'s ${act === "levy" ? "levy" : act === "spending" ? "spending of the public money" : act === "motion" ? "motions" : "appointments"}`}, and nobody in the city would act against a tribune's word while it stands.`;
+    const what = act === "all" ? "" : `'s ${act === "levy" ? "levy" : act === "spending" ? "spending of the public money" : act === "motion" ? "motions" : act === "tax" ? "tribute and coin" : "appointments"}`;
+    if (office === undefined) {
+      return `${tribune.name}, his colleague as ${colleagueOffice!.label}, has interceded against ${actor}${what}: what one of two of equal power does, the other may stop while his word stands.`;
+    }
+    return `${tribune.name}, as ${office.label}, has interceded against ${actor}${what}, and nobody in the city would act against a tribune's word while it stands.`;
   }
   return null;
 }

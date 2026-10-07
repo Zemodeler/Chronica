@@ -12,7 +12,9 @@ import {
   type Coinage,
   type FactProposalDraft,
   type WorldState,
+  readDepartments,
 } from "@chronica/shared";
+import { coinsBadName } from "./levers";
 
 /**
  * The coinages' monthly pass (phase E of the economy rework): where prices
@@ -63,12 +65,14 @@ const MAX_STRAIN_NEWS_PER_PASS = 2;
 const nameOf = (world: WorldState, id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
 
 /** The premium a coin is heading for, given an issuer's trade, wars and arrears; bounded. */
-export function premiumTarget(coinage: Coinage, balance: { readonly exports: number; readonly imports: number }, atWar: boolean, inArrears: boolean): number {
+export function premiumTarget(coinage: Coinage, balance: { readonly exports: number; readonly imports: number }, atWar: boolean, inArrears: boolean, badName = 1): number {
   const traded = balance.exports + balance.imports;
   const trade = traded <= 0 ? 0 : Math.round((TRADE_PREMIUM_BPS * (balance.exports - balance.imports)) / traded);
   const excess = Math.max(0, coinage.priceLevelBps - 10_000);
   const inflation = Math.min(INFLATION_PREMIUM_MAX_BPS, Math.round((excess * INFLATION_PREMIUM_SHARE_BPS) / 10_000));
-  const target = trade - (atWar ? WAR_PREMIUM_BPS : 0) - (inArrears ? ARREARS_PREMIUM_BPS : 0) - inflation;
+  // How much of the coin's bad name -- war, arrears, the prices a lighter coin has built -- sticks to it among the money-changers
+  // is what the master of its mint can answer for (the `mint` charge): a middling one, all of it.
+  const target = trade - Math.round(((atWar ? WAR_PREMIUM_BPS : 0) + (inArrears ? ARREARS_PREMIUM_BPS : 0) + inflation) * badName);
   return Math.max(-MAX_PREMIUM_BPS, Math.min(MAX_PREMIUM_BPS, target));
 }
 
@@ -118,15 +122,17 @@ export function monthOfCoinage(world: WorldState, days: readonly number[], toDay
 
   const facts: FactProposalDraft[] = [];
   let strained = 0;
+  const reader = readDepartments(world);
   const next = coinages.map((coinage) => {
     const issuer = coinage.issuerPolityId;
     if (issuer === null) return coinage;
+    const badName = coinsBadName(reader, issuer);
     const atWar = warsOf(world.polityAgreements, issuer).length > 0;
     const inArrears = behind.has(issuer);
     let current = coinage;
     for (const day of days) {
       const priceLevelBps = stepPriceLevel(current, day);
-      const target = premiumTarget({ ...current, priceLevelBps }, { exports: exports.get(issuer) ?? 0, imports: imports.get(issuer) ?? 0 }, atWar, inArrears);
+      const target = premiumTarget({ ...current, priceLevelBps }, { exports: exports.get(issuer) ?? 0, imports: imports.get(issuer) ?? 0 }, atWar, inArrears, badName);
       current = { ...current, priceLevelBps, premiumBps: stepPremium(current.premiumBps, target) };
     }
     // At war and behind on what it owes: the coin is under strain, said once a year.
