@@ -566,7 +566,7 @@ const WRITTEN_OUT: ReadonlySet<string> = new Set(["rome", "carthage", "syracuse"
 
 const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
   schemaVersion: 3,
-  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 48, libraryVersion: 1 },
+  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 49, libraryVersion: 1 },
   elapsedStep: 0,
   instant: { day: 0, minute: 0 },
   // How the powers tax their ground, where the age said so (v48). Every other
@@ -577,7 +577,27 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
   // the harvest, the decuma, which Rome inherited from Hiero and kept -- so
   // the king's revenue swings with the year, and a drought is a thin year for
   // his treasury as well as for his people.
-  economy: { taxPolicies: [{ polityId: "syracuse", regime: "tithe", rateBps: 1_000 }] },
+  //
+  // And the customs of the age (v49): what each power lays on goods that enter
+  // its markets from another's, where the sources say. Carthage lived by its
+  // harbour dues, which the treaty texts show it guarding, and Syracuse, the
+  // other great emporium of the west, levied them heavily too; Rome's portoria
+  // were light; Rhodes and Athens took the two in a hundred (the pentekoste)
+  // that the Aegean world took everywhere (Polybius 30.31 has Rhodes drawing a
+  // million drachmae a year from its harbour); the Ptolemies' import duties on
+  // oil and wine ran to a quarter of the price. Every other power lays none:
+  // nothing is known of what its harbours charged.
+  economy: {
+    taxPolicies: [{ polityId: "syracuse", regime: "tithe", rateBps: 1_000 }],
+    customsRates: [
+      { polityId: "athens", rateBps: 200 },
+      { polityId: "carthage", rateBps: 1_000 },
+      { polityId: "ptolemaic-egypt", rateBps: 2_500 },
+      { polityId: "rhodes", rateBps: 200 },
+      { polityId: "rome", rateBps: 250 },
+      { polityId: "syracuse", rateBps: 1_000 },
+    ],
+  },
   map: {
     settlementCatalogueVersion: 40,
     polities: [
@@ -710,6 +730,41 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
     polityId: "rome",
     otherPolityId: "rhegium-campanians",
     terms: "Rome means to retake Rhegium from the garrison that seized it and killed its citizens.",
+    sinceStep: 0,
+    untilStep: null,
+    sourceMessageId: null,
+    status: "active",
+    endedAtStep: null,
+    endedReason: null,
+    visibility: "public",
+  },
+  // The treaties of trade Rome stands in (v49). With Carthage: the compact of 509
+  // as Polybius gives it (3.22), renewed in 348 and again in 306 and, on the eve
+  // of Pyrrhus's war, in 279; Romans and Carthaginians may trade in each other's
+  // harbours on the dues written, which neither may raise past what the treaty
+  // allows. With Massalia: the old friendship of the two cities (Justin 43.3, the
+  // Phocaeans' gift to Rome after the Gauls), on terms no worse than any other's.
+  {
+    id: "trade-rome-carthage",
+    kind: "trade_pact",
+    polityId: "rome",
+    otherPolityId: "carthage",
+    terms: "The treaties of 509, 348 and 306 BC, renewed in 279: Romans and Carthaginians trade in each other's harbours on the dues written, and neither raises them.",
+    trade: { tariffCapBps: 500, mostFavoured: false, exempt: [], goods: [] },
+    sinceStep: 0,
+    untilStep: null,
+    sourceMessageId: null,
+    status: "active",
+    endedAtStep: null,
+    endedReason: null,
+    visibility: "public",
+  }, {
+    id: "trade-rome-massalia",
+    kind: "trade_pact",
+    polityId: "rome",
+    otherPolityId: "massalia",
+    terms: "The old friendship of Rome and Massalia: their merchants trade in each other's harbours on the best terms either gives anyone.",
+    trade: { tariffCapBps: 250, mostFavoured: true, exempt: [], goods: [] },
     sinceStep: 0,
     untilStep: null,
     sourceMessageId: null,

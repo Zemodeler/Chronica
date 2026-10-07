@@ -358,8 +358,10 @@ function trackHeldPacts(world: WorldState, toDay: number): { world: WorldState; 
   // A pact that ended in the meantime is not waited on.
   const standing = new Set(world.polityAgreements.filter((agreement) => agreement.status === "active" && agreement.kind === "trade_pact").map((agreement) => `${agreement.polityId}|${agreement.otherPolityId}`));
   held = held.filter((entry) => standing.has(`${entry.polityId}|${entry.otherPolityId}`));
-  if (held.length === memory.tradeNews.length && held.every((entry, index) => entry === memory.tradeNews[index])) return { world, facts };
-  return { world: withMemory(world, { tradeNews: held.slice(-200) }), facts };
+  const before = memory.tradeNews.filter((entry) => entry.kind === "cut");
+  if (held.length === before.length && held.every((entry, index) => entry === before[index])) return { world, facts };
+  // The news of relief ships is kept; only the held pacts are what this reckons.
+  return { world: withMemory(world, { tradeNews: [...memory.tradeNews.filter((entry) => entry.kind !== "cut"), ...held].slice(-200) }), facts };
 }
 
 const MAX_TRADE_FACTS_PER_DAY = 4;

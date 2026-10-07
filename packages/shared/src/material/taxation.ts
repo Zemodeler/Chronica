@@ -1,7 +1,7 @@
 import type { WorldState } from "../world/world-state";
 import type { Province, ProvinceEdge } from "../world/map";
 import type { IncomeSource, ProvinceMaterial, TaxRegime } from "../material-state";
-import { deriveDefaultProvinceMaterial } from "./province-material";
+import { MANPOWER_FRACTION_OF_POPULATION, deriveDefaultProvinceMaterial } from "./province-material";
 import { ownerOf, ownsAndHolds } from "../world/occupation";
 import { adjacentTo } from "../world/movement";
 import { tradeIntensities } from "../world/markets";
@@ -99,6 +99,14 @@ export interface TaxBurden {
    * `stabilityShiftBps`.
    */
   readonly provinceStabilityShiftBps?: ReadonlyMap<string, number>;
+  /**
+   * How much higher a `men` province's rolls of men fit for the call-up stand
+   * than a province's ordinarily do, as a share of the ordinary ceiling
+   * (`ProvinceTargets.manpowerShift`): what is owed a year, as a share of what
+   * the ordinary ceiling is. A power that takes its tribute in men has more of
+   * them to raise, and the people have fewer to marry and to plough.
+   */
+  readonly provinceManpowerShift?: ReadonlyMap<string, number>;
   /** How many of its held provinces are taxed by a chosen policy, and so lie under it. */
   readonly policyProvinces?: number;
 }
@@ -275,6 +283,7 @@ export function taxBurdens(world: WorldState, options: { readonly officeSkill?: 
     let policyProvinces = 0;
     const byRegime: Partial<Record<TaxRegime, number>> = {};
     const provinceShift = new Map<string, number>();
+    const manpowerShift = new Map<string, number>();
     for (const province of owned) {
       const row = materialById.get(province.id) ?? deriveDefaultProvinceMaterial(province, world.elapsedStep);
       const policy = policyOf(province, row);
@@ -283,6 +292,7 @@ export function taxBurdens(world: WorldState, options: { readonly officeSkill?: 
       if (!reading.held) continue;
       bearable += reading.monthly;
       menPerYear += reading.menPerYear;
+      if (reading.menPerYear > 0 && row.population > 0) manpowerShift.set(province.id, reading.menPerYear / (row.population * MANPOWER_FRACTION_OF_POPULATION));
       byRegime[policy.regime] = (byRegime[policy.regime] ?? 0) + reading.monthly;
       if (reading.monthly > 0) {
         rated += reading.monthly * (policy.rateBps / DEFAULT_TAX_RATE_BPS);
@@ -311,6 +321,7 @@ export function taxBurdens(world: WorldState, options: { readonly officeSkill?: 
       bearableByRegime: byRegime,
       menPerYear,
       provinceStabilityShiftBps: provinceShift,
+      provinceManpowerShift: manpowerShift,
       policyProvinces,
     });
   }

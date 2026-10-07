@@ -141,7 +141,8 @@ describe("what the player's government can see of the world", () => {
     // Moved 19.5k -> 20k (2026-10-03): the play-test fixes -- every power named
     // with its id, the actor's standing and the gates ahead, a proconsul's
     // powers, and orders already answered kept apart from those awaiting one.
-    expect(text.length).toBeLessThan(20_000);
+    // Moved 20k -> 20.25k (2026-10-07): Rome opens with two trade pacts (v49), one line each among its agreements.
+    expect(text.length).toBeLessThan(20_250);
   });
 });
 

@@ -32,6 +32,7 @@ import { adjacentTo } from "@chronica/shared";
 import { marketNews } from "./market-summary";
 import { closeBook, cutOffHubs, marketMonth, monthsToHarvest, openBook, stockTheHarvest } from "./markets";
 import { tradeMonth } from "./trade-flows";
+import { reliefNews } from "./trade-summary";
 
 /**
  * The land, reckoned by the calendar (VISION §6, §7).
@@ -364,6 +365,7 @@ export function reviewTheLand(input: LandInput): LandResult {
     const monthOne = (last ?? toDay) + REVIEW_DAYS;
     const customsEarned = new Map<string, number>();
     let lanes = new Map<string, number>();
+    const relief = new Map<string, { units: number; from: Set<string> }>();
     for (let month = 0; month < months; month += 1) {
       // What each hub's country makes and uses, a siege's requisition and the
       // price that results, and so how fed each province is; people follow.
@@ -373,6 +375,12 @@ export function reviewTheLand(input: LandInput): LandResult {
       const flows = tradeMonth(book, { world, rows, cut, toHarvest: monthsToHarvest(day, input.clock, HARVEST_MONTH) });
       for (const [polityId, amount] of flows.duties) customsEarned.set(polityId, (customsEarned.get(polityId) ?? 0) + amount);
       lanes = flows.lanes;
+      for (const [polityId, kept] of flows.relief) {
+        const total = relief.get(polityId) ?? { units: 0, from: new Set<string>() };
+        total.units += kept.units;
+        for (const from of kept.from) total.from.add(from);
+        relief.set(polityId, total);
+      }
       for (const id of ids) {
         const standing = standings.get(id);
         if (standing === undefined) continue;
@@ -423,6 +431,13 @@ export function reviewTheLand(input: LandInput): LandResult {
     }
     world = closeBook(world, book);
     world = withTradeBooks(world, customsEarned, lanes);
+    // Grain that came by sea to a dear market is news, a line a power and not oftener than once a year.
+    const reliefTold = reliefNews(world, relief, toDay);
+    facts.push(...reliefTold.facts);
+    if (reliefTold.told.length > 0) {
+      const told = new Set(reliefTold.told.map((entry) => entry.polityId));
+      world = { ...world, economy: { ...economyOf(world), tradeNews: [...economyOf(world).tradeNews.filter((entry) => !(entry.kind === "relief" && told.has(entry.polityId))), ...reliefTold.told].slice(-200) } };
+    }
     world = {
       ...world,
       material: {

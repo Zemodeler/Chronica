@@ -97,7 +97,7 @@ describe("a trade pact lowers tariffs", () => {
   it("is opened by agreement_open with its terms, which the markets then read", () => {
     const opened = apply(opening(), { op: "agreement_open", localId: "pact-1", kind: "trade_pact", polityId: "carthage", otherPolityId: "syracuse", terms: "Customs of no more than five in a hundred.", trade: { tariffCapBps: 500, exempt: ["grain"] }, forDays: null, sourceMessageRef: null, visibility: "public", reason: "A pact." });
     expect(opened.rejected).toEqual([]);
-    const placed = opened.world.polityAgreements.find((entry) => entry.kind === "trade_pact")!;
+    const placed = opened.world.polityAgreements.find((entry) => entry.kind === "trade_pact" && entry.polityId !== "rome" && entry.otherPolityId !== "rome")!;
     expect(placed.trade).toEqual({ tariffCapBps: 500, mostFavoured: false, exempt: ["grain"], goods: [] });
     expect(tradeTermsBetween(opened.world, "syracuse", "carthage").pact?.exempt).toEqual(["grain"]);
     expect(opened.factProposals.some((fact) => fact.kind === "trade_pact_opened")).toBe(true);
@@ -116,7 +116,7 @@ describe("a trade pact lowers tariffs", () => {
     // Ten days later, when the letter has arrived.
     const answered = applyDeltas({ ...sent.world, elapsedStep: 12 }, [WorldDeltaSchema.parse({ op: "diplomatic_message_answer", messageRef: message.id, answer: "accepted", answerText: "Agreed.", reason: "Agreed." })], { ...context(), now: { day: 12, minute: 0 }, actorRef: { kind: "character", id: receiver.id } });
     expect(answered.rejected).toEqual([]);
-    const placed = answered.world.polityAgreements.find((entry) => entry.kind === "trade_pact")!;
+    const placed = answered.world.polityAgreements.find((entry) => entry.kind === "trade_pact" && entry.polityId !== "rome" && entry.otherPolityId !== "rome")!;
     expect(placed.trade).toMatchObject({ tariffCapBps: 500, mostFavoured: true });
   });
 
@@ -126,13 +126,13 @@ describe("a trade pact lowers tariffs", () => {
     const embargo = { op: "agreement_open", localId: "embargo-1", kind: "embargo", polityId: "carthage", otherPolityId: "syracuse", terms: "No trade.", forDays: null, sourceMessageRef: null, visibility: "public", reason: "A quarrel." };
     const breach = apply(base, embargo);
     expect(breach.rejected).toEqual([]);
-    expect(breach.world.polityAgreements.find((entry) => entry.kind === "trade_pact")!.status).toBe("ended");
+    expect(breach.world.polityAgreements.find((entry) => entry.kind === "trade_pact" && entry.polityId !== "rome" && entry.otherPolityId !== "rome")!.status).toBe("ended");
     expect(trustOf(breach.world, POWERS.syracuse, POWERS.carthage)).toBeLessThan(trustBefore);
     expect(trustOf(breach.world, POWERS.syracuse, POWERS.carthage)).toBeGreaterThanOrEqual(trustBefore - 15);
     expect(breach.factProposals.find((fact) => fact.kind === "embargo_laid")?.summary).toMatch(/breaks/);
 
     // Closed first: no breach.
-    const closed = apply(base, { op: "agreement_close", agreementRef: base.polityAgreements.find((entry) => entry.kind === "trade_pact")!.id, reason: "The pact lapses by consent." });
+    const closed = apply(base, { op: "agreement_close", agreementRef: base.polityAgreements.find((entry) => entry.kind === "trade_pact" && entry.polityId !== "rome" && entry.otherPolityId !== "rome")!.id, reason: "The pact lapses by consent." });
     const clean = apply(closed.world, embargo);
     expect(trustOf(clean.world, POWERS.syracuse, POWERS.carthage)).toBe(trustBefore);
 
@@ -143,12 +143,11 @@ describe("a trade pact lowers tariffs", () => {
   });
 
   it("is what a peace's trade term writes, with a modest mutual cap", () => {
-    const made = treatyOf(opening(), [{ kind: "trade" }], "carthage", "rome");
+    const made = treatyOf(opening(), [{ kind: "trade" }], "syracuse", "carthage");
     const open = made.besides.find((delta) => delta.op === "agreement_open")!;
     expect(open.op === "agreement_open" && open.kind).toBe("trade_pact");
     expect(open.op === "agreement_open" && open.trade?.tariffCapBps).toBe(PEACE_TRADE_TARIFF_CAP_BPS);
-    const placed = apply(opening(), open as unknown as Record<string, unknown>).world.polityAgreements.find((entry) => entry.kind === "trade_pact")!;
+    const placed = apply(opening(), open as unknown as Record<string, unknown>).world.polityAgreements.find((entry) => entry.kind === "trade_pact" && entry.polityId !== "rome" && entry.otherPolityId !== "rome")!;
     expect(placed.trade?.tariffCapBps).toBe(500);
-    expect(economyOf(opening()).customsRates).toEqual([]);
   });
 });

@@ -215,7 +215,7 @@ function withGovernment(
 function withTaxUnrest(
   targets: Map<string, ProvinceTargets>,
   world: WorldState,
-  burdens: ReadonlyMap<string, { readonly stabilityShiftBps: number; readonly provinceStabilityShiftBps?: ReadonlyMap<string, number> | undefined }>,
+  burdens: ReadonlyMap<string, { readonly stabilityShiftBps: number; readonly provinceStabilityShiftBps?: ReadonlyMap<string, number> | undefined; readonly provinceManpowerShift?: ReadonlyMap<string, number> | undefined }>,
 ): Map<string, ProvinceTargets> {
   const next = new Map(targets);
   for (const province of world.map.provinces) {
@@ -223,9 +223,11 @@ function withTaxUnrest(
     // How the whole is pressed, and how this province is taxed in particular:
     // a levy is resented, a rate over the customary one hated.
     const shift = Math.max(-MAX_TAX_UNREST_BPS, (burden?.stabilityShiftBps ?? 0) + (burden?.provinceStabilityShiftBps?.get(province.id) ?? 0));
-    if (shift === 0) continue;
+    // A province that owes its tribute in men has more of them on its rolls than one that pays in silver.
+    const men = burden?.provinceManpowerShift?.get(province.id) ?? 0;
+    if (shift === 0 && men === 0) continue;
     const current = next.get(province.id) ?? {};
-    next.set(province.id, { ...current, stabilityShiftBps: (current.stabilityShiftBps ?? 0) + shift });
+    next.set(province.id, { ...current, ...(shift === 0 ? {} : { stabilityShiftBps: (current.stabilityShiftBps ?? 0) + shift }), ...(men === 0 ? {} : { manpowerShift: (current.manpowerShift ?? 0) + men }) });
   }
   return next;
 }
@@ -1636,7 +1638,8 @@ export function runDeterministicTick(given: TickInput): TickResult {
   // The land reckoned for the month and the year; what treaties and debts
   // make happen; and misery and ambition that turn to risings and civil war --
   // before powers are reviewed, so a province full of yearning rises today.
-  const reckoned = reviewTheLand({ world: met.world, toDay: input.toDay, clock: input.clock, targets: () => provinceTargetsFrom(met.world) });
+  // The grain office's skill is carried into the month's reckoning of bread (`foodRecoveryScale`, read by `marketMonth`).
+  const reckoned = reviewTheLand({ world: met.world, toDay: input.toDay, clock: input.clock, targets: () => withGovernment(provinceTargetsFrom(met.world), met.world, readDepartments(met.world)) });
   // What the month's trade earned each power in customs is paid into its treasury the day it is reckoned.
   const land = { ...reckoned, world: payCustoms(reckoned.world, input.toDay, input.ids) };
   facts.push(...land.facts);

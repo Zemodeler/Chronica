@@ -81,6 +81,8 @@ export const CROSSING_COST_SHARE: Readonly<Record<CrossingType, number>> = { lan
 /** How much a way can carry in a month, as a share of what the buying hub uses in one, by its crossing. */
 export const CROSSING_CAPACITY_SHARE: Readonly<Record<CrossingType, number>> = { land: 0.4, pass: 0.2, river: 0.7, strait: 1, sea_lane: 1.2 };
 
+/** Grain by water into a hub where it sells at this much of its ordinary price or more is a relief ship. */
+export const RELIEF_PRICE_BPS = 14_000;
 /** The most a hub sends out of any one good in a month, over all its roads, as a share of what its own country uses in a month. */
 export const EXPORT_SHARE_OF_USE = 0.5;
 /** Of what the selling hub means to hold, the share it will not sell below, for every good but grain. */
@@ -134,6 +136,12 @@ export interface FlowResult {
   readonly lanes: Map<string, number>;
   /** Units moved, by good, over the whole pass. */
   readonly moved: number[];
+  /**
+   * Grain that came by water into a hub where it was dear (`RELIEF_PRICE_BPS`),
+   * by the power the hub belongs to, with the powers it came from: what a
+   * "relief ship" is in the news.
+   */
+  readonly relief: Map<string, { units: number; from: Set<string> }>;
 }
 
 interface HubState {
@@ -208,7 +216,7 @@ export function tradeMonth(book: Book, input: FlowInput): FlowResult {
     return known;
   };
 
-  const result: FlowResult = { duties: new Map(), lanes: new Map(), moved: new Array<number>(GOOD_COUNT).fill(0) };
+  const result: FlowResult = { duties: new Map(), lanes: new Map(), moved: new Array<number>(GOOD_COUNT).fill(0), relief: new Map() };
   for (const hub of book.values()) {
     hub.inflow.fill(0);
     hub.outflow.fill(0);
@@ -290,6 +298,13 @@ function routeMonth(_book: Book, input: FlowInput, result: FlowResult, route: Ro
     const duty = dutyOn(buyer, spec.id);
     const moved = worthMoving(spec, sellerBook.stock[index]!, sellerBook.target[index]!, buyerBook.stock[index]!, buyerBook.target[index]!, duty, haul, most);
     if (moved < 1) continue;
+    // Bread by sea to a hub where it is dear is a relief ship, and news.
+    if (index === GRAIN && sea && buyer.polity !== null && buyerBook.price[index]! >= RELIEF_PRICE_BPS) {
+      const kept = result.relief.get(buyer.polity) ?? { units: 0, from: new Set<string>() };
+      kept.units += moved;
+      if (seller.polity !== null) kept.from.add(seller.polity);
+      result.relief.set(buyer.polity, kept);
+    }
     sellerBook.stock[index]! -= moved;
     buyerBook.stock[index]! += moved;
     sellerBook.price[index] = priceBpsFrom(spec, sellerBook.stock[index]!, sellerBook.target[index]!);

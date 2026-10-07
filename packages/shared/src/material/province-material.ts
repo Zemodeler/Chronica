@@ -43,7 +43,7 @@ const POPULATION_PER_SETTLEMENT_SIZE = TOWNSFOLK_PER_SETTLEMENT_SIZE * (1 + COUN
  * fields: a third of those of military age, who were about a quarter of the
  * people. Rome at its utmost, after Cannae, had about that under arms.
  */
-const MANPOWER_FRACTION_OF_POPULATION = 0.08;
+export const MANPOWER_FRACTION_OF_POPULATION = 0.08;
 /**
  * Of the people, those who come of age for the call-up in a year: a pool bled
  * dry fills again over six or seven years, as Rome's did after Cannae. It

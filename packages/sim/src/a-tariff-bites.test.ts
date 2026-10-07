@@ -131,7 +131,6 @@ describe("a tariff bites", () => {
     for (let step = 1; step <= 3; step += 1) current = reviewTheLand({ world: current, toDay: step * 30 }).world;
     const due = economyOf(current).customsDue.find((entry) => entry.polityId === POWERS.syracuse)?.amount ?? 0;
     expect(due).toBeGreaterThan(0);
-    expect(economyOf(current).customsDue.some((entry) => entry.polityId === POWERS.carthage)).toBe(false);
 
     const treasury = treasuryOf(current, POWERS.syracuse)!;
     const paid = payCustoms(current, 90, createIdFactory("customs"));
@@ -141,19 +140,22 @@ describe("a tariff bites", () => {
     // A single credit through the market's door, nothing unexplained.
     const audit = auditMoney(current, paid);
     expect(unexplainedTotal(audit)).toBe(0);
-    expect(audit.doors.market.in).toBe(due);
+    // Every power's customs came in at the market's door, and nowhere else.
+    expect(audit.doors.market.in).toBe(economyOf(current).customsDue.filter((entry) => treasuryOf(current, entry.polityId) !== null).reduce((sum, entry) => sum + entry.amount, 0));
   });
 
   it("can be set by the power's own officers, with the customs scope of tax_policy_set, and is clamped", () => {
     const world = opening();
     const set = apply(world, [{ op: "tax_policy_set", scope: "customs", polityId: "rome", rateBps: 700, reason: "A tariff on foreign grain." }]);
-    expect(economyOf(set.world).customsRates).toEqual([{ polityId: "rome", rateBps: 700 }]);
+    const rateOf = (w: WorldState, id: string): number | undefined => economyOf(w).customsRates.find((entry) => entry.polityId === id)?.rateBps;
+    expect(rateOf(world, "rome")).toBe(250);
+    expect(rateOf(set.world, "rome")).toBe(700);
     const steep = apply(set.world, [{ op: "tax_policy_set", scope: "customs", polityId: "rome", rateBps: 9_999, reason: "Everything." }]);
-    expect(economyOf(steep.world).customsRates[0]!.rateBps).toBe(5_000);
+    expect(rateOf(steep.world, "rome")).toBe(5_000);
     const none = apply(steep.world, [{ op: "tax_policy_set", scope: "customs", polityId: "rome", rateBps: 0, reason: "Free ports." }]);
-    expect(economyOf(none.world).customsRates).toEqual([]);
+    expect(rateOf(none.world, "rome")).toBeUndefined();
     // Nobody lays customs for a power that is not his.
     const foreign = apply(world, [{ op: "tax_policy_set", scope: "customs", polityId: "carthage", rateBps: 700, reason: "A tariff." }]);
-    expect(economyOf(foreign.world).customsRates).toEqual([]);
+    expect(rateOf(foreign.world, "carthage")).toBe(1_000);
   });
 });

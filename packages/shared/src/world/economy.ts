@@ -106,8 +106,12 @@ export const EconomyMemorySchema = z
     customsDue: z.array(z.object({ polityId: EntityIdSchema, amount: z.number().int().nonnegative() }).strict()).max(200).default([]),
     /** Which powers' hubs traded most with which last month, by value in drachmae: what a ruler's slice reads. Capped, largest first. */
     tradeLanes: z.array(z.object({ fromPolityId: EntityIdSchema, toPolityId: EntityIdSchema, value: z.number().int().nonnegative() }).strict()).max(60).default([]),
-    /** When a power last heard of trade resumed or cut between it and another, so news is told once, not each month. */
-    tradeNews: z.array(z.object({ polityId: EntityIdSchema, otherPolityId: EntityIdSchema, kind: z.enum(["resumed", "cut"]), atStep: ElapsedStepSchema }).strict()).max(200).default([]),
+    /**
+     * What a power has been told of its trade, so news is told once and not each month. "cut": a trade pact
+     * between it and `otherPolityId` is held by war (told as resumed when the war ends); "relief": the day it
+     * last heard that grain had come by sea to its dear markets (`otherPolityId` is the first power it came from).
+     */
+    tradeNews: z.array(z.object({ polityId: EntityIdSchema, otherPolityId: EntityIdSchema, kind: z.enum(["resumed", "cut", "relief"]), atStep: ElapsedStepSchema }).strict()).max(200).default([]),
   })
   .strict();
 export type EconomyMemory = z.infer<typeof EconomyMemorySchema>;

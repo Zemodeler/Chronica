@@ -238,7 +238,9 @@ export function marketMonth(book: Book, input: MonthInput): void {
     const local = readout * (1 - row.warDamageBps / 20_000) + (input.targets.get(id)?.foodSecurityShiftBps ?? 0);
     const goal = Math.max(0, Math.min(10_000, Math.round(local)));
     const now = row.foodSecurityBps;
-    const next = goal < now ? Math.max(goal, now - FOOD_STEP_DOWN_BPS) : Math.min(goal, now + FOOD_STEP_UP_BPS);
+    // A grain office run well gets bread to the people faster and lets it fail them more slowly (up to three in ten either way; `withGovernment`).
+    const office = Math.max(0.1, input.targets.get(id)?.foodRecoveryScale ?? 1);
+    const next = goal < now ? Math.max(goal, now - Math.round(FOOD_STEP_DOWN_BPS / office)) : Math.min(goal, now + Math.round(FOOD_STEP_UP_BPS * office));
     if (next !== now) input.rows.set(id, { ...row, foodSecurityBps: next });
   }
 }
