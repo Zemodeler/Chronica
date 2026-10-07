@@ -4,6 +4,9 @@ import {
   kmBetween,
   bestGapGood,
   marketPriceBps,
+  coinageOf,
+  coinageOfPolity,
+  conversionBps,
   tradePremiumBps,
   warfareWith,
   type FactProposalDraft,
@@ -155,7 +158,11 @@ export function landCargoes(world: WorldState, toDay: number, ids: IdFactory, wa
         });
       }
       const margin = cargoMarginBps(world, venture);
-      const sold =Math.max(1, Math.round((cargo.cost * (10_000 + margin)) / 10_000));
+      // What the far market pays is in its own power's coin: a merchant bringing it home to a purse
+      // in another coinage pays the money-changers' cut, which never enters the books.
+      const farPolity = world.map.provinces.find((province) => province.id === venture.toProvinceId)?.controllerPolityId ?? null;
+      const changed = farPolity === null ? 10_000 : conversionBps(world, coinageOfPolity(world, farPolity).id, coinageOf(world, purse.id).id);
+      const sold = Math.max(1, Math.round((cargo.cost * (10_000 + margin) * changed) / 100_000_000));
       accounts = accounts.map((account) => (account.id === purse.id ? { ...account, balance: account.balance + sold } : account));
       transactions.push({
         // The market at the far end buys what the ship carried: its price is the

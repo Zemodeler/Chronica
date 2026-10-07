@@ -29,6 +29,7 @@ import {
 } from "@chronica/shared";
 import { adjacentTo } from "@chronica/shared";
 // (`adjacentTo` is indexed once per map: a province's neighbours are a lookup, not a search.)
+import { monthOfCoinage } from "./coinage";
 import { marketNews } from "./market-summary";
 import { closeBook, cutOffHubs, marketMonth, monthsToHarvest, openBook, stockTheHarvest } from "./markets";
 import { tradeMonth } from "./trade-flows";
@@ -431,6 +432,10 @@ export function reviewTheLand(input: LandInput): LandResult {
     }
     world = closeBook(world, book);
     world = withTradeBooks(world, customsEarned, lanes);
+    // Then the coinages: prices follow what a mint has done a few months behind it, and what a coin fetches follows its issuer's trade and credit.
+    const coined = monthOfCoinage(world, Array.from({ length: months }, (_, month) => monthOne + month * REVIEW_DAYS), toDay);
+    world = coined.world;
+    facts.push(...coined.facts);
     // Grain that came by sea to a dear market is news, a line a power and not oftener than once a year.
     const reliefTold = reliefNews(world, relief, toDay);
     facts.push(...reliefTold.facts);

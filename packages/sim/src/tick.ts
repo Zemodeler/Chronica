@@ -53,6 +53,7 @@ import {
   type Project,
   recordTenures,
   obligationAmountNow,
+  convertSilver,
   bestGapGood,
   tradePremiumBps,
   liveProvinceIds,
@@ -467,14 +468,20 @@ export function runDeterministicTick(given: TickInput): TickResult {
         shortfalls.set(levied, { asked: tally.asked + owed, raised: tally.raised + received });
       }
       if (received > 0) {
+        // A tribute paid out of one power's chest into another's, in another coin, passes a money-changer.
+        const crossed = fromPayer === null ? { received, cut: 0 } : convertSilver(input.world, fromPayer, source.beneficiaryAccountId, received);
         if (fromPayer !== null) credit(fromPayer, -received);
-        credit(source.beneficiaryAccountId, received);
-        collected += received;
+        credit(source.beneficiaryAccountId, crossed.received);
+        collected += crossed.received;
+        if (crossed.cut > 0) transactions.push({
+          id: input.ids.next("txn"), atStep: due, kind: "transfer", amount: crossed.cut, external: "abroad", sourceAccountId: fromPayer!,
+          cause: { kind: "scheduled_income", id: source.id, explanation: `${source.label}: the money-changers' cut`.slice(0, 240) }, visibility: "polity",
+        });
         transactions.push({
           id: input.ids.next("txn"),
           atStep: due,
           kind: source.kind === "tax" ? "tax" : "income",
-          amount: received,
+          amount: crossed.received,
           ...(fromPayer === null ? { external: source.kind === "trade" || source.originKind === "venture" ? "market" as const : "harvest" as const } : { sourceAccountId: fromPayer }),
           destinationAccountId: source.beneficiaryAccountId,
           cause: { kind: "scheduled_income", id: source.id, explanation: source.label },
@@ -513,8 +520,13 @@ export function runDeterministicTick(given: TickInput): TickResult {
       const owed = amount + arrears;
       const available = balanceOf(obligation.payerAccountId);
       if (available >= owed && owed > 0) {
+        // Paid into another coinage, the sum passes a money-changer: the payee gets it less his cut,
+        // which leaves the books by the `abroad` door (`convertSilver`).
+        const crossed = obligation.recipientAccountId === undefined || obligation.recipientAccountId === obligation.payerAccountId
+          ? { received: owed, cut: 0 }
+          : convertSilver(input.world, obligation.payerAccountId, obligation.recipientAccountId, owed);
         credit(obligation.payerAccountId, -owed);
-        if (obligation.recipientAccountId !== undefined) credit(obligation.recipientAccountId, owed);
+        if (obligation.recipientAccountId !== undefined) credit(obligation.recipientAccountId, crossed.received);
         paid += owed;
         // The named men's pay reaches their purses, out of what the treasury
         // paid and not on top of it: it left the chest and landed nowhere (E18).
@@ -527,11 +539,15 @@ export function runDeterministicTick(given: TickInput): TickResult {
           });
         }
         const toTheRanks = owed - shares.reduce((sum, share) => sum + share.amount, 0);
-        if (toTheRanks > 0) transactions.push({
+        if (crossed.cut > 0) transactions.push({
+          id: input.ids.next("txn"), atStep: due, kind: "transfer", amount: crossed.cut, external: "abroad", sourceAccountId: obligation.payerAccountId,
+          cause: { kind: "obligation", id: obligation.id, explanation: `${obligation.label}: the money-changers' cut`.slice(0, 240) }, visibility: "polity",
+        });
+        if (toTheRanks - crossed.cut > 0) transactions.push({
           id: input.ids.next("txn"),
           atStep: due,
           kind: obligation.kind === "army_pay" || obligation.kind === "army_upkeep" ? "upkeep" : "transfer",
-          amount: toTheRanks,
+          amount: toTheRanks - crossed.cut,
           sourceAccountId: obligation.payerAccountId,
           // Never to itself. An obligation whose payer and recipient are the
           // same account is refused at creation now, but one already standing
@@ -1010,13 +1026,19 @@ export function runDeterministicTick(given: TickInput): TickResult {
       const available = fromAccountId === null ? outcome.amount : balanceOf(fromAccountId);
       const handed = Math.min(outcome.amount, available);
       if (handed <= 0) return null;
+      // A subsidy into another coinage passes a money-changer, as any sum crossing does.
+      const crossed = fromAccountId === null ? { received: handed, cut: 0 } : convertSilver(input.world, fromAccountId, toAccountId, handed);
       if (fromAccountId !== null) credit(fromAccountId, -handed);
-      credit(toAccountId, handed);
+      credit(toAccountId, crossed.received);
+      if (crossed.cut > 0) transactions.push({
+        id: input.ids.next("txn"), atStep: input.toDay, kind: "transfer", amount: crossed.cut, external: "abroad", sourceAccountId: fromAccountId!,
+        cause: { kind: "project_milestone", id: project.id, explanation: `${outcome.label}: the money-changers' cut`.slice(0, 240) }, visibility: "polity",
+      });
       transactions.push({
         id: input.ids.next("txn"),
         atStep: input.toDay,
         kind: "transfer",
-        amount: handed,
+        amount: crossed.received,
         // A subsidy nobody funded comes from a power the world keeps no chest for.
         ...(fromAccountId === null ? { external: "abroad" as const } : { sourceAccountId: fromAccountId }),
         destinationAccountId: toAccountId,

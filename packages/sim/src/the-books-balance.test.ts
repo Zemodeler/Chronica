@@ -117,13 +117,16 @@ describe("the books balance", { timeout: 120_000 }, () => {
     const month = (state: WorldState) => runDeterministicTick({ world: { ...state, elapsedStep: 30 }, toDay: 30, ids: createIdFactory("tribute"), warfare: definition.warfare });
     const paying = bound(520_000);
     const paid = month(paying);
-    const line = paid.world.material.transactions.find((transaction) => transaction.cause.id === "syracuse-tribute")!;
-    expect(line).toMatchObject({ sourceAccountId: "syracuse-treasury", destinationAccountId: "carthage-treasury", amount: 40_000 });
+    const line = paid.world.material.transactions.find((transaction) => transaction.cause.id === "syracuse-tribute" && transaction.destinationAccountId === "carthage-treasury")!;
+    // Syracuse's coin into Carthage's: the changer keeps 1.5 in a hundred (600), which leaves by the abroad door.
+    expect(line).toMatchObject({ sourceAccountId: "syracuse-treasury", destinationAccountId: "carthage-treasury", amount: 39_400 });
     expect(line.external).toBeUndefined();
+    const cut = paid.world.material.transactions.find((transaction) => transaction.cause.id === "syracuse-tribute" && transaction.external === "abroad")!;
+    expect(cut).toMatchObject({ sourceAccountId: "syracuse-treasury", amount: 600 });
     expect(unexplainedTotal(auditMoney({ ...paying, elapsedStep: 30 }, paid.world))).toBe(0);
     // A chest that holds less pays what it holds (with the tithe that came in the same month): nothing is made up.
     const poor = month(bound(25_000, 200_000));
-    expect(poor.world.material.transactions.find((transaction) => transaction.cause.id === "syracuse-tribute")?.amount).toBeLessThanOrEqual(25_000 + 62_000);
+    expect(poor.world.material.transactions.find((transaction) => transaction.cause.id === "syracuse-tribute" && transaction.destinationAccountId === "carthage-treasury")?.amount).toBeLessThanOrEqual(25_000 + 62_000);
   });
 
   it("explains the customs trade pays too: a year of goods crossing borders under tariffs, a pact and an embargo, nothing unexplained", () => {
@@ -162,6 +165,34 @@ describe("the books balance", { timeout: 120_000 }, () => {
     expect(audit.doors.market.in).toBeGreaterThanOrEqual(customs);
     const through = Object.values(audit.doors).reduce((sum, door) => sum + door.in - door.out, 0);
     expect(totalMoney(world) - totalMoney(opening())).toBe(through);
+  });
+
+  it("explains a debasement and the money-changers' cut: seigniorage at its door, a tribute across two coinages, two years, nothing unexplained", () => {
+    // Rome strikes its coin with less silver; Syracuse pays Carthage a tribute, across two coinages, every month.
+    const base = opening();
+    const struck = apply({ ...base, material: { ...base.material, incomeSources: [...base.material.incomeSources, {
+      id: "syracuse-tribute", kind: "tribute" as const, label: "Tribute of Syracuse", beneficiaryAccountId: "carthage-treasury", originKind: "polity" as const, originId: "carthage",
+      counterpartyPolityId: "syracuse", amount: 20_000, cadenceSteps: 30, nextDueStep: 30, collectionRateBps: 10_000, active: true,
+    }] } }, [{ op: "coinage_debase", coinageId: "roman_aes_and_silver", stepBps: -2_000, reason: "The war must be paid." }], as("gaius-genucius"));
+    expect(struck.rejected).toEqual([]);
+    let world = struck.world;
+    let audit = auditMoney(base, struck.world);
+    expect(audit.doors.seigniorage.in).toBeGreaterThan(0);
+    for (let month = 1; month <= 24; month += 1) {
+      const toDay = month * 30;
+      const before: WorldState = { ...world, elapsedStep: toDay };
+      const ticked = runDeterministicTick({ world: before, toDay, ids: createIdFactory(`coin-tick-${month}`), warfare: definition.warfare, clock: definition.clock, life: definition.life });
+      const monthly = auditMoney(before, ticked.world);
+      expect(monthly.unexplained, `month ${month}:
+${auditInWords(monthly)}`).toEqual([]);
+      audit = combineAudits(audit, monthly);
+      world = ticked.world;
+    }
+    expect(unexplainedTotal(audit), auditInWords(audit)).toBe(0);
+    // The changers took their cut of every tribute, and of anything else that crossed from one coin to another.
+    expect(audit.doors.abroad.out).toBeGreaterThan(0);
+    const through = Object.values(audit.doors).reduce((sum, door) => sum + door.in - door.out, 0);
+    expect(totalMoney(world) - totalMoney(base)).toBe(through);
   });
 
   it("finds money made from nowhere", () => {

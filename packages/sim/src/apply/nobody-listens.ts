@@ -1,4 +1,4 @@
-import { allOffices, deriveRelationDimension, familyLinksOf, stableHash, type ChamberPower, type GovernmentInstitution, type Office, type WorldDelta, type WorldState } from "@chronica/shared";
+import { allOffices, coinageById, deriveRelationDimension, familyLinksOf, stableHash, type ChamberPower, type GovernmentInstitution, type Office, type WorldDelta, type WorldState } from "@chronica/shared";
 
 /**
  * An order nobody is obliged to carry out does not happen.
@@ -212,6 +212,11 @@ export function nobodyListens(
       const under = polity(resolve(delta.polityId) ?? delta.polityId);
       return `${who} announced new rates of tax for ${under}. The collectors take their orders from the treasury, had none, and went on gathering what they always had.`;
     }
+    // The moneyers answer to the treasury too.
+    case "coinage_debase": {
+      const under = polity(coinageById(world, resolve(delta.coinageId) ?? delta.coinageId)?.issuerPolityId ?? "");
+      return `${who} ordered the mint to strike the coin of ${under} differently. The moneyers take their orders from the treasury, had none, and went on striking what they always had.`;
+    }
     default:
       return null;
   }
@@ -224,7 +229,7 @@ export function nobodyListens(
  */
 const GOVERNMENT_ACTS: ReadonlySet<WorldDelta["op"]> = new Set([
   "agreement_open", "agreement_close", "diplomatic_message_send", "political_procedure_open", "political_procedure_resolve",
-  "office_seat_set", "authority_grant_upsert", "income_source_upsert", "obligation_upsert", "polity_create", "tax_policy_set",
+  "office_seat_set", "authority_grant_upsert", "income_source_upsert", "obligation_upsert", "polity_create", "tax_policy_set", "coinage_debase",
 ]);
 
 /** The government an act abroad would commit, for saying whose it was not. */
@@ -245,6 +250,7 @@ function abroadPolityOf(delta: WorldDelta, world: WorldState, resolve: (ref: str
     case "income_source_upsert": return ofAccount(delta.beneficiaryAccountRef);
     case "obligation_upsert": return ofAccount(delta.payerAccountRef);
     case "tax_policy_set": return id(delta.polityId);
+    case "coinage_debase": return coinageById(world, id(delta.coinageId))?.issuerPolityId ?? undefined;
     case "political_procedure_open":
       return delta.institutionRef === null ? undefined : world.material.institutions.find((institution) => institution.id === id(delta.institutionRef!))?.polityId;
     case "political_procedure_resolve": {

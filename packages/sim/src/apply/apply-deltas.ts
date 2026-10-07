@@ -88,6 +88,16 @@ import {
   ferryDays,
   ensureProvinceMaterial,
   MAX_CUSTOMS_RATE_BPS,
+  COINAGE_COOLDOWN_DAYS,
+  MAX_DEBASE_STEP_BPS,
+  MAX_STANDARD_SHARE_BPS,
+  MIN_STANDARD_SHARE_BPS,
+  RECOINED_SHARE_BPS,
+  coinageById,
+  treasuryOf,
+  coinageStock,
+  convertSilver,
+  standardOf,
   clampTaxRate,
   economyOf,
   EMPTY_ECONOMY_MEMORY,
@@ -345,6 +355,13 @@ function scopeOf(delta: WorldDelta, world: WorldState, resolve: (ref: string) =>
       const polityId = resolve(delta.polityId) ?? delta.polityId;
       const chest = world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === polityId && account.status === "active");
       return chest === undefined ? { kind: "polity", id: polityId } : { kind: "account", id: chest.id };
+    }
+    // The coin is struck for the power that issues it: judged against its chest, as its taxes are.
+    case "coinage_debase": {
+      const issuerId = coinageById(world, delta.coinageId)?.issuerPolityId ?? null;
+      if (issuerId === null) return polityFallback;
+      const chest = world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === issuerId && account.status === "active");
+      return chest === undefined ? { kind: "polity", id: issuerId } : { kind: "account", id: chest.id };
     }
     case "office_seat_set": {
       // Scoped to the power whose office it is: seating a man is an act over a
@@ -643,6 +660,8 @@ const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   public_benefaction: "spend",
   // Choosing how provinces are taxed commits the treasury's future revenue, as setting up an income source does.
   tax_policy_set: "spend",
+  // What the mint strikes is the treasury's own affair, and spends or earns its silver.
+  coinage_debase: "spend",
 };
 
 /** The power an act needs: founding something is proposing it, and keeping it at an account's expense is spending from it. */
@@ -3509,6 +3528,71 @@ function applyOne(
           provinceMaterial: backfilled.material.provinceMaterial.map((row) => (row.provinceId === provinceId ? { ...row, taxRegime: delta.regime, taxRateBps: rateBps } : row)),
         },
       };
+    }
+
+    case "coinage_debase": {
+      const coinage = coinageById(world, delta.coinageId);
+      if (coinage === undefined) reject(`No coinage "${delta.coinageId}" exists to strike differently.`, "reference");
+      const issuerId = coinage.issuerPolityId;
+      if (issuerId === null) reject(`${coinage.name} has no power of its own to mint it: nobody here may debase or reform it.`);
+      const issuer = world.map.polities.find((candidate) => candidate.id === issuerId);
+      if (issuer === undefined) reject(`The power that strikes ${coinage.name} no longer exists.`, "reference");
+      // Only the issuer's own government strikes its coin; the world's own hand is let by.
+      const actorPolity = context.actorRef.kind === "character" ? world.characters.find((character) => character.id === context.actorRef.id)?.polityId ?? null : context.actorRef.kind === "polity" ? context.actorRef.id : null;
+      if (actorPolity !== null && actorPolity !== issuerId && context.actsForTheWorld !== true) {
+        reject(`${issuer.name} strikes ${coinage.name}; an officer of another power has no mint to change it.`);
+      }
+      const last = coinage.history.at(-1);
+      if (last !== undefined && atStep - last.atStep < COINAGE_COOLDOWN_DAYS) {
+        reject(`The mint of ${coinage.name} struck a new coin only ${atStep - last.atStep} days ago: it will not change again for ${COINAGE_COOLDOWN_DAYS - (atStep - last.atStep)} more.`);
+      }
+      if (delta.targetSilverBps === null && delta.stepBps === null) reject("Name the silver content to strike at, or the change to make to it.");
+      const standard = standardOf(coinage);
+      const wanted = delta.targetSilverBps ?? Math.round((coinage.silverBps * (10_000 + (delta.stepBps ?? 0))) / 10_000);
+      // No act moves it more than a quarter, and no coin is struck below four in ten or above eleven in ten of its standard.
+      const struck = Math.round(Math.max(
+        Math.max(standard * MIN_STANDARD_SHARE_BPS / 10_000, coinage.silverBps * (10_000 - MAX_DEBASE_STEP_BPS) / 10_000),
+        Math.min(Math.min(standard * MAX_STANDARD_SHARE_BPS / 10_000, coinage.silverBps * (10_000 + MAX_DEBASE_STEP_BPS) / 10_000), wanted),
+      ));
+      if (struck === coinage.silverBps) reject(`${coinage.name} is already struck at that silver content.`);
+      const treasuryId = treasuryOf(world, issuerId);
+      if (treasuryId === null) reject(`${issuer.name} keeps no treasury to take the mint's gain or pay for its silver.`, "reference");
+      // What is called in and re-struck in the year of the change: a share of the coin the issuer's countries hold.
+      const recoined = Math.round((coinageStock(world, coinage.id) * RECOINED_SHARE_BPS) / 10_000);
+      const debasing = struck < coinage.silverBps;
+      // Debasing, the same silver makes more coin: the mint keeps the difference as seigniorage. Re-coining
+      // higher, the silver has to be found: what is called in is brought up to the new fineness at the treasury's cost.
+      const sum = debasing
+        ? Math.round((recoined * (coinage.silverBps - struck)) / coinage.silverBps)
+        : Math.round((recoined * (struck - coinage.silverBps)) / coinage.silverBps);
+      const treasury = world.material.accounts.find((account) => account.id === treasuryId)!;
+      if (!debasing && treasury.balance < sum) reject(`Bringing ${coinage.name} up to ${struck} would cost ${sum}, and ${treasury.id} holds ${treasury.balance}.`);
+      const moved = debasing
+        ? moveMoney(world, { from: null, to: treasuryId, amount: sum, kind: "income", causeId: coinage.id, explanation: `Seigniorage: ${coinage.name} struck at ${struck} for ${coinage.silverBps} of silver.`, external: "seigniorage" }, context)
+        : moveMoney(world, { from: treasuryId, to: null, amount: sum, kind: "purchase", causeId: coinage.id, explanation: `Silver to re-strike ${coinage.name} at ${struck}.` }, context);
+      const memory = economyOf(moved);
+      const nextCoinages = memory.coinages.some((candidate) => candidate.id === coinage.id)
+        ? memory.coinages.map((candidate) => candidate.id !== coinage.id ? candidate : {
+          ...candidate,
+          silverBps: struck,
+          standardBps: standard,
+          debasedSinceStep: atStep,
+          history: [...candidate.history, { atStep, fromSilverBps: coinage.silverBps, toSilverBps: struck }].slice(-8),
+        })
+        : memory.coinages;
+      emitFact({
+        localId: `coinage_${debasing ? "debased" : "reformed"}_${coinage.id}_${atStep}`.slice(0, 60),
+        kind: debasing ? "coinage_debased" : "coinage_reformed",
+        summary: debasing
+          ? `${issuer.name} has had its mint strike ${coinage.name} with less silver in it (${struck} of the ${coinage.silverBps} it held): the treasury is the richer by ${sum} for it, and prices will follow the coin down.`.slice(0, 600)
+          : `${issuer.name} has had ${coinage.name} re-struck at a higher fineness (${struck}, from ${coinage.silverBps}), at a cost of ${sum} in silver: its coin will buy more in time.`.slice(0, 600),
+        affectedRefs: [{ kind: "polity", id: issuerId }],
+        visibility: "public",
+        discoveryState: "public",
+        knowableInDays: 0,
+        significance: debasing ? 50 : 40,
+      });
+      return { ...moved, economy: { ...memory, coinages: nextCoinages } };
     }
 
     case "political_procedure_open": {
@@ -6991,24 +7075,38 @@ interface Movement {
 
 function moveMoney(world: WorldState, movement: Movement, context: ApplyContext): WorldState {
   if (movement.amount <= 0 || (movement.from === null && movement.to === null) || movement.from === movement.to) return world;
+  // A sum crossing from one coinage to another passes through a money-changer
+  // (`world/coinage.ts`): what arrives is less his cut, which leaves the books
+  // by the `abroad` door; a sum inside one coinage moves whole.
+  const crossing = movement.from !== null && movement.to !== null ? convertSilver(world, movement.from, movement.to, movement.amount) : { received: movement.amount, cut: 0 };
   const accounts = world.material.accounts.map((account) => {
     if (account.id === movement.from) return { ...account, balance: account.balance - movement.amount };
-    if (account.id === movement.to) return { ...account, balance: account.balance + movement.amount };
+    if (account.id === movement.to) return { ...account, balance: account.balance + crossing.received };
     return account;
   });
   const holder = world.material.accounts.find((account) => account.id === (movement.from ?? movement.to));
+  const changersCut: readonly MoneyTransaction[] = crossing.cut <= 0 ? [] : [{
+    id: context.ids.next("txn"),
+    atStep: world.elapsedStep,
+    kind: "transfer",
+    amount: crossing.cut,
+    external: "abroad",
+    sourceAccountId: movement.from!,
+    cause: { kind: "action", id: movement.causeId.slice(0, 120), explanation: "The money-changers' cut on a sum crossing from one coinage to another." },
+    visibility: movement.visibility ?? holder?.visibility ?? "polity",
+  }];
   const transaction: MoneyTransaction = {
     id: context.ids.next("txn"),
     atStep: world.elapsedStep,
     kind: movement.kind,
-    amount: movement.amount,
+    amount: crossing.received,
     ...(movement.external === undefined || (movement.from !== null && movement.to !== null) ? {} : { external: movement.external }),
     ...(movement.from === null ? {} : { sourceAccountId: movement.from }),
     ...(movement.to === null ? {} : { destinationAccountId: movement.to }),
     cause: { kind: "action", id: movement.causeId.slice(0, 120), explanation: (movement.explanation.trim() || "An act of this turn.").slice(0, 240) },
     visibility: movement.visibility ?? holder?.visibility ?? "polity",
   };
-  return { ...world, material: { ...world.material, accounts, transactions: [...world.material.transactions, transaction] } };
+  return { ...world, material: { ...world.material, accounts, transactions: [...world.material.transactions, transaction, ...changersCut] } };
 }
 
 /**

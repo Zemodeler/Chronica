@@ -40,6 +40,7 @@ export function describeBreach(delta: WorldDelta, world: WorldState, actorName: 
     case "obligation_upsert": return `${actorName} charged ${account(delta.payerAccountRef)} with a standing payment of ${delta.amount}`;
     case "income_source_upsert": return `${actorName} altered what ${account(delta.beneficiaryAccountRef)} receives`;
     case "tax_policy_set": return delta.scope === "customs" ? `${actorName} changed the customs on foreign goods` : `${actorName} changed how ${delta.scope === "province" && delta.provinceId !== null ? province(delta.provinceId) : "the whole power"} is taxed`;
+    case "coinage_debase": return `${actorName} ordered the mint to strike the coin with ${delta.stepBps !== null && delta.stepBps > 0 ? "more" : delta.targetSilverBps !== null && delta.stepBps === null ? "a different amount of" : "less"} silver`;
     case "loan_open": return `${actorName} borrowed ${delta.principal} against ${account(delta.borrowerAccountRef)}`;
     case "force_create": return `${actorName} raised ${delta.name} without leave to raise anybody`;
     case "force_modify": return `${actorName} gave orders to ${force(delta.forceRef)}`;

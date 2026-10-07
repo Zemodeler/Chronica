@@ -1,5 +1,6 @@
 import { regionalSummary } from "./regional-summary";
 import { marketSummary, polityMarkets } from "./market-summary";
+import { coinageSummary } from "./coinage";
 import { tradeSummary } from "./trade-summary";
 import { powersDealtWith } from "./far-powers";
 import { powersNamedIn } from "./powers-named";
@@ -175,6 +176,8 @@ export interface WorldSlice {
   readonly markets?: string | null;
   /** Its trade: partners, what it sells and buys, customs, pacts and embargoes, shortages eased or worsened; one line a power, when there is any to say (`trade-summary.ts`). */
   readonly tradeNote?: string | null;
+  /** Its money: the coin, its silver against the standard, price pressure and exchange; one line, only when notable (`coinage.ts`). */
+  readonly coinageNote?: string | null;
   /** Coin a month per thousand men, for whoever can open the power's treasury and the scenario names it. */
   readonly soldierPayPerThousand: number | null;
   readonly military: readonly {
@@ -563,6 +566,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
   // Prices are what anybody in the country knows: no key to the treasury is needed to read them.
   const markets = ownPolity === null ? null : marketSummary(polityMarkets(world).get(ownPolity));
   const tradeNote = ownPolity === null ? null : tradeSummary(world, ownPolity);
+  const coinageNote = ownPolity === null ? null : coinageSummary(world, ownPolity);
   const soldierPayPerThousand = opensTreasury ? world.map.polities.find((polity) => polity.id === ownPolity)?.soldierPayPerThousand ?? null : null;
   const monthlyExpenditure = Math.round(
     world.material.obligations
@@ -1332,6 +1336,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     regional,
     markets,
     tradeNote,
+    coinageNote,
     soldierPayPerThousand,
     military,
     foreignPowers,
@@ -1523,6 +1528,7 @@ export function renderWorldSlice(slice: WorldSlice): string {
         // Said only when it is news: bread at its ordinary price, and no good far from its own, is no line of prompt.
         ...(slice.markets == null ? [] : [slice.markets]),
         ...(slice.tradeNote == null ? [] : [slice.tradeNote]),
+        ...(slice.coinageNote == null ? [] : [slice.coinageNote]),
         ...slice.country.strained.map((province) =>
           slice.country.governs
             ? `${province.name} [${province.id}] — ${province.manpower} men, food ${province.food}/100, order ${province.stability}/100, war damage ${province.warDamage}/100, taxable ${province.taxCapacity}`

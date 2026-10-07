@@ -171,7 +171,9 @@ describe("orchestrator prompt", () => {
     // Raised 79.5k -> 80.2k (2026-10-07): trade between powers (phase D) -- the "embargo" kind, the
     // shared TradeTerms (a customs cap, goods free, goods forbidden) on a pact, an embargo and a trade
     // offer, the "customs" scope of "tax_policy_set", and one sentence of how they work.
-    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(80_200);
+    // Raised 80.2k -> 80.8k (2026-10-07): coinages (phase E) -- "coinage_debase" (a mint strikes the coin
+    // with less silver, or more) in the generated schema, and one clause of how it works.
+    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(80_800);
   });
 });
 
