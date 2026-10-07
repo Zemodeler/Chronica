@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo, useRef, type PointerEvent } from "react";
-import { applyMapOverlayDelta, DynamicMapOverlaySchema, isGeoJsonMapDocument, MapOverlayDeltaSchema, type GeoJsonMap, type DynamicMapOverlay, type AgendaDestination, type MatterFocus, type RoomStates, MAP_CHANGE_KINDS } from "@chronica/shared";
+import { applyMapOverlayDelta, DynamicMapOverlaySchema, isGeoJsonMapDocument, MapOverlayDeltaSchema, type GeoJsonMap, type DynamicMapOverlay, type AgendaDestination, type TradeProposalKind, type MatterFocus, type RoomStates, MAP_CHANGE_KINDS } from "@chronica/shared";
 import type { RoomContents } from "../../../../lib/room-service";
 
 // A map document never changes at its version, so each version is downloaded
@@ -297,6 +297,12 @@ export function GameShell({
   const [lettersSeed, setLettersSeed] = useState<string | null>(null);
   const writeTo = useCallback((polityLabel: string) => {
     setLettersSeed(polityLabel);
+    openSurface("people");
+  }, [openSurface]);
+  /** The treaties' "Propose trade": the tray opens on whoever decides it there, with the proposal form ready. */
+  const [proposeSeed, setProposeSeed] = useState<{ polityLabel: string; kind?: TradeProposalKind | undefined; nonce: number } | null>(null);
+  const proposeTrade = useCallback((polityLabel: string, kind?: TradeProposalKind) => {
+    setProposeSeed((previous) => ({ polityLabel, kind, nonce: (previous?.nonce ?? 0) + 1 }));
     openSurface("people");
   }, [openSurface]);
 
@@ -816,6 +822,7 @@ export function GameShell({
           side={sheetSideFor(roomStyle, "people")}
           openSessionId={openChatSessionId}
           searchSeed={lettersSeed}
+          proposeSeed={proposeSeed}
           directory={room?.sheets?.directory}
           initialContacts={room?.sheets?.contacts}
           onWorldChanged={controller.refresh}
@@ -867,6 +874,7 @@ export function GameShell({
           onClose={closeSurface}
           side={sheetSideFor(roomStyle, "standing")}
           onWriteTo={orderingCharacterId ? writeTo : undefined}
+          onProposeTrade={orderingCharacterId ? proposeTrade : undefined}
           onOpenLetters={playerCharacterId ? () => openSurface("people") : undefined}
         />
       )}

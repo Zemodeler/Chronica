@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import type { ConstitutionReading, LawsReading, StateOffice, StateReading } from "@chronica/shared";
+import type { ConstitutionReading, LawsReading, StateOffice, StateReading, TradeProposalKind } from "@chronica/shared";
 import { Sheet, type SheetSide } from "../../../components/ui/sheet";
 import { Tabs, type TabSection } from "../../../components/ui/tabs";
 import { Era } from "../../../components/ui/era";
@@ -81,7 +81,7 @@ function sentencesByHolding(powers: readonly PowerReading[]): { over: string; sa
   });
 }
 
-export function StandingPanel({ standing, state, constitution, laws, peace, gameId, onChanged, focus, onClose, side, onWriteTo, onOpenLetters }: {
+export function StandingPanel({ standing, state, constitution, laws, peace, gameId, onChanged, focus, onClose, side, onWriteTo, onProposeTrade, onOpenLetters }: {
   readonly standing: Standing | null;
   /** The peace tables his power sits at (`readPeaceTables`). */
   readonly peace?: PeaceTablesView | null | undefined;
@@ -96,6 +96,8 @@ export function StandingPanel({ standing, state, constitution, laws, peace, game
   readonly onClose: () => void;
   readonly side: SheetSide;
   readonly onWriteTo?: ((polityLabel: string) => void) | undefined;
+  /** Put trade to a power in a letter: the tray opens on the one who decides it. */
+  readonly onProposeTrade?: ((polityLabel: string, kind?: TradeProposalKind) => void) | undefined;
   readonly onOpenLetters?: (() => void) | undefined;
 }) {
   // A link inside one page can turn to another: a change to the constitution
@@ -128,7 +130,7 @@ export function StandingPanel({ standing, state, constitution, laws, peace, game
         id: "treaties",
         title: "Treaties",
         marked: state.abroad.powers.some((power) => power.posture === "war" || power.letters.length > 0),
-        content: <TreatiesSheet abroad={state.abroad} peace={peace} gameId={gameId} onChanged={onChanged} onWriteTo={onWriteTo} onOpenLetters={onOpenLetters} />,
+        content: <TreatiesSheet abroad={state.abroad} peace={peace} gameId={gameId} onChanged={onChanged} onWriteTo={onWriteTo} onProposeTrade={onProposeTrade} onOpenLetters={onOpenLetters} />,
       }]
       : []),
     ...(peace != null && gameId !== undefined && (peace.tables.length > 0 || peace.wars.length > 0)

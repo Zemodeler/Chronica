@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { spanInWords, type Abroad, type PolityAgreementKind, type TreatyLine, type TreatyMoment, type TreatyPosture, type TreatyPower, type TreatyTradeTerms } from "@chronica/shared";
+import { spanInWords, type TradeProposalKind, type Abroad, type PolityAgreementKind, type TreatyLine, type TreatyMoment, type TreatyPosture, type TreatyPower, type TreatyTradeTerms } from "@chronica/shared";
 import type { PeaceTablesView } from "@chronica/sim";
 import { Era } from "../../../components/ui/era";
 import { Tabs, type TabSection } from "../../../components/ui/tabs";
@@ -46,7 +46,7 @@ function postureLine(power: TreatyPower, polityLabel: string): string {
   }
 }
 
-export function TreatiesSheet({ abroad, onWriteTo, onOpenLetters, peace, gameId, onChanged }: {
+export function TreatiesSheet({ abroad, onWriteTo, onProposeTrade, onOpenLetters, peace, gameId, onChanged }: {
   readonly abroad: Abroad;
   /** The peace tables his power sits at; with `gameId`, they give a war its tab. */
   readonly peace?: PeaceTablesView | null | undefined;
@@ -54,6 +54,8 @@ export function TreatiesSheet({ abroad, onWriteTo, onOpenLetters, peace, gameId,
   readonly onChanged?: (() => void) | undefined;
   /** Start a letter to them at the desk; absent for those who cannot give orders. */
   readonly onWriteTo?: ((polityLabel: string) => void) | undefined;
+  /** Put trade to them in a letter: a pact, new terms, the lifting of an embargo, or a notice of one. Absent for those who cannot give orders. */
+  readonly onProposeTrade?: ((polityLabel: string, kind?: TradeProposalKind) => void) | undefined;
   readonly onOpenLetters?: (() => void) | undefined;
 }) {
   const polityLabel = abroad.polityLabel ?? "Your power";
@@ -119,6 +121,7 @@ export function TreatiesSheet({ abroad, onWriteTo, onOpenLetters, peace, gameId,
           ask={ask}
           war={peace != null && gameId !== undefined ? <WarTab gameId={gameId} peace={peace} enemyId={chosen.polityId} onChanged={onChanged ?? (() => undefined)} /> : undefined}
           onWriteTo={onWriteTo}
+          onProposeTrade={onProposeTrade}
           onOpenLetters={onOpenLetters}
         />
       )}
@@ -170,16 +173,17 @@ function PowerCard({ power, chosen, onChoose, ask }: {
   );
 }
 
-function Dossier({ power, ask, war, onWriteTo, onOpenLetters }: {
+function Dossier({ power, ask, war, onWriteTo, onProposeTrade, onOpenLetters }: {
   readonly power: TreatyPower;
   readonly ask: Ask;
   /** Where the player is at war with this power: its war tab. */
   readonly war?: ReactNode;
   readonly onWriteTo?: ((polityLabel: string) => void) | undefined;
+  readonly onProposeTrade?: ((polityLabel: string, kind?: TradeProposalKind) => void) | undefined;
   readonly onOpenLetters?: (() => void) | undefined;
 }) {
   const sections: TabSection[] = [
-    { id: "treaties", title: "Treaties", content: <DossierBody power={power} ask={ask} onWriteTo={onWriteTo} onOpenLetters={onOpenLetters} /> },
+    { id: "treaties", title: "Treaties", content: <DossierBody power={power} ask={ask} onWriteTo={onWriteTo} onProposeTrade={onProposeTrade} onOpenLetters={onOpenLetters} /> },
     ...(war !== undefined && power.posture === "war" ? [{ id: "war", title: "War", marked: true, content: war }] : []),
   ];
   return (
@@ -194,10 +198,11 @@ function Dossier({ power, ask, war, onWriteTo, onOpenLetters }: {
   );
 }
 
-function DossierBody({ power, ask, onWriteTo, onOpenLetters }: {
+function DossierBody({ power, ask, onWriteTo, onProposeTrade, onOpenLetters }: {
   readonly power: TreatyPower;
   readonly ask: Ask;
   readonly onWriteTo?: ((polityLabel: string) => void) | undefined;
+  readonly onProposeTrade?: ((polityLabel: string, kind?: TradeProposalKind) => void) | undefined;
   readonly onOpenLetters?: (() => void) | undefined;
 }) {
   return (
@@ -250,6 +255,11 @@ function DossierBody({ power, ask, onWriteTo, onOpenLetters }: {
       {onWriteTo !== undefined && (
         <footer className="dossier__actions">
           <button type="button" className="btn" onClick={() => onWriteTo(power.label)}>Write to {power.label}</button>
+          {onProposeTrade !== undefined && (
+            <button type="button" className="btn" onClick={() => onProposeTrade(power.label, power.lines.some((line) => line.kind === "trade_pact") ? "revise" : undefined)}>
+              {power.lines.some((line) => line.kind === "trade_pact") ? "Propose new terms of trade" : "Propose trade"}
+            </button>
+          )}
         </footer>
       )}
     </>

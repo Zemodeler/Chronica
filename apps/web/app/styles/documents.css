@@ -604,6 +604,15 @@
   .letters-form__choices label { display: flex; align-items: center; gap: .6rem; font-weight: 400; }
   .letters-form__actions { display: flex; justify-content: flex-end; gap: .6rem; }
   .letters-form__error { padding-left: .9rem; border-left: 2px solid var(--seal); color: var(--ink); }
+  /* A proposal of trade in a letter: the terms are ruled fields on the page, who decides it is said first. */
+  .trade-proposal h4 { margin: 0; font: 600 var(--step-1) var(--font-serif); }
+  .trade-proposal__who { margin: 0; color: var(--ink-faded); font: italic 400 var(--step-0) var(--font-serif); }
+  .trade-proposal__terms { display: grid; gap: .5rem; margin: 0; padding: .6rem .8rem; border: 1px solid var(--rule); }
+  .trade-proposal__terms legend { padding: 0 .3rem; color: var(--ink-faded); }
+  .trade-proposal__terms label { display: grid; gap: .2rem; font-weight: 400; }
+  .trade-proposal__terms .trade-proposal__check { display: flex; align-items: center; gap: .5rem; }
+  .trade-proposal__terms [role="group"] { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .25rem .8rem; }
+  .trade-proposal__terms [role="group"] > .mirror__note { grid-column: 1 / -1; }
   .chronicle-entry__threads { margin: .1rem 0 0; color: var(--ink-faded); font: italic 400 var(--step--1) var(--font-serif); }
   /* The mirror among its peers. */
   .mirror__peers { display: grid; gap: .3rem; margin: .5rem 0 0; }

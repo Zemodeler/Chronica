@@ -3,7 +3,8 @@
 import { ConflictingReports } from "./office-insights";
 
 import { useRef, useState, useEffect, useCallback, useMemo, type FormEvent } from "react";
-import type { AwaitingLetter, Correspondence, DirectoryEntry, DirectoryGroup } from "@chronica/shared";
+import type { AwaitingLetter, Correspondence, DirectoryEntry, DirectoryGroup, TradeDesk, TradeProposalKind, TradeProposalRequest } from "@chronica/shared";
+import { TradeProposalForm } from "./trade-proposal";
 import { useWindowState } from "../../../components/ui/window-workspace";
 import type { DirectoryView } from "../../../../lib/directory-service";
 import { Sheet, type SheetSide } from "../../../components/ui/sheet";
@@ -44,6 +45,8 @@ interface ChatPanelProps {
   readonly onOpenSessionConsumed?: () => void;
   /** A name to search the letters for on arrival: the treaties' "Write to them". */
   readonly searchSeed?: string | null;
+  /** The treaties' "Propose trade": open the letter to that power's decider with the proposal form ready. The nonce lets the same power be asked for twice. */
+  readonly proposeSeed?: { readonly polityLabel: string; readonly kind?: TradeProposalKind | undefined; readonly nonce: number } | null;
   /**
    * Reads the game again: a letter is a turn of its own, and the Chronicle
    * and the last report must show it the moment it is written, not after the
@@ -81,7 +84,7 @@ type Reply = "accepted" | "refused" | "countered";
  * the way a history records an exchange, not as chat bubbles. A
  * correspondence reads as the letters themselves, dated.
  */
-export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSessionConsumed, searchSeed, onWorldChanged, directory, initialContacts }: ChatPanelProps) {
+export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSessionConsumed, searchSeed, proposeSeed, onWorldChanged, directory, initialContacts }: ChatPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [contacts, setContacts] = useState<readonly ContactView[]>(initialContacts ?? []);
   // Whether the people have been read yet. "Nobody yet" was shown while they
@@ -90,6 +93,9 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
   const [groups, setGroups] = useState<readonly DirectoryGroup[]>(directory?.groups ?? []);
   const [letters, setLetters] = useState<readonly AwaitingLetter[]>(directory?.letters ?? []);
   const [correspondence, setCorrespondence] = useState<readonly Correspondence[]>(directory?.correspondence ?? []);
+  /** What may be proposed to each power, and who decides it (`readTradeDesk`). */
+  const [trade, setTrade] = useState<TradeDesk | undefined>(directory?.trade);
+  const [proposing, setProposing] = useState<{ readonly kind?: TradeProposalKind | undefined; readonly key: number } | null>(null);
   const [focus, setFocus] = useWindowState<Focus>("letters:focus", { kind: "none" });
   const [letterBody, setLetterBody] = useWindowState(`letters:draft:${focus.kind === "none" ? "new" : focus.id}`, "");
   const [reply, setReply] = useWindowState<Reply>("letters:reply", "countered");
@@ -101,6 +107,16 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
   const [search, setSearch] = useWindowState("letters:search", "");
   useEffect(() => { if (searchSeed) setSearch(searchSeed); }, [searchSeed]);
   const [activeSessionId, setActiveSessionId] = useWindowState<string | null>("letters:session", null);
+  // "Propose trade" on a power's dossier: the tray opens on the person who decides it, with the form ready.
+  useEffect(() => {
+    if (!proposeSeed || trade === undefined) return;
+    const power = trade.powers.find((entry) => entry.label === proposeSeed.polityLabel);
+    if (power?.addressee == null) return;
+    setSearch("");
+    choosePerson({ id: power.addressee.characterId, name: power.addressee.name });
+    setProposing({ kind: proposeSeed.kind, key: proposeSeed.nonce });
+    // One-shot, like the search seed: a new nonce is a new asking.
+  }, [proposeSeed?.nonce]);
   const [messages, setMessages] = useState<readonly MessageView[]>([]);
   const [messageBody, setMessageBody] = useWindowState(`letters:spoken-draft:${activeSessionId ?? "new"}`, "");
   const [sending, setSending] = useState(false);
@@ -164,7 +180,8 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
     try {
       const res = await fetch(`/api/games/${encodeURIComponent(gameId)}/directory`, { cache: "no-store" });
       if (!res.ok) { setDirectoryState((state) => (state === "ready" ? state : "failed")); return; }
-      const data = await res.json() as { groups: DirectoryGroup[]; letters: AwaitingLetter[]; correspondence: Correspondence[] };
+      const data = await res.json() as { groups: DirectoryGroup[]; letters: AwaitingLetter[]; correspondence: Correspondence[]; trade?: TradeDesk };
+      if (data.trade !== undefined) setTrade(data.trade);
       setGroups(data.groups ?? []);
       setLetters(data.letters ?? []);
       setCorrespondence(data.correspondence ?? []);
@@ -205,6 +222,7 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
   useEffect(() => {
     if (directory !== undefined) {
       setGroups(directory.groups); setLetters(directory.letters); setCorrespondence(directory.correspondence); setDirectoryState("ready");
+      if (directory.trade !== undefined) setTrade(directory.trade);
     }
     if (initialContacts !== undefined) setContacts(initialContacts);
   }, [directory, initialContacts]);
@@ -231,7 +249,30 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
     await fetchMessages(sessionId);
   }
 
+  /** A proposal of trade goes out as a letter of its own, with the terms as the engine reads them. */
+  async function sendProposal(request: TradeProposalRequest, words: string) {
+    if (correspondentId === null || posting) return;
+    setPosting(true);
+    setLetterError(null);
+    setLetterSent(null);
+    try {
+      const res = await fetch(`/api/games/${encodeURIComponent(gameId)}/letters`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ toCharacterId: correspondentId, body: words, proposal: request }),
+      });
+      const data = await res.json().catch(() => ({})) as { error?: string };
+      if (!res.ok) { setLetterError(data.error ?? "The letter did not go. Try again."); return; }
+      setLetterSent(`Your proposal is on its way to ${correspondentName}. Nothing is agreed until it is answered.`);
+      setProposing(null);
+      void Promise.allSettled([fetchDirectory(), onWorldChanged?.()]);
+    } catch {
+      setLetterError("The letter did not go. Try again.");
+    } finally {
+      setPosting(false);
+    }
+  }
+
   function freshPage() {
+    setProposing(null);
     setLetterError(null);
     setLetterSent(null);
     setReply("countered");
@@ -695,6 +736,33 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
                 )}
               </form>
             )}
+
+            {letter === null && focus.kind === "person" && (() => {
+              // The power this person serves, as the desk knows it: whoever decides for it, or anyone of it the page lists.
+              const power = trade?.powers.find((entry) => entry.addressee?.characterId === focus.id)
+                ?? (focused?.polityLabel == null ? undefined : trade?.powers.find((entry) => entry.label === focused.polityLabel));
+              if (power === undefined) return null;
+              return proposing === null ? (
+                <div className="letters__compose letters__compose--letter">
+                  <button type="button" className="word-button" onClick={() => setProposing({ key: Date.now() })}>Put trade to {power.label}</button>
+                </div>
+              ) : (
+                <div className="letters__compose letters__compose--letter">
+                  <TradeProposalForm
+                    key={`${power.polityId}:${proposing.key}`}
+                    power={power}
+                    toId={focus.id}
+                    toName={correspondentName}
+                    initialKind={proposing.kind}
+                    posting={posting}
+                    error={letterError}
+                    sent={letterSent}
+                    onSend={(request, words) => { void sendProposal(request, words); }}
+                    onWriteTo={(addressee) => { choosePerson({ id: addressee.characterId, name: addressee.name }); setProposing({ key: Date.now() }); }}
+                  />
+                </div>
+              );
+            })()}
 
             {letter === null && byLetter && (
               <form className="letters__compose letters__compose--letter" onSubmit={(event) => { void sendLetter(event); }}>

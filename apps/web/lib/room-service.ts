@@ -6,6 +6,7 @@ import {
   FactSchema,
   lettersAwaitingYou,
   lettersDirectory,
+  readTradeDesk,
   correspondenceOf,
   orderPartStatus,
   orderPartLabel,
@@ -225,6 +226,7 @@ export async function getRoomContents(gameId: string): Promise<RoomContents | nu
           groups: lettersDirectory({ world, viewerId: characterId, conversationPartnerIds: contacts.filter((contact) => !contact.isGroup).map((contact) => contact.npcCharacterId), offices, clock }),
           letters: lettersAwaitingYou(world, characterId, offices, clock),
           correspondence: correspondenceOf(world, characterId, clock),
+          trade: readTradeDesk(world, characterId, offices),
         },
         contacts,
         orderHistory: world.orders.filter((order) => order.actorCharacterId === characterId).slice(-60).reverse().map((order) => ({

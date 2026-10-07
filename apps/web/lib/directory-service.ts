@@ -1,6 +1,6 @@
 import "server-only";
 
-import { correspondenceOf, lettersAwaitingYou, lettersDirectory, type AwaitingLetter, type Correspondence, type DirectoryGroup } from "@chronica/shared";
+import { correspondenceOf, lettersAwaitingYou, lettersDirectory, readTradeDesk, type AwaitingLetter, type Correspondence, type DirectoryGroup, type TradeDesk } from "@chronica/shared";
 import { getContactsView } from "./dialogue-service";
 import { withPlayerWorld } from "./player-world";
 
@@ -13,6 +13,8 @@ export interface DirectoryView {
   readonly groups: readonly DirectoryGroup[];
   readonly letters: readonly AwaitingLetter[];
   readonly correspondence: readonly Correspondence[];
+  /** What may be proposed to each power in a letter, and to whom it goes (`readTradeDesk`). */
+  readonly trade?: TradeDesk;
 }
 
 export async function getLettersDirectory(gameId: string): Promise<DirectoryView | null> {
@@ -30,6 +32,7 @@ export async function getLettersDirectory(gameId: string): Promise<DirectoryView
       }),
       letters: lettersAwaitingYou(world, characterId, offices, view.scenarioClock),
       correspondence: correspondenceOf(world, characterId, view.scenarioClock),
+      trade: readTradeDesk(world, characterId, offices),
     };
   });
 }

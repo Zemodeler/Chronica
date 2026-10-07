@@ -1,7 +1,7 @@
 import "server-only";
 
 import { WorldRevisionConflictError, commitBurst, factRowOf, failBurst, findRunningBurst, getWorldView, instantSortKeyOf, startBurst } from "@chronica/db";
-import { inTheSameRegion, lettersAwaitingYou, offeredAgreementKinds, peaceOfferMetadata, whoMayBeReached, type Office, type WorldDelta, type WorldState } from "@chronica/shared";
+import { PROPOSAL_REPLY_DAYS, composeProposal, inTheSameRegion, lettersAwaitingYou, offeredAgreementKinds, peaceOfferMetadata, readTradeDesk, whoMayBeReached, type Office, type TradeProposalRequest, type WorldDelta, type WorldState } from "@chronica/shared";
 import { applyDeltas, createIdFactory, materializeFacts } from "@chronica/sim";
 import { livenessAt } from "./burst-status";
 import { resolveContext } from "./simulation-service";
@@ -55,12 +55,15 @@ export interface NewLetter {
   readonly toCharacterId: string;
   readonly subject?: string | undefined;
   readonly body: string;
+  /** Trade put in the letter: a pact, its revision, the lifting of an embargo, or a notice of one (`trade-desk.ts`). */
+  readonly proposal?: TradeProposalRequest | undefined;
 }
 
 /** A letter to somebody out of the player's region. */
 export async function writeLetter(gameId: string, letter: NewLetter): Promise<LetterOutcome> {
   const body = letter.body.trim();
-  if (body.length === 0 || body.length > BODY_MAX) return refuse(400, `A letter must be between 1 and ${BODY_MAX} characters.`);
+  // A proposal says what it proposes in its terms; the writer's own words with it are his to add.
+  if ((body.length === 0 && letter.proposal === undefined) || body.length > BODY_MAX) return refuse(400, `A letter must be between 1 and ${BODY_MAX} characters.`);
   return withLetterBurst(gameId, (world, characterId, offices) => {
     const writer = world.characters.find((character) => character.id === characterId);
     const reader = world.characters.find((character) => character.id === letter.toCharacterId);
@@ -70,7 +73,7 @@ export async function writeLetter(gameId: string, letter: NewLetter): Promise<Le
     // Anybody may be written to; whether they answer is their business, in
     // character. Only somebody here who would give you a hearing is spoken
     // with instead.
-    if (inTheSameRegion(writer, reader)
+    if (letter.proposal === undefined && inTheSameRegion(writer, reader)
       && whoMayBeReached({ world, offices, reacherId: characterId, targetId: reader.id, channel: "correspondence", orderAttempts: world.orderAttempts }).reachable) {
       return refuse(409, `${reader.name} is here. Speak with them instead.`);
     }
@@ -80,6 +83,7 @@ export async function writeLetter(gameId: string, letter: NewLetter): Promise<Le
     // The last letter between them, so the world reads this one as the next in the thread.
     const previous = world.diplomacy.filter((message) =>
       (message.fromCharacterId === reader.id && message.toCharacterId === characterId) || (message.fromCharacterId === characterId && message.toCharacterId === reader.id)).at(-1);
+    if (letter.proposal !== undefined) return proposalAct(world, offices, writer, reader, fromPolityId, toPolityId, previous?.id ?? null, letter.proposal, body);
     const subject = subjectOf(letter.subject, body);
     return {
       deltas: [{
@@ -106,6 +110,50 @@ export async function writeLetter(gameId: string, letter: NewLetter): Promise<Le
       subjectIds: [writer.id, reader.id],
     };
   });
+}
+
+/**
+ * Trade put in a letter. What may be proposed, and to whom it goes, is the desk's to say (`readTradeDesk`), the same reading the
+ * sheet drew the form from; the letter is sent to the person the writer chose, and the engine stamps who in fact decides it
+ * (`decidedBy`), so a letter to the wrong man is answered by pointing to the right one. Nothing is agreed by sending.
+ */
+function proposalAct(
+  world: WorldState, offices: readonly Office[], writer: WorldState["characters"][number], reader: WorldState["characters"][number],
+  fromPolityId: string, toPolityId: string, previousId: string | null, request: TradeProposalRequest, words: string,
+): LetterAct | LetterOutcome {
+  const desk = readTradeDesk(world, writer.id, offices);
+  const power = desk.powers.find((entry) => entry.polityId === toPolityId);
+  if (power === undefined) return refuse(409, `You have no dealings with the power ${reader.name} serves, and no way to put a pact to it.`);
+  if (!desk.speaksForUs.yes) return refuse(403, desk.speaksForUs.why ?? "You do not treat in your government's name.");
+  const allowed = power.proposals[request.kind];
+  if (!allowed.allowed) return refuse(409, allowed.why ?? "That cannot be proposed now.");
+  const { subject, terms, letterKind } = composeProposal(request, power.label, words);
+  const waiting = world.diplomacy.find((message) => message.status === "awaiting_reply" && message.fromCharacterId === writer.id && message.toPolityId === toPolityId
+    && message.kind === letterKind && JSON.stringify(message.trade ?? null) === JSON.stringify(request.trade));
+  if (waiting !== undefined) return refuse(409, "A letter with these very terms is still waiting on its answer. Change the terms, or wait for it.");
+  return {
+    deltas: [{
+      op: "diplomatic_message_send",
+      localId: "proposal",
+      kind: letterKind,
+      fromPolityId,
+      fromCharacterRef: writer.id,
+      toPolityId,
+      toCharacterRef: reader.id,
+      subject,
+      terms,
+      replyWithinDays: PROPOSAL_REPLY_DAYS[request.kind],
+      inReplyToRef: previousId,
+      visibility: "polity",
+      trade: request.trade,
+      ...(request.forDays === null ? {} : { forDays: request.forDays }),
+      reason: `${writer.name} puts it in writing.`,
+    }],
+    orderText: `Write to ${reader.name} (${request.kind}): ${terms}`,
+    title: `${writer.name} writes to ${reader.name} of ${power.label}`,
+    body: `"${subject}" -- ${terms}`,
+    subjectIds: [writer.id, reader.id],
+  };
 }
 
 export interface LetterAnswer {
