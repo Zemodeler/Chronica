@@ -1,0 +1,151 @@
+# Gentes: the noble families of 270 BCE
+
+The question: do Roman houses exist, actual noble families as they had historically? Before this work they did
+not. What existed was a number (`Character.dynastyId`, always null at the opening), an order read off the
+name (`ordo.ts`'s list of twenty nomina), eleven seeded households that were a man and his wife and children
+with no name of their own, and the word "house" meaning two things (a noble family, and a trading firm:
+`MerchantHouse`). This plan makes the family a thing in the world: a *gens* (Rome) or a house (Carthage, the
+kings), with a name, branches, a head, honours, rites, feuds and marriages, and with consequences in
+elections, marriage, the Senate, inheritance and adoption.
+
+**Words.** In code and in everything the player or a model reads: *gens*, *gentes*, *stirps* (a branch, named
+by its cognomen), *nobilitas*, *novus homo*, *imagines*, *sacra*, *princeps gentis*. "The house of ..." is used
+only for a noble family or a royal house. A trading firm is a "firm" or "company" in new text (the code's
+`MerchantHouse` keeps its name).
+
+## S1. Sources and confidence
+
+| What | Source | Confidence |
+|---|---|---|
+| Consuls 366 to 270 BCE | https://en.wikipedia.org/wiki/List_of_Roman_consuls (the table follows Broughton's *Magistrates of the Roman Republic* and the Fasti Capitolini; cross-check https://en.wikipedia.org/wiki/Fasti_Capitolini). The four "dictator years" 333, 324, 309, 301 are left out, as modern editors do. Where Wikipedia's text left a name incomplete (328, 351, 286) the Livy/Broughton reading is used. | High for 300 to 270; medium before 300 (the early lists are annalistic and some cognomina are doubtful) |
+| Censors 300 to 265 | https://en.wikipedia.org/wiki/List_of_censors_of_the_Roman_Republic (Broughton). 289 and 283 carry the doubt the table notes. | Medium to high |
+| Patrician and plebeian gentes, their branches (stirpes) | https://en.wikipedia.org/wiki/List_of_Roman_gentes and the article for each gens; Broughton's Index | High for the order of a gens; medium for which branch a given man belonged to |
+| Plebeian consulship, priesthoods open to the plebs | Lex Licinia Sextia 367, lex Ogulnia 300 (Livy 10.6-9); one consul and one censor a year/lustrum plebeian from 342 | High |
+| Adoption, adrogatio, the curiate law | Gaius, *Institutes* 1.97-107; Gellius 5.19 (the pontifices inquire; the adopter must be older than the adoptee by the age of puberty and past having children of his own) | High on the form; the 270 practice is inferred from later examples |
+| Naming (praenomen, nomen, cognomen, filiation, women named by the nomen, "Maior/Minor") | Salway, "What's in a Name?" JRS 84 (1994); https://en.wikipedia.org/wiki/Roman_naming_conventions | High |
+| Imagines, funeral rites, ius imaginum | Polybius 6.53; Pliny, *NH* 35.6-8 | High (the right belonged to those whose ancestors held a curule office) |
+| Nobilitas | Gelzer, *The Roman Nobility*; Hopkins and Burton, "Ambition and Withdrawal"; the term proper is later (Livy and Cicero use it for the third and second centuries) | The concept is sound for 270; the statistics are of the later Republic and are only a guide |
+| Hereditary sacra | Cicero, *De Legibus* 2.46-53 (sacra private, the heir carries them); Cato in Gellius; the rex sacrorum and the flamines were patrician by law | High |
+| Carthage's Barcids, Magonids, Hannonids | https://en.wikipedia.org/wiki/Barcid ; https://en.wikipedia.org/wiki/Magonids (ruled c. 550 to 340, ended by a failed coup); Hanno the Great (4th c.) and the 3rd-century Hanno of the landed party (Polybius, Appian). Hamilcar Barca b. c. 275. The sources do not name his father. | The Barcid name and Hamilcar high; the head of the house in 270 is invented; the Magonid and Hannonid lines in 270 are a reconstruction, low |
+| Hiero II's house | https://en.wikipedia.org/wiki/Hiero_II_of_Syracuse : an illegitimate son of the noble Hierocles who claimed descent from Gelon, b. c. 308; married Philistis daughter of Leptines (Polybius 1.9); children Gelon II (co-ruler to 216), Damarata, Heraclea; Hieronymus is a grandson. | High on the family; no child is known to be born by 270, so none is seeded |
+| Ptolemies | https://en.wikipedia.org/wiki/Ptolemy_II_Philadelphus , https://en.wikipedia.org/wiki/Arsinoe_II_of_Egypt : Arsinoe II married her brother c. 276-273 and died in July 270 or 268; the future Ptolemy III b. c. 284 son of Arsinoe I; Magas of Cyrene was Ptolemy's half-brother by their mother | Medium (Arsinoe's death date is disputed) |
+| Antigonids | https://en.wikipedia.org/wiki/Antigonus_II_Gonatas : Antigonus m. Phila, daughter of Seleucus I, c. 276; their son Demetrius II b. c. 275 | Medium |
+| Seleucids | https://en.wikipedia.org/wiki/Antiochus_I_Soter : m. Stratonice; Antiochus II b. c. 287; an elder son Seleucus was co-regent and was executed c. 267-266 | Medium for Antiochus II; low for Seleucus (not seeded) |
+
+The seed list below marks each person **H** (the sources name him and the age is within a few years), **M**
+(named, age or kinship inferred), **L** (invented or very doubtful). Invented kinswomen and sons are marked
+in their `creationReason` as the sources do not name them.
+
+### What the opening does not do
+
+* Publius Cornelius Scipio Africanus is **not** seeded (b. 236); nor Hannibal (b. 247), Marcus Claudius Marcellus
+  (b. 268), Cato (b. 234), Aemilius Paullus (b. c. 229), Gelon II (b. c. 266), Hieronymus (b. c. 231), Ptolemy IV,
+  Antiochus III. Of the Scipiones only Barbatus, his son Lucius (cos. 259) and Gnaeus Scipio Asina (cos. 260)
+  live in 270; the Africanus line grows from Lucius's house by births in play.
+* Appius Claudius Caecus is not alive in 270 (his death is put c. 273 by some, and the sources are silent); his sons
+  Appius Claudius Russus and Publius Claudius Pulcher are, and the scenario already has Russus and "Claudia".
+* No Scipio Barbatus epitaph, no Fabian "Cunctator" legend: Quintus Fabius Maximus Verrucosus is a boy of ten.
+
+## Design
+
+`world.gentes` is a list of records; `Character.dynastyId` is the id of the gens (and is real: set at the
+opening, copied at birth, rewritten by adoption). `Character.praenomen/nomen/cognomen` are optional fields;
+the ordo of a Roman is read from the gens record first, then the nomen, and the old name-list stays only as
+the last fallback.
+
+* **Gens**: `id` (`gens-cornelia`), `kind` (`noble` | `royal`), `nomen`, `plural` ("the Cornelii"), `polityId`,
+  `ordo`, `stirpes` (cognomen, the branch), `honours` (every consulship, censorship and dictatorship the gens
+  has held, with the man's name, his branch and the year), `imagines`, `sacra` (named hereditary rites),
+  `tomb`, `feuds`, `alliances`, `princepsId`, `dignitasBps`, `keptAtStep`.
+* **Nobilitas.** A man is a *nobilis* if his own branch has a consul among its forefathers or he is one himself
+  (the count of consulships in his stirps), a lesser noble if only another branch of his gens has, and a
+  *novus homo* if nobody of his gens ever sat in the curule chair. The count feeds the electors' reckoning of a man
+  (`candidateScore`), the dowries and the willingness to marry, the size of his clientela, and his gens's dignitas.
+* **Dignitas** of a gens: its first man's standing, a quarter of every other living member's, and a
+  hundred and fifty points for each consulship, capped at the scale.
+* **Alliances** are the marriages between gentes (the pair, the day, a strength that fades and is renewed by the next
+  match), **feuds** are inherited grudges (made from the relations of the living; they outlast those who made them).
+* **Loyalty.** Each gens has one group of the *household* kind and every member a membership in it, with a loyalty;
+  in a division the seats of one gens lean together, the princeps counting double, and a feud turns a
+  seat against a motion sponsored by the other side, both bounded.
+* **Adoption** (`sim/adoption.ts`, one helper; the merchant firms' succession uses the same family, social and contract
+  links): the adoptee takes the adopter's praenomen, nomen and cognomen and keeps his old nomen as an *-ianus*
+  cognomen (Publius Cornelius Scipio Aemilianus); he enters the gens, its sacra and its imagines, and inherits.
+  A patrician gens takes only a patrician (the road from plebeian to patrician by adoption does not exist in this age);
+  the adopter must be a grown man, at least eighteen years older, with no living son (adrogatio), and a
+  patrician adoption needs a living pontifex maximus to inquire.
+* **Sacra and priesthoods**: the rex sacrorum, the flamines and the Salii are patrician by birth; the pontiffs and augurs
+  are open to both orders since 300 with reserved places. Where a gens keeps sacra gentilicia, the head (princeps)
+  carries them and the rites pass with the estate; a gens without a living man loses them.
+
+## Roster (S3; as built is at the foot)
+
+The existing characters are linked to gentes (dynastyId set) and the missing prominent living members are
+added. Ages are for 270. "cons." is the consulship's year (BCE). Existing characters keep their ages.
+
+| Gens | Stirps | Person | Age | Order | Honours by 270 / later | Conf |
+|---|---|---|---|---|---|---|
+| Cornelia | Blasio | Gnaeus Cornelius Blasio (existing) | 42 | pat. | cos. 270, 257; cens. 265 | H |
+| Cornelia | Arvina | Publius Cornelius Arvina (existing) | 58 | pat. | cos. 306, 288; cens. 294 | H (age is the scenario's) |
+| Cornelia | Rufinus | Publius Cornelius Rufinus | 66 | pat. | cos. 290, 277; expelled from the Senate 275 | M |
+| Cornelia | Lentulus | Lucius Cornelius Lentulus Caudinus | 55 | pat. | cos. 275 | M |
+| Cornelia | Merenda | Servius Cornelius Merenda | 50 | pat. | cos. 274 | M |
+| Cornelia | Dolabella | Publius Cornelius Dolabella | 60 | pat. | cos. 283 | M |
+| Cornelia | Scipio | Lucius Cornelius Scipio Barbatus | 67 | pat. | cos. 298; cens. 280 | M (alive in 270 by the lack of any report of his death) |
+| Cornelia | Scipio | Lucius Cornelius Scipio, his son | 38 | pat. | cos. 259; cens. 258 | M |
+| Cornelia | Scipio Asina | Gnaeus Cornelius Scipio Asina | 33 | pat. | cos. 260, 254 | M |
+| Fabia | Maximus Gurges | Quintus Fabius Maximus Gurges (existing) | 50 | pat. | cos. 292, 276, 265 | H |
+| Fabia | Maximus | Quintus Fabius Maximus Verrucosus | 10 | pat. | cos. 233 and after (born later in his career) | M |
+| Fabia | Pictor | Gaius, Numerius Fabius Pictor (existing) and the historian | 41, 30, 1 | pat. | cos. 269, 266 | H |
+| Fabia | Licinus | Gaius Fabius Licinus | 50 | pat. | cos. 273 | M |
+| Valeria | Laevinus | Publius Valerius Laevinus (existing) | 52 | pat. | cos. 280 | H |
+| Valeria | Maximus Messalla | Manius Valerius Maximus Messalla (existing, named Marcus there) | 44 | pat. | cos. 263 | H |
+| Valeria | Flaccus | Lucius Valerius Flaccus | 35 | pat. | cos. 261 | M |
+| Claudia | Canina | Gaius Claudius Canina (existing) | 50 | pat. (the old list made him plebeian: wrong) | cos. 285, 273 | H |
+| Claudia | Pulcher (Caecus's sons) | Appius Claudius Russus (existing), Appius Claudius Caudex, Publius Claudius Pulcher | 39, 35, 20 | pat. | cos. 268, 264, 249 | M, L for Caudex's and Pulcher's kinship |
+| Aemilia | Papus | Quintus Aemilius Papus (existing), his son Lucius | 62, 24 | pat. | cos. 282, 278; cens. 275 | H |
+| Aemilia | Barbula | Lucius Aemilius Barbula (existing) | 53 | pat. | cos. 281; cens. 269 | H |
+| Aemilia | Lepidus | Marcus Aemilius Lepidus | 55 | pat. | cos. 285 | M |
+| Manlia | Vulso | Lucius Manlius Vulso Longus | 35 | pat. | cos. 256, 250 | M |
+| Manlia | Torquatus | Titus Manlius Torquatus | 25 | pat. | cos. 235, 224 | L (age) |
+| Postumia | Megellus | Lucius Postumius Megellus (existing) | 64 | pat. | cos. 305, 294, 291, 262 | H |
+| Papiria | Cursor | Lucius Papirius Cursor (existing) | 52 | pat. | cos. 272 | H |
+| Sulpicia | Paterculus | Gaius Sulpicius Paterculus | 30 | pat. | cos. 258 | M |
+| Quinctia | Claudus | Gaius Quinctius Claudus | 50 | pat. | cos. 271 | M |
+| Servilia | Tucca | Gaius Servilius Tucca | 55 | pat. | cos. 284 | M |
+| Nautia | Rutilus | Gaius Nautius Rutilus | 62 | pat. | cos. 287 | M |
+| Julia | Libo | Lucius Julius Libo (existing) | 31 | pat. | cos. 267 | H |
+| Caecilia | Metellus | Lucius Caecilius Metellus | 20 | pleb. | cos. 251, 247 (his father Denter fell at Arretium, cos. 284); the gens's first consul is 284 | M |
+| Genucia | Clepsina | Gaius Genucius Clepsina, Lucius Genucius Clepsina (existing) | 45, 50 | pleb. | cos. 276, 270; 271 | H |
+| Decia | Mus | Publius Decius Mus (existing) | 48 | pleb. | cos. 279 (the gens: 340, 312, 308, 297, 295, 279) | H |
+| Fulvia | Flaccus | Marcus Fulvius Flaccus (existing) | 37 | pleb. | cos. 264 | H |
+| Atilia | Regulus | Marcus Atilius Regulus (existing) | 32 | pleb. | cos. 267, 256 | H |
+| Sempronia | Sophus | Publius Sempronius Sophus (existing) | 41 | pleb. | cos. 268 | H |
+| Marcia | Rutilus / Philippus | Gaius Marcius Rutilus, Quintus Marcius Philippus (existing) | 50, 50 | pleb. | cos. 281; cens. 269 | M (the scenario gives Rutilus fifty) |
+| Junia | Brutus / Pera | Decimus Junius Pera (existing), Gaius Junius Bubulcus Brutus | 31, 55 | pleb. | cos. 266; 291/277 | M |
+| Curia | Dentatus | Manius Curius Dentatus (existing) | 60 | pleb. | cos. 290, 275, 274; cens. 272; novus homo | H |
+| Fabricia | Luscinus | Gaius Fabricius Luscinus (existing) | 58 | pleb. | cos. 282, 278; cens. 275; novus homo | H |
+| Coruncania | | Tiberius Coruncanius (existing) | 50 | pleb. | cos. 280; first plebeian pontifex maximus (in the scenario at the opening) | H |
+| Mamilia | Vitulus | Lucius Mamilius Vitulus (existing), Quintus Mamilius Vitulus | 33, 33 | pleb. | cos. 265, 262 | M |
+| Otacilia | Crassus | Manius, Titus Otacilius Crassus (existing) | 38, 29 | pleb. | cos. 263, 261 | H |
+| Aquillia | Florus | Gaius Aquillius Florus | 30 | pleb. | cos. 259 | M |
+| Ogulnia | Gallus | Quintus Ogulnius Gallus (existing) | 47 | pleb. | cos. 269 | H |
+| Others | | the remaining existing Romans (Duilius, Livius, Lutatius, Aurelius Cotta, Carvilius, Caedicius, Fundanius...) | | | | by name |
+
+Carthage and the kings (all `Gens` with the same structure; no order):
+
+| House | Kind | Head and members | Notes | Conf |
+|---|---|---|---|---|
+| Barcids | noble | Hannibal the Barcid (existing, invented head), Hamilcar Barca (age 5), Imilce, Arisha | Name "the lightning": Hamilcar b. c. 275 | H name, L head |
+| Hannonids | noble | Hanno of Carthage (existing), Arishat, Batbaal, Bomilcar son of Hanno | the landed, African party of the 3rd century | M |
+| Gisgonids | noble | Hannibal Gisco (existing), Elishat, Sophonba; the "son of Gisco" men | Hannibal son of Gisco commanded at Agrigentum 262 | M |
+| Magonids | noble | Mago the Elder (existing) | the old ruling line (c. 550-340) fallen to a family of the Council | L |
+| Hieronids | royal | Hieron II, Philistis | Claims the Deinomenid line of Gelon; children are born after 270 | H |
+| Leptinids | noble | Leptines of Syracuse | Hiero's father-in-law | H |
+| Ptolemies (Lagids) | royal | Ptolemy II (existing), Arsinoe II, the heir Ptolemy (III), Magas of Cyrene (existing) | | M |
+| Antigonids | royal | Antigonus Gonatas (existing), Phila, Demetrius (II), heir | | M |
+| Seleucids | royal | Antiochus I (existing), Stratonice, Antiochus (II) | the co-regent Seleucus is not seeded | M |
+
+## As built
+
+(Filled in below as each stage lands.)

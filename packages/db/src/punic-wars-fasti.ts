@@ -1,0 +1,126 @@
+/**
+ * The consuls of Rome from 366 to 270 BCE, year by year, as the fasti give them.
+ *
+ * Who held a consulship before the opening is what makes a man a nobilis (his
+ * gens, or his own branch of it, has a consul to its name) or a novus homo
+ * (nobody of his name has sat in the curule chair). The list is the Fasti
+ * Capitolini as Broughton's Magistrates of the Roman Republic reads them, in
+ * the table kept on Wikipedia ("List of Roman consuls", which cites Broughton
+ * and the Chronograph of 354); the four 'dictator years' (333, 324, 309, 301)
+ * the later annalists inserted are left out, as the fasti's modern editors
+ * leave them. A name is given as the praenomen, nomen and cognomen the
+ * sources use; the repeated consulships of one man are each listed.
+ * docs/plans/gentes.md has the sources and the confidence.
+ */
+export const CONSULS_366_TO_270: readonly (readonly [number, readonly [string, string]])[] = [
+  [366, ["Lucius Aemilius Mamercinus","Lucius Sextius Sextinus Lateranus"]],
+  [365, ["Lucius Genucius Aventinensis","Quintus Servilius Ahala"]],
+  [364, ["Gaius Sulpicius Peticus","Gaius Licinius Calvus"]],
+  [363, ["Gnaeus Genucius Aventinensis","Lucius Aemilius Mamercinus"]],
+  [362, ["Quintus Servilius Ahala","Lucius Genucius Aventinensis"]],
+  [361, ["Gaius Licinius Stolo","Gaius Sulpicius Peticus"]],
+  [360, ["Marcus Fabius Ambustus","Gaius Poetelius Libo Visolus"]],
+  [359, ["Marcus Popillius Laenas","Gnaeus Manlius Capitolinus Imperiosus"]],
+  [358, ["Gaius Fabius Ambustus","Gaius Plautius Proculus"]],
+  [357, ["Gaius Marcius Rutilus","Gnaeus Manlius Capitolinus Imperiosus II"]],
+  [356, ["Marcus Fabius Ambustus","Marcus Popillius Laenas"]],
+  [355, ["Gaius Sulpicius Peticus","Marcus Valerius Poplicola"]],
+  [354, ["Marcus Fabius Ambustus","Titus Quinctius Poenus Capitolinus Crispinus"]],
+  [353, ["Gaius Sulpicius Peticus","Marcus Valerius Poplicola"]],
+  [352, ["Publius Valerius Poplicola","Gaius Marcius Rutilus"]],
+  [351, ["Gaius Sulpicius Peticus","Titus Quinctius Poenus"]],
+  [350, ["Marcus Popillius Laenas","Lucius Cornelius Scipio"]],
+  [349, ["Lucius Furius Camillus","Appius Claudius Crassus Inregillensis"]],
+  [348, ["Marcus Valerius Corvus","Marcus Popillius Laenas"]],
+  [347, ["Gaius Plautius Venno","Titus Manlius Imperiosus Torquatus"]],
+  [346, ["Marcus Valerius Corvus","Gaius Poetelius Libo Visolus"]],
+  [345, ["Marcus Fabius Dorsuo","Servius Sulpicius Camerinus Rufus"]],
+  [344, ["Gaius Marcius Rutilus","Titus Manlius Imperiosus Torquatus"]],
+  [343, ["Marcus Valerius Corvus","Aulus Cornelius Cossus Arvina"]],
+  [342, ["Quintus Servilius Ahala","Gaius Marcius Rutilus"]],
+  [341, ["Gaius Plautius Venno","Lucius Aemilius Mamercinus Privernas"]],
+  [340, ["Titus Manlius Imperiosus Torquatus","Publius Decius Mus"]],
+  [339, ["Tiberius Aemilius Mamercinus","Quintus Publilius Philo"]],
+  [338, ["Lucius Furius Camillus","Gaius Maenius"]],
+  [337, ["Gaius Sulpicius Longus","Publius Aelius Paetus"]],
+  [336, ["Lucius Papirius Crassus","Kaeso Duilius"]],
+  [335, ["Marcus Atilius Regulus Calenus","Marcus Valerius Corvus"]],
+  [334, ["Spurius Postumius Albinus Caudinus","Titus Veturius Calvinus"]],
+  [332, ["Gnaeus Domitius Calvinus","Aulus Cornelius Cossus Arvina"]],
+  [331, ["Gaius Valerius Potitus","Marcus Claudius Marcellus"]],
+  [330, ["Lucius Papirius Crassus","Lucius Plautius Venno"]],
+  [329, ["Lucius Aemilius Mamercinus Privernas","Gaius Plautius Decianus"]],
+  [328, ["Publius Plautius Proculus","Publius Cornelius Scapula"]],
+  [327, ["Lucius Cornelius Lentulus","Quintus Publilius Philo"]],
+  [326, ["Gaius Poetelius Libo Visolus","Lucius Papirius Cursor"]],
+  [325, ["Lucius Furius Camillus","Decimus Junius Brutus Scaeva"]],
+  [323, ["Gaius Sulpicius Longus","Quintus Aulius Cerretanus"]],
+  [322, ["Quintus Fabius Maximus Rullianus","Lucius Fulvius Curvus"]],
+  [321, ["Titus Veturius Calvinus","Spurius Postumius Albinus Caudinus"]],
+  [320, ["Quintus Publilius Philo","Lucius Papirius Cursor"]],
+  [319, ["Lucius Papirius Cursor","Quintus Aulius Cerretanus"]],
+  [318, ["Marcus Folius Flaccinator","Lucius Plautius Venno"]],
+  [317, ["Gaius Junius Bubulcus Brutus","Quintus Aemilius Barbula"]],
+  [316, ["Spurius Nautius Rutilus","Marcus Popillius Laenas"]],
+  [315, ["Lucius Papirius Cursor","Quintus Publilius Philo"]],
+  [314, ["Marcus Poetelius Libo","Gaius Sulpicius Longus"]],
+  [313, ["Lucius Papirius Cursor","Gaius Junius Bubulcus Brutus"]],
+  [312, ["Marcus Valerius Maximus Corvus","Publius Decius Mus"]],
+  [311, ["Gaius Junius Bubulcus Brutus","Quintus Aemilius Barbula"]],
+  [310, ["Quintus Fabius Maximus Rullianus","Gaius Marcius Rutilus Censorinus"]],
+  [308, ["Publius Decius Mus","Quintus Fabius Maximus Rullianus"]],
+  [307, ["Appius Claudius Caecus","Lucius Volumnius Flamma Violens"]],
+  [306, ["Quintus Marcius Tremulus","Publius Cornelius Arvina"]],
+  [305, ["Lucius Postumius Megellus","Tiberius Minucius Augurinus"]],
+  [304, ["Publius Sempronius Sophus","Publius Sulpicius Saverrius"]],
+  [303, ["Servius Cornelius Lentulus","Lucius Genucius Aventinensis"]],
+  [302, ["Marcus Livius Denter","Marcus Aemilius Paullus"]],
+  [300, ["Marcus Valerius Corvus","Quintus Appuleius Pansa"]],
+  [299, ["Marcus Fulvius Paetinus","Titus Manlius Torquatus"]],
+  [298, ["Lucius Cornelius Scipio Barbatus","Gnaeus Fulvius Maximus Centumalus"]],
+  [297, ["Quintus Fabius Maximus Rullianus","Publius Decius Mus"]],
+  [296, ["Lucius Volumnius Flamma Violens","Appius Claudius Caecus"]],
+  [295, ["Quintus Fabius Maximus Rullianus","Publius Decius Mus"]],
+  [294, ["Lucius Postumius Megellus","Marcus Atilius Regulus"]],
+  [293, ["Lucius Papirius Cursor","Spurius Carvilius Maximus"]],
+  [292, ["Quintus Fabius Maximus Gurges","Decimus Junius Brutus Scaeva"]],
+  [291, ["Lucius Postumius Megellus","Gaius Junius Bubulcus Brutus"]],
+  [290, ["Publius Cornelius Rufinus","Manius Curius Dentatus"]],
+  [289, ["Marcus Valerius Maximus Corvinus","Quintus Caedicius Noctua"]],
+  [288, ["Quintus Marcius Tremulus","Publius Cornelius Arvina"]],
+  [287, ["Marcus Claudius Marcellus","Gaius Nautius Rutilus"]],
+  [286, ["Marcus Valerius Maximus Potitus","Gaius Aelius Paetus"]],
+  [285, ["Gaius Claudius Canina","Marcus Aemilius Lepidus"]],
+  [284, ["Gaius Servilius Tucca","Lucius Caecilius Metellus Denter"]],
+  [283, ["Publius Cornelius Dolabella","Gnaeus Domitius Calvinus Maximus"]],
+  [282, ["Gaius Fabricius Luscinus","Quintus Aemilius Papus"]],
+  [281, ["Lucius Aemilius Barbula","Quintus Marcius Philippus"]],
+  [280, ["Publius Valerius Laevinus","Tiberius Coruncanius"]],
+  [279, ["Publius Sulpicius Saverrio","Publius Decius Mus"]],
+  [278, ["Gaius Fabricius Luscinus","Quintus Aemilius Papus"]],
+  [277, ["Publius Cornelius Rufinus","Gaius Junius Bubulcus Brutus"]],
+  [276, ["Quintus Fabius Maximus Gurges","Gaius Genucius Clepsina"]],
+  [275, ["Manius Curius Dentatus","Lucius Cornelius Lentulus Caudinus"]],
+  [274, ["Manius Curius Dentatus","Servius Cornelius Merenda"]],
+  [273, ["Gaius Fabius Licinus","Gaius Claudius Canina"]],
+  [272, ["Lucius Papirius Cursor","Spurius Carvilius Maximus"]],
+  [271, ["Gaius Quinctius Claudus","Lucius Genucius Clepsina"]],
+  [270, ["Gaius Genucius Clepsina","Gnaeus Cornelius Blasio"]],
+];
+
+/**
+ * Censors from 300 to 265 BCE (Broughton; the table on Wikipedia's "List of
+ * censors of the Roman Republic"). Each is [year BCE, patrician, plebeian]; a
+ * name the sources doubt carries no mark here and is noted in the plan.
+ */
+export const CENSORS_300_TO_265: readonly (readonly [number, string, string])[] = [
+  [300, "Publius Sulpicius Saverrio", "Publius Sempronius Sophus"],
+  [294, "Publius Cornelius Arvina", "Gaius Marcius Rutilus Censorinus"],
+  [289, "Quintus Fabius Maximus Gurges", "Spurius Carvilius Maximus"],
+  [283, "", "Quintus Caedicius Noctua"],
+  [280, "Lucius Cornelius Scipio Barbatus", "Gnaeus Domitius Calvinus Maximus"],
+  [275, "Quintus Aemilius Papus", "Gaius Fabricius Luscinus"],
+  [272, "Lucius Papirius Praetextatus", "Manius Curius Dentatus"],
+  [269, "Lucius Aemilius Barbula", "Quintus Marcius Philippus"],
+  [265, "Gnaeus Cornelius Blasio", "Gaius Marcius Rutilus Censorinus"],
+];
