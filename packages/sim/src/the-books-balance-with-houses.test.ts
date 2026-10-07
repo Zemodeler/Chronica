@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { economyOf, type WorldState } from "@chronica/shared";
-import { applyDecision, atDay, definition, input, logged, opening, withChest, withIncome, withWar } from "./fiscal-test-kit";
+import { applyDecision, atDay, definition, government, input, logged, opening, withChest, withIncome, withWar } from "./fiscal-test-kit";
+import { holdVotes } from "./senate";
 import { decideFiscal } from "./fiscal-officers";
 import { auditInWords, auditMoney, combineAudits, emptyAudit, unexplainedTotal } from "./money-audit";
 import { createIdFactory } from "./ports";
@@ -44,14 +45,22 @@ describe("the books balance with houses and officers", { timeout: 600_000 }, () 
           loans += done.applied.filter((act) => act.delta.op === "loan_open").length;
         }
       }
+      // The chambers sit: what an officer laid before the Senate or the Council of Elders is counted, and what carries is carried out the next month he looks (H1).
+      const sat = holdVotes({ world, offices: government.offices, successionRules: government.successionRules, toDay, ids: createIdFactory(`houses-votes-${month}`) });
+      const sitting = auditMoney(world, sat.world);
+      expect(sitting.unexplained, `month ${month}, the chambers:
+${auditInWords(sitting)}`).toEqual([]);
+      world = sat.world;
     }
     expect(unexplainedTotal(audit), auditInWords(audit)).toBe(0);
     // The houses traded and the officers acted; the war needed credit and it was found.
     const houses = economyOf(world).houses;
     expect(houses.reduce((sum, house) => sum + house.voyages, 0)).toBeGreaterThan(300);
     expect(acts).toBeGreaterThan(5);
-    expect(loans).toBeGreaterThan(0);
-    expect(world.material.loans.some((loan) => loan.borrowerAccountId === "carthage-treasury")).toBe(true);
+    // A loan is the Council's to give leave for (the officers of the accounts only move it there): it was asked, voted, and where the need still stood, taken.
+    const leave = world.material.politicalProcedures.some((procedure) => procedure.outcome === "passed" && /be borrowed in the name of Carthage$/.test(procedure.label));
+    expect(leave || loans > 0).toBe(true);
+    if (loans > 0) expect(world.material.loans.some((loan) => loan.borrowerAccountId === "carthage-treasury")).toBe(true);
     // The doors that should have been used were: the market (cargoes, customs), the unnamed (crews, households), credit.
     expect(audit.doors.market.in).toBeGreaterThan(0);
     expect(audit.doors.the_unnamed.out).toBeGreaterThan(0);

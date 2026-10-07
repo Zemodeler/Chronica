@@ -3646,6 +3646,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       pressures: input.historicalPressures ?? [],
       warfare: input.warfare,
       appetiteAgainstPlayer: difficultyRules(world.difficulty).appetiteAgainstPlayer,
+      offices: input.offices,
     };
   };
 

@@ -8,20 +8,29 @@ import {
   coinagesOf,
   economyOf,
   greedOf,
+  isOwnToDo,
   liveProvinceIds,
+  mayAct,
+  monthlyTakings,
   officeTemper,
   readDepartments,
   stableHash,
   standardOf,
   taxBurdens,
   warsOf,
+  type ActKind,
+  type BodyRef,
   type Character,
   type FactProposal,
+  type Office,
+  type PoliticalProcedure,
+  type QuestionConcern,
   type StatecraftEntry,
   type TaxBurden,
   type WorldDelta,
   type WorldState,
 } from "@chronica/shared";
+import { convenersOf } from "./apply/asking";
 import { purseOfHouse } from "./merchant-houses";
 import type { StatecraftDecision, StatecraftInput } from "./statecraft";
 
@@ -49,6 +58,12 @@ import type { StatecraftDecision, StatecraftInput } from "./statecraft";
  *    once peace and a full chest allow.
  *  - **Trade.** Where two powers nobody plays are at peace and their trade runs large each way, and both
  *    tax what comes in, open a pact capping their tariffs; and lift an embargo that has outlived its war.
+ *
+ * **Through competence (H1).** The man does only what his charge lets him (`mayAct`, docs/plans/government.md): where it is his alone, or his with a
+ * colleague's, he does it as above; where the matter is the chamber's (the Senate decrees the tribute past custom, a new tax, a loan, the coin; Carthage's elders the
+ * same), he lays it before the chamber, and a consul or a magistrate of those who may convene it puts it (`convenersOf`), once, and waits on the vote; a motion
+ * that passes is carried out the next month he looks, as far as it goes and no further, and one that fails is not moved again for a season; where the matter is none
+ * of his, he leaves it. A power with no constitution on record, or a man with no office in it, does as before.
  *
  * Every act is an ordinary delta, applied by the burst through the same authority and money rules as any
  * other act (`calls: "none"`); nothing is written here. **The man matters.** His skill and his temper
@@ -203,13 +218,134 @@ function officerOf(world: WorldState, polityId: string, reader: ReturnType<typeo
   return { officer: man, skill: reader.skill({ kind: "polity", id: polityId }, "tax_roll") };
 }
 
+// ── What is his to do, and what is the chamber's ──────────────────────────────
+
+/** A season a motion that failed is not moved again in. */
+export const MOTION_REST_DAYS = 120;
+/** How long a motion that carried waits for the officer to carry it out before it lapses. */
+export const DECREE_LAPSES_DAYS = 120;
+
+/** What a man's competence makes of an act of his own: do it, lay it before the chamber, or leave it. */
+type Footing = { readonly how: "own" } | { readonly how: "ask"; readonly body: BodyRef } | { readonly how: "no"; readonly why: string };
+
+function footingOf(world: WorldState, officer: Character, act: ActKind, offices: readonly Office[], magnitude: number | undefined): Footing {
+  const may = mayAct(world, officer.id, act, { offices, ...(magnitude === undefined ? {} : { magnitude }) });
+  // No constitution on record for the power, or no office of it held: as the rules always did.
+  if (may === null || isOwnToDo(may.grade)) return { how: "own" };
+  if (may.grade === "by_the_body" && may.body !== null) return { how: "ask", body: may.body };
+  return { how: "no", why: may.why };
+}
+
+/** One thing the officer would do, and how it would be put to the chamber if it is not his to do. */
+interface Matter {
+  readonly kind: FiscalKind;
+  readonly act: ActKind;
+  /** In the act's own unit (`WITHIN_UNIT`), where it has a figure. */
+  readonly magnitude?: number;
+  /** What the motion says, as it follows "that": "the tribute of Rome be laid at 14 in a hundred". The same words the competence gate lays a player's motion in. */
+  readonly label: string;
+  readonly concerns: readonly QuestionConcern[];
+  readonly deltas: readonly WorldDelta[];
+  readonly text: string;
+  readonly why: string;
+}
+
+const inAHundred = (bps: number): string => `${(bps / 100).toFixed(bps % 100 === 0 ? 0 : 1)} in a hundred`;
+/** The figure a motion's words end in or begin with, in basis points or silver; null where it has none. */
+function figureIn(label: string): number | null {
+  const rate = /at ([0-9.]+) in a hundred$/u.exec(label);
+  if (rate !== null) return Math.round(Number(rate[1]) * 100);
+  const sum = /^([0-9]+) be borrowed/u.exec(label);
+  return sum === null ? null : Number(sum[1]);
+}
+/** What a label says before its figure: two motions about the same thing differ only by it. */
+const stemOf = (label: string): string => label.replace(/ at [0-9.]+ in a hundred$/u, "").replace(/^[0-9]+ be borrowed/u, "be borrowed");
+
+/**
+ * The motions the officers have put (a deliberation opened by an officer about his own power), by the power: what is waiting on a vote,
+ * what carried and is not yet carried out, and what failed lately. Read off the world's own questions, with nothing stored beside them.
+ */
+function motionsByPower(world: WorldState): Map<string, PoliticalProcedure[]> {
+  const found = new Map<string, PoliticalProcedure[]>();
+  for (const procedure of world.material.politicalProcedures) {
+    if (procedure.type !== "council_deliberation" || procedure.subjectKind !== "polity" || procedure.subjectId === null || !procedure.label.startsWith("Motion of ")) continue;
+    const list = found.get(procedure.subjectId);
+    if (list === undefined) found.set(procedure.subjectId, [procedure]);
+    else list.push(procedure);
+  }
+  return found;
+}
+
+const thatOf = (procedure: PoliticalProcedure): string => procedure.label.slice(procedure.label.indexOf(": that ") + 7);
+
+/** The man who puts a motion to the chamber: himself where his office convenes it, else the best known of those who do, else himself (a chamber nobody is named to convene). */
+function sponsorOf(world: WorldState, officer: Character, bodyId: string): Character {
+  const chamber = world.material.institutions.find((institution) => institution.id === bodyId);
+  if (chamber === undefined) return officer;
+  const conveners = convenersOf(world, chamber);
+  if (conveners.length === 0 || conveners.includes(officer.id)) return officer;
+  const best = conveners
+    .map((id) => world.characters.find((character) => character.id === id)!)
+    .sort((a, b) => b.prestigeBps - a.prestigeBps || a.id.localeCompare(b.id))[0];
+  return best ?? officer;
+}
+
+interface Asked { readonly kind: FiscalKind; readonly label: string; readonly text: string; readonly why: string; readonly delta: WorldDelta }
+
+interface Weighing {
+  readonly offices: readonly Office[];
+  /** The motions already put about this power. */
+  readonly mine: readonly PoliticalProcedure[];
+  readonly day: number;
+  readonly month: string;
+  /** The day this kind of thing was last done by the rules, if ever. */
+  readonly carriedDay: number | undefined;
+  /** What has been laid before a chamber already this month, so that the same matter is not put twice. */
+  readonly asked: readonly Asked[];
+}
+
+/**
+ * A matter weighed against the competence of the man who would do it: `"own"` where it is his to do (or the chamber has decreed it and he is carrying out the
+ * decree), the motion to lay before the chamber where it is the chamber's and nothing of it is waiting or lately failed, and null where it is none of his
+ * or is already before the chamber.
+ */
+function weigh(world: WorldState, officer: Character, polity: { readonly id: string; readonly name: string }, matter: Matter, context: Weighing): "own" | Asked | null {
+  const { offices, mine, day, month } = context;
+  const stand = footingOf(world, officer, matter.act, offices, matter.magnitude);
+  if (stand.how === "own") return "own";
+  if (stand.how === "no") return null;
+  const stem = stemOf(matter.label);
+  const figure = figureIn(matter.label);
+  // The chamber has decreed it and it is not yet carried out: his to do, as far as the decree goes.
+  const decreed = mine.some((procedure) => procedure.outcome === "passed" && stemOf(thatOf(procedure)) === stem
+    && (procedure.resolvedAtStep ?? 0) >= day - DECREE_LAPSES_DAYS && (context.carriedDay === undefined || context.carriedDay < (procedure.resolvedAtStep ?? 0))
+    && (figure === null || (figureIn(thatOf(procedure)) ?? Infinity) + 10 >= figure));
+  if (decreed) return "own";
+  const waiting = mine.some((procedure) => procedure.outcome === null && stemOf(thatOf(procedure)) === stem);
+  const failed = mine.some((procedure) => procedure.outcome !== null && procedure.outcome !== "passed" && stemOf(thatOf(procedure)) === stem && (procedure.resolvedAtStep ?? 0) > day - MOTION_REST_DAYS);
+  if (waiting || failed || context.asked.some((entry) => stemOf(entry.label) === stem)) return null;
+  const sponsor = sponsorOf(world, officer, stand.body.id);
+  const chamber = stand.body.name.replace(/^the\s+/iu, "");
+  return {
+    kind: matter.kind, label: matter.label,
+    text: `laid it before the ${chamber} that ${matter.label}, for it is not his to decide${sponsor.id === officer.id ? "" : `, and ${sponsor.name} put it`}`,
+    why: `asked the ${chamber} that ${matter.label}`,
+    delta: WorldDeltaSchema.parse({
+      op: "political_procedure_open", localId: `motion_${matter.kind}_${polity.id}_${month}`.slice(0, 60), type: "council_deliberation", institutionRef: stand.body.id,
+      sponsorCharacterRef: sponsor.id, subjectKind: "polity", subjectRef: polity.id, label: `Motion of ${officer.name}: that ${matter.label}`.slice(0, 200),
+      resolutionMechanism: "vote", deadlineInDays: 10, visibility: "public", enacts: null, concerns: [...matter.concerns],
+      reason: `${officer.name} may not decide it alone, and moved it in the ${stand.body.name}.`.slice(0, 240),
+    }),
+  };
+}
+
 /**
  * The fiscal decisions of the month, one at most for each power nobody plays, in power order.
  *
  * Nothing is applied: each decision carries its deltas and one fact, which the burst applies as the
  * rules' own business (`statecraft.ts` runs this with its other passes).
  */
-export function decideFiscal(input: Pick<StatecraftInput, "world" | "gameId" | "excludedPolityIds" | "playedByModel" | "playerCharacterId">): StatecraftDecision[] {
+export function decideFiscal(input: Pick<StatecraftInput, "world" | "gameId" | "excludedPolityIds" | "playedByModel" | "playerCharacterId" | "offices">): StatecraftDecision[] {
   const { world } = input;
   const day = world.instant.day;
   if (day < QUIET_OPENING_DAYS) return [];
@@ -222,6 +358,8 @@ export function decideFiscal(input: Pick<StatecraftInput, "world" | "gameId" | "
   const nameOf = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
   const rulerOf = (polityId: string): Character | undefined => reader.rulers(polityId).find((ruler) => ruler.alive && ruler.id !== input.playerCharacterId);
   const month = String(Math.floor(day / 30));
+  const offices = input.offices ?? [];
+  const motions = motionsByPower(world);
 
   // Which powers have something live in them: the others make no news (`liveProvinceIds`), however they keep their books.
   let livePowers: Set<string> | undefined;
@@ -279,6 +417,20 @@ export function decideFiscal(input: Pick<StatecraftInput, "world" | "gameId" | "
 
     const parts: { kind: FiscalKind; text: string; why: string }[] = [];
     const deltas: WorldDelta[] = [];
+    const asked: Asked[] = [];
+    const mine = motions.get(polity.id) ?? [];
+
+    /**
+     * What he would do, weighed against his charge: done where it is his, laid before the chamber where it is the chamber's (once; not while it waits
+     * on a vote, nor for a season after one failed), carried out as far as the chamber decreed where it has, and left where it is none of his.
+     */
+    const submit = (matter: Matter): void => {
+      const weighed = weigh(world, officer, polity, matter, { offices, mine, day, month, carriedDay: last.get(matter.kind), asked });
+      if (weighed === "own") {
+        deltas.push(...matter.deltas);
+        parts.push({ kind: matter.kind, text: matter.text, why: matter.why });
+      } else if (weighed !== null) asked.push(weighed);
+    };
     const taxPolicy = memory.taxPolicies.find((policy) => policy.polityId === polity.id);
     const rate = taxPolicy?.rateBps ?? DEFAULT_TAX_RATE_BPS;
     const regime = taxPolicy?.regime ?? "land_levy";
@@ -298,9 +450,10 @@ export function decideFiscal(input: Pick<StatecraftInput, "world" | "gameId" | "
       const projected = askedRatio * (wanted / Math.max(1, rate));
       rateAtCeiling = rate + 100 > ceiling || projected > PROJECTED_BURDEN_CEILING;
       if (taxWait >= TAX_COOLDOWN_DAYS && wanted > rate && projected <= PROJECTED_BURDEN_CEILING) {
-        deltas.push(delta({ op: "tax_policy_set", scope: "polity", polityId: polity.id, provinceId: null, regime, rateBps: wanted, reason: `${officer.name} raises the rate: the chest holds ${monthsWord(cover)} of its pay.`.slice(0, 240) }));
-        parts.push({
-          kind: "tax", why: `tax: raised the rate ${pct(rate)} to ${pct(wanted)} (${monthsWord(cover)} in the chest${book.arrears > 0 ? ", pay in arrears" : ""})`,
+        submit({
+          kind: "tax", act: "tax_rate", magnitude: wanted, concerns: ["taxes"], label: `the tribute of ${polity.name} be laid at ${inAHundred(wanted)}`,
+          deltas: [delta({ op: "tax_policy_set", scope: "polity", polityId: polity.id, provinceId: null, regime, rateBps: wanted, reason: `${officer.name} raises the rate: the chest holds ${monthsWord(cover)} of its pay.`.slice(0, 240) })],
+          why: `tax: raised the rate ${pct(rate)} to ${pct(wanted)} (${monthsWord(cover)} in the chest${book.arrears > 0 ? ", pay in arrears" : ""})`,
           text: `raised the rate of tax from ${pct(rate)} to ${pct(wanted)} of what the land can bear, the chest holding ${monthsWord(cover)} of its pay${book.arrears > 0 ? " and the soldiers' pay behind" : ""}`,
         });
       }
@@ -309,13 +462,20 @@ export function decideFiscal(input: Pick<StatecraftInput, "world" | "gameId" | "
       const wanted = Math.max(flush ? DEFAULT_TAX_RATE_BPS : TAX_FLOOR_BPS, rate - step - Math.max(0, noise));
       if (wanted < rate) {
         const why = flush ? `${monthsWord(cover)} in the chest and a surplus at peace` : "the provinces are restless under what they pay";
-        deltas.push(delta({ op: "tax_policy_set", scope: "polity", polityId: polity.id, provinceId: null, regime, rateBps: wanted, reason: `${officer.name} eases the rate: ${why}.`.slice(0, 240) }));
-        parts.push({ kind: "tax", why: `tax: eased the rate ${pct(rate)} to ${pct(wanted)} (${why})`, text: `eased the rate of tax from ${pct(rate)} to ${pct(wanted)}: ${why}` });
+        submit({
+          kind: "tax", act: "tax_rate", magnitude: 0, concerns: ["taxes"], label: `the tribute of ${polity.name} be laid at ${inAHundred(wanted)}`,
+          deltas: [delta({ op: "tax_policy_set", scope: "polity", polityId: polity.id, provinceId: null, regime, rateBps: wanted, reason: `${officer.name} eases the rate: ${why}.`.slice(0, 240) })],
+          why: `tax: eased the rate ${pct(rate)} to ${pct(wanted)} (${why})`, text: `eased the rate of tax from ${pct(rate)} to ${pct(wanted)}: ${why}`,
+        });
       }
     } else if (taxWait >= TAX_COOLDOWN_DAYS && shortShare >= 0.34 && regime === "land_levy") {
       // A famine year under a steady levy takes the seed-corn: a tithe follows the harvest down.
-      deltas.push(delta({ op: "tax_policy_set", scope: "polity", polityId: polity.id, provinceId: null, regime: "tithe", rateBps: rate, reason: `${officer.name} shifts the levy to a tithe: the harvest has failed in ${hubs?.short ?? 0} of its markets.`.slice(0, 240) }));
-      parts.push({ kind: "tax", why: "tax: changed the levy to a tithe (the harvest has failed)", text: "changed the land levy to a tithe, which follows the harvest down: bread is dear in a quarter of its markets" });
+      // A tax of another kind is a new tax, and no magistrate lays a new tax (the competence gate reads it so too).
+      submit({
+        kind: "tax", act: "tax_rate", magnitude: Number.POSITIVE_INFINITY, concerns: ["taxes"], label: `the tribute of ${polity.name} be laid anew, as a tithe at ${inAHundred(rate)}`,
+        deltas: [delta({ op: "tax_policy_set", scope: "polity", polityId: polity.id, provinceId: null, regime: "tithe", rateBps: rate, reason: `${officer.name} shifts the levy to a tithe: the harvest has failed in ${hubs?.short ?? 0} of its markets.`.slice(0, 240) })],
+        why: "tax: changed the levy to a tithe (the harvest has failed)", text: "changed the land levy to a tithe, which follows the harvest down: bread is dear in a quarter of its markets",
+      });
     }
 
     // ── Customs ────────────────────────────────────────────────────────
@@ -323,12 +483,18 @@ export function decideFiscal(input: Pick<StatecraftInput, "world" | "gameId" | "
     if (since("customs") >= CUSTOMS_COOLDOWN_DAYS) {
       if (shortShare >= SHORT_HUB_SHARE && customsRate > 0) {
         const wanted = Math.max(0, customsRate - CUSTOMS_STEP_BPS);
-        deltas.push(delta({ op: "tax_policy_set", scope: "customs", polityId: polity.id, provinceId: null, regime: "land_levy", rateBps: wanted, reason: `${officer.name} lowers the customs to draw bread in.`.slice(0, 240) }));
-        parts.push({ kind: "customs", why: `customs: lowered the customs ${pct(customsRate)} to ${pct(wanted)} (grain is dear)`, text: `lowered the customs from ${pct(customsRate)} to ${pct(wanted)} to draw grain in` });
+        submit({
+          kind: "customs", act: "customs", magnitude: 0, concerns: ["taxes", "trade"], label: `the customs of ${polity.name} be laid at ${inAHundred(wanted)}`,
+          deltas: [delta({ op: "tax_policy_set", scope: "customs", polityId: polity.id, provinceId: null, regime: "land_levy", rateBps: wanted, reason: `${officer.name} lowers the customs to draw bread in.`.slice(0, 240) })],
+          why: `customs: lowered the customs ${pct(customsRate)} to ${pct(wanted)} (grain is dear)`, text: `lowered the customs from ${pct(customsRate)} to ${pct(wanted)} to draw grain in`,
+        });
       } else if (strained && (inboundOf.get(polity.id) ?? 0) >= 20_000 && customsRate + CUSTOMS_STEP_BPS <= Math.min(CUSTOMS_CEILING_BPS, MAX_CUSTOMS_RATE_BPS) && shortShare < SHORT_HUB_SHARE) {
         const wanted = customsRate + CUSTOMS_STEP_BPS;
-        deltas.push(delta({ op: "tax_policy_set", scope: "customs", polityId: polity.id, provinceId: null, regime: "land_levy", rateBps: wanted, reason: `${officer.name} raises the customs: trade is strong and the chest is short.`.slice(0, 240) }));
-        parts.push({ kind: "customs", why: `customs: raised the customs ${pct(customsRate)} to ${pct(wanted)} (the chest is short)`, text: `raised the customs from ${pct(customsRate)} to ${pct(wanted)}, for the trade is strong and the chest short` });
+        submit({
+          kind: "customs", act: "customs", magnitude: wanted, concerns: ["taxes", "trade"], label: `the customs of ${polity.name} be laid at ${inAHundred(wanted)}`,
+          deltas: [delta({ op: "tax_policy_set", scope: "customs", polityId: polity.id, provinceId: null, regime: "land_levy", rateBps: wanted, reason: `${officer.name} raises the customs: trade is strong and the chest is short.`.slice(0, 240) })],
+          why: `customs: raised the customs ${pct(customsRate)} to ${pct(wanted)} (the chest is short)`, text: `raised the customs from ${pct(customsRate)} to ${pct(wanted)}, for the trade is strong and the chest short`,
+        });
       }
     }
 
@@ -352,25 +518,31 @@ export function decideFiscal(input: Pick<StatecraftInput, "world" | "gameId" | "
         remaining -= amount;
       }
       const rateBps = book.arrears > 0 ? 200 : 150;
+      const loanDeltas: WorldDelta[] = [];
       let n = 0;
       for (const lender of lenders) {
         n += 1;
-        deltas.push(delta({
+        loanDeltas.push(delta({
           op: "loan_open", localId: `fiscal_loan_${polity.id}_${month}_${n}`.slice(0, 60), lenderKind: "character", lenderRef: lender.head.id, borrowerAccountRef: book.treasuryId,
           principal: lender.amount, interestBps: rateBps, cadenceDays: 30, terms: `A loan from ${lender.house} to the treasury of ${polity.name}, at ${pct(rateBps)} a month`.slice(0, 300), collateralHoldingRef: null,
           reason: `${officer.name} borrows from ${lender.house} for the war.`.slice(0, 240),
         }));
       }
       if (remaining >= 10_000) {
-        deltas.push(delta({
+        loanDeltas.push(delta({
           op: "loan_open", localId: `fiscal_loan_${polity.id}_${month}_abroad`.slice(0, 60), lenderKind: "foreign", lenderRef: null, borrowerAccountRef: book.treasuryId,
           principal: remaining, interestBps: 250, cadenceDays: 30, terms: `A loan from the bankers abroad to the treasury of ${polity.name}, at 2.5% a month`,
           collateralHoldingRef: null, reason: `${officer.name} borrows abroad for the war.`.slice(0, 240),
         }));
       }
-      if (deltas.some((candidate) => candidate.op === "loan_open")) {
+      if (loanDeltas.length > 0) {
         const from = lenders.length === 0 ? "bankers abroad" : lenders.map((lender) => lender.house).join(" and ") + (remaining >= 10_000 ? " and bankers abroad" : "");
-        parts.push({ kind: "credit", why: `credit: borrowed ${wanted - Math.max(0, remaining < 10_000 ? remaining : 0)} for the war from ${from}`.slice(0, 160), text: `borrowed ${wanted} for the war from ${from}, with ${monthsWord(cover)} of pay in the chest` });
+        const takings = monthlyTakings(world, polity.id);
+        submit({
+          kind: "credit", act: "loans", magnitude: takings <= 0 ? Number.POSITIVE_INFINITY : wanted / takings, concerns: ["spending"],
+          label: `${wanted} be borrowed in the name of ${polity.name}`, deltas: loanDeltas,
+          why: `credit: borrowed ${wanted - Math.max(0, remaining < 10_000 ? remaining : 0)} for the war from ${from}`.slice(0, 160), text: `borrowed ${wanted} for the war from ${from}, with ${monthsWord(cover)} of pay in the chest`,
+        });
       }
     }
 
@@ -379,23 +551,29 @@ export function decideFiscal(input: Pick<StatecraftInput, "world" | "gameId" | "
     if (coinage !== undefined && since("coinage") >= COINAGE_COOLDOWN_OWN_DAYS) {
       const standard = standardOf(coinage);
       if (extremis && (rateAtCeiling || taxWait < TAX_COOLDOWN_DAYS) && coinage.silverBps >= standard * 0.6) {
-        deltas.push(delta({ op: "coinage_debase", coinageId: coinage.id, targetSilverBps: null, stepBps: -1_500, reason: `${officer.name} has the mint strike lighter coin: the war has emptied the chest.`.slice(0, 240) }));
-        parts.push({ kind: "coinage", why: `coinage: struck ${coinage.name} lighter (the war has emptied the chest)`, text: `had the mint strike ${coinage.name} lighter, for the war has emptied the chest and the soldiers' pay is behind` });
+        submit({
+          kind: "coinage", act: "coinage", magnitude: 1_500, concerns: ["coinage"], label: `${coinage.name} be struck with less silver`,
+          deltas: [delta({ op: "coinage_debase", coinageId: coinage.id, targetSilverBps: null, stepBps: -1_500, reason: `${officer.name} has the mint strike lighter coin: the war has emptied the chest.`.slice(0, 240) })],
+          why: `coinage: struck ${coinage.name} lighter (the war has emptied the chest)`, text: `had the mint strike ${coinage.name} lighter, for the war has emptied the chest and the soldiers' pay is behind`,
+        });
       } else if (!atWar && cover >= 6 && coinage.silverBps < standard * 0.92) {
         const cost = Math.round((coinageStock(world, coinage.id) * 0.3 * 1_000) / 10_000);
         if (book.balance >= 2 * cost) {
-          deltas.push(delta({ op: "coinage_debase", coinageId: coinage.id, targetSilverBps: null, stepBps: 1_000, reason: `${officer.name} has the mint re-strike the coin better, now there is peace and money.`.slice(0, 240) }));
-          parts.push({ kind: "coinage", why: `coinage: re-struck ${coinage.name} with more silver (peace, and a full chest)`, text: `had ${coinage.name} re-struck with more silver, now there is peace and the chest is full` });
+          submit({
+            kind: "coinage", act: "coinage", magnitude: 1_000, concerns: ["coinage"], label: `${coinage.name} be struck with more silver`,
+            deltas: [delta({ op: "coinage_debase", coinageId: coinage.id, targetSilverBps: null, stepBps: 1_000, reason: `${officer.name} has the mint re-strike the coin better, now there is peace and money.`.slice(0, 240) })],
+            why: `coinage: re-struck ${coinage.name} with more silver (peace, and a full chest)`, text: `had ${coinage.name} re-struck with more silver, now there is peace and the chest is full`,
+          });
         }
       }
     }
 
-    if (parts.length === 0) continue;
+    if (parts.length === 0 && asked.length === 0) continue;
     hasDecision.add(polity.id);
-    const doing = parts.map((part) => part.text).join("; and ");
+    const doing = [...parts.map((part) => part.text), ...asked.map((entry) => entry.text)].join("; and ");
     const trusted = greed >= 60 ? " Men do not trust his hands." : "";
     const summary = `${officer.name}, who keeps the books of ${polity.name}, ${doing}.${trusted}`.slice(0, 400);
-    const news = isLivePower(polity.id) && parts.some((part) => part.kind !== "customs");
+    const news = isLivePower(polity.id) && [...parts, ...asked].some((part) => part.kind !== "customs");
     decisions.push({
       polityId: polity.id,
       // The officer's own hand. A quaestor's office holds the proposal and not the rate, so the burst applies these as the power's
@@ -403,8 +581,8 @@ export function decideFiscal(input: Pick<StatecraftInput, "world" | "gameId" | "
       actorCharacterId: officer.id,
       act: "fiscal",
       targetPolityId: null,
-      why: parts.map((part) => part.why).join(" | ").slice(0, 400),
-      deltas,
+      why: [...parts, ...asked].map((part) => part.why).join(" | ").slice(0, 400),
+      deltas: [...deltas, ...asked.map((entry) => entry.delta)],
       facts: news
         ? [fact({
           localId: `fiscal_${polity.id}_${month}`.slice(0, 60), kind: "fiscal", summary,
@@ -415,7 +593,7 @@ export function decideFiscal(input: Pick<StatecraftInput, "world" | "gameId" | "
     });
   }
 
-  decisions.push(...tradeDiplomacy(input, reader, flowBetween, rulerOf, nameOf, hasDecision));
+  decisions.push(...tradeDiplomacy(input, reader, flowBetween, rulerOf, nameOf, hasDecision, motions));
   return decisions;
 }
 
@@ -429,16 +607,21 @@ export function decideFiscal(input: Pick<StatecraftInput, "world" | "gameId" | "
  * the news: these decisions carry no fact of their own.
  */
 function tradeDiplomacy(
-  input: Pick<StatecraftInput, "world" | "gameId" | "excludedPolityIds" | "playedByModel" | "playerCharacterId">,
+  input: Pick<StatecraftInput, "world" | "gameId" | "excludedPolityIds" | "playedByModel" | "playerCharacterId" | "offices">,
   reader: ReturnType<typeof readDepartments>,
   flowBetween: ReadonlyMap<string, number>,
   rulerOf: (polityId: string) => Character | undefined,
   nameOf: (id: string) => string,
   _busy: ReadonlySet<string>,
+  motions: ReadonlyMap<string, readonly PoliticalProcedure[]>,
 ): StatecraftDecision[] {
   void reader;
   const { world } = input;
   const day = world.instant.day;
+  const offices = input.offices ?? [];
+  const month = String(Math.floor(day / 30));
+  /** Whether the chamber has lately carried a motion of these words that nobody has yet carried out: the matter is then his to do whatever the dice say. */
+  const decreed = (polityId: string, label: string): boolean => (motions.get(polityId) ?? []).some((procedure) => procedure.outcome === "passed" && thatOf(procedure) === label && (procedure.resolvedAtStep ?? 0) >= day - DECREE_LAPSES_DAYS);
   const memory = economyOf(world);
   const decisions: StatecraftDecision[] = [];
   const free = (polityId: string): Character | undefined => {
@@ -453,11 +636,20 @@ function tradeDiplomacy(
     if (agreement.status !== "active" || agreement.kind !== "embargo" || day - agreement.sinceStep < EMBARGO_OUTLIVES_DAYS) continue;
     const layer = free(agreement.polityId);
     if (layer === undefined || warsOf(world.polityAgreements, agreement.polityId).includes(agreement.otherPolityId)) continue;
-    if (stableHash([input.gameId, "fiscal-embargo", agreement.id, String(Math.floor(day / 30))]) % 100 >= 30) continue;
+    const liftLabel = `the embargo on ${nameOf(agreement.otherPolityId)} be lifted`;
+    if (!decreed(agreement.polityId, liftLabel) && stableHash([input.gameId, "fiscal-embargo", agreement.id, month]) % 100 >= 30) continue;
+    const lifting: Matter = {
+      kind: "embargo", act: "embargoes", label: liftLabel, concerns: ["trade"],
+      deltas: [delta({ op: "agreement_close", agreementRef: agreement.id, reason: `${layer.name} lifts the embargo: it has outlived its quarrel.`.slice(0, 240) })],
+      why: `embargo: lifted the embargo on ${nameOf(agreement.otherPolityId)} (it has stood ${Math.round((day - agreement.sinceStep) / 30)} months in peace)`.slice(0, 400),
+      text: "lifted the embargo",
+    };
+    const weighed = weigh(world, layer, { id: agreement.polityId, name: nameOf(agreement.polityId) }, lifting, { offices, mine: motions.get(agreement.polityId) ?? [], day, month, carriedDay: undefined, asked: [] });
+    if (weighed === null) continue;
     decisions.push({
       polityId: agreement.polityId, actorCharacterId: layer.id, act: "fiscal", targetPolityId: agreement.otherPolityId,
-      why: `embargo: lifted the embargo on ${nameOf(agreement.otherPolityId)} (it has stood ${Math.round((day - agreement.sinceStep) / 30)} months in peace)`.slice(0, 400),
-      deltas: [delta({ op: "agreement_close", agreementRef: agreement.id, reason: `${layer.name} lifts the embargo: it has outlived its quarrel.`.slice(0, 240) })],
+      why: weighed === "own" ? lifting.why : weighed.why.slice(0, 400),
+      deltas: weighed === "own" ? lifting.deltas : [weighed.delta],
       facts: [],
     });
   }
@@ -483,16 +675,25 @@ function tradeDiplomacy(
       && ((agreement.polityId === candidate.a && agreement.otherPolityId === candidate.b) || (agreement.polityId === candidate.b && agreement.otherPolityId === candidate.a)));
     if (standing) continue;
     if (warsOf(world.polityAgreements, candidate.a).includes(candidate.b)) continue;
-    if (stableHash([input.gameId, "fiscal-pact", candidate.a, candidate.b, String(Math.floor(day / 30))]) % 100 >= 25) continue;
-    decisions.push({
-      polityId: candidate.a, actorCharacterId: ruler.id, act: "fiscal", targetPolityId: candidate.b,
-      why: `pact: opened a trade pact with ${nameOf(candidate.b)}, capping customs at ${pct(PACT_TARIFF_CAP_BPS)} (the trade between them is great)`.slice(0, 400),
+    const pactLabel = `a trade pact be made with ${nameOf(candidate.b)}`;
+    if (!decreed(candidate.a, pactLabel) && stableHash([input.gameId, "fiscal-pact", candidate.a, candidate.b, month]) % 100 >= 25) continue;
+    const pact: Matter = {
+      kind: "pact", act: "pacts", label: pactLabel, concerns: ["peace", "trade"],
       deltas: [delta({
         op: "agreement_open", localId: `fiscal_pact_${candidate.a}_${candidate.b}_${Math.floor(day / 30)}`.slice(0, 60), kind: "trade_pact", polityId: candidate.a, otherPolityId: candidate.b,
         terms: `Their merchants trade on the best terms either gives: neither lays more than ${pct(PACT_TARIFF_CAP_BPS)} on the other's goods.`,
         trade: { tariffCapBps: PACT_TARIFF_CAP_BPS, mostFavoured: false, exempt: [], goods: [] }, visibility: "public",
         reason: `${ruler.name} binds the trade with ${nameOf(candidate.b)} by a pact: both would gain.`.slice(0, 240),
       })],
+      why: `pact: opened a trade pact with ${nameOf(candidate.b)}, capping customs at ${pct(PACT_TARIFF_CAP_BPS)} (the trade between them is great)`.slice(0, 400),
+      text: "opened a trade pact",
+    };
+    const weighed = weigh(world, ruler, { id: candidate.a, name: nameOf(candidate.a) }, pact, { offices, mine: motions.get(candidate.a) ?? [], day, month, carriedDay: undefined, asked: [] });
+    if (weighed === null) continue;
+    decisions.push({
+      polityId: candidate.a, actorCharacterId: ruler.id, act: "fiscal", targetPolityId: candidate.b,
+      why: weighed === "own" ? pact.why : weighed.why.slice(0, 400),
+      deltas: weighed === "own" ? pact.deltas : [weighed.delta],
       facts: [],
     });
     opened += 1;

@@ -30,6 +30,8 @@ export const atDay = (world: WorldState, day: number): WorldState => ({ ...world
 /** Powers nobody plays: everyone but the one the player is, and the model plays nobody. */
 export const input = (world: WorldState, playerPolity = "rome", gameId = "game-fiscal") => ({
   world, gameId, excludedPolityIds: new Set([playerPolity]), playedByModel: new Set<string>(), playerCharacterId: null as string | null,
+  // The scenario's offices, so an officer's competence is read for the offices it wrote by hand (the quaestors, the officers of the accounts).
+  offices: government.offices,
 });
 
 export function withWar(world: WorldState, a: string, b: string): WorldState {

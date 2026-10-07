@@ -17,7 +17,7 @@ import { dutyOnCargoBps, houseOfVenture, voyageIsLost, voyageLossBps } from "./h
 import { keepMerchantHouses, pairsFor, purseOfHouse, readTheMonth } from "./merchant-houses";
 import { auditInWords, auditMoney } from "./money-audit";
 import { createIdFactory } from "./ports";
-import { applyDecision, atDay, input, opening, withChest, withIncome, withWar } from "./fiscal-test-kit";
+import { applyDecision, atDay, government, input, opening, withChest, withIncome, withWar } from "./fiscal-test-kit";
 import { decideFiscal } from "./fiscal-officers";
 
 /**
@@ -212,7 +212,10 @@ describe("a house follows the gap", () => {
   });
 
   it("lends to a treasury that is empty in a war, at the rate of the market, and is repaid by the ordinary instalments", () => {
-    const needy = withIncome(withChest(withWar(opening(), "carthage", "rome"), "carthage", 1_000, 90_000), "carthage", 0.05);
+    const poor = withIncome(withChest(withWar(opening(), "carthage", "rome"), "carthage", 1_000, 90_000), "carthage", 0.05);
+    // A loan is the Council of Elders' to give leave for (H1: the officers of the accounts move it there); this is a test of the houses that lend, so the leave is given in the officers' charge.
+    const accountant = government.offices.find((office) => office.id === "carthaginian-accountant")!;
+    const needy: WorldState = { ...poor, offices: [...poor.offices.filter((office) => office.id !== accountant.id), { ...accountant, charge: { ...accountant.charge, loans: { grade: "alone" as const } } }] };
     const decision = [120, 150, 180, 210, 240, 270, 300].map((day) => decideFiscal(input(atDay(needy, day))).find((found) => found.polityId === "carthage" && found.deltas.some((delta) => delta.op === "loan_open")))
       .find((found) => found !== undefined)!;
     expect(decision, "the officer of the Accounts goes to the houses").toBeDefined();

@@ -70,11 +70,21 @@ describe("a quaestor keeps the books", () => {
       const again = decisionFor(atDay(world, day - 30 + wait), "carthage");
       expect(again === undefined || taxDelta(again.deltas) === undefined).toBe(true);
     }
-    // Past the cooldown, in some month in the next half-year, it is raised a step more.
-    const later = [0, 30, 60, 90, 120, 150].map((extra) => decisionFor(atDay(world, day - 30 + TAX_COOLDOWN_DAYS + extra), "carthage")).find((decision) => decision !== undefined && taxDelta(decision.deltas) !== undefined);
+    // Past the cooldown, in some month in the next half-year, he moves again: a step more where it is within custom (his own), and where it is past it
+    // (12 in a hundred) he lays it before the Council of Elders, which holds the taxes, and does not raise it himself (H1: through competence).
+    const moved = (decision: ReturnType<typeof decisionFor>) => decision !== undefined && (taxDelta(decision.deltas) !== undefined || decision.deltas.some((delta) => delta.op === "political_procedure_open"));
+    const later = [0, 30, 60, 90, 120, 150].map((extra) => decisionFor(atDay(world, day - 30 + TAX_COOLDOWN_DAYS + extra), "carthage")).find(moved);
     expect(later).toBeDefined();
-    expect(taxDelta(later!.deltas)!.rateBps).toBeGreaterThan(rateOf(world, "carthage")!);
-    expect(taxDelta(later!.deltas)!.rateBps).toBeLessThanOrEqual(EXTREMIS_TAX_CEILING_BPS);
+    const rate = taxDelta(later!.deltas);
+    if (rate !== undefined) {
+      expect(rate.rateBps).toBeGreaterThan(rateOf(world, "carthage")!);
+      expect(rate.rateBps).toBeLessThanOrEqual(1_200);
+    } else {
+      const motion = later!.deltas.find((delta) => delta.op === "political_procedure_open") as { label: string; institutionRef: string } | undefined;
+      expect(motion!.institutionRef).toBe("carthaginian-council");
+      expect(motion!.label).toMatch(/^Motion of .*: that the tribute of Carthage be laid at [0-9]+([.][0-9])? in a hundred$/);
+      expect(Number(/at ([0-9.]+) in a hundred/.exec(motion!.label)![1]) * 100).toBeLessThanOrEqual(EXTREMIS_TAX_CEILING_BPS);
+    }
   });
 
   it("eases a rich power's tax at peace back to the ordinary rate and no lower, and leaves a middling one alone", () => {

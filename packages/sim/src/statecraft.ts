@@ -19,6 +19,7 @@ import {
   type Character,
   type DiplomaticMessage,
   type FactProposal,
+  type Office,
   type ScenarioHistoricalPressure,
   type ScenarioWarfareRules,
   type StatecraftAct,
@@ -120,6 +121,8 @@ export interface StatecraftInput {
   readonly warfare?: ScenarioWarfareRules | undefined;
   /** Raises or lowers every power's appetite against the player's (difficulty, §5). Zero by default. */
   readonly appetiteAgainstPlayer?: number | undefined;
+  /** The scenario's offices, so that what an officer may do (his competence, `mayAct`) is read for the offices the scenario wrote by hand. */
+  readonly offices?: readonly Office[] | undefined;
 }
 
 export interface StatecraftDecision {
