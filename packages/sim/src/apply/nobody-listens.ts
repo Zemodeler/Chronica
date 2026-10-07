@@ -207,6 +207,11 @@ export function nobodyListens(
       if (ownsAccount(payer) || !world.material.accounts.some((account) => account.id === payer)) return null;
       return `${who} promised that ${delta.label.toLowerCase()} would be paid from money that was never ${who}'s to promise. Nobody has been paid.`;
     }
+    // The collectors answer to the treasury, not to whoever announces a new rate.
+    case "tax_policy_set": {
+      const under = polity(resolve(delta.polityId) ?? delta.polityId);
+      return `${who} announced new rates of tax for ${under}. The collectors take their orders from the treasury, had none, and went on gathering what they always had.`;
+    }
     default:
       return null;
   }
@@ -219,7 +224,7 @@ export function nobodyListens(
  */
 const GOVERNMENT_ACTS: ReadonlySet<WorldDelta["op"]> = new Set([
   "agreement_open", "agreement_close", "diplomatic_message_send", "political_procedure_open", "political_procedure_resolve",
-  "office_seat_set", "authority_grant_upsert", "income_source_upsert", "obligation_upsert", "polity_create",
+  "office_seat_set", "authority_grant_upsert", "income_source_upsert", "obligation_upsert", "polity_create", "tax_policy_set",
 ]);
 
 /** The government an act abroad would commit, for saying whose it was not. */
@@ -239,6 +244,7 @@ function abroadPolityOf(delta: WorldDelta, world: WorldState, resolve: (ref: str
     case "office_seat_set": return allOffices(world, offices).find((office) => office.id === delta.officeId)?.polityId;
     case "income_source_upsert": return ofAccount(delta.beneficiaryAccountRef);
     case "obligation_upsert": return ofAccount(delta.payerAccountRef);
+    case "tax_policy_set": return id(delta.polityId);
     case "political_procedure_open":
       return delta.institutionRef === null ? undefined : world.material.institutions.find((institution) => institution.id === id(delta.institutionRef!))?.polityId;
     case "political_procedure_resolve": {

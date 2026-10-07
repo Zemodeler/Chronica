@@ -14,6 +14,7 @@ import {
   reckonTaxCapacity,
   type ProvinceMaterial,
   type WorldState,
+  harvestDevelopmentFactor,
 } from "@chronica/shared";
 import { createIdFactory } from "./ports";
 import { runDeterministicTick } from "./tick";
@@ -75,7 +76,8 @@ describe("a bad harvest", () => {
     for (const id of [LATIUM, CAMPANIA]) {
       const material = row(after.world, id);
       const kind = harvestIn(id, year);
-      expect(material.foodSecurityBps).toBe(Math.round(bands[kind] * (material.productiveCapacityBps / 10_000) * (1 - material.warDamageBps / 20_000)));
+      // What a province's ground grows is also a little more where it is developed (`harvestDevelopmentFactor`).
+      expect(material.foodSecurityBps).toBe(Math.min(10_000, Math.round(bands[kind] * (material.productiveCapacityBps / 10_000) * (1 - material.warDamageBps / 20_000) * harvestDevelopmentFactor(material.developmentBps!))));
     }
     // And a second tick the same summer brings in nothing more.
     const again = runDeterministicTick({ world: after.world, toDay: harvestDay + 20, ids: createIdFactory("again"), warfare: definition.warfare, clock });

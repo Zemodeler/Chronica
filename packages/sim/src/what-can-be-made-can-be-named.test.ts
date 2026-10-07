@@ -144,6 +144,10 @@ const FIXTURES: Readonly<Record<string, Record<string, unknown>>> = {
     op: "polity_stance_shift", polityId: "syracuse", towardPolityId: HANDLE, trustDelta: -40,
     reason: "Syracuse takes a view of the rising.",
   },
+  "tax_policy_set.polityId": {
+    op: "tax_policy_set", scope: "polity", polityId: HANDLE, regime: "tithe", rateBps: 1_000,
+    reason: "The free city settles how it will be taxed.",
+  },
   "polity_outlook_set.polityId": {
     op: "polity_outlook_set", polityId: HANDLE, primaryObjective: "Stay free of all three of them.",
     concerns: [{ label: "Syracuse will come for the strait", level: "high" }],

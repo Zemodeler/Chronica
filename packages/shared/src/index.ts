@@ -28,6 +28,7 @@ export * from "./material/live-provinces";
 export * from "./material/province-material";
 export * from "./material/spoils";
 export * from "./material/taxation";
+export * from "./material/tax-policy";
 export * from "./material/estates";
 export * from "./knowledge/index";
 export * from "./material/ventures";

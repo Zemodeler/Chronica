@@ -86,7 +86,10 @@ const cargoReturn = (before: WorldState, after: WorldState): number => after.mat
 
 describe("a merchant and his trade", () => {
   it("opens a venture between two ports from his own purse, lawfully, at the engine's price", () => {
-    const world = opening();
+    // A purse that can bear the price: Syracuse, the most developed province of the opening, makes a
+    // "marked" venture dearer than Leptines's 42,000 (a purse is capped at what it holds).
+    const poor = opening();
+    const world = { ...poor, material: { ...poor.material, accounts: poor.material.accounts.map((account) => (account.id === "leptines-purse" ? { ...account, balance: account.balance + 20_000 } : account)) } };
     const terms = ventureTerms(world, SYRACUSE, MESSANA, "marked")!;
     const result = apply(world, [THE_VENTURE], as("leptines-syracuse"));
     expect(result.rejected).toEqual([]);
@@ -226,6 +229,7 @@ describe("a merchant and his trade", () => {
     const finished = tick(built.world, 30).world;
     const dues = finished.material.incomeSources.find((source) => source.label === "Harbour dues")!;
     // A great market's share of Syracuse (a seventh of what its province can yield), not the ten million the answer promised.
-    expect(dues.amount).toBeLessThanOrEqual(300_000);
+    // (Syracuse's province is the most developed in the opening, and what it can yield is reckoned from that: 2,155,968 a month, so 323,395.)
+    expect(dues.amount).toBeLessThanOrEqual(325_000);
   });
 });

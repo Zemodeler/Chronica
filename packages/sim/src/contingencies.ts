@@ -11,6 +11,7 @@ import {
   type Force,
   type ScenarioWarfareRules,
   type WorldState,
+  applyForagingScar,
 } from "@chronica/shared";
 import { resolveEngagement, type BattleAccount } from "./battle";
 import { firedBetween, watchReading } from "./watch";
@@ -241,11 +242,11 @@ function springTrap(
     material: {
       ...next.material,
       provinceMaterial: next.material.provinceMaterial.map((material) => (material.provinceId === plan.provinceId
-        ? {
+        ? applyForagingScar({
           ...material,
           warDamageBps: Math.min(10_000, material.warDamageBps + Math.round(toll / 2)),
           productiveCapacityBps: Math.max(0, material.productiveCapacityBps - Math.round(toll / 3)),
-        }
+        }, Math.round(toll / 2))
         : material)),
     },
   };

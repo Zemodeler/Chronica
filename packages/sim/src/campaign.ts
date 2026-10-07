@@ -18,6 +18,7 @@ import {
   type WarfareRules,
   type WorldState,
   forceLever,
+  applyForagingScar,
 } from "@chronica/shared";
 
 /**
@@ -158,13 +159,15 @@ export function keepTheField(input: KeepTheFieldInput): { world: WorldState; fac
   let provinceMaterial = world.material.provinceMaterial;
   const materialOf = (id: string): ProvinceMaterial | undefined => provinceMaterial.find((row) => row.provinceId === id);
   const strip = (id: string, food: number, productive: number, stability: number, damage: number): void => {
-    provinceMaterial = provinceMaterial.map((row) => (row.provinceId !== id ? row : {
+    // An army living off a country wears it down a little for every day it stays: a development hit and a scar
+    // in proportion to the burning (`applyForagingScar`), well below a battle's.
+    provinceMaterial = provinceMaterial.map((row) => (row.provinceId !== id ? row : applyForagingScar({
       ...row,
       foodSecurityBps: clampBps(row.foodSecurityBps - food),
       productiveCapacityBps: clampBps(row.productiveCapacityBps - productive),
       stabilityBps: clampBps(row.stabilityBps - stability),
       warDamageBps: clampBps(row.warDamageBps + damage),
-    }));
+    }, damage)));
   };
   const say = (kind: string, force: Force, summary: string, significance: number): void => {
     facts.push({

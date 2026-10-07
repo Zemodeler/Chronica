@@ -55,7 +55,7 @@ export const BASE_OFFICE_ACTIONS: readonly WorldDeltaOp[] = [
 export const DEFAULT_OFFICE_POWER_BUNDLES: readonly OfficePowerBundle[] = [
   {
     words: ["quaestor", "treasurer", "treasury", "paymaster", "steward", "steward", "chamberlain", "purse", "exchequer", "tax", "revenue", "collector", "aedile"],
-    grants: ["money_transfer", "obligation_upsert", "income_source_upsert", "loan_open", "loan_settle"],
+    grants: ["money_transfer", "obligation_upsert", "income_source_upsert", "tax_policy_set", "loan_open", "loan_settle"],
   },
   {
     words: ["legate", "commander", "captain", "general", "prefect", "tribune", "centurion", "admiral", "navarch", "warlord", "marshal", "strategos", "levy", "war"],

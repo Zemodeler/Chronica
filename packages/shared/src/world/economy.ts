@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ElapsedStepSchema, EntityIdSchema } from "../material-state";
+import { ElapsedStepSchema, EntityIdSchema, MAX_TAX_RATE_BPS, TaxRegimeSchema } from "../material-state";
 import type { WorldState } from "./world-state";
 
 /**
@@ -58,6 +58,23 @@ export const EconomyMemorySchema = z
       leaderCharacterId: EntityIdSchema,
       sinceStep: ElapsedStepSchema,
     }).strict()).max(60).default([]),
+    /**
+     * How each power taxes its provinces unless a province has its own word
+     * (`ProvinceMaterial.taxRegime`): the regime and the share taken. Kept
+     * here and not on the rows because it is one line a power, where the rows
+     * are six thousand. A power with no line taxes as it always did.
+     */
+    taxPolicies: z.array(z.object({
+      polityId: EntityIdSchema,
+      regime: TaxRegimeSchema,
+      rateBps: z.number().int().min(0).max(MAX_TAX_RATE_BPS),
+    }).strict()).max(200).default([]),
+    /**
+     * When a power last heard that its countryside lies waste, and of how many
+     * districts, so the news comes once a war and not once a month: again only
+     * when more of its ground has been laid waste, and never within two years.
+     */
+    wasteNews: z.array(z.object({ polityId: EntityIdSchema, atStep: ElapsedStepSchema, districts: z.number().int().nonnegative().default(0) }).strict()).max(200).default([]),
   })
   .strict();
 export type EconomyMemory = z.infer<typeof EconomyMemorySchema>;
@@ -73,6 +90,8 @@ export const EMPTY_ECONOMY_MEMORY: EconomyMemory = {
   pendingCalls: [],
   contingentsSent: [],
   civilWars: [],
+  taxPolicies: [],
+  wasteNews: [],
 };
 
 export const economyOf = (world: Pick<WorldState, "economy">): EconomyMemory => world.economy ?? EMPTY_ECONOMY_MEMORY;

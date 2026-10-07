@@ -1659,6 +1659,23 @@ const PublicBenefactionSchema = z.object({
 }).strict();
 
 /**
+ * How a power taxes its provinces (`material/tax-policy.ts`): the regime --
+ * tithe, land levy, customs or a tribute of men -- and the share it takes, for
+ * the power as a whole or for one province of it. The power's own provinces
+ * only, and the rate never past `MAX_TAX_RATE_BPS`; a rate set higher is
+ * brought down to it.
+ */
+const TaxPolicySetSchema = z.object({
+  op: z.literal("tax_policy_set"),
+  scope: z.enum(["polity", "province"]).describe("polity: the power's default for every province without its own; province: this one only"),
+  polityId: EntityIdSchema.describe("the power whose policy it is; for a province it must hold it"),
+  provinceId: MaybeIdSchema.default(null),
+  regime: z.enum(["tithe", "land_levy", "customs", "men"]).describe("tithe: share of the harvest, swings with the year; land_levy: steady, resented; customs: dues on trade; men: manpower tribute from allies and subjects, no money"),
+  rateBps: z.number().int().min(0).max(10_000).describe("share of what the land can bear; 1,000 is the ordinary levy; above about 1,200 costs order, and stays costly"),
+  reason: ReasonSchema,
+}).strict();
+
+/**
  * A man put in a post in an army: made optio, centurion, legate. No act could
  * set one, so a man in the ranks could rise only when the man over him died
  * (E15). Judged by who gives the post (`appointedBy`): the centurion his
@@ -2067,6 +2084,7 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   ServiceContractCloseSchema,
   RegimeChangeSchema,
   PublicBenefactionSchema,
+  TaxPolicySetSchema,
 ]).meta({ id: "WorldDelta" });
 export type WorldDelta = z.infer<typeof WorldDeltaSchema>;
 export type WorldDeltaOp = WorldDelta["op"];
@@ -2135,6 +2153,7 @@ export const WORLD_DELTA_OPS = [
   "service_contract_close",
   "regime_change",
   "public_benefaction",
+  "tax_policy_set",
 ] as const satisfies readonly WorldDeltaOp[];
 
 /**
@@ -2222,4 +2241,6 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   regime_change: "military",
   // Spending on the people: his own purse is his own business, the treasury is not.
   public_benefaction: "fiscal",
+  // How a power's provinces are taxed is the fiscal power at its plainest.
+  tax_policy_set: "fiscal",
 };

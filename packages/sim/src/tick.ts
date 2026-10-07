@@ -16,6 +16,7 @@ import {
   domesticRevenuePolity,
   provinceTaxCapacity,
   taxBurdens,
+  MAX_TAX_UNREST_BPS,
   taxShortfallSummary,
   agreementsBetween,
   atWar,
@@ -212,11 +213,14 @@ function withGovernment(
 function withTaxUnrest(
   targets: Map<string, ProvinceTargets>,
   world: WorldState,
-  burdens: ReadonlyMap<string, { readonly stabilityShiftBps: number }>,
+  burdens: ReadonlyMap<string, { readonly stabilityShiftBps: number; readonly provinceStabilityShiftBps?: ReadonlyMap<string, number> | undefined }>,
 ): Map<string, ProvinceTargets> {
   const next = new Map(targets);
   for (const province of world.map.provinces) {
-    const shift = province.controllerPolityId === null ? 0 : burdens.get(province.controllerPolityId)?.stabilityShiftBps ?? 0;
+    const burden = province.controllerPolityId === null ? undefined : burdens.get(province.controllerPolityId);
+    // How the whole is pressed, and how this province is taxed in particular:
+    // a levy is resented, a rate over the customary one hated.
+    const shift = Math.max(-MAX_TAX_UNREST_BPS, (burden?.stabilityShiftBps ?? 0) + (burden?.provinceStabilityShiftBps?.get(province.id) ?? 0));
     if (shift === 0) continue;
     const current = next.get(province.id) ?? {};
     next.set(province.id, { ...current, stabilityShiftBps: (current.stabilityShiftBps ?? 0) + shift });
@@ -361,7 +365,9 @@ export function runDeterministicTick(given: TickInput): TickResult {
   // What each power's own lands can bear this month, weighed before anything
   // is collected (see `taxBurdens`). A power asking more than that gets what
   // there is, every domestic revenue in the same proportion.
-  const burdens = taxBurdens(input.world);
+  // Who manages the money (below) also decides how far a power's collectors reach.
+  const inCharge = readDepartments(input.world);
+  const burdens = taxBurdens(input.world, { officeSkill: (polityId) => inCharge.skill({ kind: "polity", id: polityId }, "tax_roll") });
   const shortfalls = new Map<string, { asked: number; raised: number }>();
 
   // A venture is cut at its own ports, not wherever its owner's country has
@@ -390,8 +396,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
   // man's estates and ventures pay as well as he or his steward runs them: up
   // to a seventh more, or less. It was the best tax man among all the
   // magistrates, whoever he was, and a king's own gift for it never counted.
-  const inCharge = readDepartments(input.world);
-  const handling = (source: WorldState["material"]["incomeSources"][number], levied: string | null): number => {
+  const handling =(source: WorldState["material"]["incomeSources"][number], levied: string | null): number => {
     if (levied !== null) return 1 + skillShare(inCharge.skill({ kind: "polity", id: levied }, "tax_roll"), 0.15);
     if (source.originKind !== "holding" && source.originKind !== "venture") return 1;
     const owner = input.world.material.accounts.find((account) => account.id === source.beneficiaryAccountId)?.owner;
@@ -429,7 +434,10 @@ export function runDeterministicTick(given: TickInput): TickResult {
       // war, occupied, or under blockade (docs/plans/a-living-world.md §10).
       // A grain merchant feels Egypt's war in his ledger.
       const disrupted = route === undefined ? 10_000 : Math.min(...[route.fromProvinceId, route.toProvinceId].map((provinceId) => routeOpenBps(input.world, provinceId)));
-      const owed = Math.round((source.amount * source.collectionRateBps / 10_000) * premium / 10_000 * disrupted / 10_000);
+      // A power's own tax rolls are written at the rate it has chosen for its
+      // provinces (`TaxBurden.rateScale`): the same rolls, a heavier or lighter hand.
+      const rolls = source.kind === "tax" && levied !== null && source.originKind !== "position" ? burdens.get(levied)?.rateScale ?? 1 : 1;
+      const owed = Math.round((source.amount * source.collectionRateBps / 10_000) * rolls * premium / 10_000 * disrupted / 10_000);
       // A good collector gathers what is owed better; he cannot gather what
       // the land does not have. He brings in more only as far as the land has
       // room to give, so his gift fades as a tax nears what it bears, and a
@@ -1625,7 +1633,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
   // The land reckoned for the month and the year; what treaties and debts
   // make happen; and misery and ambition that turn to risings and civil war --
   // before powers are reviewed, so a province full of yearning rises today.
-  const land = reviewTheLand({ world: met.world, toDay: input.toDay, clock: input.clock });
+  const land = reviewTheLand({ world: met.world, toDay: input.toDay, clock: input.clock, targets: () => provinceTargetsFrom(met.world) });
   facts.push(...land.facts);
   const playerPolityId = input.playerCharacterId == null ? null : land.world.characters.find((character) => character.id === input.playerCharacterId)?.polityId ?? null;
   const treaties = keepTreaties({ world: land.world, toDay: input.toDay, ids: input.ids, playerPolityId });

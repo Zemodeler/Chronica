@@ -27,6 +27,7 @@ import {
   type Force,
   type Siege,
   type WorldState,
+  scarredBy,
 } from "@chronica/shared";
 import { resolveEngagement, type BattleAccount } from "./battle";
 import { blockadeTightness } from "./blockades";
@@ -396,6 +397,13 @@ export function pressSieges(given: WorldState, toDay: number, options: PressSieg
 const SACK_LOSS = 0.15;
 /** What a sack does to the province's order and its bread, in basis points. */
 const SACK_STABILITY_BPS = 3_000;
+/**
+ * What a city given to its men does to the province's development and the
+ * scar on it, as a severity (0 to 1): the same as a sack by the spoils
+ * (4 000 of 10 000), since it is the same thing -- a fifth of what the
+ * province had gone at once, and a scar that fades over a generation.
+ */
+const SACK_DEVELOPMENT_SEVERITY = 0.4;
 const SACK_FOOD_BPS = 2_000;
 /** How much the powers around the sacker fear it the more. */
 const SACK_ALARM = 15;
@@ -438,7 +446,7 @@ function sackCities(world: WorldState, sacked: readonly { provinceId: string; pl
       material: {
         ...next.material,
         provinceMaterial: next.material.provinceMaterial.map((candidate) => (candidate.provinceId === sack.provinceId
-          ? { ...candidate, population: Math.max(0, candidate.population - lost), availableManpower: Math.max(0, candidate.availableManpower - Math.round(lost / 4)), stabilityBps: Math.max(0, candidate.stabilityBps - SACK_STABILITY_BPS), foodSecurityBps: Math.max(0, candidate.foodSecurityBps - SACK_FOOD_BPS), warDamageBps: Math.min(10_000, candidate.warDamageBps + 2_500) }
+          ? { ...candidate, population: Math.max(0, candidate.population - lost), availableManpower: Math.max(0, candidate.availableManpower - Math.round(lost / 4)), stabilityBps: Math.max(0, candidate.stabilityBps - SACK_STABILITY_BPS), foodSecurityBps: Math.max(0, candidate.foodSecurityBps - SACK_FOOD_BPS), warDamageBps: Math.min(10_000, candidate.warDamageBps + 2_500), ...scarredBy(candidate, SACK_DEVELOPMENT_SEVERITY) }
           : candidate)),
         accounts: chest === undefined ? next.material.accounts : next.material.accounts.map((account) => (account.id === chest.id ? { ...account, balance: account.balance + loot } : account)),
         // Written down, as plunder: a sacked city is not an account, and the

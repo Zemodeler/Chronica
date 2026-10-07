@@ -16,6 +16,7 @@ import {
   type Force,
   type ScenarioWarfareRules,
   type WorldState,
+  applyForagingScar,
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
 
@@ -91,7 +92,10 @@ function drawOn(world: WorldState, provinceId: string, manDays: number, ceiling:
         const share = parts.get(row.provinceId);
         if (share === undefined) return row;
         const eaten = Math.min(ceiling, Math.round(((manDays * share) / Math.max(1, row.population)) * 20_000 / 30));
-        return { ...row, foodSecurityBps: clampBps(row.foodSecurityBps - eaten), stabilityBps: clampBps(row.stabilityBps - anger) };
+        // A requisition strips the farms as well as the granaries: a requisitioning army leaves a
+        // little scar for what it took (the quarter of it that was not left to the farmers), a purchase none.
+        const taken = { ...row, foodSecurityBps: clampBps(row.foodSecurityBps - eaten), stabilityBps: clampBps(row.stabilityBps - anger) };
+        return anger > 0 ? applyForagingScar(taken, Math.round(eaten / 4)) : taken;
       }),
     },
   };

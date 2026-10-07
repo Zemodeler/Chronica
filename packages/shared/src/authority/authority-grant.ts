@@ -145,6 +145,7 @@ export const DOMAIN_POWER_BY_ACTION: Readonly<Record<string, AuthorityPower>> = 
   // Nobody's office grants taking the state; the attempt is judged as the override it is.
   regime_change: "override",
   public_benefaction: "spend",
+  tax_policy_set: "spend",
   office_seat_set: "appoint",
   agreement_open: "negotiate",
   agreement_close: "negotiate",

@@ -1,3 +1,4 @@
+import { regionalSummary } from "./regional-summary";
 import { powersDealtWith } from "./far-powers";
 import { powersNamedIn } from "./powers-named";
 import { armyInWords, serviceInWords } from "./army-words";
@@ -166,6 +167,8 @@ export interface WorldSlice {
   readonly loanOffers: readonly string[];
   /** How hard the power's own lands are being taxed, for whoever can open its treasury. */
   readonly taxBurden: { readonly asked: number; readonly bearable: number; readonly inWords: string } | null;
+  /** How its provinces are taxed and how they fare, one line a power (`regional-summary.ts`), for whoever can open its treasury. */
+  readonly regional?: string | null;
   /** Coin a month per thousand men, for whoever can open the power's treasury and the scenario names it. */
   readonly soldierPayPerThousand: number | null;
   readonly military: readonly {
@@ -550,6 +553,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     account.owner.kind === "polity" && account.owner.id === ownPolity && reachesAccount(account.id));
   const burden = opensTreasury ? taxBurdens(world).get(ownPolity) : undefined;
   const taxBurden = burden === undefined ? null : { asked: burden.asked, bearable: burden.bearable, inWords: taxBurdenInWords(burden) };
+  const regional = opensTreasury && ownPolity !== null ? regionalSummary(world, ownPolity, burden) : null;
   const soldierPayPerThousand = opensTreasury ? world.map.polities.find((polity) => polity.id === ownPolity)?.soldierPayPerThousand ?? null : null;
   const monthlyExpenditure = Math.round(
     world.material.obligations
@@ -1316,6 +1320,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     monthlyExpenditure,
     loanOffers: input.actorRef.kind === "character" ? loanOfferLines(world, input.actorRef.id) : [],
     taxBurden,
+    regional,
     soldierPayPerThousand,
     military,
     foreignPowers,
@@ -1406,6 +1411,7 @@ export function renderWorldSlice(slice: WorldSlice): string {
     ...(slice.taxBurden === null ? [] : [
       `Our lands' taxes: ~${slice.taxBurden.asked}/month asked of ~${slice.taxBurden.bearable} bearable (${slice.taxBurden.inWords}); more is not collected, and past half, order sours.`,
     ]),
+    ...(slice.regional == null ? [] : [slice.regional]),
     ...(slice.soldierPayPerThousand === null ? [] : [
       `Our soldiers are paid ${slice.soldierPayPerThousand.toLocaleString("en-GB")}/month for every 1,000 men.`,
     ]),

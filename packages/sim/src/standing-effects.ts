@@ -106,19 +106,22 @@ function provincesOf(world: WorldState, carrier: Carrier, effect: StandingEffect
 /** No pile of buildings moves a province further than this from its ordinary level. */
 const MAX_SHIFT_BPS = 4_000;
 const MAX_MANPOWER_SHIFT = 1;
+/** Works lift what a province can become by no more than a fifth of its potential, however many are built. */
+const MAX_DEVELOPMENT_SHIFT_BPS = 2_000;
 
 /** Where each province now settles back to, from everything standing in or over it. */
 export function provinceTargetsFrom(world: WorldState): Map<string, ProvinceTargets> {
-  const sums = new Map<string, { stability: number; food: number; productive: number; manpower: number }>();
+  const sums = new Map<string, { stability: number; food: number; productive: number; manpower: number; development: number }>();
   for (const carrier of standingCarriers(world)) {
     for (const effect of carrier.effects) {
-      if (!["stability", "food_security", "productive_capacity", "manpower"].includes(effect.quantity)) continue;
+      if (!["stability", "food_security", "productive_capacity", "manpower", "development"].includes(effect.quantity)) continue;
       for (const provinceId of provincesOf(world, carrier, effect)) {
-        const sum = sums.get(provinceId) ?? { stability: 0, food: 0, productive: 0, manpower: 0 };
+        const sum = sums.get(provinceId) ?? { stability: 0, food: 0, productive: 0, manpower: 0, development: 0 };
         if (effect.quantity === "stability") sum.stability += effectWorth.baselineShiftBps(effect);
         if (effect.quantity === "food_security") sum.food += effectWorth.baselineShiftBps(effect);
         if (effect.quantity === "productive_capacity") sum.productive += effectWorth.baselineShiftBps(effect);
         if (effect.quantity === "manpower") sum.manpower += effectWorth.manpowerShift(effect);
+        if (effect.quantity === "development") sum.development += effectWorth.developmentShiftBps(effect);
         sums.set(provinceId, sum);
       }
     }
@@ -132,7 +135,7 @@ export function provinceTargetsFrom(world: WorldState): Map<string, ProvinceTarg
     for (const province of world.map.provinces) {
       const shift = province.controllerPolityId === null ? 0 : calling.get(province.controllerPolityId) ?? 0;
       if (shift === 0) continue;
-      const sum = sums.get(province.id) ?? { stability: 0, food: 0, productive: 0, manpower: 0 };
+      const sum = sums.get(province.id) ?? { stability: 0, food: 0, productive: 0, manpower: 0, development: 0 };
       sums.set(province.id, { ...sum, manpower: sum.manpower + shift });
     }
   }
@@ -142,6 +145,7 @@ export function provinceTargetsFrom(world: WorldState): Map<string, ProvinceTarg
     foodSecurityShiftBps: clamp(sum.food, MAX_SHIFT_BPS),
     productiveCapacityShiftBps: clamp(sum.productive, MAX_SHIFT_BPS),
     manpowerShift: clamp(sum.manpower, MAX_MANPOWER_SHIFT),
+    developmentShiftBps: clamp(sum.development, MAX_DEVELOPMENT_SHIFT_BPS),
   }]));
 }
 

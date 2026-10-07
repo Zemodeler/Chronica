@@ -86,6 +86,9 @@ import {
   describeFerry,
   ferryDays,
   ensureProvinceMaterial,
+  clampTaxRate,
+  economyOf,
+  EMPTY_ECONOMY_MEMORY,
   sackTheProvince,
   settlementShareBps,
   WorldStateSchema,
@@ -326,6 +329,14 @@ function scopeOf(delta: WorldDelta, world: WorldState, resolve: (ref: string) =>
       return { kind: delta.target === "polity" ? "polity" : "institution", id: resolve(delta.targetId) ?? delta.targetId };
     case "province_material_shift":
       return { kind: "province", id: delta.provinceId };
+    // How a power's provinces are taxed is that power's act, whether it is for all of them or one, and
+    // a fiscal one: judged against the chest the revenue goes into, as setting up an income is, so
+    // that a governor who may manage a province does not thereby set the taxes of the realm.
+    case "tax_policy_set": {
+      const polityId = resolve(delta.polityId) ?? delta.polityId;
+      const chest = world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === polityId && account.status === "active");
+      return chest === undefined ? { kind: "polity", id: polityId } : { kind: "account", id: chest.id };
+    }
     case "office_seat_set": {
       // Scoped to the power whose office it is: seating a man is an act over a
       // government, and judging it against the office itself would let anybody
@@ -621,6 +632,8 @@ const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   // Taking a state is the power nobody's office grants: every attempt is recorded as a breach.
   regime_change: "override",
   public_benefaction: "spend",
+  // Choosing how provinces are taxed commits the treasury's future revenue, as setting up an income source does.
+  tax_policy_set: "spend",
 };
 
 /** The power an act needs: founding something is proposing it, and keeping it at an account's expense is spending from it. */
@@ -3434,11 +3447,50 @@ function applyOne(
           productiveCapacityBps: clampBps(material.productiveCapacityBps + (delta.productiveCapacityBpsDelta ?? 0)),
           warDamageBps: clampBps(material.warDamageBps + (delta.warDamageBpsDelta ?? 0)),
           taxCapacity: Math.max(0, material.taxCapacity + (delta.taxCapacityDelta ?? 0)),
+          // The month's reckoning rebuilds capacity from the people and their
+          // development; what a hand laid on it is kept beside it to be added again.
+          ...(delta.taxCapacityDelta === undefined || delta.taxCapacityDelta === 0 ? {} : { taxCapacityOffset: Math.max(-10_000_000, Math.min(10_000_000, (material.taxCapacityOffset ?? 0) + delta.taxCapacityDelta)) }),
           displacedPopulation: Math.max(0, material.displacedPopulation + (delta.displacedPopulationDelta ?? 0)),
           lastMaterialUpdateStep: atStep,
         };
       });
       return { ...backfilled, material: { ...backfilled.material, provinceMaterial } };
+    }
+
+    case "tax_policy_set": {
+      const polityId = resolve(delta.polityId) ?? delta.polityId;
+      const polity = world.map.polities.find((candidate) => candidate.id === polityId);
+      if (polity === undefined) reject(`No power "${polityId}" exists to set a tax policy for.`, "reference");
+      // An officer sets his own power's taxes, and nobody else's. The world's
+      // own hand (a mechanic, a scenario) is not an officer and is let by.
+      const actorPolity = context.actorRef.kind === "character" ? world.characters.find((character) => character.id === context.actorRef.id)?.polityId ?? null : context.actorRef.kind === "polity" ? context.actorRef.id : null;
+      if (actorPolity !== null && actorPolity !== polityId && context.actsForTheWorld !== true) {
+        reject(`${polity.name} is not the power this officer serves: its provinces are taxed by its own government.`);
+      }
+      const rateBps = clampTaxRate(delta.rateBps);
+      if (delta.scope === "polity") {
+        const memory = economyOf(world);
+        const kept = memory.taxPolicies.filter((policy) => policy.polityId !== polityId);
+        return { ...world, economy: { ...memory, taxPolicies: [...kept, { polityId, regime: delta.regime, rateBps }].sort((a, b) => a.polityId.localeCompare(b.polityId)) } };
+      }
+      const provinceId = delta.provinceId === null ? null : resolve(delta.provinceId) ?? delta.provinceId;
+      if (provinceId === null) reject("A tax policy for one province must name it.");
+      const province = world.map.provinces.find((candidate) => candidate.id === provinceId);
+      if (province === undefined) reject(`No province "${provinceId}" exists to tax.`, "reference");
+      // Only ground the power holds: an occupied province is its occupier's to
+      // squeeze, a lost one is nobody's to tax.
+      if (province.controllerPolityId !== polityId) {
+        reject(`${province.name} is not held by ${polity.name}, which cannot set how it is taxed.`);
+      }
+      const backfilled = ensureProvinceMaterial(world, atStep);
+      return {
+        ...backfilled,
+        economy: backfilled.economy ?? EMPTY_ECONOMY_MEMORY,
+        material: {
+          ...backfilled.material,
+          provinceMaterial: backfilled.material.provinceMaterial.map((row) => (row.provinceId === provinceId ? { ...row, taxRegime: delta.regime, taxRateBps: rateBps } : row)),
+        },
+      };
     }
 
     case "political_procedure_open": {

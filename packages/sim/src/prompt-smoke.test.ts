@@ -166,7 +166,9 @@ describe("orchestrator prompt", () => {
     // (febddc8), then the play-test fixes' generated schema: force_post_set, a
     // request's ask, public_benefaction, a soldier's conduct, a vote's budget
     // holder, franchise, land and debt laws, the submission clause, a loan offer.
-    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(79_000);
+    // Raised 79k -> 79.5k (2026-10-07): the economy rework's "tax_policy_set" (how a power
+    // taxes its provinces: regime and rate) and its line in the generated schema.
+    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(79_500);
   });
 });
 

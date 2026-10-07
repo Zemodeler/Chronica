@@ -1,6 +1,6 @@
 import type { MoneyTransaction, ProvinceMaterial } from "../material-state";
 import type { WorldState } from "../world/world-state";
-import { applyWarDamage, deriveDefaultProvinceMaterial, findProvinceMaterial } from "./province-material";
+import { applyWarDamage, deriveDefaultProvinceMaterial, findProvinceMaterial, scarredBy } from "./province-material";
 
 /**
  * What an army takes, and what taking it costs the place.
@@ -42,6 +42,8 @@ const SACK_SHARE = 0.5;
 
 /** How hard a full sack is on the province, in basis points of severity. */
 const SACK_SEVERITY_BPS = 4_000;
+/** The severity (0 to 1) of the sack-specific blow to development and the scar, over and above `applyWarDamage`'s. */
+const SACK_DEVELOPMENT_SEVERITY = 0.2;
 
 export interface Seizure {
   readonly world: WorldState;
@@ -181,7 +183,14 @@ export function sackTheProvince(world: WorldState, input: SackInput): Seizure {
 
   const material = findProvinceMaterial(withMoney, input.provinceId)
     ?? deriveDefaultProvinceMaterial(province, input.atStep);
-  const damaged = applyWarDamage(material, { severityBps: severity }, input.atStep);
+  const struck = applyWarDamage(material, { severityBps: severity }, input.atStep);
+  // A sack is what leaves a place behind for a generation: its development takes
+  // a second, sack-sized blow on top of the common one for war, in proportion to
+  // how much of the province's worth was carried off, so that a full sack
+  // (half of what is there) costs about a fifth of what the province had and
+  // scars it by a seventh, and a token levy next to nothing.
+  const sackShare = remaining <= 0 ? 0 : taken / remaining / SACK_SHARE;
+  const damaged = { ...struck, ...scarredBy(struck, SACK_DEVELOPMENT_SEVERITY * sackShare) };
   const provinceMaterial = withMoney.material.provinceMaterial.some((row) => row.provinceId === input.provinceId)
     ? withMoney.material.provinceMaterial.map((row) => (row.provinceId === input.provinceId ? damaged : row))
     : [...withMoney.material.provinceMaterial, damaged];

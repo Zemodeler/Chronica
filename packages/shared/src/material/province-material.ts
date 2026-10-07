@@ -2,6 +2,7 @@ import type { WorldState } from "../world/world-state";
 import type { Province } from "../world/map";
 import type { ProvinceLevel, ProvinceMaterial } from "../material-state";
 import { liveProvinceIds } from "./live-provinces";
+import { stableHash } from "../determinism";
 
 // Background material society (docs/14 Phase 2).
 //
@@ -111,9 +112,162 @@ export function peopleOf(province: Pick<Province, "settlements" | "terrainId" | 
   return Math.max(0, province.settlements.reduce((total, settlement) => total + settlement.size * POPULATION_PER_SETTLEMENT_SIZE, 0));
 }
 
+/**
+ * How developed a province is, and what it could be.
+ *
+ * Every province was alike once it was counted: the same output from a head,
+ * the same tax, whether it was the Campanian plain with its drained fields and
+ * three harbours or a valley of herdsmen. Development is what makes places
+ * differ and what lets them change. It is the roads, harbours, estates and the
+ * habit of trade that sit on top of the people (0-10 000), and it sets how
+ * many people the ground carries, how much they make and how much of it a
+ * government can reach.
+ *
+ * Two numbers, both derived from what the map already says. Where a province
+ * *starts* depends on its ground, how big its town is and whether it has a
+ * port; where it can *get to* (its potential) on its ground, a harbour and a
+ * navigable river, and nothing else, so a hill-valley is never Campania
+ * however long it is left in peace.
+ */
+export const DEVELOPMENT_NEUTRAL_BPS = 5_000;
+/** The floor development falls to: roads and field-banks do not vanish altogether. */
+export const MIN_DEVELOPMENT_BPS = 500;
+const START_DEVELOPMENT_BY_TERRAIN: Readonly<Record<string, number>> = {
+  "coastal-plain": 3_800,
+  hills: 2_900,
+  "hills-uplands": 2_500,
+  "mountain-pass": 2_200,
+  "desert-steppe": 2_000,
+};
+const START_DEVELOPMENT_OTHERWISE = 2_800;
+const POTENTIAL_BY_TERRAIN: Readonly<Record<string, number>> = {
+  "coastal-plain": 9_000,
+  hills: 7_000,
+  "hills-uplands": 6_000,
+  "mountain-pass": 5_000,
+  "desert-steppe": 4_200,
+};
+const POTENTIAL_OTHERWISE = 6_500;
+const PORT_START_BONUS_BPS = 500;
+const PORT_POTENTIAL_BONUS_BPS = 700;
+const RIVER_POTENTIAL_BONUS_BPS = 400;
+const MAX_START_DEVELOPMENT_BPS = 7_000;
+const MIN_START_DEVELOPMENT_BPS = 2_000;
+
+/** The size of a province's towns, in the map's own units. */
+function settledSize(province: Pick<Province, "settlements">): number {
+  return province.settlements.reduce((total, settlement) => total + settlement.size, 0);
+}
+const hasPort = (province: Pick<Province, "settlements">): boolean => province.settlements.some((settlement) => settlement.kind === "port");
+
+/**
+ * Where a province's development begins: its ground, a town's worth of roads
+ * and walls (logarithmic, because a city of fifty is not ten times a town of
+ * five), a harbour, and a little of its own luck so that two hill valleys are
+ * not the same. Between 2 000 and 7 000, so no province starts at the bottom
+ * or the top of what it could be.
+ */
+export function deriveInitialDevelopment(province: Pick<Province, "id" | "settlements" | "terrainId">): number {
+  const ground = START_DEVELOPMENT_BY_TERRAIN[province.terrainId] ?? START_DEVELOPMENT_OTHERWISE;
+  const town = Math.min(2_200, Math.round(500 * Math.log2(1 + settledSize(province) / 2)));
+  const luck = (stableHash(["development", province.id]) % 801) - 400;
+  const value = ground + town + (hasPort(province) ? PORT_START_BONUS_BPS : 0) + luck;
+  return Math.max(MIN_START_DEVELOPMENT_BPS, Math.min(MAX_START_DEVELOPMENT_BPS, value));
+}
+
+/** What a province's development can reach in peace: its ground, a harbour, a river, the weight of its towns. */
+export function developmentPotential(province: Pick<Province, "settlements" | "terrainId">, onARiver = false): number {
+  const ground = POTENTIAL_BY_TERRAIN[province.terrainId] ?? POTENTIAL_OTHERWISE;
+  const towns = Math.min(800, Math.round(250 * Math.log2(1 + settledSize(province) / 4)));
+  return clampBps(ground + towns + (hasPort(province) ? PORT_POTENTIAL_BONUS_BPS : 0) + (onARiver ? RIVER_POTENTIAL_BONUS_BPS : 0));
+}
+
+/**
+ * A province's development, from its row, or from what a row for it would
+ * start with, or the neutral level where nothing is known of the province.
+ */
+export function developmentOf(row: Pick<ProvinceMaterial, "developmentBps">, province?: Pick<Province, "id" | "settlements" | "terrainId">): number {
+  if (row.developmentBps !== undefined) return row.developmentBps;
+  return province === undefined ? DEVELOPMENT_NEUTRAL_BPS : deriveInitialDevelopment(province);
+}
+
+/**
+ * What development does to how much a head makes, as a multiplier: 1 at the
+ * neutral level, a little over 1.6 at the very top and 0.45 near the bottom.
+ */
+export function developmentFactor(developmentBps: number): number {
+  return 0.4 + 1.2 * (developmentBps / 10_000);
+}
+
+/**
+ * How much of a province's capacity to make things it really has: its
+ * productive capacity (what war and levies have left of it) times what its
+ * development lifts or lowers it by. Basis points, and past 10 000 where a
+ * developed province's fields and workshops outdo the ordinary.
+ */
+export function effectiveProductiveCapacity(row: Pick<ProvinceMaterial, "productiveCapacityBps" | "developmentBps">, province?: Pick<Province, "id" | "settlements" | "terrainId">): number {
+  return Math.round(row.productiveCapacityBps * developmentFactor(developmentOf(row, province)));
+}
+
+/**
+ * What the ground grows relative to the ordinary, by development: a gentler
+ * slope than the one for tax, because even a poor province feeds its own.
+ */
+export function harvestDevelopmentFactor(developmentBps: number): number {
+  return 0.85 + 0.3 * (developmentBps / 10_000);
+}
+
+/**
+ * How many people a province's ground can carry, by its development, against
+ * the number its towns and countryside were counted at (`peopleOf`). At the
+ * development it started with, exactly that; half again as developed and a
+ * fifth more; war-ravaged to half, a quarter fewer. Never below a third.
+ */
+export function carryingCapacityOf(baselinePeople: number, developmentBps: number, startingDevelopmentBps: number): number {
+  const ratio = developmentBps / Math.max(1, startingDevelopmentBps);
+  return Math.max(Math.floor(baselinePeople * 0.35), Math.round(baselinePeople * (0.5 + 0.5 * ratio)));
+}
+
+/** The things about a province that never change in a game, worked out once per map: what it can become, where it starts, how many people it was counted at. */
+export interface ProvinceGround {
+  readonly potentialBps: number;
+  readonly startingDevelopmentBps: number;
+  readonly baselinePeople: number;
+  readonly port: boolean;
+  readonly river: boolean;
+}
+
+const groundByProvinces = new WeakMap<readonly Province[], Map<string, ProvinceGround>>();
+
+/** Every province's ground, from an index built once for as long as the map's province list lives. */
+export function provinceGrounds(world: Pick<WorldState, "map">): Map<string, ProvinceGround> {
+  const known = groundByProvinces.get(world.map.provinces);
+  if (known !== undefined) return known;
+  const onRiver = new Set<string>();
+  for (const edge of world.map.edges) {
+    if (edge.crossing !== "river") continue;
+    onRiver.add(edge.from);
+    onRiver.add(edge.to);
+  }
+  const grounds = new Map<string, ProvinceGround>();
+  for (const province of world.map.provinces) {
+    const river = onRiver.has(province.id);
+    grounds.set(province.id, {
+      potentialBps: developmentPotential(province, river),
+      startingDevelopmentBps: deriveInitialDevelopment(province),
+      baselinePeople: peopleOf(province),
+      port: hasPort(province),
+      river,
+    });
+  }
+  groundByProvinces.set(world.map.provinces, grounds);
+  return grounds;
+}
+
 /** A province with no authored material state gets one derived from its settlements, or its countryside. */
 export function deriveDefaultProvinceMaterial(province: Province, atStep: number): ProvinceMaterial {
   const population = peopleOf(province);
+  const developmentBps = deriveInitialDevelopment(province);
   return {
     provinceId: province.id,
     population,
@@ -121,21 +275,26 @@ export function deriveDefaultProvinceMaterial(province: Province, atStep: number
     productiveCapacityBps: BASELINE_PRODUCTIVE_CAPACITY_BPS,
     foodSecurityBps: BASELINE_FOOD_SECURITY_BPS,
     stabilityBps: BASELINE_STABILITY_BPS,
-    taxCapacity: Math.floor(population * TAX_CAPACITY_PER_POPULATION),
+    taxCapacity: reckonTaxCapacity({ population, productiveCapacityBps: BASELINE_PRODUCTIVE_CAPACITY_BPS, warDamageBps: 0, developmentBps }),
     displacedPopulation: 0,
     warDamageBps: 0,
     lastMaterialUpdateStep: atStep,
+    developmentBps,
+    scarBps: 0,
   };
 }
 
 /**
  * What a province's people can pay in a month, as the calendar reckons it
- * (`sim/economy.ts`): a twentieth of a coin a head, as much of it as they can make, and
- * none of what war has burned. A fresh province reckons to exactly what it was
- * derived with.
+ * (`sim/economy.ts`): a twentieth of a coin a head, as much of it as they can make
+ * (more where the province is developed, less where it is not), none of what
+ * war has burned, and whatever a hand has laid on it by decree
+ * (`taxCapacityOffset`). A row with no development reckons as the neutral level does.
  */
-export function reckonTaxCapacity(material: Pick<ProvinceMaterial, "population" | "productiveCapacityBps" | "warDamageBps">): number {
-  return Math.max(0, Math.floor(material.population * TAX_CAPACITY_PER_POPULATION * (material.productiveCapacityBps / 10_000) * (1 - material.warDamageBps / 10_000)));
+export function reckonTaxCapacity(material: Pick<ProvinceMaterial, "population" | "productiveCapacityBps" | "warDamageBps"> & Partial<Pick<ProvinceMaterial, "developmentBps" | "taxCapacityOffset">>): number {
+  const made = material.population * TAX_CAPACITY_PER_POPULATION * (material.productiveCapacityBps / 10_000) * (1 - material.warDamageBps / 10_000)
+    * developmentFactor(material.developmentBps ?? DEVELOPMENT_NEUTRAL_BPS);
+  return Math.max(0, Math.floor(made) + (material.taxCapacityOffset ?? 0));
 }
 
 /**
@@ -187,15 +346,24 @@ export function ensureProvinceMaterial(world: WorldState, atStep: number): World
   const uncounted = (row: ProvinceMaterial): boolean => row.population === 0 && row.availableManpower === 0
     && row.warDamageBps === 0 && row.displacedPopulation === 0 && townless.has(row.provinceId);
   const refill = world.material.provinceMaterial.some(uncounted);
-  if (missing.length === 0 && !refill) return world;
+  // A row written before development existed is given the development a row
+  // for its province would start with, once; one that has it keeps it.
+  const undeveloped = world.material.provinceMaterial.some((row) => row.developmentBps === undefined);
+  if (missing.length === 0 && !refill && !undeveloped) return world;
+  const grounds = undeveloped ? provinceGrounds(world) : undefined;
+  const developed = (row: ProvinceMaterial): ProvinceMaterial => (row.developmentBps !== undefined || grounds === undefined ? row : {
+    ...row,
+    developmentBps: grounds.get(row.provinceId)?.startingDevelopmentBps ?? DEVELOPMENT_NEUTRAL_BPS,
+    scarBps: row.scarBps ?? 0,
+  });
   return {
     ...world,
     material: {
       ...world.material,
       provinceMaterial: [
         ...(refill
-          ? world.material.provinceMaterial.map((row) => (uncounted(row) ? { ...deriveDefaultProvinceMaterial(townless.get(row.provinceId)!, row.lastMaterialUpdateStep), stabilityBps: row.stabilityBps, foodSecurityBps: row.foodSecurityBps } : row))
-          : world.material.provinceMaterial),
+          ? world.material.provinceMaterial.map((row) => developed(uncounted(row) ? { ...deriveDefaultProvinceMaterial(townless.get(row.provinceId)!, row.lastMaterialUpdateStep), stabilityBps: row.stabilityBps, foodSecurityBps: row.foodSecurityBps } : row))
+          : world.material.provinceMaterial.map(developed)),
         ...missing.map((province) => deriveDefaultProvinceMaterial(province, atStep)),
       ],
     },
@@ -221,10 +389,15 @@ export function applyRecruitmentToMaterial(material: ProvinceMaterial, recruits:
   const capacityHitBps = material.population > 0
     ? clampBps((actual / material.population) * 10_000 * 2)
     : 0;
+  // A levy empties the fields of the men who kept them, and what is not
+  // tended decays: development falls by a third of the share of the people
+  // taken, a levy of a thirtieth of a province costing it a hundredth.
+  const drained = material.population > 0 ? actual / material.population : 0;
   return {
     ...material,
     availableManpower: material.availableManpower - actual,
     productiveCapacityBps: clampBps(material.productiveCapacityBps - Math.min(2_000, capacityHitBps)),
+    ...(material.developmentBps === undefined ? {} : { developmentBps: Math.max(MIN_DEVELOPMENT_BPS, clampBps(material.developmentBps - material.developmentBps * drained * LEVY_DEVELOPMENT_LOSS)) }),
     lastMaterialUpdateStep: atStep,
   };
 }
@@ -232,6 +405,35 @@ export function applyRecruitmentToMaterial(material: ProvinceMaterial, recruits:
 export interface WarDamageInput {
   /** 0-10 000: how severe this event was for the province (a raid is lower than a sack). */
   readonly severityBps: number;
+}
+
+/**
+ * What war does to development, apart from the people and fields it burns.
+ *
+ * A burned field is sown again next spring; a ruined harbour, a razed town
+ * and a drained countryside are not, and a province that has been campaigned
+ * over loses the merchants and landowners who made it prosper. So an event
+ * of severity s takes a share of the province's development at once
+ * (`DEVELOPMENT_LOSS_PER_SEVERITY`), and writes a scar -- a share of what is
+ * left of its room to grow -- that caps it for decades (`scarBps`). A full
+ * sack (`material/spoils.ts` adds a second, sack-sized blow to the common one
+ * for war) costs about a fifth of what a province had and scars it by a
+ * seventh; a battle on its fields a twentieth; the second war deepens the
+ * first scar, since each adds a share of what room remains.
+ */
+export const DEVELOPMENT_LOSS_PER_SEVERITY = 0.5;
+export const SCAR_PER_SEVERITY = 0.35;
+/** A levy's cost to development, per share of the province's people it takes. */
+const LEVY_DEVELOPMENT_LOSS = 0.33;
+
+/** A province struck at this severity (0 to 1): what it has left of its development and what it carries as a scar. */
+export function scarredBy(material: ProvinceMaterial, severity: number): Pick<ProvinceMaterial, "developmentBps" | "scarBps"> {
+  const development = material.developmentBps ?? DEVELOPMENT_NEUTRAL_BPS;
+  const scar = material.scarBps ?? 0;
+  return {
+    developmentBps: Math.max(MIN_DEVELOPMENT_BPS, clampBps(development - development * severity * DEVELOPMENT_LOSS_PER_SEVERITY)),
+    scarBps: clampBps(scar + (10_000 - scar) * severity * SCAR_PER_SEVERITY),
+  };
 }
 
 /** Battle, siege, raid, occupation, or disease striking one province. */
@@ -247,8 +449,20 @@ export function applyWarDamage(material: ProvinceMaterial, input: WarDamageInput
     stabilityBps: clampBps(material.stabilityBps - severity * 3_000),
     productiveCapacityBps: clampBps(material.productiveCapacityBps - severity * 3_000),
     warDamageBps: clampBps(material.warDamageBps + severity * 5_000),
+    ...scarredBy(material, severity),
     lastMaterialUpdateStep: atStep,
   };
+}
+
+/**
+ * An army living off a province, or an occupier squeezing it: damage in
+ * proportion to what was burned or taken (basis points of war damage), with a
+ * development hit well below a battle's. Foraging is a season's grazing; it
+ * is the sack, not the foraging, that wrecks places.
+ */
+export function applyForagingScar(material: ProvinceMaterial, damageBps: number): ProvinceMaterial {
+  if (damageBps <= 0) return material;
+  return { ...material, ...scarredBy(material, (clampBps(damageBps) / 10_000) * 0.4) };
 }
 
 /** Below this, a province is genuinely food-insecure rather than merely below full baseline. */
@@ -281,6 +495,12 @@ function foodShortagePressure(material: ProvinceMaterial, stepsIdle: number): { 
  * manpower figure multiplies the share of people who can be called up.
  */
 export interface ProvinceTargets {
+  /**
+   * What stands in the province lifts (or lowers) the development it can
+   * reach, in basis points of potential, and where it is a rebuilding speeds
+   * the fading of a scar by the same measure (`developmentShiftBps`).
+   */
+  readonly developmentShiftBps?: number;
   readonly stabilityShiftBps?: number;
   readonly foodSecurityShiftBps?: number;
   readonly productiveCapacityShiftBps?: number;
