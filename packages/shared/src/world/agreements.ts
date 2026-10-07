@@ -352,6 +352,51 @@ export function openWar(agreements: readonly PolityAgreement[], war: {
 }
 
 /**
+ * An embargo laid by the engine itself, where no delta is being applied: a notice of embargo whose term ran out unanswered
+ * (`tick.ts`), as `openWar` is for an ultimatum's. `agreement_open` is the way in for everything written, and does what this
+ * does -- a trade pact standing between the two ends with it -- and this says whether there was one, because laying an embargo
+ * over a pact is a breach that costs the embargoer trust (`EMBARGO_BREACH_TRUST`). Where the embargoer already has one on
+ * the same power the list is returned as it was.
+ */
+export function layEmbargo(agreements: readonly PolityAgreement[], embargo: {
+  readonly id: string;
+  /** The power that lays it. */
+  readonly polityId: string;
+  readonly otherPolityId: string;
+  readonly terms: string;
+  readonly goods: readonly GoodId[];
+  readonly atStep: number;
+  readonly sourceMessageId: string | null;
+  readonly reason: string;
+}): { readonly agreements: PolityAgreement[]; readonly breachedPact: boolean } {
+  if (agreements.some((agreement) => agreement.status === "active" && agreement.kind === "embargo" && agreement.polityId === embargo.polityId && agreement.otherPolityId === embargo.otherPolityId)) {
+    return { agreements: [...agreements], breachedPact: false };
+  }
+  const pact = (agreement: PolityAgreement): boolean => agreement.status === "active" && agreement.kind === "trade_pact" && between(agreement, embargo.polityId, embargo.otherPolityId);
+  return {
+    breachedPact: agreements.some(pact),
+    agreements: [
+      ...agreements.map((agreement) => (pact(agreement) ? { ...agreement, status: "ended" as const, endedAtStep: embargo.atStep, endedReason: embargo.reason.slice(0, 240) } : agreement)),
+      {
+        id: embargo.id,
+        kind: "embargo",
+        polityId: embargo.polityId,
+        otherPolityId: embargo.otherPolityId,
+        terms: embargo.terms.slice(0, 600),
+        trade: { tariffCapBps: null, mostFavoured: false, exempt: [], goods: [...embargo.goods] },
+        sinceStep: embargo.atStep,
+        untilStep: null,
+        sourceMessageId: embargo.sourceMessageId,
+        status: "active",
+        endedAtStep: null,
+        endedReason: null,
+        visibility: "public",
+      },
+    ],
+  };
+}
+
+/**
  * The powers a war is actually with: the other side of every war this power,
  * or the leader it follows by foedus, is in. `enemiesOf` counts every ally that
  * follows them too, and a Campanian at war with Rome is not at war with nine

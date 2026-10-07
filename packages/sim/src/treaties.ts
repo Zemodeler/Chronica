@@ -78,6 +78,9 @@ export const trustOf = (world: WorldState, polityId: string, towardPolityId: str
   world.polityStances.find((stance) => stance.polityId === polityId && stance.towardPolityId === towardPolityId)?.trustScore ?? 0;
 
 /** One power's trust in another moved, bounded as every stance is. */
+/** What embargoing a power while a trade pact stood with it costs, in the trust that power has in the embargoer: a quarter of a broken peace's forty. */
+export const EMBARGO_BREACH_TRUST = 10;
+
 export function shiftTrust(stances: readonly PolityStance[], polityId: string, towardPolityId: string, delta: number, reason: string, atStep: number): PolityStance[] {
   if (polityId === towardPolityId || delta === 0) return [...stances];
   const existing = stances.find((stance) => stance.polityId === polityId && stance.towardPolityId === towardPolityId);

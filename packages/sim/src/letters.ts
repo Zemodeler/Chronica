@@ -1,5 +1,5 @@
 import { offerMetadata } from "./treaty-duties";
-import { allOffices, buildAuthorityIndex, formatWorldDate, isDelivered, readDepartments, settlePeaceTalks, type DiplomaticMessage, type Office, type ScenarioClock, type WorldState } from "@chronica/shared";
+import { formatWorldDate, isDelivered, settlePeaceTalks, tradeAddresseeFinder, type DiplomaticMessage, type Office, type ScenarioClock, type WorldState } from "@chronica/shared";
 
 /**
  * Who answers a letter sent to a power.
@@ -17,35 +17,9 @@ import { allOffices, buildAuthorityIndex, formatWorldDate, isDelivered, readDepa
  * that, nobody, and the letter stays addressed to the power as it always was.
  */
 export function diplomaticAnswererOf(world: WorldState, polityId: string, offices: readonly Office[], notFrom: string | null = null): string | null {
-  const members = new Set(world.characters.filter((character) => character.alive && character.polityId === polityId && character.id !== notFrom).map((character) => character.id));
-  if (members.size === 0) return null;
-  const index = buildAuthorityIndex(
-    { officeSeats: world.material.officeSeats, forces: world.material.forces, accounts: world.material.accounts },
-    world.authorityGrants,
-    allOffices(world, offices),
-    world.elapsedStep,
-  );
-  // The department that writes the state's letters, where it has one; then
-  // whoever may treat for it, the ruler before a cavalry commander with the
-  // same powers -- the Bruttians' letter once went to their hipparch by the
-  // alphabet, and their ruler never saw it.
-  const reader = readDepartments(world);
-  const office = reader.holding({ kind: "polity", id: polityId }, "foreign_letters");
-  const clerk = office.department === null ? undefined : office.people.find((person) => members.has(person.id));
-  if (clerk !== undefined) return clerk.id;
-  const rulers = new Set(reader.rulers(polityId).map((person) => person.id));
-  const diplomats = index.grants
-    .filter((grant) => grant.domain === "diplomatic" && grant.scope.kind === "polity" && grant.scope.id === polityId
-      && grant.holder.kind === "character" && members.has(grant.holder.id))
-    .sort((a, b) => b.powers.length - a.powers.length || Number(rulers.has(b.holder.id)) - Number(rulers.has(a.holder.id)) || a.holder.id.localeCompare(b.holder.id));
-  if (diplomats.length > 0) return diplomats[0]!.holder.id;
-  const ruler = [...rulers].find((id) => members.has(id));
-  if (ruler !== undefined) return ruler;
-  const officeHolders = world.characters
-    .filter((character) => members.has(character.id) && character.officeId !== null)
-    .map((character) => character.id)
-    .sort();
-  return officeHolders[0] ?? null;
+  // One reading for the engine and the page (`trade-desk.ts`): the sheet that says who decides a trade and the rule that
+  // addresses the letter are the same function, so what the player is told is who in fact answers.
+  return tradeAddresseeFinder(world, offices)(polityId, notFrom)?.characterId ?? null;
 }
 
 /**

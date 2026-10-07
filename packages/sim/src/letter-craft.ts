@@ -34,10 +34,12 @@ export type Intent =
   | "talks_accept" | "talks_refuse"
   | "alliance_offer" | "alliance_accept" | "alliance_refuse"
   | "aid_accept" | "aid_refuse"
-  | "submit" | "defy" | "stall";
+  | "submit" | "defy" | "stall"
+  | "trade_accept" | "trade_refuse" | "trade_counter" | "trade_redirect"
+  | "embargo_yield" | "embargo_protest";
 
 /** Why a letter says what it says, in the terms of what moved the writer. */
-export type Reason = "not_beaten" | "tired" | "losing" | "no_quarrel" | "cannot_spare" | "distrust" | "friendship" | "common_enemy" | "price" | "honour" | "weakness" | "none";
+export type Reason = "not_beaten" | "tired" | "losing" | "no_quarrel" | "cannot_spare" | "distrust" | "friendship" | "common_enemy" | "price" | "honour" | "weakness" | "customs" | "at_war" | "embargoed" | "grain" | "not_mine" | "none";
 
 export interface LetterFacts {
   readonly us: string;
@@ -89,7 +91,7 @@ export function toneOf(writer: Character, day: number, intent: Intent, weak = fa
   };
   // Some matters are not pleaded and some are not threatened.
   if (intent === "ultimatum" || intent === "defy") scores.pleading = 0;
-  if (intent === "submit" || intent === "peace_accept" || intent === "alliance_accept") scores.threatening *= 0.4;
+  if (intent === "submit" || intent === "peace_accept" || intent === "alliance_accept" || intent === "trade_accept" || intent === "embargo_yield" || intent === "trade_redirect") scores.threatening *= 0.4;
   let best: Tone = "courteous";
   let top = -Infinity;
   for (const tone of Object.keys(scores) as Tone[]) {
@@ -207,6 +209,36 @@ const BODIES: Readonly<Record<Intent, Bodies>> = {
     firm: ["We refuse. If it is war, it is war.", "No. We will not do it."],
     hard: ["We will not do it, and we do not fear what follows. Come when you will.", "Come and take it."],
   },
+  trade_accept: {
+    soft: ["We are glad to open our markets to {them} on these terms, and will keep them.", "Let our merchants trade freely, as written. We accept with a good heart."],
+    firm: ["We accept the pact. Our merchants will trade on what is written.", "Agreed. The customs will be as you have set them down."],
+    hard: ["We accept. Do not think the terms were given from weakness.", "We agree. Keep to your side of it, as we shall to ours."],
+  },
+  trade_refuse: {
+    soft: ["We would gladly trade, but cannot grant this: {reason}.", "We cannot sign it as it stands, and are sorry for it: {reason}."],
+    firm: ["We decline the pact. {reason}.", "No pact: {reason}."],
+    hard: ["We will not sign it. {reason}.", "Our markets are not yours to bargain for. {reason}."],
+  },
+  trade_counter: {
+    soft: ["We would gladly trade, but not on these terms: {reason}. We send others we can keep.", "Let us trade on terms both can bear: {reason}. Ours follow."],
+    firm: ["We cannot sign as written: {reason}. We send terms we can keep.", "Not as written, but we will deal: {reason}. Our terms follow."],
+    hard: ["Not as written. {reason}. Here is what we will sign.", "You ask too much: {reason}. These are our terms, and they are not much open to haggling."],
+  },
+  trade_redirect: {
+    soft: ["This is not mine to decide, and I am sorry I cannot oblige you; {ask}.", "It is not for me to grant. Forgive me, and {ask}."],
+    firm: ["This is not for me to answer. {ask}.", "I do not decide this. {ask}."],
+    hard: ["You write to the wrong man. {ask}.", "It is not mine to give, and not yours to ask of me. {ask}."],
+  },
+  embargo_yield: {
+    soft: ["We would not see our markets shut, and will do as you ask: {reason}.", "Let the markets stay open. We will do what you ask, for {reason}."],
+    firm: ["We will do as you ask. Leave the markets open.", "Agreed. Do not shut the markets."],
+    hard: ["We will do it, for our merchants' sake and not for yours.", "We yield this once. Do not think a threat will serve twice."],
+  },
+  embargo_protest: {
+    soft: ["We protest, and regret it: {reason}. We beg you not to shut the markets.", "We cannot do as you ask, and ask you not to shut the markets over it: {reason}."],
+    firm: ["We refuse. If you shut your markets, you shut them: {reason}.", "No. {reason}. The embargo will be your doing."],
+    hard: ["Shut them, then. We shall not be threatened out of what is ours.", "We will not be told what to do by a closed door. {reason}."],
+  },
   stall: {
     soft: ["Your letter has reached us, and we are considering it with care. We beg a little time.", "We have your letter, and need time to answer it rightly."],
     firm: ["We have received it. We will answer when we have considered.", "Your letter is before our council. Wait."],
@@ -226,6 +258,11 @@ const REASONS: Readonly<Record<Reason, string>> = {
   price: "the price is too high",
   honour: "our honour does not permit it",
   weakness: "we are not in a state to",
+  customs: "the customs it would give up are more than it is worth to us",
+  at_war: "we are at war, and nothing crosses between us while it lasts",
+  embargoed: "we have shut our markets to you, and have been given no cause to open them",
+  grain: "our people cannot do without what crosses between us",
+  not_mine: "it is not mine to decide",
   none: "that is our answer",
 };
 

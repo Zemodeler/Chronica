@@ -712,9 +712,12 @@ export function answerByRule(world: WorldState, message: DiplomaticMessage, inpu
   // A man of no honour may say yes and mean no: nothing here, and nothing in the world, shows it (`intendsToBreak`).
   return {
     polityId: message.toPolityId, actorCharacterId: answerer.id, act: "answer_letter", targetPolityId: message.fromPolityId,
-    why: `${verdict.accepted ? "accepted" : "refused"} "${message.subject}": ${verdict.why}`.slice(0, 400),
-    deltas: [delta({ op: "diplomatic_message_answer", messageRef: message.id, answer: verdict.accepted ? "accepted" : "refused", answerText: letter.body, agreementKind: null, reason: letter.body.slice(0, 240) })],
+    why: `${answer} "${message.subject}": ${verdict.why}`.slice(0, 400),
+    deltas: [delta({ op: "diplomatic_message_answer", messageRef: message.id, answer, answerText: letter.body, agreementKind: null, ...(verdict.counter === undefined ? {} : { counterTrade: verdict.counter }), reason: letter.body.slice(0, 240) })],
     facts: [],
+  // An offer of trade he would take on other terms, or one written to somebody who does not decide it, is answered "countered":
+  // the first sends his terms back as an offer of his own, the second only says who does decide (`trade-verdict.ts`).
+  const answer = verdict.counter !== undefined || verdict.redirect !== undefined ? "countered" : verdict.accepted ? "accepted" : "refused";
   };
 }
 

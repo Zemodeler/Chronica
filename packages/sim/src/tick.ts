@@ -11,6 +11,7 @@ import {
   effectWorth,
   advanceProvinceMaterial,
   applyDiplomaticAnswerToStance,
+  layEmbargo,
   diplomaticAnswerChangesTrust,
   sameNegotiation,
   settlePeaceTalks,
@@ -84,7 +85,7 @@ import { settleUnionOffers } from "./submission";
 import { betweenHarvests, reviewTheLand } from "./economy";
 import { payCustoms } from "./customs";
 import { routeOpenBps } from "./trade-flows";
-import { endObligationsOfEndedAgreements, keepTreaties } from "./treaties";
+import { EMBARGO_BREACH_TRUST, endObligationsOfEndedAgreements, keepTreaties, shiftTrust } from "./treaties";
 import { keepPromises } from "./promises";
 import { workOnTreatyDuties } from "./treaty-duties";
 import { continueMissions } from "./mission-fieldwork";
@@ -1406,7 +1407,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
     // it arrived: a letter crossing it on the road answers nothing.
     // Not an ultimatum: a demand is met or it is not, and a letter about
     // something else is no answer to it.
-    const wroteBack = message.kind === "ultimatum" ? undefined : recovered.diplomacy.find((other) => other.id !== message.id
+    const wroteBack = message.kind === "ultimatum" || message.kind === "embargo_notice" ? undefined : recovered.diplomacy.find((other) => other.id !== message.id
       && other.fromPolityId === message.toPolityId && other.toPolityId === message.fromPolityId
       && other.sentAtStep >= (message.deliveredOnDay ?? message.sentAtStep)
       && (other.inReplyToMessageId === message.id || sameNegotiation(message, other)));
@@ -1443,6 +1444,32 @@ export function runDeterministicTick(given: TickInput): TickResult {
       });
     }
     return ignored;
+    // A notice of embargo, left unanswered, is carried out as a refusal would be: the sender lays the embargo it named.
+    if (message.onRefusal === "embargo") {
+      const laid = layEmbargo(agreements, {
+        id: input.ids.next("agreement"),
+        polityId: message.fromPolityId,
+        otherPolityId: message.toPolityId,
+        terms: message.terms.slice(0, 600),
+        goods: message.trade?.goods ?? [],
+        atStep: input.toDay,
+        sourceMessageId: message.id,
+        reason: `${polityName(message.toPolityId)} sent no answer to "${message.subject}".`,
+      });
+      agreements = laid.agreements;
+      if (laid.breachedPact) polityStances = shiftTrust(polityStances, message.toPolityId, message.fromPolityId, -EMBARGO_BREACH_TRUST, `${polityName(message.fromPolityId)} embargoed them while a trade pact stood`, input.toDay);
+      const goods = (message.trade?.goods ?? []).map((good) => good.replace(/_/g, " "));
+      facts.push({
+        localId: nextLocalId("threat"),
+        kind: "embargo_laid",
+        summary: `${polityName(message.fromPolityId)} has laid an embargo on trade with ${polityName(message.toPolityId)}${goods.length === 0 ? "" : `, of ${goods.join(", ")}`}, as "${message.subject}" had said it would if no answer came: no merchant carries ${goods.length === 0 ? "goods" : "them"} between their markets until it is lifted.`.slice(0, 600),
+        affectedRefs: [{ kind: "polity", id: message.fromPolityId }, { kind: "polity", id: message.toPolityId }],
+        visibility: "public",
+        discoveryState: "public",
+        knowableInDays: 0,
+        significance: 50,
+      });
+    }
   });
   // One letter sent to many is one matter, and its silences one fact. Rome's
   // call for aid went to eight allies; six said nothing, and the Chronicle

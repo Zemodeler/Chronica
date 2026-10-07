@@ -38,7 +38,7 @@ export interface AwaitingLetter {
 
 /** Kinds that ask for something, and are accepted or refused rather than only answered. */
 const ASKS: ReadonlySet<DiplomaticMessageKind> = new Set([
-  "alliance_offer", "peace_offer", "trade_offer", "marriage_offer", "military_aid_request", "tribute_demand", "ultimatum", "peace_talks",
+  "alliance_offer", "peace_offer", "trade_offer", "marriage_offer", "military_aid_request", "tribute_demand", "ultimatum", "peace_talks", "embargo_notice",
 ]);
 
 const KIND_WORDS: Readonly<Record<DiplomaticMessageKind, string>> = {
@@ -51,6 +51,7 @@ const KIND_WORDS: Readonly<Record<DiplomaticMessageKind, string>> = {
   military_aid_request: "A request for troops",
   tribute_demand: "A demand for tribute",
   ultimatum: "An ultimatum",
+  embargo_notice: "A notice of embargo",
   warning: "A warning",
   protest: "A protest",
   congratulation: "Congratulations",

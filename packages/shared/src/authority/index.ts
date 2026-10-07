@@ -18,3 +18,4 @@ export * from "./laws";
 export * from "./standing-orders";
 export * from "./administration";
 export * from "./agenda";
+export * from "./trade-desk";

@@ -152,6 +152,8 @@ import {
   CUSTOMARY_TAX_BURDEN,
   hireFloorPerMonth,
   nearestShore,
+  tradeAddresseeFinder,
+  tradeTermsInWords,
 } from "@chronica/shared";
 import { dutyGoals, impliedUndertakings, offerMetadata } from "../treaty-duties";
 import { findInvariantViolations } from "../invariants";
@@ -164,14 +166,12 @@ import { carryOutEnactment } from "../enact";
 import { commandChanges } from "../command-changes";
 import { endPolity } from "../polity-end";
 import { LOAN_TERM_PERIODS, loanInstalment } from "../debts";
-import { endObligationsOfEndedAgreements, hasGrievance, shiftTrust } from "../treaties";
+import { EMBARGO_BREACH_TRUST, endObligationsOfEndedAgreements, hasGrievance, shiftTrust } from "../treaties";
 
 /** The words added to the news of an embargo when it ended a trade pact that stood: the pact was broken, not closed. */
 const brokenPactNote = (world: WorldState, a: string, b: string): string =>
   agreementsBetween(world.polityAgreements, a, b).some((agreement) => agreement.kind === "trade_pact") ? " It ends the trade pact between them, which it breaks." : "";
 
-/** What embargoing a power while a trade pact stood with it costs, in the trust that power has in the embargoer: a quarter of a broken peace's forty. */
-const EMBARGO_BREACH_TRUST = 10;
 import { trespassOf } from "../trespass";
 import { SOVEREIGN_AGREEMENTS, chamberThatDecides, fleesHisMaster, listensAnyway, nobodyListens, nobodyRises, notHisToSpend } from "./nobody-listens";
 import { isOwnBusiness } from "./own-business";
@@ -1983,6 +1983,29 @@ function applyOne(
    * `agreement_open`, so it is judged as any declaration would be.
    */
   const carryOutTheThreat = (replied: WorldState, message: WorldState["diplomacy"][number]): WorldState => {
+    // A notice of embargo refused is the embargo laid, by the power that gave the notice: through `agreement_open`, so it is judged
+    // as any embargo would be (a pact standing is ended, which is a breach that costs trust).
+    if (message.onRefusal === "embargo") {
+      const laying: WorldDelta = {
+        op: "agreement_open",
+        localId: `embargo_${message.id}`.slice(0, 60),
+        kind: "embargo",
+        polityId: message.fromPolityId,
+        otherPolityId: message.toPolityId,
+        terms: message.terms.slice(0, 600),
+        forDays: message.forDays ?? null,
+        sourceMessageRef: message.id,
+        visibility: "public",
+        trade: { tariffCapBps: null, mostFavoured: false, exempt: [], goods: message.trade?.goods ?? [] },
+        reason: `${polityName(replied, message.toPolityId)} refused "${message.subject}".`.slice(0, 240),
+      };
+      try {
+        return applyOne(replied, laying, context, assignedIds, resolve, emitFact, emitAccount);
+      } catch (error) {
+        if (!(error instanceof DeltaRejection)) throw error;
+        return replied;
+      }
+    }
     if (message.onRefusal !== "war" && message.onRefusal !== "war_if_attacked") return replied;
     // A threat of war for going on attacking waits for the attack: a refusal
     // of the words, with the pause kept, is not what it threatened (R15).
@@ -5432,6 +5455,12 @@ function applyOne(
       if (inReplyToId !== null && !world.diplomacy.some((message) => message.id === inReplyToId)) {
         reject(`No letter "${inReplyToId}" exists to be answering.`, "reference");
       }
+      // An embargo notice is a threat of the ultimatum's kind: what it asks is yielded to, or the embargo it names is laid.
+      const threat = delta.kind === "embargo_notice" ? ("embargo" as const) : delta.onRefusal;
+      // A trade offer or an embargo notice to somebody who does not decide it carries the name of who does, as the engine reads
+      // the offices today (`trade-desk.ts`); the one it is written to answers by pointing there, and does not speak for his power.
+      const decider = (delta.kind === "trade_offer" || delta.kind === "embargo_notice") && recipientId !== null && letterToId !== letterFromId
+        ? tradeAddresseeFinder(world, context.offices)(letterToId)?.characterId ?? null : null;
       const offer = offerMetadata(world, { ...delta, fromPolityId: letterFromId, toPolityId: letterToId });
       const proposed = { ...delta, ...offer, fromPolityId: letterFromId, toPolityId: letterToId, fromCharacterId: senderId };
       const situationKey = diplomaticSituationKey(world, letterFromId, letterToId);
@@ -5492,9 +5521,11 @@ function applyOne(
             visibility: delta.visibility,
             proposes: offer.proposes,
             agreementId: null,
-            ...(delta.onRefusal == null ? {} : { onRefusal: delta.onRefusal }),
+            ...(threat == null ? {} : { onRefusal: threat }),
+            ...(delta.forDays == null ? {} : { forDays: delta.forDays }),
             ...(delta.clauses === undefined || delta.clauses.length === 0 ? {} : { clauses: delta.clauses }),
             ...(delta.trade === undefined ? {} : { trade: delta.trade }),
+            ...(decider === null || decider === recipientId ? {} : { decidedBy: decider }),
           },
         ],
       };
@@ -5517,6 +5548,30 @@ function applyOne(
       // An ally offered union answers by rule; the reply is only its voice (`submission.ts`).
       const ruled = unionVerdict(world, message);
       if (ruled !== null && (ruled.answer !== delta.answer || (delta.refusedClauses ?? []).length > 0 || delta.addedTerms != null)) return applyOne(world, { ...delta, answer: ruled.answer, answerText: `${delta.answerText} ${ruled.why}`.slice(0, 1_200), refusedClauses: [], addedTerms: null }, context, assignedIds, resolve, emitFact, emitAccount);
+      // "Countered" to an offer of trade, with the pact he would make instead: the answer is recorded, and his terms go back to the
+      // writer as an offer of their own, for the writer to accept (and open the pact), or not. A counter is not countered again.
+      if (delta.answer === "countered" && delta.counterTrade !== undefined && offeredAgreementKinds(message).includes("trade_pact")) {
+        const countered = applyOne(world, { ...delta, counterTrade: undefined }, context, assignedIds, resolve, emitFact, emitAccount);
+        const from = message.toCharacterId ?? (context.actorRef.kind === "character" ? context.actorRef.id : null);
+        if (from === null) return countered;
+        return applyOne(countered, {
+          op: "diplomatic_message_send",
+          localId: `counter_${message.id}`.slice(0, 60),
+          kind: "trade_offer",
+          fromPolityId: message.toPolityId,
+          fromCharacterRef: from,
+          toPolityId: message.fromPolityId,
+          toCharacterRef: message.fromCharacterId,
+          subject: `On "${message.subject}": other terms`.slice(0, 240),
+          terms: `${tradeTermsInWords(delta.counterTrade, "pact", message.forDays ?? null)} ${delta.answerText}`.slice(0, 1_200),
+          ...(message.forDays == null ? {} : { forDays: message.forDays }),
+          replyWithinDays: 30,
+          inReplyToRef: message.id,
+          visibility: message.visibility,
+          trade: delta.counterTrade,
+          reason: `${delta.answerText}`.slice(0, 240),
+        }, context, assignedIds, resolve, emitFact, emitAccount);
+      }
       // An acceptance that adds terms is an answer with terms of its own: the
       // player's reply is read for them (`termsAddedIn`), a model's is told in
       // "addedTerms". It binds nothing until the other side takes them (R13).
@@ -5703,6 +5758,27 @@ function applyOne(
           ...added,
           polityAgreements: added.polityAgreements.map((agreement) => (agreement.id === standing.id
             ? { ...agreement, terms: `${agreement.terms} ${delta.terms}`.slice(0, 600) }
+            : agreement)),
+        };
+      }
+      // A trade pact accepted over the one that stands is its revision: the terms are replaced, the pact goes on, and the letter
+      // that revised it is the one it now comes from. Without terms of its own it is the same pact said twice.
+      if (standing !== undefined && delta.kind === "trade_pact" && delta.trade !== undefined) {
+        emitFact({
+          localId: `trade_pact_revised_${delta.localId}`.slice(0, 60),
+          kind: "treaty_amended",
+          summary: `${polityName(world, partyId)} and ${polityName(world, otherPartyId)} revised the trade pact between them: ${delta.terms}`.slice(0, 600),
+          affectedRefs: [{ kind: "polity", id: partyId }, { kind: "polity", id: otherPartyId }],
+          visibility: delta.visibility === "private" ? "polity" : "public",
+          discoveryState: delta.visibility === "private" ? "polity" : "public",
+          knowableInDays: 0,
+          significance: 40,
+        });
+        return {
+          ...world,
+          polityAgreements: world.polityAgreements.map((agreement) => (agreement.id === standing.id
+            ? { ...agreement, terms: delta.terms.slice(0, 600), trade: delta.trade, sourceMessageId: sourceMessageId ?? agreement.sourceMessageId,
+              untilStep: delta.forDays === null ? agreement.untilStep : atStep + delta.forDays }
             : agreement)),
         };
       }

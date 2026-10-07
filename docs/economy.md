@@ -183,6 +183,37 @@ grievance. Laying an embargo while a pact stands ends the pact and costs the emb
 that power's trust, with no legitimacy hit or war grievance (`apply-deltas.ts`); closing the pact first is no breach.
 v49 opens Rome with pacts with Carthage (cap 500) and Massalia (cap 250, most favoured).
 
+## Proposing trade by letter
+
+A pact or an embargo is part of "Write to", not a decree. The treaties sheet's "Propose trade" (and the letter tray's
+"Put trade to ...") opens a form (`trade-proposal.tsx`) whose terms start from what stands (`readTradeDesk`,
+`packages/shared/src/authority/trade-desk.ts`): a new pact from half the writer's own customs rate (three to ten in a hundred),
+a revision from the pact in force, one point tighter, bread free when the writer's own hubs are short.
+
+- **Who decides.** `tradeAddresseeFinder` names who answers for a power in trade, and why: the head of the department that
+  writes its letters, else whoever holds its diplomatic grant, else its ruler, else its first officer. It is the same function
+  `diplomaticAnswererOf` uses to address a letter to a power, so the sheet and the engine cannot disagree. A letter to somebody
+  else is allowed and is stamped `decidedBy`; the person written to answers "countered", saying who decides, and nothing is
+  opened or refused (no trust moves).
+- **Pacts are bargains.** `trade_offer` carries `trade` (cap, most-favoured, exempt) and `forDays`. Sending agrees nothing.
+  The answerer's yes opens the pact through `bindTheAcceptance`; accepted over a pact already standing it revises that pact in
+  place (the same record, new terms, the new letter as its source). Lifting an embargo is a pact offer: a pact opened over an
+  embargo ends it. A refusal opens nothing.
+- **The answer** is `trade-verdict.ts`, deterministic, the same every time it is asked: the customs given up (the cap against
+  the answerer's own rate, times 0.6 plus 0.8 of the share of its inbound trade that comes from the writer; each good let in
+  free costs 150), against what he will bear (700 bp, plus 6 a point of trust, 5 of his liking, 700 for a hand that is not
+  greedy, 300 for the sociable, 350 where its own bread is short; less where he laid an embargo himself). A war refuses; trust
+  of -40 or worse refuses. Past what he bears but within 900 he answers "countered" with `counterTrade`: the cap raised in
+  hundreds until he can keep it, most-favoured dropped, only bread free. The engine sends that back as a `trade_offer` of his
+  own; a counter is not countered again, so a bargain is at most two letters. Model-played rulers are held to the same verdict
+  (`bindAnswerToNature`, and the line in the cognition portrait).
+- **Embargo is announced.** An embargo is one power's own act, so it cannot be accepted into being. `embargo_notice` is a
+  threat of the ultimatum's kind (`onRefusal: "embargo"`): what it asks is yielded to, which lays nothing, or it is refused or
+  goes unanswered and the sender lays the embargo it named (`carryOutTheThreat`, and `tick.ts` for silence, which breaks any
+  pact that stood at `EMBARGO_BREACH_TRUST`). The answerer yields when the pain (his trade with the sender, more where bread is
+  short) outweighs his pride. A bare embargo is still `agreement_open`.
+- Tests: `a-trade-pact-is-written-for` (sim), `trade-proposal.test.tsx` (web).
+
 ## Coinages (phase E, v50)
 
 `packages/shared/src/world/coinage.ts`: each `Coinage` has an issuer, the powers that hold it, `silverBps` (silver in

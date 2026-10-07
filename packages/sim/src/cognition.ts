@@ -968,7 +968,11 @@ export function renderCharacterPortrait(
         const line = `  - [${message.id}] ${message.kind} from ${polityName(message.fromPolityId)}${enemyPowers.has(message.fromPolityId) ? " (the enemy: their power is at war with it)" : ""}, by ${name(message.fromCharacterId)} — ${message.subject}: ${message.terms}`;
         // On the large matters his nature has already decided, and he is to word it, not overturn it (`letter-verdict.ts`).
         const verdict = character !== undefined && LARGE_MATTERS.has(message.kind) ? letterVerdict(world, message, character) : null;
-        return verdict === null ? [line] : [line, `      By who you are, you ${verdict.accepted ? "say YES" : "say NO"} to this (${verdict.why}). Answer it so, in your own words; the engine will not carry out the opposite.`];
+        if (verdict === null) return [line];
+        // Trade: a pact he would sign on his own terms, or one written to the wrong man, is neither a yes nor a no (`trade-verdict.ts`).
+        if (verdict.redirect !== undefined) return [line, `      This is not yours to decide: ${verdict.redirect.name} answers for your power in such matters. Answer "countered", saying so; the engine will not carry out a yes or a no.`];
+        if (verdict.counter !== undefined) return [line, `      By who you are, you would not sign this as written (${verdict.why}). Answer "countered" with counterTrade set to the terms you would sign: customs capped at ${verdict.counter.tariffCapBps ?? "no cap"}${verdict.counter.exempt.length > 0 ? `, ${verdict.counter.exempt.join(", ")} free` : ""}.`];
+        return [line, `      By who you are, you ${verdict.accepted ? "say YES" : "say NO"} to this (${verdict.why}). Answer it so, in your own words; the engine will not carry out the opposite.`];
       }),
     );
   }

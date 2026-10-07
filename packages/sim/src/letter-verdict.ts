@@ -1,9 +1,10 @@
-import { PEACE_AT, TRUCE_AT, computeOpinion, stableHash, warStanding, warWeariness, warsOf, type Character, type DiplomaticMessage, type WorldState } from "@chronica/shared";
+import { PEACE_AT, TRUCE_AT, computeOpinion, stableHash, warStanding, warWeariness, warsOf, type Character, type DiplomaticMessage, type TradeTerms, type WorldState } from "@chronica/shared";
 import { readBoard } from "./board";
 import { dispositionOf, leastOdds, peaceReluctance } from "./disposition";
 import { favouredNeighbour, hasQuirk } from "./quirks";
 import { perceivedRatio } from "./perceive";
 import type { Intent, LetterFacts, Reason } from "./letter-craft";
+import { tradeVerdict } from "./trade-verdict";
 
 /**
  * What a person would say to a letter, decided by who they are -- before anyone
@@ -27,13 +28,17 @@ export interface Verdict {
   readonly weak: boolean;
   /** Days he takes counsel before answering, if the term allows. */
   readonly slowness: number;
+  /** An offer of trade he would not take as written but would on these terms: answered "countered", the terms sent back. */
+  readonly counter?: TradeTerms;
+  /** An offer of trade or a notice of embargo written to somebody who does not decide it: the one who does. */
+  readonly redirect?: { readonly characterId: string; readonly name: string };
 }
 
 /** The days between a power's reviews of what has come in: no answer is quicker than the next. */
 export const STEP_DAYS = 30;
 
 /** Kinds of letter whose answer is the answerer's nature at work in a large matter. */
-export const LARGE_MATTERS = new Set<DiplomaticMessage["kind"]>(["ultimatum", "warning", "protest", "tribute_demand", "peace_offer", "peace_talks", "alliance_offer", "military_aid_request"]);
+export const LARGE_MATTERS = new Set<DiplomaticMessage["kind"]>(["ultimatum", "warning", "protest", "tribute_demand", "peace_offer", "peace_talks", "alliance_offer", "military_aid_request", "trade_offer", "embargo_notice"]);
 
 export function letterVerdict(world: WorldState, message: DiplomaticMessage, answerer: Character): Verdict | null {
   const day = world.instant.day;
@@ -56,6 +61,11 @@ export function letterVerdict(world: WorldState, message: DiplomaticMessage, ans
   const slowness = Math.round(Math.max(0, Math.min(2, d.fear * 0.7 + (1 - d.nerve) * 0.7 + d.steadiness * 0.4 - 0.6))) * STEP_DAYS + omen;
   const done = (accepted: boolean, intent: Intent, reason: Reason, why: string, extra: Partial<LetterFacts> = {}, weak = false): Verdict =>
     ({ accepted, intent, reason, why, extra, weak, slowness });
+
+  // Trade is weighed by what his power's books say (`trade-verdict.ts`): customs given up, bread, trust, what already stands.
+  if (message.kind === "trade_offer" || message.kind === "embargo_notice") {
+    return tradeVerdict(world, message, answerer, { d, trust, liking, bias, suspicious, generous, stubborn, unforgiven, fondOf, slowness });
+  }
 
   if (message.kind === "peace_talks") {
     // Talking costs nothing a tired or losing power, or one six months into its war, will not give -- unless he is proud, and not beaten.

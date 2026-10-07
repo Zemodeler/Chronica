@@ -1811,12 +1811,14 @@ const DiplomaticMessageSendSchema = z.object({
   clauses: z.array(TreatyClauseSchema).max(24).optional(),
   /** For a trade offer: the pact's terms if it is accepted: a cap on customs, most-favoured status, goods let in free. */
   trade: TradeTermsSchema.optional(),
+  /** How long what it offers lasts, when it is for a time (a pact for five years): carried to the agreement its acceptance opens. */
+  forDays: z.number().int().positive().max(36_600).nullable().optional(),
   /**
    * What the sender does if it is refused, or no answer comes by
    * "replyWithinDays": "war"; "war_if_attacked" when the threat is war only
    * if they go on attacking. The engine carries it out.
    */
-  onRefusal: z.enum(["war", "war_if_attacked"]).nullable().optional(),
+  onRefusal: z.enum(["war", "war_if_attacked", "embargo"]).nullable().optional(),
   reason: ReasonSchema,
 }).strict();
 
@@ -2053,6 +2055,8 @@ const DiplomaticMessageAnswerSchema = z.object({
   addedTerms: z.string().trim().min(1).max(600).nullable().optional(),
   /** Accepting all but some of its clauses, by their place: the rest go back as a counter-offer. */
   refusedClauses: z.array(z.number().int().min(0).max(5)).max(6).optional(),
+  /** Answering "countered" to an offer of trade: the pact's terms it would make instead, sent back as a trade offer of its own. */
+  counterTrade: TradeTermsSchema.optional(),
   reason: ReasonSchema,
 }).strict();
 

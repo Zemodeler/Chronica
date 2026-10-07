@@ -30,6 +30,13 @@ export const DiplomaticMessageKindSchema = z.enum([
   "warning",
   "protest",
   "congratulation",
+  /**
+   * "Open your markets to us, or we shut ours": an embargo announced, not bargained. An embargo is one power's own act
+   * and cannot be accepted into being, so the letter is a threat of the ultimatum's kind -- what it asks is yielded to
+   * or it is carried out (`onRefusal: "embargo"`): a refusal, or no answer by the day, and the sender lays the embargo
+   * named in `trade.goods` (empty is every good). Accepted, nothing is laid and the matter is settled.
+   */
+  "embargo_notice",
   /** "Let us discuss peace": accepted, it seats both sides at the peace table (`world/peace-table.ts`). */
   "peace_talks",
 ]);
@@ -110,7 +117,7 @@ export const DiplomaticMessageSchema = z
      * and declared the war in the same breath, before Hieron could answer; the
      * refusal that came afterwards arrived ten days after the battle.
      */
-    onRefusal: z.enum(["war", "war_if_attacked"]).nullable().optional(),
+    onRefusal: z.enum(["war", "war_if_attacked", "embargo"]).nullable().optional(),
     /**
      * The day a conditional threat was refused or went unanswered, so it now
      * stands: "cease hostilities or face war" answered with a refusal of the
@@ -141,6 +148,12 @@ export const DiplomaticMessageSchema = z
      * Carthage in 241 and sent ten commissioners to write better ones.
      */
     withoutAuthority: z.boolean().optional(),
+    /**
+     * For an offer of trade or a notice of embargo written to somebody who does not decide it: the person who does
+     * (`tradeAddresseeFinder`), stamped when it was sent, with the engine's reading of the offices. The one it was
+     * written to answers by pointing the writer there rather than speaking for a government he does not speak for.
+     */
+    decidedBy: EntityIdSchema.optional(),
     /** The ratification its acceptance waits on, and how it was accepted. */
     ratification: z.object({
       procedureId: EntityIdSchema,

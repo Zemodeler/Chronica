@@ -69,10 +69,13 @@ export function bindAnswerToNature(world: WorldState, actorId: string, act: Worl
   const actor = world.characters.find((character) => character.id === actorId);
   if (message === undefined || actor === undefined || !LARGE_MATTERS.has(message.kind)) return { act, brought: null };
   const verdict = letterVerdict(world, message, actor);
-  if (verdict === null || (act.answer === "accepted") === verdict.accepted) return { act, brought: null };
+  // Written to somebody who does not decide it, he only says who does, whatever the model had him say.
+  if (verdict === null || (verdict.redirect === undefined && (act.answer === "accepted") === verdict.accepted)) return { act, brought: null };
   const nameOf = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
   const letter = writeLetter(actor, world.instant.day, verdict.intent, { us: nameOf(message.toPolityId), them: nameOf(message.fromPolityId), reason: verdict.reason, ...verdict.extra }, "{us} answers {them}", verdict.weak);
-  const bound = WorldDeltaSchema.parse({ ...act, answer: verdict.accepted ? "accepted" : "refused", answerText: letter.body, refusedClauses: [], addedTerms: null, reason: letter.body.slice(0, 240) });
+  // A pact he would sign on terms of his own is answered "countered" with them, which sends them back as an offer (`counterTrade`).
+  const answer = verdict.redirect !== undefined || verdict.counter !== undefined ? "countered" : verdict.accepted ? "accepted" : "refused";
+  const bound = WorldDeltaSchema.parse({ ...act, answer, answerText: letter.body, refusedClauses: [], addedTerms: null, ...(verdict.counter === undefined ? {} : { counterTrade: verdict.counter }), reason: letter.body.slice(0, 240) });
   return { act: bound, brought: `${actor.name} would not have answered "${message.subject}" as the model had him: it is not in him (${verdict.why}).` };
 }
 
