@@ -8,17 +8,22 @@ import {
   dayOfCalendarDate,
   astronomicalYearOf,
   EMPTY_ECONOMY_MEMORY,
+  drawStock,
+  ensureMarkets,
   ensureProvinceMaterial,
-  grainPriceBps,
+  marketGeography,
+  ordinaryCrop,
   polityGrainPriceBps,
+  provinceGrainPriceBps,
+  provinceGrounds,
   reckonTaxCapacity,
+  stockIn,
   type ProvinceMaterial,
   type WorldState,
-  harvestDevelopmentFactor,
 } from "@chronica/shared";
 import { createIdFactory } from "./ports";
 import { runDeterministicTick } from "./tick";
-import { HARVEST_MONTH, harvestIn } from "./economy";
+import { HARVEST_MONTH, harvestIn, harvestYield } from "./economy";
 
 /**
  * A bad harvest, and what the land does with the months between.
@@ -27,6 +32,19 @@ import { HARVEST_MONTH, harvestIn } from "./economy";
  * from its towns, and a famine below the hunger line was a word in a fact.
  * The harvest was a card the narrator might draw. These walk the calendar and
  * watch the engine do it instead.
+ *
+ * Phase C of the economy rework changed what a harvest is. It used to reset a
+ * province's food security from a table (a drought left it at a quarter of
+ * ordinary, whatever it had held the year before), so a drought starved a
+ * province the day it came in and a good year erased every memory of the last.
+ * It now fills the granary of the market the province trades in
+ * (`sim/markets.ts`): its crop is its people's ordinary crop times the year's
+ * weather in its country and its own luck, the months eat it, and how fed a
+ * province is follows what the granary holds. These tests were updated for it,
+ * not loosened: the harvest still comes once a year in its month and says so
+ * power by power, a drought is still the year's news and still makes bread
+ * dear; what it no longer does is starve a country that has a granary to
+ * draw on (`a-granary-carries-a-year` has the two droughts that do).
  */
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
@@ -64,48 +82,76 @@ function nextHarvestDay(): number {
   throw new Error("no harvest month");
 }
 
+/** A world a day before the harvest of `year`, its markets open and its granaries as low as they run before a crop: a season's reserve and the day's bread. */
+function onTheEveOf(year: number): { world: WorldState; day: number } {
+  const day = dayOfCalendarDate({ ...calendarYearOf(year), month: HARVEST_MONTH, day: 1 }, clock);
+  const opened = ensureMarkets(opening(), 1 / 30);
+  const waiting: WorldState = { ...opened, economy: { ...EMPTY_ECONOMY_MEMORY, ...opened.economy, lastReviewStep: day - 1, lastHarvestYear: year - 1 } };
+  return { world: waiting, day };
+}
+
+/** The first year, from the first harvest on, in which the weather in Latium's country is of this kind. */
+function firstYearOf(kind: string): number {
+  const first = astronomicalYearOf(calendarDateOf({ day: nextHarvestDay(), minute: 0 }, clock));
+  return Array.from({ length: 400 }, (_, index) => first + index).find((candidate) => harvestIn(opening(), LATIUM, candidate) === kind)!;
+}
+
 describe("a bad harvest", () => {
-  it("comes in once a year, in its month, and sets what each province has to eat", () => {
+  it("comes in once a year, in its month, and fills the granary of the market each province trades in", () => {
     const harvestDay = nextHarvestDay();
     const before = walk(opening(), harvestDay - 1, harvestDay - 1);
     const after = runDeterministicTick({ world: before.world, toDay: harvestDay + 1, ids: createIdFactory("harvest"), warfare: definition.warfare, clock });
     const year = astronomicalYearOf(calendarDateOf({ day: harvestDay, minute: 0 }, clock));
     expect(after.world.economy?.lastHarvestYear).toBe(year);
-    // Every province ate what its own year gave it.
-    const bands = { drought: 2_500, poor: 5_500, fair: 8_000, good: 9_000, bumper: 10_000 } as const;
-    for (const id of [LATIUM, CAMPANIA]) {
+    // The granary of Latium's market took in what its country grew: its people's ordinary crop times the year's
+    // weather and each province's luck.
+    const geography = marketGeography(after.world);
+    const hub = geography.hubOf.get(LATIUM)!;
+    const grounds = provinceGrounds(after.world);
+    const provinces = new Map(after.world.map.provinces.map((province) => [province.id, province]));
+    const crop = geography.country.get(hub)!.reduce((sum, id) => {
       const material = row(after.world, id);
-      const kind = harvestIn(id, year);
-      // What a province's ground grows is also a little more where it is developed (`harvestDevelopmentFactor`).
-      expect(material.foodSecurityBps).toBe(Math.min(10_000, Math.round(bands[kind] * (material.productiveCapacityBps / 10_000) * (1 - material.warDamageBps / 20_000) * harvestDevelopmentFactor(material.developmentBps!))));
-    }
+      return sum + ordinaryCrop(material, provinces.get(id)!, grounds.get(id)!) * harvestYield(hub, id, year);
+    }, 0);
+    const held = stockIn(before.world, LATIUM, "grain");
+    const now = stockIn(after.world, LATIUM, "grain");
+    expect(now).toBeGreaterThan(held);
+    expect(Math.abs(now - held - crop) / crop).toBeLessThan(0.01);
     // And a second tick the same summer brings in nothing more.
     const again = runDeterministicTick({ world: after.world, toDay: harvestDay + 20, ids: createIdFactory("again"), warfare: definition.warfare, clock });
     expect(again.factProposals.some((fact) => fact.kind === "harvest_failed" || fact.kind === "harvest")).toBe(false);
   });
 
   it("fails somewhere in a year of drought, and says so power by power", () => {
-    // The first year the rolls give Latium a drought, and the day it comes in.
-    const first = astronomicalYearOf(calendarDateOf({ day: nextHarvestDay(), minute: 0 }, clock));
-    const year = Array.from({ length: 200 }, (_, index) => first + index).find((candidate) => harvestIn(LATIUM, candidate) === "drought")!;
+    // The first year the rolls give Latium's country a drought, and the day it comes in.
+    const year = firstYearOf("drought");
     expect(year).toBeDefined();
-    const day = dayOfCalendarDate({ ...calendarYearOf(year), month: HARVEST_MONTH, day: 1 }, clock);
-    const waiting: WorldState = { ...opening(), economy: { ...EMPTY_ECONOMY_MEMORY, lastReviewStep: day - 1, lastHarvestYear: year - 1 } };
+    const { world: waiting, day } = onTheEveOf(year);
     const ticked = runDeterministicTick({ world: waiting, toDay: day, ids: createIdFactory("drought"), warfare: definition.warfare, clock });
-    expect(row(ticked.world, LATIUM).foodSecurityBps).toBeLessThan(4_000);
     const failed = ticked.factProposals.find((fact) => fact.kind === "harvest_failed" && (fact.affectedRefs ?? []).some((ref) => ref.id === "rome"));
     // One line for the power, naming a few of its provinces: a drought over seventy is news in a country.
     expect(failed?.summary).toMatch(/^The harvest failed in .+ more of Roman Republic's provinces: drought/);
     expect(failed?.affectedRefs).toContainEqual({ kind: "polity", id: "rome" });
+    // The crop is dear (a drought's grain is half a year's), and the granary, not the sky, now decides whether anyone starves:
+    // a fair year's harvest on the same eve leaves it cheap.
+    const fair = onTheEveOf(firstYearOf("fair"));
+    const fairTicked = runDeterministicTick({ world: fair.world, toDay: fair.day, ids: createIdFactory("fair"), warfare: definition.warfare, clock });
+    expect(provinceGrainPriceBps(ticked.world, LATIUM)).toBeGreaterThan(provinceGrainPriceBps(fairTicked.world, LATIUM) + 3_000);
+    expect(provinceGrainPriceBps(ticked.world, LATIUM)).toBeGreaterThan(12_500);
+    expect(polityGrainPriceBps(ticked.world, "rome")).toBeGreaterThan(polityGrainPriceBps(fairTicked.world, "rome"));
     // Droughts and gluts are both there, over the years: the harvest is not always fair.
-    const kinds = new Set(Array.from({ length: 40 }, (_, index) => harvestIn(LATIUM, first + index)));
+    const first = astronomicalYearOf(calendarDateOf({ day: nextHarvestDay(), minute: 0 }, clock));
+    const kinds = new Set(Array.from({ length: 40 }, (_, index) => harvestIn(opening(), LATIUM, first + index)));
     expect(kinds.has("drought") || kinds.has("poor")).toBe(true);
     expect(kinds.has("bumper") || kinds.has("good")).toBe(true);
   });
 
   it("kills the hungry, and the hungry who fled settle in the quiet country next door", () => {
     // Latium starving and full of people who have left their farms; its
-    // neighbour, the Campanian plain, fed and quiet.
+    // neighbour, the Campanian plain, fed and quiet. (A province's food is
+    // still a row, which the month's reckoning draws toward what its market's
+    // granary says; a province struck into hunger stays hungry for a few
+    // months while its neighbours, in a market that is full, are fed.)
     // A fifth of its people off their land: the recovery pass sends home a
     // hundredth of a province's people a day, so fewer than that are home
     // before the month is out and never go anywhere.
@@ -140,12 +186,18 @@ describe("a bad harvest", () => {
     expect(material.taxCapacity).toBeLessThan(row(opening(), LATIUM).taxCapacity);
   });
 
-  it("prices grain off what there is to eat", () => {
-    expect(grainPriceBps(8_000)).toBe(10_000);
-    expect(grainPriceBps(2_000)).toBeGreaterThan(30_000 - 1);
-    expect(grainPriceBps(10_000)).toBeLessThan(10_000);
-    const hungry = setRow(setRow(opening(), LATIUM, { foodSecurityBps: 2_000 }), CAMPANIA, { foodSecurityBps: 2_000 });
-    expect(polityGrainPriceBps(hungry, "rome")).toBeGreaterThan(polityGrainPriceBps(opening(), "rome"));
+  it("prices grain off what the granary holds, not off how fed the people are", () => {
+    const world = ensureMarkets(opening());
+    const ordinary = polityGrainPriceBps(world, "rome");
+    expect(ordinary).toBe(10_000);
+    // A row written hungry changes nothing about the price: it is the stock that is dear or cheap.
+    const hungryRow = setRow(setRow(world, LATIUM, { foodSecurityBps: 2_000 }), CAMPANIA, { foodSecurityBps: 2_000 });
+    expect(polityGrainPriceBps(hungryRow, "rome")).toBe(ordinary);
+    // Draw the granary of Latium's market down to a fifth and the price is the market's ceiling.
+    const held = stockIn(world, LATIUM, "grain");
+    const lean = drawStock(world, LATIUM, "grain", held * 0.8).world;
+    expect(provinceGrainPriceBps(lean, LATIUM)).toBeGreaterThan(30_000);
+    expect(polityGrainPriceBps(lean, "rome")).toBeGreaterThan(ordinary);
   });
 
   it("does nothing to a world with no provinces to reckon", () => {

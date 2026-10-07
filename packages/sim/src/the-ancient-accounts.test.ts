@@ -6,7 +6,9 @@ import {
   SOLDIER_PAY_PER_THOUSAND,
   WorldStateSchema,
   ensureProvinceMaterial,
-  grainPriceBps,
+  drawStock,
+  ensureMarkets,
+  provinceGrainPriceBps,
   grainPriceFor,
   inTalents,
   taxBurdens,
@@ -70,18 +72,19 @@ describe("the treasury pays an army what its men are owed", () => {
     expect(pay.amount - total).toBeGreaterThan(0.9 * pay.amount);
   });
 
-  it("prices bread at the one price grain has: the power's rate, dearer as the country goes hungry", () => {
-    const world = opening();
+  it("prices bread at the one price grain has: the power's rate at the market's price, dearer as its granary runs low", () => {
+    // The price is the price of the market the province trades in (`world/markets.ts`), which is what its
+    // granary holds against what it ought: not, as it was, a reading off how fed the province is.
+    const world = ensureMarkets(opening());
     const latium = PUNIC_IDS.rome;
     const ordinary = SOLDIER_PAY_PER_THOUSAND / 60;
-    const food = world.material.provinceMaterial.find((row) => row.provinceId === latium)!.foodSecurityBps;
-    expect(grainPrice(world, "rome", latium)).toBeCloseTo((ordinary * grainPriceBps(food)) / 10_000, 6);
-    expect(grainPriceFor(null, 8_000)).toBeCloseTo(ordinary, 6);
-    const starving: WorldState = { ...world, material: { ...world.material, provinceMaterial: world.material.provinceMaterial.map((row) => (row.provinceId === latium ? { ...row, foodSecurityBps: 2_000 } : row)) } };
-    // Thrice the ordinary price at the dearest, as the world's grain price reads it everywhere else.
-    expect(grainPrice(starving, "rome", latium)).toBeCloseTo(3 * ordinary, 6);
+    expect(grainPrice(world, "rome", latium)).toBeCloseTo((ordinary * provinceGrainPriceBps(world, latium)) / 10_000, 6);
+    expect(grainPriceFor(null, 10_000)).toBeCloseTo(ordinary, 6);
+    // The granary emptied: four times the ordinary price at the dearest, the market's ceiling.
+    const starving = drawStock(world, latium, "grain", Number.MAX_SAFE_INTEGER).world;
+    expect(grainPrice(starving, "rome", latium)).toBeCloseTo(4 * ordinary, 6);
     // A power that states no rate of its own pays the world's.
-    expect(grainPrice(world, "syracuse", PUNIC_IDS.syracuse)).toBeCloseTo(ordinary * grainPriceBps(world.material.provinceMaterial.find((row) => row.provinceId === PUNIC_IDS.syracuse)!.foodSecurityBps) / 10_000, 6);
+    expect(grainPrice(world, "syracuse", PUNIC_IDS.syracuse)).toBeCloseTo(ordinary * provinceGrainPriceBps(world, PUNIC_IDS.syracuse) / 10_000, 6);
   });
 });
 

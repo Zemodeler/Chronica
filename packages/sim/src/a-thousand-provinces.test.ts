@@ -61,6 +61,11 @@ describe("a power of a thousand provinces", () => {
     const spent = performance.now() - started;
     expect(land.months).toBe(1);
     expect(land.world.material.provinceMaterial.length).toBe(world.map.provinces.length);
+    // The same pass opened the markets (some seventy hubs, six goods each) and ran a month of them over every province.
+    const markets = land.world.economy!.markets;
+    expect(markets.length).toBeGreaterThanOrEqual(40);
+    expect(markets.length).toBeLessThanOrEqual(80);
+    expect(markets.every((hub) => hub.goods.length === 6)).toBe(true);
     // Well inside the month's budget: a reckoning that loops a province at a time must not search the map at each.
     expect(spent).toBeLessThan(3_000);
     // A full year of it, once, in the pass's own cap of twelve months.

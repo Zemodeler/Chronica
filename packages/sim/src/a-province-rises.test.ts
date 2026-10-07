@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { punicWarsScenario } from "@chronica/db";
-import { EMPTY_ECONOMY_MEMORY, ScenarioDefinitionSchema, WorldStateSchema, atWar, economyOf, ensureProvinceMaterial, isQuietGround, type ProvinceMaterial, type WorldState } from "@chronica/shared";
+import { EMPTY_ECONOMY_MEMORY, ScenarioDefinitionSchema, WorldStateSchema, atWar, drawStock, economyOf, ensureMarkets, ensureProvinceMaterial, isQuietGround, type ProvinceMaterial, type WorldState } from "@chronica/shared";
 import { createIdFactory } from "./ports";
 import { runDeterministicTick } from "./tick";
 import { RISING_AFTER_MONTHS, YEARNING_AT_CONQUEST_BPS } from "./unrest";
@@ -30,11 +30,16 @@ function quietRomanProvince(world: WorldState): string {
   return province!.id;
 }
 
-/** A province starving and in disorder, that has been so for all but the last month it needs. */
-function miserable(world: WorldState, provinceId: string, months = RISING_AFTER_MONTHS - 1): WorldState {
+/**
+ * A province starving and in disorder, that has been so for all but the last month it needs. It starves as a
+ * province now does: the granary of its market is empty (food security is read off it each month, and a row
+ * written hungry is brought back toward what the granary says within a month or two), and the row says so too.
+ */
+function miserable(opened: WorldState, provinceId: string, months = RISING_AFTER_MONTHS - 1): WorldState {
+  const world = drawStock(ensureMarkets(opened), provinceId, "grain", Number.MAX_SAFE_INTEGER).world;
   return {
     ...world,
-    economy: { ...EMPTY_ECONOMY_MEMORY, lastReviewStep: 0, unrest: [{ provinceId, months }] },
+    economy: { ...EMPTY_ECONOMY_MEMORY, ...world.economy, lastReviewStep: 0, unrest: [{ provinceId, months }] },
     material: {
       ...world.material,
       provinceMaterial: world.material.provinceMaterial.map((material) => (material.provinceId === provinceId ? { ...material, stabilityBps: 1_000, foodSecurityBps: 1_500 } : material)),

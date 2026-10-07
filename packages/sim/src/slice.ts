@@ -1,4 +1,5 @@
 import { regionalSummary } from "./regional-summary";
+import { marketSummary, polityMarkets } from "./market-summary";
 import { powersDealtWith } from "./far-powers";
 import { powersNamedIn } from "./powers-named";
 import { armyInWords, serviceInWords } from "./army-words";
@@ -169,6 +170,8 @@ export interface WorldSlice {
   readonly taxBurden: { readonly asked: number; readonly bearable: number; readonly inWords: string } | null;
   /** How its provinces are taxed and how they fare, one line a power (`regional-summary.ts`), for whoever can open its treasury. */
   readonly regional?: string | null;
+  /** What its markets are doing when there is news in them: grain in store and its price, what is dear and cheap, hubs short of bread; one line a power (`market-summary.ts`). */
+  readonly markets?: string | null;
   /** Coin a month per thousand men, for whoever can open the power's treasury and the scenario names it. */
   readonly soldierPayPerThousand: number | null;
   readonly military: readonly {
@@ -554,6 +557,8 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
   const burden = opensTreasury ? taxBurdens(world).get(ownPolity) : undefined;
   const taxBurden = burden === undefined ? null : { asked: burden.asked, bearable: burden.bearable, inWords: taxBurdenInWords(burden) };
   const regional = opensTreasury && ownPolity !== null ? regionalSummary(world, ownPolity, burden) : null;
+  // Prices are what anybody in the country knows: no key to the treasury is needed to read them.
+  const markets = ownPolity === null ? null : marketSummary(polityMarkets(world).get(ownPolity));
   const soldierPayPerThousand = opensTreasury ? world.map.polities.find((polity) => polity.id === ownPolity)?.soldierPayPerThousand ?? null : null;
   const monthlyExpenditure = Math.round(
     world.material.obligations
@@ -1321,6 +1326,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     loanOffers: input.actorRef.kind === "character" ? loanOfferLines(world, input.actorRef.id) : [],
     taxBurden,
     regional,
+    markets,
     soldierPayPerThousand,
     military,
     foreignPowers,
@@ -1509,8 +1515,8 @@ export function renderWorldSlice(slice: WorldSlice): string {
         slice.country.governs
           ? `${slice.country.provinces} province(s), ${slice.country.population} people, ${slice.country.availableManpower} men available to raise${slice.country.alliedManpower > 0 ? `, and ${slice.country.alliedManpower} more our allies send by foedus when a war opens` : ""}.`
           : `${slice.country.provinces} province(s), ${slice.country.population} people.`,
-        // Said only when it is news: bread at its ordinary price is no line of prompt.
-        ...(Math.abs(slice.country.grainPriceBps - 10_000) < 1_500 ? [] : [`Grain sells at ${Math.round(slice.country.grainPriceBps / 100)}% of its ordinary price${slice.country.grainPriceBps > 10_000 ? ": bread is dear, and armies cost more to keep" : ": bread is cheap"}.`]),
+        // Said only when it is news: bread at its ordinary price, and no good far from its own, is no line of prompt.
+        ...(slice.markets == null ? [] : [slice.markets]),
         ...slice.country.strained.map((province) =>
           slice.country.governs
             ? `${province.name} [${province.id}] — ${province.manpower} men, food ${province.food}/100, order ${province.stability}/100, war damage ${province.warDamage}/100, taxable ${province.taxCapacity}`

@@ -1,5 +1,6 @@
 import {
   takenBy,
+  sackTheMarket,
   SIEGE_BASE_DAYS,
   reconcileCapitals,
   SIEGE_WORKS,
@@ -457,6 +458,8 @@ function sackCities(world: WorldState, sacked: readonly { provinceId: string; pl
         }].slice(-500),
       },
     };
+    // The market it was the hub of, or belonged to, is stripped, and those who were sold are sold.
+    next = sackTheMarket(next, sack.provinceId, lost);
     facts.push({
       localId: `sacked_${sack.provinceId}_${toDay}`.slice(0, 60),
       kind: "city_sacked",

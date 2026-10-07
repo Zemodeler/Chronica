@@ -1,6 +1,7 @@
 import { hiringGroups } from "./action-groups";
 import {
   serveInArmy,
+  bestGapGood,
   takenBy,
   openPeaceTable,
   ownerOf,
@@ -4097,7 +4098,7 @@ function applyOne(
       // (`cargoes.ts`), not a trickle every month for ever (play-test L9).
       // A single cargo is done when it is sold; a regular trade sails again.
       const bySea = from.id !== to.id && hasPort(world, from.id) && hasPort(world, to.id);
-      const cargo = bySea ? { cost: terms.price, sailedAtStep: atStep, arrivesAtStep: atStep + voyageDays(world, from.id, to.id), voyages: 0, rollsOver: delta.band !== "slight" } : undefined;
+      const cargo = bySea ? { cost: terms.price, good: bestGapGood(world, from.id, to.id).good, sailedAtStep: atStep, arrivesAtStep: atStep + voyageDays(world, from.id, to.id), voyages: 0, rollsOver: delta.band !== "slight" } : undefined;
       if (cargo !== undefined) {
         emitFact({
           localId: `cargo_${ventureId}`.slice(0, 60), kind: "cargo_sailed",

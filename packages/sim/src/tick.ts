@@ -53,7 +53,7 @@ import {
   type Project,
   recordTenures,
   obligationAmountNow,
-  provinceGrainPriceBps,
+  bestGapGood,
   tradePremiumBps,
   liveProvinceIds,
   type ProvinceMaterial,
@@ -425,11 +425,12 @@ export function runDeterministicTick(given: TickInput): TickResult {
     while (due <= input.toDay && periods < MAX_PERIODS_PER_TICK) {
       const levied = domesticRevenuePolity(input.world, source);
       const share = levied === null ? 1 : burdens.get(levied)?.collectedShare ?? 1;
-      // A venture earns by the markets at its two ends (`tradePremiumBps`):
-      // grain carried into a famine sells dear.
+      // A venture earns by the markets at its two ends (`tradePremiumBps`): the
+      // good whose price differs most between them, as a ship would be loaded
+      // with it. Grain carried into a famine sells dear.
       const route = source.originKind === "venture" ? ventureById.get(source.originId) : undefined;
-      const premium = route === undefined ? 10_000
-        : tradePremiumBps(provinceGrainPriceBps(input.world, route.fromProvinceId), provinceGrainPriceBps(input.world, route.toProvinceId));
+      const gap = route === undefined ? undefined : bestGapGood(input.world, route.fromProvinceId, route.toProvinceId);
+      const premium = gap === undefined ? 10_000 : tradePremiumBps(gap.fromBps, gap.toBps);
       // And it earns little where the war has reached either end: ground at
       // war, occupied, or under blockade (docs/plans/a-living-world.md §10).
       // A grain merchant feels Egypt's war in his ledger.

@@ -19,6 +19,7 @@ import {
   type WorldState,
   forceLever,
   applyForagingScar,
+  drawStock,
 } from "@chronica/shared";
 
 /**
@@ -158,7 +159,12 @@ export function keepTheField(input: KeepTheFieldInput): { world: WorldState; fac
   const provinceName = (id: string): string => world.map.provinces.find((province) => province.id === id)?.name ?? id;
   let provinceMaterial = world.material.provinceMaterial;
   const materialOf = (id: string): ProvinceMaterial | undefined => provinceMaterial.find((row) => row.provinceId === id);
+  // What an army living off a country takes of its grain is taken from the granary of its market too, a month's
+  // bread for the share of the people it ate: the price answers, and the next reckoning reads the food off what is left.
+  const foraged = new Map<string, number>();
   const strip = (id: string, food: number, productive: number, stability: number, damage: number): void => {
+    const people = materialOf(id)?.population ?? 0;
+    if (food > 0 && people > 0) foraged.set(id, (foraged.get(id) ?? 0) + (food / 10_000) * people * 4);
     // An army living off a country wears it down a little for every day it stays: a development hit and a scar
     // in proportion to the burning (`applyForagingScar`), well below a battle's.
     provinceMaterial = provinceMaterial.map((row) => (row.provinceId !== id ? row : applyForagingScar({
@@ -351,5 +357,7 @@ export function keepTheField(input: KeepTheFieldInput): { world: WorldState; fac
     return force;
   });
 
-  return { world: { ...world, material: { ...world.material, forces, provinceMaterial } }, facts };
+  let marketed: WorldState = { ...world, material: { ...world.material, forces, provinceMaterial } };
+  for (const [provinceId, units] of foraged) marketed = drawStock(marketed, provinceId, "grain", units).world;
+  return { world: marketed, facts };
 }
