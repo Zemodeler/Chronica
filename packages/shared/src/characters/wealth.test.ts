@@ -5,18 +5,21 @@ describe("what a person of this standing is worth", () => {
   it("does not let a common soldier be handed a senator's fortune", () => {
     // The declaration prompt asks for the standing and the money in the same
     // breath and believed whatever came back.
-    expect(clampWealth(40_000, "Common soldier of the legions")).toBeLessThanOrEqual(60);
+    expect(clampWealth(40_000, "Common soldier of the legions")).toBeLessThanOrEqual(600);
   });
 
   it("does not leave a merchant invented to lend money with nothing to lend", () => {
     // Which is the bug that put `wealth` on `character_create` at all, solved
     // in one direction and left open in the other.
-    expect(clampWealth(4, "A merchant of Ostia")).toBeGreaterThanOrEqual(200);
+    // A merchant is worth ten thousand drachmae at the least: eighty-odd years of a legionary's pay.
+    expect(clampWealth(4, "A merchant of Ostia")).toBeGreaterThanOrEqual(10_000);
   });
 
   it("keeps the model's judgment inside the band, because a rich merchant and a poor one are both merchants", () => {
-    expect(clampWealth(400, "merchant")).toBe(400);
-    expect(clampWealth(2_400, "merchant")).toBe(2_400);
+    expect(clampWealth(12_000, "merchant")).toBe(12_000);
+    expect(clampWealth(120_000, "merchant")).toBe(120_000);
+    // And a senator is about a hundred thousand, the census figure the scale is set to.
+    expect(clampWealth(100_000, "senator")).toBe(100_000);
   });
 
   it("reads a phrase by its richest word, not its first", () => {

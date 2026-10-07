@@ -55,7 +55,9 @@ describe("what the viewer can say about others' numbers", () => {
   it("says ships and wealth in words", () => {
     expect(estimateShips(40, "report", 0)).toMatch(/ships/);
     expect(wealthInWords(0)).toBe("a man with his hands and little else");
-    expect(wealthInWords(5_000)).toBe("a fortune that is itself a kind of office");
+    expect(wealthInWords(5_000)).toBe("a household of some standing");
+    expect(wealthInWords(12_000)).toBe("money enough to be courted for it");
+    expect(wealthInWords(100_000)).toBe("a fortune that is itself a kind of office");
   });
 });
 

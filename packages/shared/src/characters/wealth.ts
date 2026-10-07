@@ -48,7 +48,16 @@ export type ScenarioWealthRules = z.infer<typeof ScenarioWealthRulesSchema>;
  * What a scenario that authors none gets.
  *
  * Deliberately coarse and deliberately overridable: four bands spanning three
- * orders of magnitude, in the units this codebase's scenarios already use. The
+ * orders of magnitude, in the drachmae of the age's scale (v47), the same units
+ * as a legionary's pay of 120 a year (`LEGIONARY_PAY_GROSS`), a talent of 6,000
+ * (`DRACHMAE_PER_TALENT`) and a private fortune counted by `PRIVATE_WEALTH_SCALE`
+ * (`material/estates.ts`), which makes a senator with a marked estate, a purse of
+ * the same size and a venture or two worth about a hundred thousand, as the
+ * census had him. They had been counted in the old scale, a tenth to a
+ * hundredth of that, so a merchant clamped to 200 drachmae owned less than a
+ * legionary's two years' pay. The bands here are the Punic scenario's own
+ * (`punic-wars-scenario.ts`: capite censi, assidui, a household of standing,
+ * equestrian, senatorial) folded into four. The
  * codebase has a standing objection to hardcoded assumptions about a
  * government or an economy, and this is one -- shipped because the alternative
  * is that every scenario that has not got round to authoring bands goes on
@@ -58,22 +67,22 @@ export const DEFAULT_WEALTH_BANDS: readonly WealthBand[] = [
   {
     id: "poor", label: "a man with his hands and little else",
     words: ["poor", "labourer", "laborer", "peasant", "farmer", "slave", "freedman", "servant", "soldier", "legionary", "ranker", "sailor", "rower", "shepherd", "artisan", "craftsman", "smith"],
-    min: 0, max: 60,
+    min: 0, max: 600,
   },
   {
     id: "middling", label: "a household of some standing",
     words: ["citizen", "plebeian", "plebian", "commoner", "veteran", "centurion", "trader", "shopkeeper", "scribe", "clerk", "priest", "physician", "teacher", "yeoman", "burgher"],
-    min: 20, max: 400,
+    min: 150, max: 12_000,
   },
   {
     id: "substantial", label: "money enough to be courted for it",
     words: ["merchant", "shipowner", "equestrian", "equites", "eques", "knight", "landowner", "banker", "financier", "publican", "magistrate", "officer", "tribune", "decurion"],
-    min: 200, max: 3_000,
+    min: 10_000, max: 150_000,
   },
   {
     id: "great", label: "a fortune that is itself a kind of office",
     words: ["patrician", "senatorial", "senator", "aristocracy", "aristocrat", "noble", "nobility", "consul", "king", "queen", "prince", "royal", "dynast", "tyrant", "suffete", "magnate"],
-    min: 1_000, max: 40_000,
+    min: 25_000, max: 500_000,
   },
 ];
 
