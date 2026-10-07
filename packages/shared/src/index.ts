@@ -18,6 +18,8 @@ export * from "./material-state";
 export * from "./political-parts";
 export * from "./material-view";
 export * from "./material/books";
+export * from "./material/regions-view";
+export * from "./material/trade-view";
 export * from "./material/disband";
 export * from "./material/account-names";
 export * from "./material/character-accounts";

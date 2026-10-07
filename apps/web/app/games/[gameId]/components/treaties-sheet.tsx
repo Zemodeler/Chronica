@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { spanInWords, type Abroad, type PolityAgreementKind, type TreatyLine, type TreatyMoment, type TreatyPosture, type TreatyPower } from "@chronica/shared";
+import { spanInWords, type Abroad, type PolityAgreementKind, type TreatyLine, type TreatyMoment, type TreatyPosture, type TreatyPower, type TreatyTradeTerms } from "@chronica/shared";
 import { Era } from "../../../components/ui/era";
 import { Tip, TipCard } from "../../../components/ui/tip";
 
@@ -233,8 +233,23 @@ function LineEntry({ line, power, ask }: { readonly line: TreatyLine; readonly p
         {line.secret && <span> · <SecretTip ask={ask} power={power} /></span>}
       </p>
       <p className="treaty-line__summary">{line.summary}.</p>
+      {line.trade !== null && line.trade !== undefined && <TradeTerms trade={line.trade} kind={line.kind} />}
     </div>
   );
+}
+
+/** What a trade pact or an embargo says about customs and goods, a term to a line. */
+function TradeTerms({ trade, kind }: { readonly trade: TreatyTradeTerms; readonly kind: PolityAgreementKind }) {
+  const percent = (bps: number): string => `${(bps / 100).toFixed(bps % 100 === 0 ? 0 : 1)} in a hundred`;
+  const terms = kind === "embargo"
+    ? [trade.forbidden.length === 0 ? "Every good is forbidden." : `Forbidden: ${trade.forbidden.join(", ")}.`]
+    : [
+      trade.tariffCapBps === null ? "No cap on customs: each power lays its own." : `Customs on either's goods may not pass ${percent(trade.tariffCapBps)}.`,
+      trade.mostFavoured ? "Each gives the other the best terms it gives anyone." : null,
+      trade.exempt.length > 0 ? `Free of customs: ${trade.exempt.join(", ")}.` : null,
+      trade.heldByWar ? "Held by the war; it comes back with the peace." : null,
+    ].filter((term): term is string => term !== null);
+  return <ul className="treaty-line__trade" aria-label="Terms of trade">{terms.map((term) => <li key={term}>{term}</li>)}</ul>;
 }
 
 /* ─── The notes ─────────────────────────────────────────────────────── */

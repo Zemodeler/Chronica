@@ -4,7 +4,9 @@ import type { Office } from "../characters/character";
 import type { WorldState } from "../world/world-state";
 import { accountLabel } from "./account-names";
 import { obligationAmountNow } from "../world/economy";
-import { coinageOfAccount, coinagesOf, faceAmount } from "../world/coinage";
+import { coinageOfAccount, coinageOfPolity, coinagesOf, faceAmount, priceLevelBpsOf, standardOf } from "../world/coinage";
+import { readTheRegions, type RegionsReading } from "./regions-view";
+import { readTheTrade, type TradeReading } from "./trade-view";
 import type { MoneyAccount } from "../material-state";
 import { taxWhy, type WhyReading } from "../knowledge/why";
 
@@ -100,6 +102,25 @@ export interface Books {
   readonly stopped: readonly { readonly key: string; readonly label: string; readonly monthly: number }[];
   /** The power's most strained provinces, for whoever reads its books. Null for a private purse. */
   readonly lands: readonly LandLine[] | null;
+  /** The coin the power's treasury holds, for whoever can open it (phase F): its silver, its price level and what it fetches. */
+  readonly coin?: CoinStanding | null;
+  /** Its provinces by region, with development, scar and tax regime (`readTheRegions`), for whoever governs it. */
+  readonly regions?: RegionsReading | null;
+  /** Its markets and trade (`readTheTrade`), for whoever can open its treasury. */
+  readonly trade?: TradeReading | null;
+}
+
+/** What a power's own coin stands at, derived from the world's coinages. */
+export interface CoinStanding {
+  readonly name: string;
+  /** Silver in a unit of the coin against the Attic drachma, 10 000 being as much. */
+  readonly silverBps: number;
+  /** What it was struck at when the world began. */
+  readonly standardBps: number;
+  /** Prices in the countries that use it, basis points of ordinary. */
+  readonly priceLevelBps: number;
+  /** What it fetches above (+) or below (-) its silver among the money-changers. */
+  readonly premiumBps: number;
 }
 
 export interface DebtLine {
@@ -273,6 +294,21 @@ export function readTheBooks(
       strained: material.stabilityBps < 5_000 || material.foodSecurityBps < 5_000 || material.warDamageBps >= 5_000,
     }));
 
+  // The power's coin, its lands by region and its trade: for those who can open its chest, and the
+  // lands' regimes only for those who may set them (a fiscal power that spends, over its chest).
+  const chestOpener = opensTreasury && readerPolity !== null;
+  const canSetTaxes = station === null || station.grants.some((grant) => grant.domain === "fiscal"
+    && grant.powers.includes("spend")
+    && ((grant.scope.kind === "polity" && grant.scope.id === readerPolity) || (grant.scope.kind === "account" && readable.has(grant.scope.id))));
+  const coin: CoinStanding | null = chestOpener && coinagesOf(world).length > 0
+    ? (() => {
+      const own = coinageOfPolity(world, readerPolity);
+      return { name: own.name, silverBps: own.silverBps, standardBps: standardOf(own), priceLevelBps: priceLevelBpsOf(world, readerPolity), premiumBps: own.premiumBps };
+    })()
+    : null;
+  const regions = chestOpener && governs ? readTheRegions(world, readerPolity, canSetTaxes) : null;
+  const trade = chestOpener ? readTheTrade(world, readerPolity) : null;
+
   // If nothing changes: how long what is in hand lasts at this month's rate.
   const surplus = totalIncome - totalExpenditure;
   const inHand = accounts.reduce((sum, account) => sum + account.balance, 0);
@@ -293,5 +329,8 @@ export function readTheBooks(
     behind,
     stopped,
     lands,
+    coin,
+    regions,
+    trade,
   };
 }

@@ -7,11 +7,13 @@ import {
   AGREEMENT_KIND_IN_WORDS,
   alliesLedBy,
   leaderOf,
+  tradeTermsBetween,
   type PolityAgreement,
   type PolityAgreementKind,
 } from "../world/agreements";
 import type { WorldState } from "../world/world-state";
 import { formatWorldDate, type ScenarioClock } from "../world/clock";
+import { GOODS } from "../world/markets";
 
 /**
  * Where a power stands with every other, as one of its people could know it.
@@ -60,6 +62,21 @@ export interface TreatyLine {
   readonly throughLabel: string | null;
   /** The letter that made it, when there was one and you could have read it. */
   readonly letter: TreatyLetter | null;
+  /** For a trade pact or an embargo: what the markets read of it, in words the sheet can set out. */
+  readonly trade: TreatyTradeTerms | null;
+}
+
+/** The terms of a trade pact or an embargo, ready to show. */
+export interface TreatyTradeTerms {
+  /** The most customs either may lay on the other's goods, in basis points; null: no cap. */
+  readonly tariffCapBps: number | null;
+  readonly mostFavoured: boolean;
+  /** Goods let in free of customs (a pact), by name. */
+  readonly exempt: readonly string[];
+  /** Goods an embargo forbids by name; empty is all trade. */
+  readonly forbidden: readonly string[];
+  /** A pact that war holds suspended: it comes back with the peace. */
+  readonly heldByWar: boolean;
 }
 
 export type TreatyPosture = "war" | "answer_to" | "bound_to_us" | "equals" | "none" | "ended";
@@ -188,6 +205,19 @@ export function readAbroad(
     };
   };
 
+  const goodNames = (ids: readonly string[]): string[] => ids.map((id) => GOODS.find((spec) => spec.id === id)?.name ?? id.replace(/_/g, " "));
+  const tradeOf = (agreement: PolityAgreement): TreatyTradeTerms | null => {
+    if (agreement.kind !== "trade_pact" && agreement.kind !== "embargo") return null;
+    const terms = agreement.trade;
+    const pact = agreement.kind === "trade_pact";
+    return {
+      tariffCapBps: pact ? terms?.tariffCapBps ?? null : null,
+      mostFavoured: pact && terms?.mostFavoured === true,
+      exempt: pact ? goodNames(terms?.exempt ?? []) : [],
+      forbidden: pact ? [] : goodNames(terms?.goods ?? []),
+      heldByWar: pact && agreement.status === "active" && tradeTermsBetween(world, agreement.polityId, agreement.otherPolityId).pactSuspended,
+    };
+  };
   const lineOf = (agreement: PolityAgreement, throughLabel: string | null): TreatyLine => ({
     key: agreement.id,
     kind: agreement.kind,
@@ -200,6 +230,7 @@ export function readAbroad(
     secret: !agreementIsOpen(agreement),
     throughLabel,
     letter: letterOf(agreement),
+    trade: tradeOf(agreement),
   });
 
   const otherOf = (agreement: PolityAgreement, side: string): string | null =>
