@@ -233,6 +233,9 @@ export function settleStandingEffects(input: { readonly world: WorldState; reado
           atStep: input.toDay,
           kind,
           amount,
+          // A work's keep is paid to the masons and keepers nobody names; what it
+          // earns is what a market or a harbour pays its owner.
+          ...(from !== null && to !== null ? {} : { external: kind === "upkeep" ? "the_unnamed" as const : "market" as const }),
           ...(from === null ? {} : { sourceAccountId: from }),
           ...(to === null ? {} : { destinationAccountId: to }),
           cause: { kind: kind === "upkeep" ? "obligation" as const : "scheduled_income" as const, id: carrier.id, explanation: carrier.label },

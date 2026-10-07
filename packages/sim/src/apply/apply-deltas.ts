@@ -1991,6 +1991,8 @@ function applyOne(
         // A rule's toll is the rule's doing, and is filed under it: an order
         // that set up the arrangement can then call what it takes its own.
         causeId: context.firingMechanic?.entityId ?? context.actorRef.id, explanation: delta.reason,
+        // "Money genuinely leaving the modelled world": a foreign shipwright, a bribe abroad.
+        external: "abroad",
       }, context);
     }
 
@@ -4299,7 +4301,9 @@ function applyOne(
         openedAtStep: atStep,
       };
 
-      const lent = moveMoney(world, { from: lendingAccountId, to: borrowerId, amount: principal, kind: "transfer", causeId: loanId, explanation: `Lent: ${taken.terms}` }, context);
+      // A foreign banker's money is credit from outside the accounts, tagged as
+      // such, and what is repaid to him leaves them the same way.
+      const lent = moveMoney(world, { from: lendingAccountId, to: borrowerId, amount: principal, kind: "transfer", causeId: loanId, explanation: `Lent: ${taken.terms}`, external: "credit" }, context);
       return {
         ...lent,
         material: {
@@ -4364,7 +4368,7 @@ function applyOne(
       const lenderAccount = loan.lenderKind === "foreign" || loan.lenderId === null
         ? undefined
         : world.material.accounts.find((account) => account.owner.kind === loan.lenderKind && account.owner.id === loan.lenderId);
-      const repaid = moveMoney(world, { from: borrower.id, to: lenderAccount?.id ?? null, amount: paying, kind: "transfer", causeId: loanId, explanation: `Repaid on ${loan.terms}` }, context);
+      const repaid = moveMoney(world, { from: borrower.id, to: lenderAccount?.id ?? null, amount: paying, kind: "transfer", causeId: loanId, explanation: `Repaid on ${loan.terms}`, external: "credit" }, context);
 
       const outstanding = loan.outstanding - paying;
       const settled = { ...loan, outstanding, status: outstanding === 0 ? ("repaid" as const) : loan.status };
@@ -5695,7 +5699,7 @@ function applyOne(
         const purse = payer === null ? undefined : world.material.accounts.find((account) => account.id === payer);
         if (purse === undefined) reject(`Nobody is named to pay the ${got.cost} the bread costs.`, "reference");
         if (purse.balance < got.cost) reject(`The bread costs ${got.cost}, and ${purse.id} holds ${purse.balance}.`);
-        fed = moveMoney(fed, { from: purse.id, to: got.sellerAccountId, amount: got.cost, kind: "purchase", causeId: forceId, explanation: `Bread for ${force.name}.` }, context);
+        fed = moveMoney(fed, { from: purse.id, to: got.sellerAccountId, amount: got.cost, kind: "purchase", causeId: forceId, explanation: `Bread for ${force.name}.`, external: "bread" }, context);
       }
       for (const fact of got.facts) emitFact(fact);
       return fed;
@@ -6876,6 +6880,8 @@ interface Movement {
   readonly explanation: string;
   /** Who may read the line. The paying account's own, by default. */
   readonly visibility?: MoneyTransaction["visibility"];
+  /** For a sum with one end outside the accounts: which door in or out of the books it is (`EXTERNAL_MONEY_KINDS`). */
+  readonly external?: MoneyTransaction["external"];
 }
 
 function moveMoney(world: WorldState, movement: Movement, context: ApplyContext): WorldState {
@@ -6891,6 +6897,7 @@ function moveMoney(world: WorldState, movement: Movement, context: ApplyContext)
     atStep: world.elapsedStep,
     kind: movement.kind,
     amount: movement.amount,
+    ...(movement.external === undefined || (movement.from !== null && movement.to !== null) ? {} : { external: movement.external }),
     ...(movement.from === null ? {} : { sourceAccountId: movement.from }),
     ...(movement.to === null ? {} : { destinationAccountId: movement.to }),
     cause: { kind: "action", id: movement.causeId.slice(0, 120), explanation: (movement.explanation.trim() || "An act of this turn.").slice(0, 240) },

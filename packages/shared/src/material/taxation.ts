@@ -19,8 +19,11 @@ import { ownerOf, ownsAndHolds } from "../world/occupation";
  *  - **What can be borne** is a share of every held province's tax capacity,
  *    scaled by how orderly the province is. Disorder pays less.
  *  - **What is asked** is every domestic revenue -- taxes, land rents, the
- *    dues of subject peoples -- paid into that power's own treasury. Trade is
- *    not a levy on anybody's land, and war and blockade already bound it.
+ *    dues of subject peoples, and the harbour dues and tolls on trade -- paid
+ *    into that power's own treasury. Trade was left out as no levy on anybody's
+ *    land, with war and blockade to bound it, and so a treasury could be given
+ *    a trade income of any size: a harbour's dues are as much a share of what
+ *    the country produces as a tithe is, and ride the same ceiling.
  *  - **More than can be borne is not collected.** Every such source is paid in
  *    the same proportion, so the collectors bring in what there is.
  *  - **Pressing hard costs order.** Asking more than half of what can be borne
@@ -45,7 +48,7 @@ export const TAX_UNREST_BPS_PER_BURDEN = 4_000;
 /** However hard a power presses, order settles no further than this below baseline on its account. */
 export const MAX_TAX_UNREST_BPS = 6_000;
 
-const DOMESTIC_REVENUE_KINDS: ReadonlySet<IncomeSource["kind"]> = new Set(["tax", "land", "tribute"]);
+const DOMESTIC_REVENUE_KINDS: ReadonlySet<IncomeSource["kind"]> = new Set(["tax", "land", "tribute", "trade"]);
 
 export interface TaxBurden {
   readonly polityId: string;

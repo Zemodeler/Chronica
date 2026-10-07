@@ -6,6 +6,7 @@ import {
   kmFrom,
   COUNTRYSIDE_KM,
   REFERENCE_PROVINCE_KM,
+  grainPriceFor,
   sameConfederation,
   stableHash,
   warfareWith,
@@ -49,20 +50,19 @@ const CONVOY_KM_PER_DAY = REFERENCE_PROVINCE_KM / 3;
 const CARRIAGE_PER_KM = 0.1 / REFERENCE_PROVINCE_KM;
 /** How far a convoy is sent at most. */
 const CONVOY_REACH_KM = 12 * REFERENCE_PROVINCE_KM;
-/** Where no power says what its soldiers are paid, what a thousand men's pay is a month. */
-const DEFAULT_PAY_PER_THOUSAND = 30;
 
 const friendlyTo = (world: WorldState, polityId: string, other: string | null): boolean =>
   other !== null && (other === polityId || sameConfederation(world.polityAgreements, polityId, other));
 
 /**
  * What bread for a thousand men for a day costs here: half a day's pay at the
- * power's own rate, up to three times that where the country is going hungry.
+ * power's own rate, at the one price grain has (`grainPriceFor`): cheaper where
+ * the country is fed, up to three times as dear where it is going hungry.
  */
 export function grainPrice(world: WorldState, polityId: string, provinceId: string): number {
-  const pay = world.map.polities.find((polity) => polity.id === polityId)?.soldierPayPerThousand ?? DEFAULT_PAY_PER_THOUSAND;
+  const pay = world.map.polities.find((polity) => polity.id === polityId)?.soldierPayPerThousand ?? null;
   const food = world.material.provinceMaterial.find((row) => row.provinceId === provinceId)?.foodSecurityBps ?? 10_000;
-  return (pay / 60) * (1 + (10_000 - food) / 5_000);
+  return grainPriceFor(pay, food);
 }
 
 /** The provinces round this one that feed an army standing in it: what "the country" meant when a province was a region. */

@@ -136,7 +136,9 @@ export function landCargoes(world: WorldState, toDay: number, ids: IdFactory, wa
       const sold =Math.max(1, Math.round((cargo.cost * (10_000 + margin)) / 10_000));
       accounts = accounts.map((account) => (account.id === purse.id ? { ...account, balance: account.balance + sold } : account));
       transactions.push({
-        id: ids.next("txn"), atStep: cargo.arrivesAtStep, kind: "income", amount: sold, destinationAccountId: purse.id,
+        // The market at the far end buys what the ship carried: its price is the
+        // cost and the margin the route earns, and the margin is the market's.
+        id: ids.next("txn"), atStep: cargo.arrivesAtStep, kind: "income", amount: sold, destinationAccountId: purse.id, external: "market",
         cause: { kind: "scheduled_income", id: venture.incomeSourceId, explanation: `Sale of the cargo of ${venture.title}`.slice(0, 240) }, visibility: "private",
       });
       const balance = accounts.find((account) => account.id === purse.id)!.balance;
@@ -144,7 +146,7 @@ export function landCargoes(world: WorldState, toDay: number, ids: IdFactory, wa
       if (again) {
         accounts = accounts.map((account) => (account.id === purse.id ? { ...account, balance: account.balance - cargo.cost } : account));
         transactions.push({
-          id: ids.next("txn"), atStep: cargo.arrivesAtStep, kind: "purchase", amount: cargo.cost, sourceAccountId: purse.id,
+          id: ids.next("txn"), atStep: cargo.arrivesAtStep, kind: "purchase", amount: cargo.cost, sourceAccountId: purse.id, external: "market",
           cause: { kind: "action", id: venture.id, explanation: `The next cargo of ${venture.title}`.slice(0, 240) }, visibility: "private",
         });
       }

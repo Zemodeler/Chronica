@@ -77,6 +77,44 @@ export const EMPTY_ECONOMY_MEMORY: EconomyMemory = {
 
 export const economyOf = (world: Pick<WorldState, "economy">): EconomyMemory => world.economy ?? EMPTY_ECONOMY_MEMORY;
 
+/**
+ * What a legionary is owed a month, in drachmae, before stoppages: two obols a
+ * day, as Polybius gives it (6.39), thirty days to the month. The one rate
+ * every army's pay is counted from: the treasury's outlay for an army
+ * (`SOLDIER_PAY_PER_THOUSAND`), the pay of the named men in its ranks
+ * (`sim/money.ts`) and the price of the bread it buys (`ordinaryGrainPrice`)
+ * were three rates, a hundred and eighty times apart, until they were one.
+ */
+export const LEGIONARY_PAY_GROSS = 10;
+/**
+ * And what is stopped out of it for his grain, his clothes and the arms he is
+ * issued, which Polybius says the quaestor deducted: about a third. A legionary
+ * keeps seven a month, a centurion twice that, a horseman three times.
+ */
+export const PAY_STOPPAGES_SHARE = 1 / 3;
+/**
+ * What the treasury pays out for every thousand men of an army each month:
+ * their gross pay, the part stopped out of it going on their grain, clothes and
+ * arms, which the treasury buys. A power that states no rate of its own pays
+ * this (`PolityMap.soldierPayPerThousand`).
+ */
+export const SOLDIER_PAY_PER_THOUSAND = LEGIONARY_PAY_GROSS * 1_000;
+/**
+ * A warship's crew a month, hull for hull: a trireme's oarsmen and marines are
+ * not each paid a legionary's wage -- most were citizens or allies serving
+ * their city's turn, and the pay is the keep of the rest.
+ */
+export const WARSHIP_PAY_PER_HULL = 500;
+
+/** A talent of silver, the unit indemnities and treasuries were reckoned in: 6,000 drachmae. */
+export const DRACHMAE_PER_TALENT = 6_000;
+
+/** A sum of drachmae in the words a treaty would use: "3,200 talents" where it is large enough to be counted so. */
+export function inTalents(drachmae: number): string {
+  const talents = drachmae / DRACHMAE_PER_TALENT;
+  return talents >= 1 ? `${Math.round(talents).toLocaleString("en-GB")} talents` : `${Math.round(drachmae).toLocaleString("en-GB")} drachmae`;
+}
+
 /** Food security at which grain sells at its ordinary price. */
 const ORDINARY_FOOD_BPS = 8_000;
 
@@ -89,6 +127,26 @@ const ORDINARY_FOOD_BPS = 8_000;
 export function grainPriceBps(foodSecurityBps: number): number {
   const ratio = ORDINARY_FOOD_BPS / Math.max(1_000, foodSecurityBps);
   return Math.max(5_000, Math.min(30_000, Math.round(ratio * 10_000)));
+}
+
+/**
+ * What bread for a thousand men for a day costs at a power's ordinary price:
+ * half a day's pay at its own rate.
+ */
+export function ordinaryGrainPrice(soldierPayPerThousand: number | null | undefined): number {
+  return (soldierPayPerThousand ?? SOLDIER_PAY_PER_THOUSAND) / 60;
+}
+
+/**
+ * The one price of bread for an army, where food security is what it is: the
+ * power's ordinary price times what grain costs in a country as hungry as that
+ * (`grainPriceBps`). `sim/grain.ts` used to read a second price off food
+ * security of its own, from 1 to 3 times, beside this module's from 0.5 to 3:
+ * a famine that made bread dear to the treasury did not make it dear to the
+ * legion. Until grain has a market, this is the only price there is.
+ */
+export function grainPriceFor(soldierPayPerThousand: number | null | undefined, foodSecurityBps: number): number {
+  return (ordinaryGrainPrice(soldierPayPerThousand) * grainPriceBps(foodSecurityBps)) / 10_000;
 }
 
 /**

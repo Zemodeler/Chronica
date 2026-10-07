@@ -1407,7 +1407,7 @@ export function renderWorldSlice(slice: WorldSlice): string {
       `Our lands' taxes: ~${slice.taxBurden.asked}/month asked of ~${slice.taxBurden.bearable} bearable (${slice.taxBurden.inWords}); more is not collected, and past half, order sours.`,
     ]),
     ...(slice.soldierPayPerThousand === null ? [] : [
-      `Our soldiers are paid ${slice.soldierPayPerThousand}/month for every 1,000 men.`,
+      `Our soldiers are paid ${slice.soldierPayPerThousand.toLocaleString("en-GB")}/month for every 1,000 men.`,
     ]),
   ]);
   section("MILITARY", slice.military.map((force) => {

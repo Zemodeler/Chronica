@@ -1,4 +1,7 @@
 import {
+  SOLDIER_PAY_PER_THOUSAND,
+  WARSHIP_PAY_PER_HULL,
+  treasuryOf,
   spendFromReservation,
   reconcileCapitals,
   isOwedATurn,
@@ -129,9 +132,9 @@ const projectConflictsInto = (world: WorldState): WorldState => ({ ...world, con
 
 /** Guards a pathological cadence from being replayed thousands of times in one span. */
 const MAX_PERIODS_PER_TICK = 24;
-/** A warship's crew a month, and a soldier's: the scenario's own rates (`punic-wars-scenario.ts`). */
-const WARSHIP_PAY = 210 / 40;
-const SOLDIER_PAY = 35 / 1_000;
+/** A warship's crew a month, and a soldier's: the world's own rates (`shared/world/economy.ts`), the legionary's the one every army's pay is counted from. */
+const WARSHIP_PAY = WARSHIP_PAY_PER_HULL;
+const SOLDIER_PAY = SOLDIER_PAY_PER_THOUSAND / 1_000;
 /** How long a crossing waits, each time, for the march or the sailing that brings its army to the shore. */
 const LEG_WAIT_DAYS = 3;
 
@@ -434,7 +437,16 @@ export function runDeterministicTick(given: TickInput): TickResult {
       const handled = handling(source, levied);
       const burden = levied === null ? undefined : burdens.get(levied);
       const room = burden === undefined || burden.asked <= 0 ? Infinity : burden.bearable / burden.asked;
-      const received = Math.round(owed * Math.min(share * handled, handled > 1 ? Math.max(share, room) : Infinity));
+      const demanded = Math.round(owed * Math.min(share * handled, handled > 1 ? Math.max(share, room) : Infinity));
+      // A tribute owed by a power that keeps a treasury is paid out of it, and
+      // only as far as it goes: it was credited to the overlord and debited
+      // from nobody, so every tributary's yearly payment was money minted.
+      // What is paid by a people with no chest of its own -- a subject country
+      // taxed by its master, rents of land taken in a war, a venture's
+      // returns -- comes from outside the accounts and says so (`external`).
+      const payerId = source.kind === "tribute" && source.counterpartyPolityId !== null ? treasuryOf(input.world, source.counterpartyPolityId) ?? null : null;
+      const fromPayer = payerId === null || payerId === source.beneficiaryAccountId ? null : payerId;
+      const received = fromPayer === null ? demanded : Math.min(demanded, balanceOf(fromPayer));
       // Short only where less came in than was due: a good collector on
       // half-occupied ground can still bring in more than the roll asked.
       if (levied !== null && share < 1 && received < owed) {
@@ -442,6 +454,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
         shortfalls.set(levied, { asked: tally.asked + owed, raised: tally.raised + received });
       }
       if (received > 0) {
+        if (fromPayer !== null) credit(fromPayer, -received);
         credit(source.beneficiaryAccountId, received);
         collected += received;
         transactions.push({
@@ -449,6 +462,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
           atStep: due,
           kind: source.kind === "tax" ? "tax" : "income",
           amount: received,
+          ...(fromPayer === null ? { external: source.kind === "trade" || source.originKind === "venture" ? "market" as const : "harvest" as const } : { sourceAccountId: fromPayer }),
           destinationAccountId: source.beneficiaryAccountId,
           cause: { kind: "scheduled_income", id: source.id, explanation: source.label },
           visibility: "polity",
@@ -512,7 +526,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
           // rejects -- and a world that will not parse is a world that cannot
           // be loaded at all.
           ...(obligation.recipientAccountId === undefined || obligation.recipientAccountId === obligation.payerAccountId
-            ? {}
+            ? { external: obligation.kind === "debt_service" ? "credit" as const : obligation.kind === "tribute" || obligation.kind === "pension" ? "abroad" as const : "the_unnamed" as const }
             : { destinationAccountId: obligation.recipientAccountId }),
           cause: { kind: "obligation", id: obligation.id, explanation: obligation.label },
           // The order that set it up spends what it pays (`spentForOrderPart`).
@@ -711,8 +725,8 @@ export function runDeterministicTick(given: TickInput): TickResult {
    * the treasury built stood ready with nobody undertaking to pay its crews,
    * and the Office asked the consul to see to it (R07). A power's work paid
    * from its treasury goes on being paid from it, at the scenario's own rates:
-   * a warship as the Syracusan squadron's, five and a quarter a hull a month;
-   * any other soldier as the legions', thirty-five a thousand. A private man's
+   * a warship at the world's rate for a hull's crew (500 a month); any other
+   * soldier as the legions', ten thousand a thousand men. A private man's
    * work pays nobody's wages but by his own order.
    */
   const payOf = (project: WorldState["projects"][number], label: string, categoryId: string, strength: number, polityId: string): string | null => {
@@ -990,7 +1004,8 @@ export function runDeterministicTick(given: TickInput): TickResult {
         atStep: input.toDay,
         kind: "transfer",
         amount: handed,
-        ...(fromAccountId === null ? {} : { sourceAccountId: fromAccountId }),
+        // A subsidy nobody funded comes from a power the world keeps no chest for.
+        ...(fromAccountId === null ? { external: "abroad" as const } : { sourceAccountId: fromAccountId }),
         destinationAccountId: toAccountId,
         cause: { kind: "project_milestone", id: project.id, explanation: outcome.label },
         visibility: "polity",

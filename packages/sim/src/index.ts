@@ -25,6 +25,7 @@ export * from "./elections";
 export * from "./plans";
 export * from "./peace";
 export * from "./peace-table";
+export * from "./money-audit";
 export * from "./polity-end";
 export { diplomaticAnswererOf } from "./letters";
 export { keepTheRanks, recordTheFight, doctrineUpkeep } from "./ranks";

@@ -441,6 +441,12 @@ function sackCities(world: WorldState, sacked: readonly { provinceId: string; pl
           ? { ...candidate, population: Math.max(0, candidate.population - lost), availableManpower: Math.max(0, candidate.availableManpower - Math.round(lost / 4)), stabilityBps: Math.max(0, candidate.stabilityBps - SACK_STABILITY_BPS), foodSecurityBps: Math.max(0, candidate.foodSecurityBps - SACK_FOOD_BPS), warDamageBps: Math.min(10_000, candidate.warDamageBps + 2_500) }
           : candidate)),
         accounts: chest === undefined ? next.material.accounts : next.material.accounts.map((account) => (account.id === chest.id ? { ...account, balance: account.balance + loot } : account)),
+        // Written down, as plunder: a sacked city is not an account, and the
+        // chest it filled was filled from nowhere the books could see.
+        transactions: chest === undefined || loot <= 0 ? next.material.transactions : [...next.material.transactions, {
+          id: boundedId("txn", "sack", sack.provinceId, String(toDay)), atStep: toDay, kind: "spoils" as const, amount: loot, external: "plunder" as const, destinationAccountId: chest.id,
+          cause: { kind: "battle_result" as const, id: `sack_${sack.provinceId}`.slice(0, 120), explanation: `${sack.place} sacked`.slice(0, 240) }, visibility: "public" as const,
+        }].slice(-500),
       },
     };
     facts.push({

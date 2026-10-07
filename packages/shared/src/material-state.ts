@@ -193,10 +193,30 @@ export const MoneyReservationSchema = z
   });
 export type MoneyReservation = z.infer<typeof MoneyReservationSchema>;
 
+/**
+ * Where money enters or leaves the books other than between two accounts.
+ *
+ * A world's money is conserved except at these doors, each one a real thing
+ * outside the accounts the model keeps: the land and its people, who are
+ * taxed, rented and tithed but keep no purse of their own; the market, which
+ * buys what a merchant carries and sells what a ship is fitted with; plunder
+ * from a sacked town; credit from a banker the world does not name; the
+ * thousands nobody names, who are paid wages, and who bring what they have
+ * saved when they take service; bread bought from the country at large; money
+ * an order sends abroad; and the means a man arrives in the world with. A
+ * one-sided transaction that names none of them is money from nowhere
+ * (`sim/money-audit.ts`).
+ */
+export const EXTERNAL_MONEY_KINDS = ["harvest", "market", "plunder", "credit", "the_unnamed", "bread", "abroad", "endowment"] as const;
+export const ExternalMoneyKindSchema = z.enum(EXTERNAL_MONEY_KINDS);
+export type ExternalMoneyKind = z.infer<typeof ExternalMoneyKindSchema>;
+
 export const MoneyTransactionSchema = z
   .object({
     id: EntityIdSchema,
     sourceActionId: EntityIdSchema.nullable().optional(),
+    /** For a transaction with only one side: which door in or out of the books it is (`EXTERNAL_MONEY_KINDS`). */
+    external: ExternalMoneyKindSchema.optional(),
     atStep: ElapsedStepSchema,
     kind: z.enum([
       "income",
