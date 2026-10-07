@@ -19,3 +19,7 @@ export * from "./standing-orders";
 export * from "./administration";
 export * from "./agenda";
 export * from "./trade-desk";
+export * from "./charge-vocabulary";
+export * from "./competence";
+export * from "./period-words";
+export * from "../world/act-marks";

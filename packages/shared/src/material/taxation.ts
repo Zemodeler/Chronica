@@ -5,7 +5,7 @@ import { MANPOWER_FRACTION_OF_POPULATION, deriveDefaultProvinceMaterial } from "
 import { ownerOf, ownsAndHolds } from "../world/occupation";
 import { adjacentTo } from "../world/movement";
 import { tradeIntensities } from "../world/markets";
-import { readDepartments } from "../world/departments";
+import { ECONOMIC_LEVER_REACH, chargeSkill, readDepartments } from "../world/departments";
 import { skillShare } from "../characters/aptitude";
 import { DEFAULT_TAX_RATE_BPS, MEN_PER_YEAR_SHARE, REGIME_LEAK_SCALE, moneyRateBps, policyPressureBps, regimeFactor, taxPolicyIndex, type TaxPolicy } from "./tax-policy";
 
@@ -231,7 +231,7 @@ const monthly = (source: IncomeSource): number =>
   source.cadenceSteps <= 0 ? 0 : (source.amount * source.collectionRateBps) / 10_000 * (30 / source.cadenceSteps);
 
 /** Every power's burden, keyed by polity. Powers asking nothing of their land are absent. */
-export function taxBurdens(world: WorldState, options: { readonly officeSkill?: (polityId: string) => number } = {}): Map<string, TaxBurden> {
+export function taxBurdens(world: WorldState, options: { readonly officeSkill?: (polityId: string) => number; readonly censusSkill?: (polityId: string) => number } = {}): Map<string, TaxBurden> {
   // Who is asked for what, by each power's own domestic revenues. A power's
   // own tax rolls are written at the rate it has chosen (`rateScale`, below),
   // so those are held apart until it is known; a tax farmer's, a land rent
@@ -255,6 +255,12 @@ export function taxBurdens(world: WorldState, options: { readonly officeSkill?: 
     departments ??= readDepartments(world);
     return departments.skill({ kind: "polity", id: polityId }, "tax_roll");
   });
+  // The census: how many of the people who are there the rolls count (the `census` charge). A roll that misses a tenth of them
+  // can raise a tenth less, and owes the muster a tenth fewer men.
+  const censusSkill = options.censusSkill ?? ((polityId: string): number => {
+    departments ??= readDepartments(world);
+    return chargeSkill(departments, polityId, "census");
+  });
 
   // Every province once, under its owner: reading them again for each power
   // that asks something was a pass over the whole map per power.
@@ -276,6 +282,7 @@ export function taxBurdens(world: WorldState, options: { readonly officeSkill?: 
     const owned = ownedBy.get(polityId) ?? [];
     const steps = stepsFromCapital(world, polityId);
     const skill = officeSkill(polityId);
+    const counted = 1 + skillShare(censusSkill(polityId), ECONOMIC_LEVER_REACH.census);
     let bearable = 0;
     let ownedCapacity = 0;
     let rated = 0;
@@ -289,11 +296,11 @@ export function taxBurdens(world: WorldState, options: { readonly officeSkill?: 
       const row = materialById.get(province.id) ?? deriveDefaultProvinceMaterial(province, world.elapsedStep);
       const policy = policyOf(province, row);
       const reading = readProvinceTax(province, row, policy, steps?.get(province.id), skill, polityId, policy.regime === "customs" ? (intensity ??= tradeIntensities(world)).get(province.id) : undefined);
-      ownedCapacity += reading.monthly;
+      ownedCapacity += reading.monthly * counted;
       if (!reading.held) continue;
-      bearable += reading.monthly;
-      menPerYear += reading.menPerYear;
-      if (reading.menPerYear > 0 && row.population > 0) manpowerShift.set(province.id, reading.menPerYear / (row.population * MANPOWER_FRACTION_OF_POPULATION));
+      bearable += reading.monthly * counted;
+      menPerYear += reading.menPerYear * counted;
+      if (reading.menPerYear > 0 && row.population > 0) manpowerShift.set(province.id, (reading.menPerYear * counted) / (row.population * MANPOWER_FRACTION_OF_POPULATION));
       byRegime[policy.regime] = (byRegime[policy.regime] ?? 0) + reading.monthly;
       if (reading.monthly > 0) {
         rated += reading.monthly * (moneyRateBps(policy) / DEFAULT_TAX_RATE_BPS);

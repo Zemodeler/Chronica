@@ -43,6 +43,7 @@ import { SuccessionRuleSchema } from "../characters/character";
 import { AuditSchema, DepartmentSchema, DiversionSchema } from "./departments";
 import { BlockadeSchema, ConvoySchema, EngagementSchema } from "./engagement";
 import { EconomyMemorySchema } from "./economy";
+import { ActMarkSchema, MAX_ACT_MARKS } from "./act-marks";
 
 /**
  * Bumped when an old snapshot needs upgrading on load.
@@ -184,6 +185,8 @@ export const WorldStateSchema = z
      * holds is the ruler's own, and an estate nobody stewards is its owner's.
      */
     departments: z.array(DepartmentSchema).default([]),
+    /** Who last decided each act of a power, and what each office has spent this year (`world/act-marks.ts`). */
+    actMarks: z.array(ActMarkSchema).max(MAX_ACT_MARKS).default([]),
     /** What officers and stewards have taken, and whether anybody has found it (`world/departments.ts`). */
     diversions: z.array(DiversionSchema).max(600).default([]),
     audits: z.array(AuditSchema).max(200).default([]),

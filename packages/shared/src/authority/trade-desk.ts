@@ -3,6 +3,7 @@ import { buildStation, holdsPolityStanding } from "./station";
 import { buildAuthorityIndex } from "./authority-grant";
 import { readAbroad } from "./abroad";
 import { allOffices, type Office } from "../characters/character";
+import { bodyFor, chargeHolders } from "./competence";
 import { readDepartments } from "../world/departments";
 import { GOODS, type GoodId } from "../world/markets";
 import { TradeTermsSchema, agreementsBetween, atWar, tradeTermsBetween, type TradeTerms } from "../world/agreements";
@@ -73,6 +74,14 @@ export function tradeAddresseeFinder(world: WorldState, offices: readonly Office
     const clerk = office.department === null ? undefined : office.people.find((person) => members.has(person.id));
     if (clerk !== undefined) return named(clerk.id, () => `its letters to other powers are written by the ${office.department!.name}, and he sits at its head`, "department");
     const rulers = new Set(reader.rulers(polityId).map((person) => person.id));
+    // Where the power has a constitution, whoever its competence names for treaties: the man who keeps the customs or its letters, else its head.
+    const charged = chargeHolders(world, polityId, "pacts", offices).find((holder) => members.has(holder.characterId) && holder.basis !== "other");
+    if (charged !== undefined) {
+      const body = bodyFor(world, polityId, "pacts", world.constitutions.find((record) => record.polityId === polityId));
+      return named(charged.characterId, () => charged.basis === "lever"
+        ? `pacts and embargoes are in the charge of his office, ${charged.officeLabel}`
+        : `he holds its highest office, and its treaties are made in his name${body === null ? "" : ` or laid by him before the ${body.name.replace(/^thes+/iu, "")}`}`, charged.basis === "lever" ? "department" : "ruler");
+    }
     const diplomats = index.grants
       .filter((grant) => grant.domain === "diplomatic" && grant.scope.kind === "polity" && grant.scope.id === polityId
         && grant.holder.kind === "character" && members.has(grant.holder.id))
@@ -84,7 +93,7 @@ export function tradeAddresseeFinder(world: WorldState, offices: readonly Office
     const ruler = [...rulers].find((id) => members.has(id));
     if (ruler !== undefined) return named(ruler, () => "it has no office that makes treaties but its ruler's", "ruler");
     const officer = world.characters.filter((character) => members.has(character.id) && character.officeId !== null).map((character) => character.id).sort()[0];
-    return officer === undefined ? null : named(officer, () => "he is the nearest it has to a minister for foreign affairs", "officer");
+    return officer === undefined ? null : named(officer, () => "he is the nearest it has to a man who treats for it", "officer");
   };
 }
 

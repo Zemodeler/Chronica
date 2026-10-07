@@ -927,7 +927,7 @@ const EnactmentProposalSchema = z
             /** Absent founds a new chamber. */
             institutionRef: MaybeRefSchema.optional(),
             name: NameSchema.optional(),
-            powers: z.array(ChamberPowerSchema).max(6).optional(),
+            powers: z.array(ChamberPowerSchema).max(10).optional(),
             advisory: z.boolean().optional(),
             franchise: FranchiseSchema.optional(),
             abolish: z.boolean().default(false),

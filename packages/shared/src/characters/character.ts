@@ -10,6 +10,7 @@ import {
 import { CharacterMindSchema, NEUTRAL_MIND } from "./mind";
 import { LessonSchema, MAX_LESSONS, MAX_MOODS, MoodSchema } from "./mind-drift";
 import { WatchPredicateSchema } from "../world/watch";
+import { ChargeSchema } from "../authority/charge-vocabulary";
 
 /**
  * What a soldier has done and where he stands. Kept by the engine
@@ -451,6 +452,12 @@ export const OfficeSchema = z
     tribunician: z.boolean().optional(),
     /** Places that must go to men of an order: a plebeian consul every year since 342, a plebeian censor since 339. */
     ordoSeats: z.object({ patrician: z.number().int().min(1).max(100).optional(), plebeian: z.number().int().min(1).max(100).optional() }).strict().optional(),
+    /**
+     * What this office may do about the state's money and treaties, where its form says something particular
+     * (`authority/competence.ts`): a line for each act, which the form's template writes. Acts it says nothing of
+     * are read from the parts of the constitution, as they were before.
+     */
+    charge: ChargeSchema.optional(),
   })
   .strict();
 export type Office = z.infer<typeof OfficeSchema>;
