@@ -56,6 +56,10 @@ import {
   recordTenures,
   obligationAmountNow,
   convertSilver,
+  mercenaryContractOfForce,
+  mercenaryContractPaidBy,
+  mercenaryTemper,
+  mercenaryWageBps,
   bestGapGood,
   tradePremiumBps,
   liveProvinceIds,
@@ -510,7 +514,11 @@ export function runDeterministicTick(given: TickInput): TickResult {
   // paymaster's ground (`obligationAmountNow`): a famine year makes every legion dearer.
   for (const obligation of byPriority) {
     if (!obligation.active) continue;
-    const amount = obligationAmountNow(input.world, obligation);
+    // A hired company asks for the silver its employer's coin was struck to hold, and for the wait (`mercenary-pay.ts`).
+    const hiredBy = obligation.kind === "salary" ? mercenaryContractPaidBy(input.world, obligation.id) : undefined;
+    const amount = hiredBy === undefined
+      ? obligationAmountNow(input.world, obligation)
+      : Math.round((obligationAmountNow(input.world, obligation) * mercenaryWageBps(input.world, hiredBy, obligation.missedPeriods)) / 10_000);
     let due = obligation.nextDueStep;
     let periods = 0;
     let arrears = obligation.arrears;
@@ -533,11 +541,17 @@ export function runDeterministicTick(given: TickInput): TickResult {
         // The named men's pay reaches their purses, out of what the treasury
         // paid and not on top of it: it left the chest and landed nowhere (E18).
         const shares = obligation.recipientAccountId === undefined ? soldierPayShares(input.world, obligation, owed) : [];
+        // Paid in the paymaster's coin into a purse of another's, a named man's share passes the money-changers too (v53).
         for (const share of shares) {
-          credit(share.accountId, share.amount);
+          const handed = convertSilver(input.world, obligation.payerAccountId, share.accountId, share.amount);
+          credit(share.accountId, handed.received);
           transactions.push({
-            id: input.ids.next("txn"), atStep: due, kind: "salary", amount: share.amount, sourceAccountId: obligation.payerAccountId, destinationAccountId: share.accountId,
+            id: input.ids.next("txn"), atStep: due, kind: "salary", amount: handed.received, sourceAccountId: obligation.payerAccountId, destinationAccountId: share.accountId,
             cause: { kind: "obligation", id: obligation.id, explanation: `${obligation.label}: a soldier's pay`.slice(0, 240) }, visibility: "private",
+          });
+          if (handed.cut > 0) transactions.push({
+            id: input.ids.next("txn"), atStep: due, kind: "transfer", amount: handed.cut, external: "abroad", sourceAccountId: obligation.payerAccountId,
+            cause: { kind: "obligation", id: obligation.id, explanation: `${obligation.label}: the money-changers' cut of a soldier's pay`.slice(0, 240) }, visibility: "polity",
           });
         }
         const toTheRanks = owed - shares.reduce((sum, share) => sum + share.amount, 0);
@@ -685,12 +699,15 @@ export function runDeterministicTick(given: TickInput): TickResult {
     const missed = paying.missedPeriods;
     // Men who are used to waiting for their pay wait longer before they sulk
     // and desert (`pay_discipline`); men who serve for the coin, not so long.
-    const patience = Math.round(forceLever({ establishments: input.world.establishments, doctrines: input.world.doctrines, today: input.world.elapsedStep }, force, "pay_discipline"));
+    // A company hired for coin has no such patience, and sours the faster the worse the coin it is paid in (`mercenary-pay.ts`).
+    const hired = mercenaryContractOfForce(input.world, force.id);
+    const patience = hired !== undefined ? 0 : Math.round(forceLever({ establishments: input.world.establishments, doctrines: input.world.doctrines, today: input.world.elapsedStep }, force, "pay_discipline"));
+    const temper = hired === undefined ? 1 : mercenaryTemper(input.world, hired);
     const moralePeriods = Math.max(1, (input.warfare?.arrearsMoralePeriods ?? 1) + patience);
     const desertionPeriods = Math.max(moralePeriods + 1, (input.warfare?.arrearsDesertionPeriods ?? 3) + patience);
     if (missed < moralePeriods) return { ...force, payArrearsPeriods: missed };
 
-    const moraleBps = Math.max(0, force.moraleBps - MORALE_LOSS_BPS_PER_PERIOD * (missed - moralePeriods + 1));
+    const moraleBps = Math.max(0, force.moraleBps - Math.round(MORALE_LOSS_BPS_PER_PERIOD * temper * (missed - moralePeriods + 1)));
     if (missed < desertionPeriods) {
       facts.push({
         localId: nextLocalId("grumbling"),
@@ -709,7 +726,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
     // Fewer, where whoever is in charge of the levy can hold men to their
     // duty: up to three in ten fewer, or more.
     const held = 1 - skillShare(inCharge.skill({ kind: "polity", id: force.polityId }, "levy"), 0.3);
-    const leaving = Math.round(DESERTION_RATE_PER_PERIOD * (missed - desertionPeriods + 1) * held * 10_000) / 10_000;
+    const leaving = Math.round(DESERTION_RATE_PER_PERIOD * temper * (missed - desertionPeriods + 1) * held * 10_000) / 10_000;
     let lost = 0;
     const personnel = force.personnel.map((category) => {
       const gone = Math.min(category.fit, Math.floor(category.fit * leaving));

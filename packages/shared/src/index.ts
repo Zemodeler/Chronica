@@ -1,6 +1,7 @@
 export * from "./authority/index";
 export * from "./characters/index";
 export * from "./world/contingency";
+export * from "./world/mercenary-pay";
 export * from "./world/siege";
 export * from "./world/command";
 export * from "./world/war-score";

@@ -1,4 +1,4 @@
-import type { FactProposalDraft, ServiceContract, WorldState } from "@chronica/shared";
+import { employerPolityOf, mercenaryGracePeriods, silverDeficitBps, type FactProposalDraft, type ServiceContract, type WorldState } from "@chronica/shared";
 
 /**
  * Service contracts over time (roles plan phase 5): a term that runs out, and
@@ -38,7 +38,9 @@ export function keepContracts(world: WorldState, toDay: number): { world: WorldS
     const employee = world.characters.find((character) => character.id === contract.employeeCharacterId);
     const pay = world.material.obligations.find((obligation) => obligation.id === contract.obligationId);
     const died = employee === undefined || !employee.alive;
-    const unpaid = pay !== undefined && pay.missedPeriods > 0;
+    // A hired company waits a period or two for a late wage in sound coin, and none for one in debased (`mercenary-pay.ts`); anyone else lapses at the first miss.
+    const grace = contract.role === "mercenary" ? mercenaryGracePeriods(world, contract) : 0;
+    const unpaid = pay !== undefined && pay.missedPeriods > grace;
     const over = contract.endsAtStep !== null && contract.endsAtStep <= toDay;
     if (!died && !unpaid && !over) {
       if (contract.journey != null && contract.journey.arrivedAtStep === null && contract.journey.arrivesAtStep <= toDay) {
@@ -59,7 +61,9 @@ export function keepContracts(world: WorldState, toDay: number): { world: WorldS
         : unpaid
           ? contract.role === "tax_farmer"
             ? `${who} missed the rent on his tax farm, and the farm was taken back: ${contract.label}.`
-            : `${who} was not paid, and his contract lapsed: ${contract.label}. He owes nobody anything now.`
+            : contract.role === "mercenary"
+              ? `${who}'s company went ${pay!.missedPeriods} period(s) without its pay${silverDeficitBps(world, employerPolityOf(world, contract)) > 0 ? `, and what pay it had was in coin worth ${Math.round((10_000 - silverDeficitBps(world, employerPolityOf(world, contract))) / 100)} in a hundred of its silver` : ""}, and walked out of the contract: ${contract.label}. It owes nobody anything now.`
+              : `${who} was not paid, and his contract lapsed: ${contract.label}. He owes nobody anything now.`
           : `${who}'s term ran out: ${contract.label}.`,
       affectedRefs: [{ kind: "character", id: contract.employeeCharacterId }, { kind: "account", id: contract.employerAccountId }],
       visibility: "polity",

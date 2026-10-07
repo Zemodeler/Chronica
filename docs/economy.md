@@ -273,6 +273,23 @@ within `MAX_PREMIUM_BPS = 1_500`. For a fifth off Rome's coin, the treasury gain
 115 and 122 per hundred after 3, 12 and 24 months (heading for 125). An issuer at war and behind on debts is told once a
 year its coin is strained; nothing is debased for it.
 
+### Mercenaries and the coin
+
+A hired company (`ServiceContract` role `mercenary`, `packages/shared/src/world/mercenary-pay.ts`) is paid in its employer's coin
+and judges it by its silver. Its wage is indexed to what the coin was struck to hold (`silverShortfallBps`: a coin a fifth short
+costs a quarter more units), plus 5% of the wage for each period gone unpaid, to +50% (`mercenaryWageBps`, applied in the
+obligations pass of `tick.ts`); a late wage is waited for two periods in sound silver and one fewer for each tenth of silver lost,
+none at a fifth (`mercenaryGracePeriods`, `contracts.ts`: past it the company walks and its force goes back to its captain); while
+it waits, its morale and desertion run faster by `mercenaryTemper` (1 + deficit/50%) and it has none of an army's patience. The named
+men's shares of an army's pay now pass the money-changers into their purses like any other sum crossing coinages. Test:
+`a-mercenary-wants-good-silver.test.ts`. What it follows: Carthage struck its first coin in Sicily about 410 BCE to pay the soldiers
+it hired there (the Siculo-Punic tetradrachms of the "Camp" mint, probably Entella, on the Attic weight because Greek and Italian
+mercenaries were used to Greek silver; some struck at Carthage and shipped over); the Mercenary War (241-238) began as arrears of
+pay owed some twenty thousand foreign soldiers after the peace of 241, with 3,200 talents owed Rome (Polybius 1.65-68), and by its
+end the treasury struck billon; Rome's stipendium was two obols a day to a foot soldier, twice that to a centurion, a drachma to a
+horseman, less stoppages (Polybius 6.39). Sources: Hoover, *Handbook of Greek Coinage: Sicily*; the Coinweek and Australian
+Numismatic Society notes on Carthaginian coinage; Polybius; Wikipedia, "Pay (Roman army)".
+
 ## Scenario versions
 
 v47 puts money at the age's scale and tags every door; v48 adds development, scars and tax regimes (Syracuse opens on a
