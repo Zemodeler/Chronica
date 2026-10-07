@@ -43,12 +43,23 @@ function kept(world: WorldState, lever: (typeof ECONOMIC_LEVERS)[number], skill:
   };
 }
 
+/**
+ * Rome opens with some of these charges given (H1): the censors keep the census and the harbour dues, the aediles the markets, the quaestors the books and their terms.
+ * The baseline of a lever is the world where nobody has been given it, so the seeded departments are stripped of them.
+ */
+const bare = (world: WorldState): WorldState => ({
+  ...world,
+  departments: world.departments.map((department) => (department.scope.kind === "polity" && department.scope.id === "rome"
+    ? { ...department, levers: department.levers.filter((lever) => !(ECONOMIC_LEVERS as readonly string[]).includes(lever)) }
+    : department)),
+});
+
 const reader = (world: WorldState) => readDepartments(world);
 const skillOf = (world: WorldState, lever: (typeof ECONOMIC_LEVERS)[number]) => reader(world).skill({ kind: "polity", id: "rome" }, lever);
 
 describe("the new levers bite", () => {
   it("are all charges a department may be given, and read as the middling run where nobody has been", () => {
-    const world = opening();
+    const world = bare(opening());
     expect([...ECONOMIC_LEVERS]).toEqual(["customs", "mint", "markets", "credit", "census"]);
     expect(priceSwing(reader(world), "rome")).toBe(1);
     expect(coinsBadName(reader(world), "rome")).toBe(1);
@@ -59,7 +70,7 @@ describe("the new levers bite", () => {
   });
 
   it("customs: a harbour well kept brings more of the duty into the chest, and a lax one loses it", () => {
-    const base = opening();
+    const base = bare(opening());
     const due = { ...base, economy: { ...economyOf(base), customsDue: [{ polityId: "rome", amount: 100_000 }] } };
     const paid = (world: WorldState) => chestOf(payCustoms(world, 200, createIdFactory("customs")), "rome").balance - chestOf(world, "rome").balance;
     const good = paid(kept(due, "customs", 90));
@@ -73,7 +84,7 @@ describe("the new levers bite", () => {
   });
 
   it("customs: a letter about a pact goes to the man who keeps the customs, where there is one, and to the head of the state where there is not", () => {
-    const base = opening();
+    const base = bare(opening());
     const find = (world: WorldState) => tradeAddresseeFinder(world, government.offices)("rome");
     expect(find(base)).toMatchObject({ basis: "ruler" });
     expect(holdersOf(base, "roman-consul")).toContain(find(base)!.characterId);
@@ -84,7 +95,7 @@ describe("the new levers bite", () => {
   });
 
   it("mint: a good master of the mint gets more from a coin struck lighter, and its bad name sticks less to the premium", () => {
-    const base = opening();
+    const base = bare(opening());
     const strike = { op: "coinage_debase", coinageId: "roman_aes_and_silver", targetSilverBps: null, stepBps: -1_500, reason: "The war must be paid for." };
     const consul = holdersOf(base, "roman-consul")[0]!;
     const gain = (world: WorldState) => {
@@ -105,7 +116,7 @@ describe("the new levers bite", () => {
   });
 
   it("markets: a hub's prices stray less from the base price under a good clerk of the markets", () => {
-    const base = opening();
+    const base = bare(opening());
     const stray = (world: WorldState): number => {
       let current = reviewTheLand({ world, toDay: 200 }).world;
       for (let month = 1; month <= 3; month += 1) current = reviewTheLand({ world: current, toDay: 200 + month * 30 }).world;
@@ -117,7 +128,7 @@ describe("the new levers bite", () => {
   });
 
   it("credit: the state is asked less interest by lenders who think well of its credit", () => {
-    const base = opening();
+    const base = bare(opening());
     const consul = holdersOf(base, "roman-consul")[0]!;
     const loan = WorldDeltaSchema.parse({
       op: "loan_open", localId: "the_loan", lenderKind: "foreign", lenderRef: null, borrowerAccountRef: "rome-treasury", principal: 300_000, interestBps: 200,
@@ -134,7 +145,7 @@ describe("the new levers bite", () => {
   });
 
   it("census: a roll that counts more of the people can raise more of what is asked of them", () => {
-    const base = opening();
+    const base = bare(opening());
     // A power that asks a great deal of its land: the roll's count is what is left to bear it.
     const pressed = {
       ...base,

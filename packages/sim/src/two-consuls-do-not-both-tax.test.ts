@@ -64,7 +64,9 @@ describe("two consuls do not both tax", () => {
 
   it("keeps the customs a season of its own: the tribute settled does not stop the tariff", () => {
     const first = act(opening(), FIRST, taxSet("rome", 1_100)).world;
-    const tariff = act(atDay(first, 210), SECOND, taxSet("rome", 600, "customs"));
+    // The tariff is the censors' within a tenth (the consuls move it in the Senate), and the season of the tribute is not its season.
+    const censor = holdersOf(first, "roman-censor")[0]!;
+    const tariff = act(atDay(first, 210), censor, taxSet("rome", 600, "customs"));
     expect(tariff.rejected).toEqual([]);
   });
 });

@@ -7,23 +7,24 @@ import { act, chestOf, customsOf, government, holdersOf, opening, rateOf, taxSet
  *
  * Whether a man may set the rate of the tribute was a question of what his office was called: any office the engine took
  * for a treasurer's could do it, as high as it liked, and the consul who commanded the armies could not. Now the answer is
- * read from the constitution (`competenceOf`): a quaestor of Rome sets the rate and the customs within custom, as one of four
- * of equal power; the rate past custom is the Senate's to decree; the coin is the Senate's too, and the consul, who may set the
- * rate within custom beside his colleague, may not strike it with other silver.
+ * read from the constitution (`competenceOf`): a quaestor of Rome sets the rate within custom, as one of four of equal power; the
+ * rate past custom is the Senate's to decree; the coin, the tariff and every loan are the Senate's too (H1: the censors, who let the harbour
+ * dues, keep the tariff within a tenth), and the consul, who may set the rate within custom beside his colleague, may not strike the coin
+ * with other silver.
  */
 
 const QUAESTOR = (world = opening()) => holdersOf(world, "roman-quaestor")[0]!;
 const CONSUL = (world = opening()) => holdersOf(world, "roman-consul")[0]!;
 
 describe("a treasurer decides", () => {
-  it("reads a quaestor's charge from the constitution: the rate and the customs within custom, nothing of the coin", () => {
+  it("reads a quaestor's charge from the constitution: the rate within custom, and nothing of the tariff or the coin", () => {
     const world = opening();
     const quaestor = competenceOf(world, "roman-quaestor", government.offices)!;
     expect(quaestor.acts.tax_rate.grade).toBe("with_colleague");
     expect(quaestor.acts.tax_rate.within).toBe(1_200);
     expect(quaestor.acts.tax_rate.beyond).toBe("by_the_body");
     expect(quaestor.acts.tax_rate.body?.name).toBe("Senate");
-    expect(quaestor.acts.customs.grade).toBe("with_colleague");
+    expect(quaestor.acts.customs.grade).toBe("by_the_body");
     expect(quaestor.acts.coinage.grade).toBe("forbidden");
     expect(quaestor.acts.war.grade).toBe("forbidden");
     // Past custom, the same office reads as the Senate's.
@@ -41,9 +42,15 @@ describe("a treasurer decides", () => {
     expect(rateOf(done.world, "rome")).toBe(1_100);
     expect(done.breaches).toEqual([]);
     expect(done.applied[0]?.authority.reason).toMatch(/quaestor may lay the rate of the tribute/i);
-    const customs = act(world, QUAESTOR(world), taxSet("rome", 600, "customs"));
+    // The tariff is the censors' (they let the harbour dues), within a tenth, and the quaestor may not lay it.
+    const refused = act(world, QUAESTOR(world), taxSet("rome", 600, "customs"));
+    expect(refused.applied).toHaveLength(0);
+    expect(refused.rejected[0]!.reason).toMatch(/Senate/);
+    const censor = holdersOf(world, "roman-censor")[0]!;
+    const customs = act(world, censor, taxSet("rome", 600, "customs"));
     expect(customs.rejected).toEqual([]);
     expect(customsOf(customs.world, "rome")).toBe(600);
+    expect(act(world, censor, taxSet("rome", 1_400, "customs")).rejected[0]!.reason).toMatch(/Senate/);
   });
 
   it("will not let him lay it past custom: that is the Senate's, and he is told so", () => {
@@ -76,19 +83,21 @@ describe("a treasurer decides", () => {
     expect(chestOf(laid.world, "rome").balance).toBe(chestOf(world, "rome").balance);
   });
 
-  it("lets the quaestor borrow a month's takings for the state and no more, and the consul three", () => {
+  it("lays every loan before the Senate, the quaestor's and the consul's alike: no magistrate borrows in the state's name alone", () => {
     const world = opening();
     const takings = monthlyTakings(world, "rome");
     const loan = (principal: number) => ({
       op: "loan_open", localId: "the_loan", lenderKind: "foreign", lenderRef: null, borrowerAccountRef: "rome-treasury", principal, interestBps: 200,
       cadenceDays: 30, terms: "Silver of the bankers abroad.", reason: "The chest is short.",
     });
-    expect(act(world, QUAESTOR(world), loan(Math.floor(takings * 0.9))).rejected).toEqual([]);
-    const past = act(world, QUAESTOR(world), loan(Math.floor(takings * 1.5)));
-    expect(past.applied).toHaveLength(0);
-    expect(past.rejected[0]!.reason).toMatch(/may borrow in the state's name, to 1 month of what the power takes in, and no further: more than that is laid before the Senate/);
-    expect(act(world, CONSUL(world), loan(Math.floor(takings * 2.5))).rejected).toEqual([]);
-    expect(act(world, CONSUL(world), loan(Math.floor(takings * 3.5))).applied).toHaveLength(0);
+    for (const man of [QUAESTOR(world), CONSUL(world)]) {
+      const small = act(world, man, loan(Math.floor(takings * 0.5)));
+      expect(small.applied).toHaveLength(0);
+      expect(small.rejected[0]!.reason).toMatch(/may not borrow in the state's name himself: it is laid before the Senate/);
+    }
+    // Laid by the order, it is moved in the Senate and done the day the vote carries it.
+    const laid = act(world, CONSUL(world), loan(Math.floor(takings * 2.5)), { order: true });
+    expect(laid.world.material.politicalProcedures.at(-1)).toMatchObject({ institutionId: "roman-senate" });
   });
 
   it("lets an aedile give out a month's takings in bread to the people, and sends the rest to the Senate", () => {

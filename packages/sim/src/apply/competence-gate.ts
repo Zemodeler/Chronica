@@ -96,6 +96,12 @@ export function gatedAct(delta: WorldDelta, world: WorldState, resolve: (ref: st
       const provinceId = delta.scope === "province" && delta.provinceId !== null ? id(delta.provinceId) : null;
       const row = provinceId === null ? undefined : world.material.provinceMaterial.find((candidate) => candidate.provinceId === provinceId);
       const now = row?.taxRateBps ?? policy;
+      // A tax of a kind the power did not lay before (the land levy turned into a tithe, a tribute of men into coin) is a new tax, and no
+      // magistrate lays a new tax: it is the chamber's whatever the rate. Within custom, a rate is a magistrate's (Polybius 6.13, 6.14; docs/plans/government.md).
+      const laidBefore = memory.taxPolicies.find((entry) => entry.polityId === polityId)?.regime;
+      if (delta.scope === "polity" && laidBefore !== undefined && delta.regime !== laidBefore) {
+        return { act: "tax_rate", polityId, magnitude: Number.POSITIVE_INFINITY, label: `the tribute of ${nameOf(world, polityId)} be laid anew, as a ${delta.regime.replace(/_/g, " ")} at ${percent(delta.rateBps)}` };
+      }
       // Easing a rate is never beyond a man's competence: only asking more is the chamber's.
       return { act: "tax_rate", polityId, magnitude: delta.rateBps > now ? delta.rateBps : 0, label: `the tribute of ${nameOf(world, polityId)} be laid at ${percent(delta.rateBps)}` };
     }

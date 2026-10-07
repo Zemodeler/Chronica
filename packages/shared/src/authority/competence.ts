@@ -6,6 +6,7 @@ import type { Constitution } from "../world/constitution";
 import { CUSTOMARY_TAX_RATE_BPS } from "../material/tax-policy";
 import { leversNamedBy } from "../world/departments";
 import { SPENDING_YEAR_DAYS, actMarkOf, type ActMark } from "../world/act-marks";
+import { leaderOf } from "../world/agreements";
 import type { WorldState } from "../world/world-state";
 import {
   ACT_KINDS,
@@ -174,7 +175,13 @@ export function bodyFor(world: WorldState, polityId: string, act: ActKind, const
   const binding = (partsOf(world, scenarioOffices).chambers.get(polityId) ?? NO_CHAMBERS).filter((institution) => institution.advisory !== true);
   const powers = POWER_OF_ACT[act];
   const holding = binding.filter((institution) => powers.some((candidate) => chamberHolds(institution.powers, candidate)));
-  const found = holding.find((institution) => powers.some((candidate) => institution.powers?.includes(candidate) === true)) ?? holding[0];
+  // The first power the act names takes precedence: the people elect (`elections`) though the Senate also holds the laws.
+  let found: GovernmentInstitution | undefined;
+  for (const candidate of powers) {
+    found = holding.find((institution) => institution.powers?.includes(candidate) === true);
+    if (found !== undefined) break;
+  }
+  found ??= holding[0];
   if (found !== undefined) return { id: found.id, name: found.name };
   const sovereignId = constitution?.sovereignInstitutionId ?? null;
   const sovereign = sovereignId === null ? undefined : binding.find((institution) => institution.id === sovereignId);
@@ -217,6 +224,7 @@ function spendGateOf(parts: Parts, office: Office): BodyRef | null {
 
 // ── Saying it ──────────────────────────────────────────────────────────────
 
+const nameOfPower = (world: WorldState, polityId: string): string => world.map.polities.find((polity) => polity.id === polityId)?.name ?? polityId;
 const percent = (bps: number): string => `${(bps / 100).toFixed(bps % 100 === 0 ? 0 : 1)} in a hundred`;
 
 /** What a limit comes to in words. */
@@ -256,6 +264,8 @@ interface Reading {
   readonly collegial: boolean;
   readonly levers: ReadonlySet<string>;
   readonly rulerLabel: string | null;
+  /** The power whose foedus this one follows, where it does: its leader makes its war and peace. */
+  readonly leader: string | null;
 }
 
 type Line = { readonly grade: CompetenceGrade; readonly within?: number | undefined; readonly beyond?: "by_the_body" | "forbidden" | undefined };
@@ -339,7 +349,9 @@ function line(read: Reading, act: ActKind): ActCompetence {
   const { world, office, constitution } = read;
   const body = bodyFor(world, office.polityId, act, constitution, read.scenarioOffices);
   const written: ChargeRule | undefined = (office.charge as Charge | undefined)?.[act];
-  const base: Line = written ?? derive(read, act, body);
+  // An ally bound by foedus makes no war or peace but its leader's (apply-deltas holds it to it too): not its head, nor any magistrate of it.
+  const bound = read.leader !== null && (act === "war" || act === "peace");
+  const base: Line = bound ? { grade: "forbidden" } : written ?? derive(read, act, body);
   let grade = base.grade;
   let within = base.within ?? null;
   let beyond: "by_the_body" | "forbidden" = base.beyond ?? (body === null ? "forbidden" : "by_the_body");
@@ -355,7 +367,8 @@ function line(read: Reading, act: ActKind): ActCompetence {
   const shown = spendBody ?? body;
   const whoDecides = shown !== null ? `the ${shown.name.replace(/^thes+/iu, "")}` : read.rulerLabel !== null ? `the ${read.rulerLabel}` : "nobody";
   const whyBeyond = within === null ? "" : `${office.label} may ${ACT_WORDS[act]}${withinWords(act, within)}, and no further: more than that is ${beyond === "by_the_body" ? `laid before ${whoDecides}, and he may move it there` : `for ${whoDecides}`}.`;
-  return { act, grade, within, beyond, body: shown, why: sentence(office.label, act, grade, within, shown, read.rulerLabel), whyBeyond };
+  const why = bound ? `${office.label} may not ${ACT_WORDS[act]}: ${nameOfPower(world, read.leader!)} makes the war and the peace of those bound to it by the foedus.` : sentence(office.label, act, grade, within, shown, read.rulerLabel);
+  return { act, grade, within, beyond, body: shown, why, whyBeyond };
 }
 
 // ── The reading ────────────────────────────────────────────────────────────
@@ -409,9 +422,13 @@ function read(world: WorldState, officeId: string, scenarioOffices: readonly Off
     collegial: (office.seatCount ?? parts.seatCount.get(office.id) ?? 0) > 1,
     levers: leversOfOffice(parts, office),
     rulerLabel: rulerOffice?.label ?? null,
+    leader: leaderOf(world.polityAgreements, office.polityId),
   };
   const acts = Object.fromEntries(ACT_KINDS.map((act) => [act, line(reading, act)])) as Record<ActKind, ActCompetence>;
-  const mayStop: ActKind[] = office.tribunician === true ? ["tax_rate", "customs", "coinage", "loans", "grain", "levy", "appointment", "spending"] : [];
+  // A tribune stops a magistrate's act in the city; an augur who has seen a bad omen stops the assembly that day, which is the elections (and so the naming of men to office).
+  const mayStop: ActKind[] = office.tribunician === true
+    ? ["tax_rate", "customs", "coinage", "loans", "grain", "levy", "appointment", "spending"]
+    : office.vetoes === true && office.kind === "priesthood" ? ["appointment"] : [];
   return { officeId, polityId: office.polityId, label: office.label, collegial: reading.collegial, isHead: reading.isHead, mayStop, acts };
 }
 

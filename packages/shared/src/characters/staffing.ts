@@ -126,7 +126,7 @@ export function namedSeats(office: Pick<Office, "kind" | "seatCount">): number {
 const focusOf = (office: Pick<Office, "kind" | "id" | "label" | "authorisedActionIds">): Focus => {
   if (office.kind === "priesthood") return "piety";
   if (office.authorisedActionIds.includes("force_engage") || /general|hipparch|strategos|commander/i.test(office.label)) return "martial";
-  if (/treasur|account|quaestor|steward/i.test(office.label)) return "stewardship";
+  if (/treasur|account|quaestor|steward|dioiketes|oikonomos/i.test(office.label)) return "stewardship";
   if (office.kind === "membership") return "diplomacy";
   return "learning";
 };

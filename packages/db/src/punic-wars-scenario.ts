@@ -6,6 +6,7 @@ import { foundingPeople, knownRulerId, romanSenators, withFinerSkills } from "./
 import { WORLD_PRESSURES, withWorldPolitics } from "./punic-wars-politics";
 import { houseFamilies, rosterPeople } from "./punic-wars-rosters";
 import { withRegionalTaxes } from "./punic-wars-taxes";
+import { PUNIC_CHARGES } from "./punic-wars-charges";
 
 /**
  * The Mediterranean and the Near East of 270 BCE, on the generated map: provinces and powers
@@ -201,20 +202,28 @@ const seeded = (id: string, polityId: string, name: string, levers: string[], of
 const SEEDED_DEPARTMENTS = [
   // The quaestors kept the treasury in the temple of Saturn, and paid out
   // nothing the Senate had not voted.
-  seeded("rome-aerarium", "rome", "The Treasury of Saturn", ["tax_roll"], ["roman-quaestor"], { gates: [{ institutionId: "roman-senate", act: "spend" }] }),
+  // And what the state borrowed or owed was in their books (credit; H0's lever): Rome had no public debt to speak of in 270, so it is the books' terms and no more.
+  seeded("rome-aerarium", "rome", "The Treasury of Saturn", ["tax_roll", "credit"], ["roman-quaestor"], { gates: [{ institutionId: "roman-senate", act: "spend" }] }),
   // The census, the rolls of the tribes, and the public contracts let every
   // five years -- the roads, the sewers, the collection of the rents.
-  seeded("rome-censorship", "rome", "The Censorship", ["audit", "public_works_cost"], ["roman-censor"], { gates: [{ institutionId: "roman-senate", act: "spend" }] }),
-  // The markets and the corn of the city.
-  seeded("rome-aediles", "rome", "The Aediles", ["grain"], ["roman-aedile", "roman-plebeian-aedile"]),
+  // The census is theirs (H), and so are the harbour dues, which they let to the companies of publicani with the rents (M-L for the date: kept as a simplification of the
+  // five-yearly contracts, Polybius 6.17).
+  seeded("rome-censorship", "rome", "The Censorship", ["audit", "public_works_cost", "census", "customs"], ["roman-censor"], { gates: [{ institutionId: "roman-senate", act: "spend" }] }),
+  // The markets, the weights and the corn of the city (M). No department keeps the mint: in 270 a consul or the Senate ordered a striking at the temple of Juno Moneta,
+  // and the tresviri monetales are probably later than their traditional 289, so none is invented (docs/plans/government.md, "Disputed and thin evidence").
+  seeded("rome-aediles", "rome", "The Aediles", ["grain", "markets"], ["roman-aedile", "roman-plebeian-aedile"]),
   seeded("rome-praetor", "rome", "The Urban Praetor's Court", ["courts"], ["roman-praetor"], { headOfficeId: "roman-praetor" }),
   seeded("rome-pontiffs", "rome", "The College of Pontiffs", ["public_rites"], ["roman-pontiff"], { headOfficeId: "roman-pontifex-maximus" }),
   // Carthage's revenues were counted by its own officers of the accounts, and
   // spent as the elders allowed.
-  seeded("carthage-accounts", "carthage", "The Office of the Accounts", ["tax_roll", "public_works_cost"], ["carthaginian-accountant"], { gates: [{ institutionId: "carthaginian-council", act: "spend" }] }),
+  // The same officers counted the harbour dues and the tribute rolls of the Libyans (L-M), and struck the coin the elders ordered, in the city's name (L-M): customs, credit,
+  // census and the mint are written to them as the simplest reading of a board whose duties the sources only sketch.
+  seeded("carthage-accounts", "carthage", "The Office of the Accounts", ["tax_roll", "public_works_cost", "customs", "credit", "census", "mint"], ["carthaginian-accountant"], { gates: [{ institutionId: "carthaginian-council", act: "spend" }] }),
   // The court of the council that judged the generals when they came home.
   seeded("carthage-hundred-and-four", "carthage", "The Hundred and Four", ["courts"], ["carthaginian-judge"], { gates: [{ institutionId: "carthaginian-hundred-and-four", act: "judge_commander" }] }),
   seeded("carthage-priests", "carthage", "The Priests of Baal Hammon", ["public_rites"], ["carthaginian-priest"]),
+  // Hiero's strategoi (M) carry out the king's levy and command his garrisons; the king's own chest and mint are the king's, and so are the tithe's collectors (private bidders) -- no department.
+  seeded("syracuse-strategoi", "syracuse", "The Strategoi of Syracuse", ["levy", "supply"], ["syracusan-strategos"]),
 ];
 const otherPowersOffices = [
   // Two suffetes a year, elected by the citizens: Carthage's consuls.
@@ -541,7 +550,8 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
       ...romanOffices,
       ...otherPowersOffices,
       ...templateOffices,
-    ],
+      // What the form does differently from the common run, written down for the offices of the powers we know (v55; punic-wars-charges.ts).
+    ].map((entry) => { const charge = PUNIC_CHARGES[(entry as { id: string }).id]; return charge === undefined ? entry : { ...entry, charge }; }),
     successionRules: [
       // The Senate elected nobody. Consuls, praetors and censors were chosen
       // by the people voting in their centuries; quaestors, aediles and the
@@ -706,7 +716,7 @@ const WRITTEN_OUT: ReadonlySet<string> = new Set(["rome", "carthage", "syracuse"
 
 const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
   schemaVersion: 3,
-  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 54, libraryVersion: 1 },
+  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 55, libraryVersion: 1 },
   elapsedStep: 0,
   instant: { day: 0, minute: 0 },
   // How the powers tax their ground, where the age said so (v48). Every other
@@ -760,7 +770,7 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
       // 700 of its ~1 300 a month rather than nearly all of it. The other half
       // of every consular army is allies, who come armed and paid by their own.
       { id: "rome", name: "Roman Republic", headOfficeId: "roman-consul", capitalSettlementId: "settlement-rome", cohesionBps: cohesionFor("rome"), soldierPayPerThousand: 10_000, governmentForm: governmentFormFor("rome") },
-      { id: "carthage", name: "Carthage", headOfficeId: "carthaginian-strategos", capitalSettlementId: "settlement-carthage", cohesionBps: cohesionFor("carthage"), governmentForm: governmentFormFor("carthage"), commandTenure: "indefinite_answerable" },
+      { id: "carthage", name: "Carthage", headOfficeId: "carthaginian-suffete", capitalSettlementId: "settlement-carthage", cohesionBps: cohesionFor("carthage"), governmentForm: governmentFormFor("carthage"), commandTenure: "indefinite_answerable" },
       { id: "syracuse", name: "Kingdom of Syracuse", capitalSettlementId: "settlement-syracuse", cohesionBps: cohesionFor("syracuse"), governmentForm: governmentFormFor("syracuse") },
       { id: "mamertines", name: "Mamertines of Messana", capitalSettlementId: "settlement-messana", cohesionBps: cohesionFor("mamertines"), governmentForm: governmentFormFor("mamertines") },
       // The Campanian legion sent to garrison Rhegium killed the citizens and
@@ -1047,6 +1057,9 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
         franchise: "council",
         // Laid before it only by a magistrate who could convene it.
         convenedByOfficeIds: ["roman-consul", "roman-praetor", "roman-dictator", "roman-tribune"],
+        // The Senate holds the state's purse, its coin, its treaties, the levy and the war (Polybius 6.13: the treasury, foreign affairs, the provinces),
+        // and the laws it carries to the people; it names nobody, for the assemblies elect (v55: said outright, so that a competence reads it by name).
+        powers: ["laws", "war", "taxes", "constitution", "judgment", "coinage", "finance", "treaties", "levy"],
         totalVotingWeight: 100,
         quorumBps: 5_000,
         passageThresholdBps: 5_001,
@@ -1058,6 +1071,8 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
       {
         id: "roman-comitia-centuriata",
         polityId: "rome",
+        // The people elect the consuls, praetors and censors, pass the laws, decide war on the Senate's motion (M) and ratify treaties (H), and judge capital cases.
+        powers: ["elections", "laws", "war", "treaties", "judgment"],
         name: "Centuriate Assembly",
         votingBlocs: [
           { id: "centuriate-first-class", name: "First class", representedInterest: "the propertied", weight: 98, baseSupport: 10, yesThreshold: 15, noThreshold: -15, causes: [], interests: ["landed", "merchants"] },
@@ -1076,6 +1091,7 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
       {
         id: "roman-comitia-tributa",
         polityId: "rome",
+        powers: ["elections", "laws", "judgment"],
         name: "Tribal Assembly",
         votingBlocs: [
           { id: "tribal-rural", name: "Rural tribes", representedInterest: "farmers", weight: 29, baseSupport: 5, yesThreshold: 15, noThreshold: -15, causes: [], interests: ["commons", "landed"] },
@@ -1124,7 +1140,8 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
         quorumBps: 5_000,
         passageThresholdBps: 5_001,
         denominator: "cast",
-        powers: ["laws", "war", "taxes", "constitution"],
+        // The elders decide finance, foreign affairs and war (Aristotle 2.11); where they and the suffetes split, the people (refersFailuresTo).
+        powers: ["laws", "war", "taxes", "constitution", "coinage", "finance", "treaties", "levy"],
         advisory: false,
         franchise: "council",
         refersFailuresTo: "carthaginian-assembly",

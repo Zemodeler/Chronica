@@ -19,6 +19,7 @@ import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
 import { createIdFactory } from "./ports";
 import { runDeterministicTick } from "./tick";
+import { bareOfCharges } from "./bare-of-charges";
 
 /**
  * "The Sicilian grain-lands will pay a tithe of the harvest, as they did to
@@ -38,7 +39,7 @@ import { runDeterministicTick } from "./tick";
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 const LATIUM = PUNIC_IDS.rome;
 const SYRACUSE_PROVINCE = PUNIC_IDS.syracuse;
-const opening = (): WorldState => ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
+const opening = (): WorldState => bareOfCharges(ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0));
 const withRow = (world: WorldState, id: string, patch: Partial<ProvinceMaterial>): WorldState => ({
   ...world,
   material: { ...world.material, provinceMaterial: world.material.provinceMaterial.map((row) => (row.provinceId === id ? { ...row, ...patch } : row)) },

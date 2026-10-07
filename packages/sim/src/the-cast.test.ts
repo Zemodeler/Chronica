@@ -20,7 +20,8 @@ describe("the standing cast", { timeout: 120_000 }, () => {
     const cast = reviewCast(opening(), "gaius-genucius").cast.members;
     const ids = cast.map((member) => member.characterId);
     expect(ids).toContain("gnaeus-cornelius");
-    expect(ids).toContain("hanno-carthage");
+    // (Carthage's head of state is its suffetes since H1, and the commander in Sicily is a general: he is no longer the voice of "the power across the strait".)
+    expect(ids).not.toContain("hanno-carthage");
     // Never the player, and never more than the seats.
     expect(ids).not.toContain("gaius-genucius");
     expect(cast.length).toBeLessThanOrEqual(8);
@@ -30,7 +31,7 @@ describe("the standing cast", { timeout: 120_000 }, () => {
 
   it("keeps a member through a quiet review, and lets him go only after his stay", () => {
     let world = reviewCast(opening(), "gaius-genucius");
-    const hanno = () => world.cast.members.find((member) => member.characterId === "hanno-carthage");
+    const hanno = () => world.cast.members.find((member) => member.characterId === "mamertine-spokesman");
     expect(hanno()?.reviews).toBe(0);
     // His thread closes: he matters less, but not at once out of the story.
     world = { ...world, storylines: world.storylines.map((storyline) => ({ ...storyline, phase: "closed" as const, closedAtStep: 0 })) };
@@ -54,11 +55,11 @@ describe("the standing cast", { timeout: 120_000 }, () => {
     });
     expect(result.world.cast.members.length).toBeGreaterThan(0);
     const all = sections.join("\n");
-    expect(all).toContain("## Hanno of Carthage [hanno-carthage]");
+    expect(all).toContain("## Statius Mettius [mamertine-spokesman]");
     expect(all).toMatch(/one of the people who matter now/);
     // His standing look comes once a burst; he may be asked again for his
     // own business -- news that lands on him, a letter owed -- but not as cast.
-    const hanno = sections.flatMap((section) => section.split(/^(?=## )/m)).filter((part) => part.startsWith("## Hanno of Carthage"));
+    const hanno = sections.flatMap((section) => section.split(/^(?=## )/m)).filter((part) => part.startsWith("## Statius Mettius"));
     expect(hanno.filter((part) => part.includes("one of the people who matter now"))).toHaveLength(1);
   });
 });

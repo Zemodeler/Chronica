@@ -141,7 +141,10 @@ describe("a tariff bites", () => {
     const audit = auditMoney(current, paid);
     expect(unexplainedTotal(audit)).toBe(0);
     // Every power's customs came in at the market's door, and nowhere else.
-    expect(audit.doors.market.in).toBe(economyOf(current).customsDue.filter((entry) => treasuryOf(current, entry.polityId) !== null).reduce((sum, entry) => sum + entry.amount, 0));
+    // (what each treasury was credited: the men who keep the harbour dues bring in more or less than is due, as their skill allows)
+    const balanceOf = (w: WorldState, polityId: string): number => w.material.accounts.find((account) => account.id === treasuryOf(w, polityId))!.balance;
+    const credited = (entry: { polityId: string }): number => (treasuryOf(current, entry.polityId) === null ? 0 : balanceOf(paid, entry.polityId) - balanceOf(current, entry.polityId));
+    expect(audit.doors.market.in).toBe(economyOf(current).customsDue.reduce((sum, entry) => sum + credited(entry), 0));
   });
 
   it("can be set by the power's own officers, with the customs scope of tax_policy_set, and is clamped", () => {

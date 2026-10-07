@@ -35,6 +35,9 @@ const NEW_FILES = [
   "../../shared/src/world/act-marks.ts",
   "./apply/competence-gate.ts",
   "./levers.ts",
+  // H1: the charges written down for the powers we know, and the officers who lay what is not theirs before the chamber.
+  "../../db/src/punic-wars-charges.ts",
+  "./fiscal-officers.ts",
 ];
 
 describe("no modern words", () => {

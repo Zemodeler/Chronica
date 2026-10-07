@@ -18,6 +18,7 @@ import {
 } from "@chronica/shared";
 import { HARVEST_MONTH, reviewTheLand } from "./economy";
 import { stockTheHarvest } from "./markets";
+import { bareOfCharges } from "./bare-of-charges";
 
 /**
  * A granary carries a year (phase C of the economy rework).
@@ -38,7 +39,7 @@ import { stockTheHarvest } from "./markets";
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 const clock = definition.clock;
 const LATIUM = PUNIC_IDS.rome;
-const opening = (): WorldState => ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
+const opening = (): WorldState => bareOfCharges(ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0));
 const row = (world: WorldState, id: string): ProvinceMaterial => world.material.provinceMaterial.find((material) => material.provinceId === id)!;
 
 /** A harvest day in the scenario's calendar, for the astronomical year. */
