@@ -304,7 +304,8 @@ tithe); v49 adds goods, hubs, flows, customs and Rome's two pacts; v50 adds the 
 - Engine: `packages/sim/src/economy.ts` (calendar), `markets.ts`, `trade-flows.ts`, `customs.ts`, `treaties.ts`,
   `coinage.ts`, `money-audit.ts`, `trade-summary.ts` (the slice's trade lines and news), `slice.ts`.
 - Readers for the treasury: `packages/shared/src/material/regions-view.ts`, `trade-view.ts`, `books.ts`.
-- Scenario data: `packages/db/src/punic-wars-scenario.ts`, `punic-wars-taxes.ts`.
+- Scenario data: `packages/db/src/punic-wars-scenario.ts`, `punic-wars-taxes.ts`, `punic-wars-houses.ts` (the merchant houses).
+- The people who manage it: `packages/sim/src/fiscal-officers.ts`, `merchant-houses.ts`, `house-voyages.ts`; the kit for their tests is `fiscal-test-kit.ts`.
 - The sanity run: `scripts/economy-sanity.mts` (`npm run sanity:economy -- 10 [--war]`) runs the real monthly tick with a
   model that never acts and checks the targets together: nothing unexplained, populations steady, grain in band,
   development diverging, price levels bounded.
@@ -331,6 +332,108 @@ obligation of four fifths of it; `an-ally-keeps-its-own-chest.test.ts` pins it. 
 `tick.ts`) now reaches their provinces, which it never did while they had no burden. A `men` province's resentment is
 unchanged.
 
+## Who manages the economy (v54)
+
+Until v54 the economy ran itself: the world AI made wars and peaces and had nothing to say about money, a power's tax rate stood
+where the scenario left it, and trade was an invisible aggregate between hubs. Two rule-based layers, with no model call, now
+manage it. Both are deterministic (`stableHash` only), aggregate (a handful of rows, not a person a province) and bounded.
+
+**Fiscal officers** (`packages/sim/src/fiscal-officers.ts`). Once a month, in the world AI's pass (`statecraft.ts`, step 4,
+`decideFiscal`), every power nobody plays has the man who keeps its books read them: the head of the department that holds
+the tax roll (a quaestor of the Treasury of Saturn, an officer of the Carthaginian Accounts), else any man of it, else the
+ruler. Never for the player's own power or one he rules (`excludedPolityIds`), nor for a man the model is playing. He reads cover
+(the chest over what the power pays a month), arrears, the deficit, war, grain in its hubs, the share its rate asks of what the
+land can bear (`taxBurdens`), the trade flowing in, and its coin:
+
+| Act | When | Bounds |
+| --- | --- | --- |
+| tax (`tax_policy_set`, polity) | strained (arrears, or under 2 months of pay in the chest and a deficit): raise a step; flush (over 8 months, surplus, peace): ease a step back toward the ordinary rate, no lower (only a restless people takes it lower, to 800); a famine in a third of its markets under a land levy: a tithe; none for a people that owes men (`men`) | steps of 200 bps (250 or 400 for a poor officer); ceiling the customary 1,200 in peace, 1,800 in war, 2,200 in extremis; never past 0.8 of what the provinces can bear; 90 days between raises, 180 before easing |
+| customs (`tax_policy_set`, customs) | bread dear in a quarter of its hubs: cut a step; strained and trade strong: raise a step | 250 bps, 0 to 1,500, 60 days |
+| credit (`loan_open`) | at war, strained, under a month of pay, a deficit: borrow from the merchant houses of its own power (under a third of a house's purse, 1.5 to 2% a month), the rest from bankers abroad (2.5%) | 150 days between; stops at 6 months of pay owed |
+| coin (`coinage_debase`) | in extremis only (war, arrears, under half a month, the tax at its ceiling): strike 15% lighter, never below 0.6 of the standard; at peace with 6 months in the chest, re-strike a tenth better | a year between |
+| trade (`agreement_open` pact, `agreement_close` embargo) | two powers nobody plays, at peace, trade of 25,000 a month each way, both laying customs above 6%: a pact capping them at 6%; an embargo older than 18 months at peace is lifted | one new pact a month in the world |
+
+**The man matters.** His quality is his skill at the tax roll plus `officeTemper` (up to 14 points either way). A poor one acts
+late (the chance of acting in a month is `35 + 0.65 q` per cent, 25 more in an emergency), in coarse steps (250, 400 bps), and lands
+off the rate he meant by up to 150 bps. His greed is the existing mechanic's: what passes through a greedy officer's hands is
+skimmed (`departments.ts`) and an audit finds it; here he is only named in the news, with "Men do not trust his hands" for a
+greed of 60 or more. The act is his: the burst applies a fiscal decision as the power's standing business (`ProposalPass.sanctioned`,
+`sanctionedDeltas`), because a quaestor's office holds the proposal and not the rate: the same rules of money, reach and the audit,
+with the authority taken as given. One decision a power a month, one fact at most (and only for a power with something live in it,
+`liveProvinceIds`; pure customs nudges make none); the log keeps what was done (`STATECRAFT_LOG_MAX`) and the cooldowns are read off
+it. One line in the slice (`accountsNote`, "Its accounts: ...") for two months after, for whoever is given that power's page.
+
+**Merchant houses** (`packages/sim/src/merchant-houses.ts`, `house-voyages.ts`, `packages/shared/src/world/houses.ts`,
+`packages/db/src/punic-wars-houses.ts`). Seventeen houses in `economy.houses`, each a head (an ordinary character with a purse: the
+house's capital), an heir he names, a home market and a lean: Rome's publicani and a banker of Neapolis; four Carthaginian houses of
+the Tyrian-descended families (Carthage, Utica, Hadrumetum, Lilybaeum); Gades, Syracuse (two), Massalia, Rhodes, Athens, Alexandria,
+Tyre, Tarentum, Ephesus. Capital 95,000 to 380,000 (3.3 million in all; a senator's purse is 24,000). Names where the sources are
+silent are generic.
+
+Once a month (from the tick, after the markets and customs) a house with room (at most `MAX_VENTURES_PER_HOUSE = 3` afloat, two
+opened a month) and money to spare (a reserve of 35% of its purse, a cargo at most 28% of it and 36,000) reads a price table once,
+takes the pairs of ports within 1,700 km of its trading hub in both directions, drops those closed by war, embargo, blockade or
+occupation, and ranks the rest by the gap in the best good's price (only goods the hub has stock to spare of), the voyage's days, the
+risk and the duty. It buys the goods out of the hub's stock (`drawStock`), sends them as an ordinary `TradeVenture` with a `cargo` (a
+single sailing), and when it lands the far hub's stock gains them (`addStock`). Landing (`cargoes.ts`) gives a house's cargo what a
+voyage had: a chance of loss (90 to 400 bps by sea and days, 350 more where war has reached either end; the cargo is gone and the
+venture closed), the crew's share (6%, the `the_unnamed` door), and the duty of the power it lands in, less any pact (the `market`
+door both ways, and into `customsDue`). Houses pay a household (1.1% of the purse a month, `the_unnamed`) and a liturgy to their
+treasury (6% of what each cargo clears over its cost, an ordinary transfer: a power's tax rolls count none of it) so their capital stays bounded. The head ages and dies by the ordinary mortality; the estate
+passes by `settleEstate`; the house goes on under the heir he named, and is wound up with nobody to follow him. Cargoes sold or lost
+two months ago are dropped from the world's list.
+
+**Merchants improve the trade, not only their purses.** A hub with houses has a *lift*, `1 + 0.5 x min(1, capital / 800,000)`
+(`merchantLiftByHub`): trade flows (`trade-flows.ts`) carry up to that much more on its routes and what its merchants can send out
+grows with it, and the haul is cheaper by `0.55 x (lift - 1)` (credit, insurance, better ships): a fifth at the most. The houses' own
+cargoes move real goods between stocks, and the officers ask them for credit.
+
+**Out of the model's room.** House heads and heirs are `background` people to the cognition policy unless the player's own circle
+touches them (a relation, a letter, a loan he took: `cognition-policy.ts`), and in no cast unless salience puts them there; they add
+nothing to the slice.
+
+**Performance** (the Punic opening, this machine, noisy): the monthly tick averaged about 52 ms without houses and 70 ms with them
+(the houses themselves 1 to 2 ms a month; the rest is landing seventeen houses' cargoes through `cargoes.ts` and more people to
+age); the officers' whole pass is about 6 ms; a year of the land is unchanged. The budgets are held by
+`the-books-are-kept-in-good-time.test.ts` beside `a-thousand-provinces.test.ts`'s.
+
+**What it did** (24 months, houses against none, same seed): 667 cargoes (20 lost, 3.0%) worth 13.0 million drachmae of goods bought out of the
+hubs' stocks; cross-power trade +1.9%; the treasuries +0.1% (Rome), +0.6% (Carthage), +0.4% (Syracuse) from customs (252,000) and
+liturgies (93,000); crews and households took about 1.0 and 1.1 million from the houses' purses, and the houses' capital grew from 3.3 to 4.2 million. A shortage
+at Utica is made good in nine months where it took twelve.
+
+**Not built:** buying grain for a hub from the treasury, and supply contracts for armies (`service_contract`); the officers' remedy
+for bread is a lower tariff and a tithe, and the houses carry grain to the dear hubs by the price gap (a dear-grain gap is given a
+bonus).
+
+## Who may do what (H0)
+
+An act of the economy -- the rate of the tribute, the customs, the silver in the coin, a loan, bread for the people, a pact, an embargo, the levy, war, peace, an appointment, a draw on the chest -- is
+no longer anybody's whose office looks fiscal. Whether a man may do it is read from his power's constitution (`competenceOf`, `packages/shared/src/authority/competence.ts`): **alone**, **with a colleague**
+(either may act, the other may stop it), **by the body** (laid before the chamber that holds that power) or **forbidden**, from the chambers' powers (now with `coinage`, `treaties`, `finance` and `levy`), the offices'
+kind, seats and vetoes, the levers of the department he staffs and his treasury reach. The details, the per-power readings and what is not yet built are in `docs/plans/government.md`, "H0 as built".
+
+What it changes in the acts above (in `apply-deltas.ts`, through `apply/competence-gate.ts`):
+
+| Act | Within his charge | Beyond it |
+|---|---|---|
+| `tax_policy_set`, rate | a treasurer or a head, with his colleagues, up to 12 in a hundred (`CUSTOMARY_TAX_RATE_BPS`) | laid before the chamber that holds the taxes (the Senate; Carthage's council); a king holds it alone |
+| `tax_policy_set`, customs | a head up to 15 in a hundred, a treasurer up to 10 | the chamber's |
+| `coinage_debase` | a king; no republic's magistrate | the chamber that holds the coin (the old bundle of taxes) |
+| `loan_open` (the state borrows) | a head 3 months of what the power takes in, a treasurer 1 | the chamber's |
+| `public_benefaction` dole | an aedile or a head, 1 to 2 months | the chamber's |
+| `agreement_open` / `_close` (pact, embargo, war, peace) | a king; the head of a power no chamber holds it in | laid before the chamber, as a war always was |
+| `money_transfer` from the chest | `spend_without_vote` is an allowance of 2 months a year for a head, 1 for an officer, for each office | the Senate's decree; a department the Senate gates (the Treasury of Saturn) has none |
+
+One decider to a season (the rate 90 days, the customs and the coin 60, a loan, bread or a pact 30): when one man has settled an act, another of equal or lower office may not settle it again until the season is out,
+and what the chamber decreed no magistrate alters. A colleague who has interceded, or who thinks ill of him, stops a collegial act; a tribune stops the levy, the purse, the tribute, the coin and bread. What a vote has
+carried, and the fiscal officers' own decisions, are not weighed again (they are recorded, so the next man's act finds the season taken). `mayAct(world, characterId, act)` is the helper for any pass that must act inside
+a man's competence.
+
+**Five charges**, levers a department may be given (`customs`, `mint`, `markets`, `credit`, `census`), each a multiplier near one by the skill of the men who keep it, and exactly one where nobody has been given it:
+the share of the duty that reaches the chest (up to a fifth either way: `customs.ts`); the gain from a coin struck lighter, and how much of its bad name sticks to its premium (`apply-deltas.ts`, `coinage.ts`); how far a
+hub's prices stray, and the hoards a famine price brings out (`markets.ts`); the interest the state is asked (`loan_open`); and what the tax roll and the muster count of the people (`material/taxation.ts`). Tests: `the-new-levers-bite`.
+
 ## Tests that pin behaviour
 
 All under `packages/sim/src` unless noted: `the-books-balance`, `a-market-sets-a-price`, `a-market-moves-grain`,
@@ -338,4 +441,5 @@ All under `packages/sim/src` unless noted: `the-books-balance`, `a-market-sets-a
 `a-cargo-follows-the-markets-gap`, `a-war-torn-region-lags`, `a-tax-regime-is-chosen`, `taxes-the-land-can-bear`,
 `the-office-and-the-roll`, `a-tariff-bites`, `a-trade-pact-lowers-tariffs`, `an-embargo-cuts-trade`,
 `war-suspends-a-pact`, `a-power-hears-of-its-trade`, `a-coin-is-debased`, `a-foreign-payment-is-changed`,
-`the-treasury-reads-the-land` and `a-thousand-provinces` (the cost budget).
+`the-treasury-reads-the-land` and `a-thousand-provinces` (the cost budget). v54: `a-quaestor-keeps-the-books`, `a-house-follows-the-gap`,
+`the-market-has-merchants`, `the-houses-stay-out-of-the-room`, `the-books-balance-with-houses` and `the-books-are-kept-in-good-time`. H0: `a-treasurer-decides`, `a-consul-cannot-draw-the-treasury-alone`, `two-consuls-do-not-both-tax`, `a-tribune-stops-a-levy`, `the-senate-decrees-the-tribute`, `a-reform-changes-who-may-act`, `the-new-levers-bite` and `no-modern-words`.
