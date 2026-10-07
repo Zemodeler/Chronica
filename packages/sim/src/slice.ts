@@ -2,6 +2,8 @@ import { regionalSummary } from "./regional-summary";
 import { marketSummary, polityMarkets } from "./market-summary";
 import { coinageSummary } from "./coinage";
 import { tradeSummary } from "./trade-summary";
+import { fiscalSliceLine } from "./fiscal-officers";
+import { houseFolkOf } from "./merchant-houses";
 import { powersDealtWith } from "./far-powers";
 import { powersNamedIn } from "./powers-named";
 import { armyInWords, serviceInWords } from "./army-words";
@@ -176,6 +178,8 @@ export interface WorldSlice {
   readonly markets?: string | null;
   /** Its trade: partners, what it sells and buys, customs, pacts and embargoes, shortages eased or worsened; one line a power, when there is any to say (`trade-summary.ts`). */
   readonly tradeNote?: string | null;
+  /** What the man who keeps its books has done lately -- a rate raised, a loan taken, a pact opened -- one line, only for a month or two after (`fiscal-officers.ts`). */
+  readonly accountsNote?: string | null;
   /** Its money: the coin, its silver against the standard, price pressure and exchange; one line, only when notable (`coinage.ts`). */
   readonly coinageNote?: string | null;
   /** Coin a month per thousand men, for whoever can open the power's treasury and the scenario names it. */
@@ -567,6 +571,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
   const markets = ownPolity === null ? null : marketSummary(polityMarkets(world).get(ownPolity));
   const tradeNote = ownPolity === null ? null : tradeSummary(world, ownPolity);
   const coinageNote = ownPolity === null ? null : coinageSummary(world, ownPolity);
+  const accountsNote = ownPolity === null ? null : fiscalSliceLine(world, ownPolity);
   const soldierPayPerThousand = opensTreasury ? world.map.polities.find((polity) => polity.id === ownPolity)?.soldierPayPerThousand ?? null : null;
   const monthlyExpenditure = Math.round(
     world.material.obligations
@@ -657,8 +662,9 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
   for (const siege of world.conflicts.sieges) matters(places.provinceOfSettlement.get(siege.settlementId), 1);
   for (const siege of world.sieges) if (siege.status === "active") matters(siege.provinceId, 1);
   for (const storyline of openStorylines(world.storylines)) matters(storyline.provinceId, 2);
+  const merchants = houseFolkOf(world);
   for (const character of world.characters) {
-    if (character.alive && character.polityId === ownPolity) matters(character.locationProvinceId, 3);
+    if (character.alive && character.polityId === ownPolity && (character.officeId !== null || !merchants.has(character.id))) matters(character.locationProvinceId, 3);
   }
 
   const reach = distancesFrom(places, pressing.size > 0 ? pressing.keys() : ourProvinceIds);
@@ -766,7 +772,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     .map((category) => ({ id: category.id, label: category.label }));
 
   const politics = world.characters
-    .filter((character) => character.alive && (ownPolity === null || character.polityId === ownPolity))
+    .filter((character) => character.alive && (ownPolity === null || character.polityId === ownPolity) && (character.officeId !== null || !merchants.has(character.id)))
     .slice(0, CAPS.characters)
     .map((character) => ({
       id: character.id,
@@ -1183,7 +1189,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       // agreement struck with one Boii chieftain binds the chieftain.
       cohesion: cohesionInWords(polity.cohesionBps),
       leaders: world.characters
-        .filter((character) => character.alive && character.polityId === polity.id)
+        .filter((character) => character.alive && character.polityId === polity.id && (character.officeId !== null || !merchants.has(character.id)))
         .slice(0, 4)
         .map((character) => `${character.name} [${character.id}]${character.officeId === null ? "" : `, ${character.officeId}`}`),
       forces: world.material.forces
@@ -1336,6 +1342,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     regional,
     markets,
     tradeNote,
+    accountsNote,
     coinageNote,
     soldierPayPerThousand,
     military,
@@ -1528,6 +1535,7 @@ export function renderWorldSlice(slice: WorldSlice): string {
         // Said only when it is news: bread at its ordinary price, and no good far from its own, is no line of prompt.
         ...(slice.markets == null ? [] : [slice.markets]),
         ...(slice.tradeNote == null ? [] : [slice.tradeNote]),
+        ...(slice.accountsNote == null ? [] : [slice.accountsNote]),
         ...(slice.coinageNote == null ? [] : [slice.coinageNote]),
         ...slice.country.strained.map((province) =>
           slice.country.governs

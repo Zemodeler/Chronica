@@ -1,4 +1,5 @@
 import type { WorldState } from "@chronica/shared";
+import { withMerchantHouses } from "./punic-wars-houses";
 
 /**
  * How the provinces of 270 BCE were taxed, where the sources say (v51).
@@ -28,8 +29,16 @@ export const LIBYAN_LEVY_BPS = 1_500;
 /** The tithe of Sicily: a tenth of the harvest. */
 export const SICILIAN_TITHE_BPS = 1_000;
 
-/** The world with the custom of each province written down. */
+/**
+ * The world with the custom of each province written down, and (v53) the merchant houses that carry its trade
+ * seated in it (`punic-wars-houses.ts`): both are the economy's own opening, and both are built on the finished map.
+ */
 export function withRegionalTaxes(world: WorldState): WorldState {
+  return withMerchantHouses(withCustomsOfTheProvinces(world));
+}
+
+/** The custom of each province alone: what v51 wrote. */
+function withCustomsOfTheProvinces(world: WorldState): WorldState {
   const customs: { provinceId: string; regime: "tithe" | "land_levy"; rateBps: number }[] = [];
   for (const province of world.map.provinces) {
     if (province.id.startsWith("sic-")) customs.push({ provinceId: province.id, regime: "tithe", rateBps: SICILIAN_TITHE_BPS });

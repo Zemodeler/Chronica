@@ -82,7 +82,9 @@ describe("a province develops", () => {
     const gained = rowOf(five, LATIUM).developmentBps! - began;
     // Slow: a few hundred a year at the very best, so five years is some hundreds and not thousands.
     expect(gained).toBeGreaterThan(500);
-    expect(gained).toBeLessThanOrEqual(5 * 320);
+    // 5 x 320 -> 5 x 340 (2026-10-07, v54): the houses seated at Rome's hub lift its carrying capacity and cheapen the haul, so the traffic
+    // that builds Latium up is a few in a hundred busier.
+    expect(gained).toBeLessThanOrEqual(5 * 340);
     // Its taxes follow it up, and so does its room for people.
     expect(rowOf(five, LATIUM).taxCapacity).toBeGreaterThan(rowOf(start, LATIUM).taxCapacity);
     // Brought to within a few hundred of it, and left for ten years, it stops at its potential.

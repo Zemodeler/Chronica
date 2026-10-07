@@ -33,6 +33,7 @@ import { alarmOf } from "./pushback";
 import { appetiteOf, dispositionOf, leastOdds, natureInWords, peaceReluctance, tilt, type Disposition } from "./disposition";
 import { plainName, writeLetter } from "./letter-craft";
 import { favouredNeighbour } from "./quirks";
+import { decideFiscal } from "./fiscal-officers";
 import { perceivedRatio } from "./perceive";
 import { STEP_DAYS, letterVerdict } from "./letter-verdict";
 
@@ -241,6 +242,10 @@ export function decideStatecraft(input: StatecraftInput): StatecraftDecision[] {
       if (order !== null) decisions.push(order);
     }
   }
+
+  // ── 4. The books ───────────────────────────────────────────────────────
+  // Each power nobody plays has a man who keeps them: tax, customs, credit, coin, pacts (`fiscal-officers.ts`).
+  decisions.push(...decideFiscal(input));
   return decisions;
 }
 

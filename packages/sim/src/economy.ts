@@ -35,6 +35,7 @@ import { monthOfCoinage } from "./coinage";
 import { marketNews } from "./market-summary";
 import { closeBook, cutOffHubs, marketMonth, monthsToHarvest, openBook, stockTheHarvest } from "./markets";
 import { tradeMonth } from "./trade-flows";
+import { merchantLiftByHub } from "./merchant-houses";
 import { reliefNews } from "./trade-summary";
 
 /**
@@ -431,7 +432,7 @@ export function reviewTheLand(input: LandInput): LandResult {
       const day = monthOne + month * REVIEW_DAYS;
       marketMonth(book, { world, rows, ids, day, clock: input.clock, harvestMonth: HARVEST_MONTH, cut, targets });
       // Then goods move between neighbouring hubs, from the cheap market to the dear one, as far as carrying them pays.
-      const flows = tradeMonth(book, { world, rows, cut, toHarvest: monthsToHarvest(day, input.clock, HARVEST_MONTH) });
+      const flows = tradeMonth(book, { world, rows, cut, toHarvest: monthsToHarvest(day, input.clock, HARVEST_MONTH), merchantLift: merchantLiftByHub(world) });
       for (const [polityId, amount] of flows.duties) customsEarned.set(polityId, (customsEarned.get(polityId) ?? 0) + amount);
       lanes = flows.lanes;
       for (const [polityId, kept] of flows.relief) {

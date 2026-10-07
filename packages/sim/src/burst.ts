@@ -785,6 +785,8 @@ interface ProposalPass {
   readonly later?: "repair" | "facts" | undefined;
   /** Facts the world writes about the act lighter than this are not written down at all: the powers' far business (L16). */
   readonly factFloor?: number | undefined;
+  /** Acts that are the power's own standing business, not an exercise of the actor's authority: a fiscal officer's (`fiscal-officers.ts`). */
+  readonly sanctioned?: ReadonlySet<WorldDelta> | undefined;
 }
 
 /** A part of the order as the orchestrator read it. */
@@ -1701,6 +1703,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       playerCharacterId: input.actorRef.kind === "character" ? input.actorRef.id : null,
       ...(order === undefined ? {} : { orderDeltas: order }),
       ...(assignedIds === undefined ? {} : { assignedIds }),
+      ...(pass.sanctioned === undefined ? {} : { sanctionedDeltas: pass.sanctioned }),
     });
 
     // A person's nature holds in the large matters whoever is playing them (`nature.ts`): the model's own people, not the player's
@@ -3708,7 +3711,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         touchesUs ? 0 : budget.maxCausalDepth,
         true,
         [],
-        { calls: "none", factFloor: farBusinessFloor(relations, [decision.polityId, decision.targetPolityId]) },
+        { calls: "none", factFloor: farBusinessFloor(relations, [decision.polityId, decision.targetPolityId]), ...(decision.act === "fiscal" ? { sanctioned: new Set(decision.deltas) } : {}) },
       );
       stampWorkFacts(before);
       // A dispatch changes nothing in the world, and is written in the ledger all the same: that is how it is not written twice.

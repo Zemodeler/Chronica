@@ -96,6 +96,9 @@ export const PORTORIA_DIVISOR = 4;
 
 const GRAIN = 0;
 
+/** How much cheaper the haul is for each point of merchant lift (`merchantLiftByHub`): at the greatest lift (1.5) about a fifth. */
+export const HAUL_CHEAPER_PER_LIFT = 0.55;
+
 /**
  * How open a trading end is, in basis points: whole in peace; a third when its
  * holder is at war; a fifth when it is occupied by somebody else or under
@@ -127,6 +130,11 @@ export interface FlowInput {
   readonly cut: ReadonlySet<string>;
   /** Months until grain next comes in: what a hub must keep to get there. */
   readonly toHarvest: number;
+  /**
+   * How much more a hub's merchants can carry for the houses seated there (1 to 1.5, `merchantLiftByHub`):
+   * a way between two hubs carries by the better of the two, and what a hub can send out in a month grows with it.
+   */
+  readonly merchantLift?: ReadonlyMap<string, number> | undefined;
 }
 
 export interface FlowResult {
@@ -260,14 +268,16 @@ function routeMonth(_book: Book, input: FlowInput, result: FlowResult, route: Ro
   // Roads and harbours at both ends: from a quarter dearer at no development to a quarter cheaper at the most.
   const average = (a.development + b.development) / 2;
   const road = 1.25 - 0.5 * (average / 10_000);
-  const carry = (0.5 + average / 10_000) * CROSSING_CAPACITY_SHARE[link.crossing];
+  const lift = Math.max(input.merchantLift?.get(route.aId) ?? 1, input.merchantLift?.get(route.bId) ?? 1);
+  const carry = (0.5 + average / 10_000) * CROSSING_CAPACITY_SHARE[link.crossing] * lift;
   const crossPolity = a.polity !== null && b.polity !== null && a.polity !== b.polity;
   const terms = crossPolity ? route.termsOf(a.polity!, b.polity!) : undefined;
   if (terms !== undefined && terms.closed !== null) return;
   for (let index = 0; index < GOOD_COUNT; index += 1) {
     const spec = GOODS[index]!;
     if (terms !== undefined && !mayTradeGood(terms, spec.id)) continue;
-    const haul = kmShare * LAND_HAUL_BPS_PER_100_KM[spec.id] * road * (10_000 / open);
+    // Where houses with capital are seated the carrying is done on credit, in better ships, with insurance: a share cheaper.
+    const haul = kmShare * LAND_HAUL_BPS_PER_100_KM[spec.id] * road * (10_000 / open) / (1 + (lift - 1) * HAUL_CHEAPER_PER_LIFT);
     // Which way it would go: to the dearer market, net of what the buyer's customs take.
     const gapTo = (buyer: HubState, buyerPrice: number, sellerPrice: number): number => buyerPrice * (1 - dutyOn(buyer, spec.id) / 10_000) - sellerPrice - haul;
     const dutyOn = (buyer: HubState, good: GoodId): number => {
@@ -293,7 +303,7 @@ function routeMonth(_book: Book, input: FlowInput, result: FlowResult, route: Ro
     const room = Math.max(0, MAX_STOCK_MONTHS * Math.max(1, demand) - buyerBook.stock[index]!);
     // Carriers take more of what is small for its worth (the root of how much dearer grain is to haul).
     // And a hub's merchants have only so many hulls and carts to send out in a month, whoever asks.
-    const sendable = Math.max(0, EXPORT_SHARE_OF_USE * sellerBook.demand[index]! - sellerBook.outflow[index]!);
+    const sendable = Math.max(0, EXPORT_SHARE_OF_USE * lift * sellerBook.demand[index]! - sellerBook.outflow[index]!);
     const most = Math.min(spare, room, sendable, demand * carry * Math.sqrt(LAND_HAUL_BPS_PER_100_KM.grain / LAND_HAUL_BPS_PER_100_KM[spec.id]));
     const duty = dutyOn(buyer, spec.id);
     const moved = worthMoving(spec, sellerBook.stock[index]!, sellerBook.target[index]!, buyerBook.stock[index]!, buyerBook.target[index]!, duty, haul, most);

@@ -2,6 +2,7 @@ import { answerDueOf, buildStation, findOrderPart, holdsPolityStanding, kmFromAn
 import type { RoutedActor } from "./attention";
 import { newsRelations } from "./far-powers";
 import { readBoard } from "./board";
+import { houseFolkOf } from "./merchant-houses";
 import type { DueStep } from "./plans";
 
 export type SimulationDetail = "personal" | "regional" | "background";
@@ -95,10 +96,15 @@ export function playerInterests(world: WorldState, playerId: string | null, offi
   for (const province of world.map.provinces) if (entities.has(province.id) && province.controllerPolityId !== null) polities.add(province.controllerPolityId);
   for (const polity of world.map.polities) if (entities.has(polity.id)) polities.add(polity.id);
   const personById = new Map(world.characters.map((person) => [person.id, person]));
+  // The merchant houses' heads and heirs run on rules (`merchant-houses.ts`): the model is not asked about them unless the player's own
+  // circle touches them -- a letter, a kinsman, a loan he asked for -- whatever province they happen to live in.
+  const houseFolk = houseFolkOf(world);
   const detailOf = (id: string): SimulationDetail => {
     if (player === undefined) return "personal"; // Headless/world simulations have no player horizon.
     const person = personById.get(id);
-    if (people.has(id) || (person !== undefined && entities.has(person.locationProvinceId))) return "personal";
+    if (people.has(id)) return "personal";
+    if (houseFolk.has(id)) return "background";
+    if (person !== undefined && entities.has(person.locationProvinceId)) return "personal";
     return person?.polityId != null && polities.has(person.polityId) ? "regional" : "background";
   };
   return { entities, people, polities, detailOf, eligibleCharacterIds: new Set(world.characters.filter((person) => detailOf(person.id) !== "background").map((person) => person.id)) };

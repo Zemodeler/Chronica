@@ -1278,6 +1278,8 @@ export const TradeVentureSchema = z
       arrivesAtStep: ElapsedStepSchema,
       /** Cargoes landed so far. */
       voyages: z.number().int().nonnegative().max(10_000).default(0),
+      /** The units of `good` the cargo carries, where it was drawn from a market (a merchant house's): they go into the far market's stock when it lands. */
+      units: z.number().int().nonnegative().optional(),
       /** A regular trade buys the next cargo out of what the last one sold for; a single cargo is done when it is sold. */
       rollsOver: z.boolean(),
     }).strict().optional(),

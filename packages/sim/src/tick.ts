@@ -88,6 +88,7 @@ import { reviewPowers } from "./polity-end";
 import { settleUnionOffers } from "./submission";
 import { betweenHarvests, reviewTheLand } from "./economy";
 import { payCustoms } from "./customs";
+import { keepMerchantHouses } from "./merchant-houses";
 import { routeOpenBps } from "./trade-flows";
 import { EMBARGO_BREACH_TRUST, endObligationsOfEndedAgreements, keepTreaties, shiftTrust } from "./treaties";
 import { keepPromises } from "./promises";
@@ -1710,8 +1711,10 @@ export function runDeterministicTick(given: TickInput): TickResult {
   // The grain office's skill is carried into the month's reckoning of bread (`foodRecoveryScale`, read by `marketMonth`).
   const reckoned = reviewTheLand({ world: met.world, toDay: input.toDay, clock: input.clock, targets: () => withGovernment(provinceTargetsFrom(met.world), met.world, readDepartments(met.world)) });
   // What the month's trade earned each power in customs is paid into its treasury the day it is reckoned.
-  const land = { ...reckoned, world: payCustoms(reckoned.world, input.toDay, input.ids) };
-  facts.push(...land.facts);
+  // And the merchant houses look to their cargoes once the markets have moved and the customs are in (`merchant-houses.ts`).
+  const housed = keepMerchantHouses(payCustoms(reckoned.world, input.toDay, input.ids), input.toDay, input.ids);
+  const land = { ...reckoned, world: housed.world };
+  facts.push(...land.facts, ...housed.facts);
   const playerPolityId = input.playerCharacterId == null ? null : land.world.characters.find((character) => character.id === input.playerCharacterId)?.polityId ?? null;
   const treaties = keepTreaties({ world: land.world, toDay: input.toDay, ids: input.ids, playerPolityId });
   facts.push(...treaties.facts);

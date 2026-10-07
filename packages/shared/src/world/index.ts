@@ -41,6 +41,7 @@ export * from "./departments";
 export * from "./engagement";
 export * from "./war-weariness";
 export * from "./economy";
+export * from "./houses";
 export * from "./markets";
 export * from "./coinage";
 export * from "./negotiations";
