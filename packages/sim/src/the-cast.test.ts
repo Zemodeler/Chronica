@@ -20,8 +20,8 @@ describe("the standing cast", { timeout: 120_000 }, () => {
     const cast = reviewCast(opening(), "gaius-genucius").cast.members;
     const ids = cast.map((member) => member.characterId);
     expect(ids).toContain("gnaeus-cornelius");
-    // (Carthage's head of state is its suffetes since H1, and the commander in Sicily is a general: he is no longer the voice of "the power across the strait".)
-    expect(ids).not.toContain("hanno-carthage");
+    // Carthage's head of state is its suffetes since H1, so Hanno is no longer "the power across the strait"; he is in the cast as the commander of her main army, in the Messana thread (2026-10-08).
+    expect(ids).toContain("hanno-carthage");
     // Never the player, and never more than the seats.
     expect(ids).not.toContain("gaius-genucius");
     expect(cast.length).toBeLessThanOrEqual(8);

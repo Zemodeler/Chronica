@@ -80,6 +80,11 @@ export function salienceOf(world: WorldState, character: Character, playerId: st
   const across = playerPolity === null ? undefined : board.get(playerPolity)?.neighbours.find((neighbour) => neighbour.polityId === theirPolity);
   if (rulesHere && !rulesUs && across !== undefined && across.relation !== "follows_us" && across.relation !== "leads_us") add(across.bordering ? 20 : 10, "rules a power the player's government deals with", "world");
   if (rulesHere && !rulesUs && seat === null) seat = "world";
+  // Where the head of a power is a body (Carthage's suffetes) or a man who does not take the field, the face a power shows the
+  // world is its general in the field: the commander of its main army speaks for it, as its ruler would have.
+  const facesTheWorld = !rulesHere && !rulesUs && theirPolity !== null && reading !== undefined && commandsMainArmy(world, character.id, theirPolity)
+    && (reading.strength >= 20_000 || (across !== undefined && across.relation !== "follows_us" && across.relation !== "leads_us"));
+  if (facesTheWorld) add(20, `commands the main army of ${reading.name}`);
 
   const thread = openStorylines(world.storylines).find((storyline) => storyline.participantIds.includes(character.id));
   if (thread !== undefined) add(thread.phase === "escalating" || thread.phase === "crisis" ? 35 : 25, `caught up in ${thread.title}`);
@@ -95,6 +100,13 @@ export function salienceOf(world: WorldState, character: Character, playerId: st
   const dealt = context === undefined ? powersDealtWith(world, playerId) : context.dealt;
   if (dealt !== null && theirPolity !== null && !dealt.has(theirPolity)) score -= 15;
   return { score, why: reasons.slice(0, 3).join(", ") || "of no account", seat };
+}
+
+/** The man at the head of a power's largest army: the one force of it that the world looks to. */
+function commandsMainArmy(world: WorldState, characterId: string, polityId: string): boolean {
+  const main = world.material.forces.filter((force) => force.polityId === polityId && force.commanderCharacterId !== null)
+    .sort((a, b) => b.authorizedStrength - a.authorizedStrength || a.id.localeCompare(b.id))[0];
+  return main?.commanderCharacterId === characterId;
 }
 
 /** Seats per kind, with this cast size: one nemesis, a chain, the world, the rest open. */
