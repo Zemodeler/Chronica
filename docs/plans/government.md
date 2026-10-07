@@ -356,4 +356,124 @@ for the competence tables; a king's friends are `advisory` (their disagreement
 costs legitimacy, not a vote); a magistrate who acts beyond his charge lays the
 act before the body or provokes the colleague's or tribune's chance to forbid.
 
-*H0 as built* is added below by another agent.
+*H0 as built* follows.
+
+## H0 as built
+
+Phase H0 of the plan for the offices of a state. The foundations are in: who may do what is read from the constitution, the acts that need it
+are weighed against it, five economic charges have numbers of their own, and an office draws on the chest up to an allowance. No advice, no
+reports, no new council: it is the existing parts (`world.constitutions`, the chambers' `powers`, offices, departments) read in a new way, and
+every sentence the player or a model reads is in the words of the age (`modernWordsIn`, `MODERN_WORDS`, scanned by `no-modern-words.test.ts`).
+
+### Where it lives
+
+| Piece | File |
+|---|---|
+| The twelve acts, the four grades, an office's `charge`, `ACT_WORDS`, the season of each act | `packages/shared/src/authority/charge-vocabulary.ts` |
+| `competenceOf(world, officeId, offices?)`, `mayAct(world, characterId, act, {offices, magnitude})`, `bodyFor`, `chargeHolders`, `spendingAllowance`, `monthlyTakings`, `gradeAt` | `packages/shared/src/authority/competence.ts` |
+| Who last decided an act, and a year's draw for each office (`ActMark`, `WorldState.actMarks`) | `packages/shared/src/world/act-marks.ts` |
+| The banned list (`MODERN_WORDS`, `modernWordsIn`) for every later phase | `packages/shared/src/authority/period-words.ts` |
+| The gate in front of `applyDeltas`, and the memory it keeps | `packages/sim/src/apply/competence-gate.ts` |
+| The five charges' numbers | `packages/sim/src/levers.ts`; the levers themselves in `packages/shared/src/world/departments.ts` |
+| Per-form data | `packages/sim/src/constitutions.ts` (`OfficeSpec.charge`, `OfficeSpec.allowance`) |
+
+### Competence
+
+An act is one of `tax_rate`, `customs`, `coinage`, `loans`, `grain`, `pacts`, `embargoes`, `levy`, `war`, `peace`, `appointment`, `spending`. For each, an
+office stands one of four ways: **alone** (within his charge), **with a colleague** (collegial: either may act and the other may stop it: *par potestas*,
+*intercessio*), **by the body** (laid before the chamber that holds that power; he may move it, and may not do it) or **forbidden**. A line may carry a figure
+(`within`, in the act's own unit) and what lies beyond it (`beyond`): a rate past the customary 12 in a hundred is the chamber's.
+
+It is derived, in this order, from the office's own `charge` (data a template or a scenario writes), then from the parts:
+
+- the chamber that decides the act: one that binds (not advisory) and holds the power (`chamberHolds`), the one that names it first; failing one, the sovereign
+  chamber of the constitution; failing that, nobody but the head of state;
+- the head of state (`Constitution.rulerOfficeId`) holds every act alone where no chamber holds it (a king: his council gives its opinion and he need not obey it, which is H3);
+  in a republic he stands **with his colleague, within custom** for the rate (12 in a hundred), the customs (15), loans (3 months of what the power takes in), bread (2 months),
+  the levy and appointments, and **by the body** for war, peace, pacts, embargoes and the coin. A man set above every chamber (a dictator: `capital_set` among his orders) holds all alone;
+- an officer's charge from the levers of the department he staffs (or, failing one, what his name says, `leversNamedBy`): the tax roll, the customs or the credit make a
+  treasurer, who sets the rate (12) and the customs (10) and borrows (1 month) with his colleagues; grain or markets, bread (1 month); the foreign letters or the customs,
+  pacts and embargoes (by the body); the levy or the supply (or `force_create` among his orders), the levy;
+- spending: from the office's treasury reach. `spend_without_vote` is an allowance (two months of takings for a head, one for an officer, in a year, for each office, counted in
+  `ActMark`); `propose_spending` alone is by the body; a department whose `gates` name a chamber for `spend` is by that chamber whatever else it has (the Treasury of Saturn paid out
+  nothing the Senate had not voted);
+- a seat in a council or a college and a priesthood hold no charge (the head of a temple state does); the tribune holds none, and **may stop** the levy, the purse, the tribute, the
+  coin, bread and appointments (`Competence.mayStop`).
+
+An abolished office is forbidden everything ("has been abolished"). Competence is read again from the parts each time (cached for a world object), so a reform, a coup or a vacated
+seat changes it at once (`a-reform-changes-who-may-act.test.ts`).
+
+**Chamber powers.** `ChamberPower` gains `coinage`, `treaties`, `finance` and `levy`. A chamber written before them (a list naming none of the four) holds each with the older power it
+was part of (`POWER_IMPLIED_BY`: coinage and finance with taxes, treaties and levy with war), so Rome's Senate keeps the mint, the purse and the treaties; naming any of the four takes a
+chamber out of the old bundle. `QuestionConcern` gains `coinage` (the blocs lean by what each wants of the silver in the coin: creditors and merchants against, debtors and the crown for); a
+question's concerns map to the powers it needs (peace to treaties, the levy to levy, spending to finance, coinage to coinage: `senate.ts` `powersNeeded`), so a body that lacks the power
+counts only an opinion (`isAdvisoryFor`).
+
+### The gate
+
+`apply-deltas.ts` asks `competenceGate` (after the authority check, before `nobodyListens`) about: `tax_policy_set` (rate and customs scopes), `coinage_debase`, `loan_open` (the state
+borrowing), `money_transfer` from a power's chest (and `service_contract_open`, a hiring paid from it: the advance and the pay for the term), `public_benefaction` of kind dole (bread), and `agreement_open` / `agreement_close` of the war, peace, pact and embargo kinds. Only for an
+act of the actor's own power, by a man who holds an office of it, in a power with a constitution on record. Not for what a vote has carried (`sanctionedDeltas`: the fiscal officers' own
+decisions are sanctioned the same way, and are only recorded), nor the world's own business (`actsForTheWorld` apart from the order), nor a treaty an accepted letter made.
+
+- **Alone** or **with a colleague**: done, and the office is the authority where no grant said so. A colleague of equal power who has interceded (an `intercession` arrangement, as a
+  tribune makes) stops it, and so does one who thinks ill of him (`RIVAL_OPINION`).
+- **Beyond his figure** or **by the body**: laid before the chamber that holds the power, as a war is (`layBeforeTheChamber` for treaties, a motion built here for a rate, a coin, a
+  loan, a draw or bread), and done the day it carries (the order's held act, `sanctionedDeltas`). Only the player's order is laid for him; a man's own word is told that it is the
+  chamber's, and nothing is opened.
+- **Forbidden**: where a grant had said he might, refused; where it had not, the engine answers as it always did.
+- **One decider to a season** (`ACT_WINDOW_DAYS`: the rate 90 days, the customs and the coin 60, a loan, bread and a pact 30): after one has settled an act, another man of equal or lower
+  office may not settle it again until the season is out; a higher office may. What the chamber has decreed no magistrate alters in the season.
+- Tribunes: `whose-to-give.ts` lets an intercession name the tribute and the coin (`tax`), loans and bread (`spending`), and lets a colleague, not only a tribune, make one.
+
+Trade letters go to `chargeHolders(..., "pacts")`: the man whose office keeps the customs or its letters, else the head of state (`trade-desk.ts`); the verdict is his.
+
+### The five charges
+
+Levers `customs`, `mint`, `markets`, `credit`, `census` (`ECONOMIC_LEVERS`; the portfolio a ruler is counted as holding for his workload is still the twelve, so nothing is added to a
+consul's load). Each is a multiplier near one, `1 + skillShare(skill, reach)`, by the skill of the **department's** men (`chargeSkill`) and **exactly one where nobody has been given the
+charge**, so a world that sets nobody to them runs as it did.
+
+| Charge | Reach | What moves | Where |
+|---|---|---|---|
+| customs | 0.2 | the share of the duty on the month's trade that reaches the chest (smuggling and lax collectors lose up to a fifth) | `customs.ts` |
+| mint | 0.15 / 0.3 | the gain from a coin struck lighter (and the cost of striking it better, divided by it); how much of a coin's war, arrears and high-price name sticks to its premium | `apply-deltas.ts` `coinage_debase`, `coinage.ts` |
+| markets | 0.2 | how far a hub's price strays from the base price; and at a famine price (grain at 140% or more) up to 6 in a hundred of the shortfall a month is brought out of hoards, for a skill above fifty | `markets.ts` |
+| credit | 0.15 | the interest a state is asked on a loan | `apply-deltas.ts` `loan_open` |
+| census | 0.08 | what the tax roll can raise of the land (`bearable`) and the men a tribute of men counts | `material/taxation.ts` |
+
+### Spending and the year's allowance
+
+`spendingAllowance(world, officeId)`: months of `monthlyTakings` (the income sources paying into the power's chests, at their collection rate) times the office's `within`, less what the office
+has drawn in the year (360 days from the first draw). A consul of Rome: 2 months (about a million drachmae). A quaestor: none (the Senate's gate). Past it, the draw is laid before the Senate.
+
+### How it reads
+
+(The opening of the Punic world: `scripts/_probe-competence.mts`.)
+
+- **Rome.** The consul (two, collegial): the rate within 12 in a hundred, the customs within 15, loans within 3 months, bread within 2 and the levy, with his colleague; the coin, pacts, embargoes,
+  war and peace by the Senate; appointments with his colleague; spending with his colleague within 2 months, then the Senate. The quaestor (four): the rate within 12 and the customs within 10 with
+  his colleagues, loans within a month; the coin forbidden; every draw by the Senate. The aedile: bread within a month; spending by the Senate. The tribune: nothing of the twelve his to do, and the
+  levy, the purse, the tribute, the coin and bread his to stop. The Senate holds taxes, war and laws by its list, and the mint, the purse, the treaties and the levy by the old bundle. The dictator
+  holds all alone.
+- **Carthage.** The Council of Elders holds taxes and war (and so the coin, the purse, the treaties and the levy by the old bundle); the officers of the accounts (three) read as treasurers (rate, customs,
+  loans, with colleagues; the coin forbidden; draws by the council's gate); the suffetes (two) hold the levy with a colleague and draw by the council; the Hundred and Four hold a seat in a court and no
+  charge of the purse. **A wart in the data:** the scenario names the commander in Sicily (`carthaginian-strategos`) as Carthage's head of state, so the head's competence (the rate and customs within custom, the
+  rest by the Council) reads as his, and the suffetes read as ordinary magistrates. H1 should write Carthage's charges as data (the suffetes as the head; the commander the levy and the field).
+- **A king** (Hiero, any monarchy whose chambers are advisory): everything alone, no figure to stay within.
+
+### Not in H0
+
+The per-culture tables above ("Proposed competence tables"), Rome's and Carthage's charges as scenario data, seeded departments for the five new charges, the officers acting inside their competence
+(they are sanctioned today and only recorded; `mayAct` is ready for them), the council's disagreement costing a king legitimacy, accounts at the close of office, and the office view. The plan's `FiscalMark`
+is `ActMark` here (`world/act-marks.ts`): a row for each power and act, replaced by the next decision, at most 900 in a world.
+
+### Cost
+
+`competenceOf` for every one of the 1,074 offices of the Punic world: 17 ms cold (15 us an office, twelve acts each, the world indexed once), 0.03 us warm. `mayAct` on a world it has not seen: about 170 us
+(the index). The gate pays that once, and only on the twelve acts. A month of the world has no new pass.
+
+### Tests
+
+`a-treasurer-decides`, `a-consul-cannot-draw-the-treasury-alone`, `two-consuls-do-not-both-tax`, `a-tribune-stops-a-levy`, `the-senate-decrees-the-tribute`, `a-reform-changes-who-may-act`,
+`the-new-levers-bite`, `no-modern-words` (sim) and `competence.test.ts` (shared); the kit is `competence-test-kit.ts`.
