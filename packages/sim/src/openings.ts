@@ -62,14 +62,17 @@ export function raiseOpenings(input: RaiseOpeningsInput): WorldState {
   const player = input.playerCharacterId ?? null;
   const season = Math.floor(toDay / OPENING_DAYS);
   const openings: Opening[] = [];
+  // The offices do not change within a pass: listed once, not for every power.
+  const everyOffice = allOffices(world, government.offices);
 
   for (const polity of world.map.polities) {
     const people = world.characters.filter((character) => character.alive && character.polityId === polity.id && character.id !== player);
     if (people.length === 0) continue;
     const ruler = rulerOf(world, polity.id, government);
     const office = rulerOfficeOf(world, polity.id, government);
-    const polityOffices = new Set(allOffices(world, government.offices).filter((candidate) => candidate.polityId === polity.id).map((candidate) => candidate.id));
-    const seated = (character: Character): boolean => world.material.officeSeats.some((seat) => seat.holderCharacterId === character.id && seat.status === "held" && polityOffices.has(seat.officeId));
+    const polityOffices = new Set(everyOffice.filter((candidate) => candidate.polityId === polity.id).map((candidate) => candidate.id));
+    const holders = new Set(world.material.officeSeats.filter((seat) => seat.status === "held" && polityOffices.has(seat.officeId)).map((seat) => seat.holderCharacterId));
+    const seated = (character: Character): boolean => holders.has(character.id);
     const generals = people
       .map((character) => ({ character, men: world.material.forces.filter((force) => force.polityId === polity.id && force.outlaw !== true && force.commanderCharacterId === character.id).reduce((sum, force) => sum + force.personnel.reduce((inner, category) => inner + category.fit, 0), 0) }))
       .filter((entry) => entry.men >= 1_000)
@@ -146,7 +149,7 @@ export function raiseOpenings(input: RaiseOpeningsInput): WorldState {
     if (people.length === 0) continue;
     const reforms = reformOpenings(world, polity.id, toDay);
     if (reforms.length === 0) continue;
-    const polityOffices = new Set(allOffices(world, government.offices).filter((candidate) => candidate.polityId === polity.id).map((candidate) => candidate.id));
+    const polityOffices = new Set(everyOffice.filter((candidate) => candidate.polityId === polity.id).map((candidate) => candidate.id));
     const councillor = people.filter((character) => world.material.officeSeats.some((seat) => seat.holderCharacterId === character.id && seat.status === "held" && polityOffices.has(seat.officeId))).sort(byStanding)[0];
     const general = world.material.forces
       .filter((force) => force.polityId === polity.id && force.outlaw !== true)

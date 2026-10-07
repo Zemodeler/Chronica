@@ -1,3 +1,4 @@
+import { forgetSettledPressures } from "./forget-the-settled";
 import {
   SOLDIER_PAY_PER_THOUSAND,
   WARSHIP_PAY_PER_HULL,
@@ -1782,7 +1783,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
   // country they stand in at war is theirs to hold (`occupation.ts`).
   const occupied = occupyOpenCountry(aged, input.toDay);
   return {
-    world: reconcileCapitals(occupied.world),
+    world: forgetSettledPressures(reconcileCapitals(occupied.world), input.toDay),
     factProposals: [...facts, ...plans.facts, ...plots.facts, ...lives.facts, ...contracts.facts, ...thrones.facts, ...elections.facts, ...votes.facts, ...tenure.facts, ...society.facts, ...kept.facts, ...appointed.facts, ...occupied.facts],
     notes,
     died: [...plots.died, ...lives.died],

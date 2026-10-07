@@ -20,6 +20,9 @@ import {
 import { DEFAULT_BUDGET, applyDeltas, auditMoney, combineAudits, emptyAudit, auditInWords, createIdFactory, runSimulationBurst, type SimModelPort, type MoneyAudit } from "@chronica/sim";
 import { polityMarkets } from "../packages/sim/src/market-summary";
 
+import { Session } from "node:inspector/promises";
+import { writeFileSync } from "node:fs";
+
 const args = process.argv.slice(2);
 const years = Number(args.find((a) => /^\d+$/.test(a)) ?? "10");
 const war = args.includes("--war");
@@ -79,6 +82,7 @@ const started = Date.now();
 line(`START ${formatWorldDate(world.instant, definition.clock)}${war ? " (war variant)" : ""}`, snapshot());
 const context = () => ({ now: world.instant, actorRef: { kind: "character" as const, id: "gaius-genucius" }, actsForTheWorld: true, offices: definition.government.offices, warfare: definition.warfare, terrains: definition.terrains ?? definition.map.terrains, ids: idFor, gameId: "sanity" });
 let target: { id: string; name: string } | null = null;
+let profiler: Session | null = null;
 const monthsToRun = Number((args.find((a) => a.startsWith("--months=")) ?? `--months=${years * 12}`).split("=")[1]);
 for (let month = 0; month < monthsToRun; month += 1) {
   if (war && month === 6) {
@@ -91,8 +95,12 @@ for (let month = 0; month < monthsToRun; month += 1) {
     world = sacked.world;
     console.log(`\n[month 6] war opened; ${target.id} sacked (${sacked.taken} taken)`);
   }
+  // `--profile-from=N`: a cpu profile (sanity.cpuprofile) of the months from N on, when the slow part of a long run is what is wanted.
+  const profileFrom = Number((args.find((a) => a.startsWith("--profile-from=")) ?? "--profile-from=-1").split("=")[1]);
+  if (month === profileFrom) { profiler = new Session(); profiler.connect(); await profiler.post("Profiler.enable"); await profiler.post("Profiler.start"); }
   const before = world;
   const monthStarted = Date.now();
+  const cpuStarted = process.cpuUsage();
   const result = await runSimulationBurst({
     world, clock: definition.clock, offices: definition.government.offices, successionRules: definition.government.successionRules, warfare: definition.warfare,
     terrains: definition.map.terrains, life: definition.life, wealth: definition.wealth, historicalPressures: definition.historicalPressures,
@@ -100,7 +108,11 @@ for (let month = 0; month < monthsToRun; month += 1) {
     orderText: null, spanDays: 30, knownFacts: [], queue: [], port: silent, narratorSeeds: [], budget: DEFAULT_BUDGET,
   });
   world = result.world;
-  if (args.includes("--timing")) console.log(`  month ${month + 1}: ${((Date.now() - monthStarted) / 1000).toFixed(1)}s, ${result.newFacts.length} facts, ${world.material.transactions.length} txns`);
+  if (args.includes("--timing")) {
+    // Wall time swings with whatever else the machine is doing; the process's own cpu time and heap say what the month cost.
+    const cpu = process.cpuUsage(cpuStarted);
+    console.log(`  month ${month + 1}: ${((Date.now() - monthStarted) / 1000).toFixed(1)}s wall, ${((cpu.user + cpu.system) / 1e6).toFixed(1)}s cpu, heap ${(process.memoryUsage().heapUsed / 1e6).toFixed(0)}M, ${result.newFacts.length} facts, ${world.material.transactions.length} txns`);
+  }
   total = combineAudits(total, auditMoney(before, world));
   const known = new Set(before.material.transactions.map((t) => t.id));
   for (const id of chosen) { income.set(id, income.get(id) ?? 0); customs.set(id, customs.get(id) ?? 0); }
@@ -124,11 +136,16 @@ for (let month = 0; month < monthsToRun; month += 1) {
     for (const id of chosen) { income.set(id, 0); customs.set(id, 0); }
     if (args.includes("--sizes")) {
       // Where the world is growing: the biggest parts of it by serialised size, to find what a slow month is carrying.
-      const parts = Object.entries(world as unknown as Record<string, unknown>).map(([key, value]) => [key, JSON.stringify(value)?.length ?? 0] as const).sort((a, b) => b[1] - a[1]).slice(0, 6);
-      const material = Object.entries(world.material as unknown as Record<string, unknown>).map(([key, value]) => [`material.${key}`, JSON.stringify(value)?.length ?? 0] as const).sort((a, b) => b[1] - a[1]).slice(0, 5);
+      const parts = Object.entries(world as unknown as Record<string, unknown>).map(([key, value]) => [key, JSON.stringify(value)?.length ?? 0] as const).sort((a, b) => b[1] - a[1]).slice(0, 14);
+      const material = Object.entries(world.material as unknown as Record<string, unknown>).map(([key, value]) => [`material.${key}`, JSON.stringify(value)?.length ?? 0] as const).sort((a, b) => b[1] - a[1]).slice(0, 10);
       console.log(`  sizes: ${[...parts, ...material].map(([key, size]) => `${key} ${(size / 1_000).toFixed(0)}k`).join(", ")}`);
     }
   }
+}
+if (profiler !== null) {
+  const { profile } = await (profiler as Session).post("Profiler.stop");
+  writeFileSync("sanity.cpuprofile", JSON.stringify(profile));
+  console.log("cpu profile written to sanity.cpuprofile");
 }
 console.log("\nMONEY AUDIT over the run");
 console.log(auditInWords(total));

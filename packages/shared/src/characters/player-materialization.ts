@@ -206,6 +206,18 @@ export function labelNamesOffice(text: string, officeLabel: string): boolean {
  * on "aedile" alone, and is the plebs' own. Null where it names none.
  */
 export function officeNamedIn<T extends Pick<Office, "label">>(text: string, offices: readonly T[]): T | null {
+  // The same few hundred labels are put to the same list of offices again and again within a pass: kept per list, which goes with it.
+  let memo = NAMED_IN.get(offices);
+  if (memo === undefined) { memo = new Map(); NAMED_IN.set(offices, memo); }
+  if (memo.has(text)) return memo.get(text) as T | null;
+  const found = officeNamedInUncached(text, offices);
+  memo.set(text, found);
+  return found;
+}
+
+const NAMED_IN = new WeakMap<readonly unknown[], Map<string, unknown>>();
+
+function officeNamedInUncached<T extends Pick<Office, "label">>(text: string, offices: readonly T[]): T | null {
   let best: T | null = null;
   let bestSize = 0;
   for (const office of offices) {
