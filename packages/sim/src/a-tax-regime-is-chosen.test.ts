@@ -6,6 +6,8 @@ import {
   WorldDeltaSchema,
   WorldStateSchema,
   collectionEfficiency,
+  ensureMarkets,
+  marketGeography,
   ensureProvinceMaterial,
   polityTaxReadings,
   stepsFromCapital,
@@ -68,14 +70,27 @@ describe("a tax regime is chosen", () => {
     expect(fair).toBeCloseTo(reading(base, "rome", LATIUM).monthly, 6);
   });
 
-  it("takes customs from a harbour and a town, and next to nothing from a valley without either", () => {
-    const base = opening();
-    const syracuse = base.map.provinces.find((province) => province.id === SYRACUSE_PROVINCE)!;
+  it("takes customs from a hub in proportion to the trade that crosses it, and next to nothing from a valley without any", () => {
+    // Phase D: customs are read off what the hub's market really trades (its last month's flows), not off its harbour and its size.
+    const quiet = ensureMarkets(opening());
+    const syracuse = quiet.map.provinces.find((province) => province.id === SYRACUSE_PROVINCE)!;
     expect(syracuse.settlements.some((settlement) => settlement.kind === "port")).toBe(true);
-    const valley = base.map.provinces.find((province) => province.controllerPolityId === "syracuse" && province.settlements.length === 0)!;
-    const yields = (id: string, regime: "land_levy" | "customs"): number => reading(withRow(base, id, { taxRegime: regime, taxRateBps: 1_000 }), "syracuse", id).monthly;
-    expect(yields(SYRACUSE_PROVINCE, "customs")).toBeGreaterThan(yields(SYRACUSE_PROVINCE, "land_levy") * 1.2);
-    expect(yields(valley.id, "customs")).toBeLessThan(yields(valley.id, "land_levy") * 0.5);
+    const hubOfSyracuse = marketGeography(quiet).hubOf.get(SYRACUSE_PROVINCE)!;
+    expect(hubOfSyracuse).toBe(SYRACUSE_PROVINCE);
+    // The same hub with as much crossing it in a month as its country uses.
+    const busy: WorldState = {
+      ...quiet,
+      economy: {
+        ...quiet.economy!,
+        markets: quiet.economy!.markets.map((hub) => (hub.hubId !== hubOfSyracuse ? hub : { ...hub, goods: hub.goods.map((good) => ({ ...good, inflow: Math.round(good.demand / 2), outflow: Math.round(good.demand / 2) })) })),
+      },
+    };
+    const valley = quiet.map.provinces.find((province) => province.controllerPolityId === "syracuse" && province.settlements.length === 0)!;
+    const yields = (world: WorldState, id: string, regime: "land_levy" | "customs"): number => reading(withRow(world, id, { taxRegime: regime, taxRateBps: 1_000 }), "syracuse", id).monthly;
+    // Where nothing crosses it a harbour bears only its quays and stalls; where goods pass it bears more than the land does.
+    expect(yields(quiet, SYRACUSE_PROVINCE, "customs")).toBeLessThan(yields(quiet, SYRACUSE_PROVINCE, "land_levy") * 0.25);
+    expect(yields(busy, SYRACUSE_PROVINCE, "customs")).toBeGreaterThan(yields(busy, SYRACUSE_PROVINCE, "land_levy") * 1.2);
+    expect(yields(busy, valley.id, "customs")).toBeLessThan(yields(busy, valley.id, "land_levy") * 0.5);
   });
 
   it("asks men of an ally and no money: a tribute of manpower", () => {

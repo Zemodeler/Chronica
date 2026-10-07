@@ -31,6 +31,7 @@ import { adjacentTo } from "@chronica/shared";
 // (`adjacentTo` is indexed once per map: a province's neighbours are a lookup, not a search.)
 import { marketNews } from "./market-summary";
 import { closeBook, cutOffHubs, marketMonth, monthsToHarvest, openBook, stockTheHarvest } from "./markets";
+import { tradeMonth } from "./trade-flows";
 
 /**
  * The land, reckoned by the calendar (VISION §6, §7).
@@ -361,10 +362,17 @@ export function reviewTheLand(input: LandInput): LandResult {
     const book = openBook(world, monthsToHarvest(toDay, input.clock, HARVEST_MONTH));
     const cut = cutOffHubs(world, geography.hubs);
     const monthOne = (last ?? toDay) + REVIEW_DAYS;
+    const customsEarned = new Map<string, number>();
+    let lanes = new Map<string, number>();
     for (let month = 0; month < months; month += 1) {
       // What each hub's country makes and uses, a siege's requisition and the
       // price that results, and so how fed each province is; people follow.
-      marketMonth(book, { world, rows, ids, day: monthOne + month * REVIEW_DAYS, clock: input.clock, harvestMonth: HARVEST_MONTH, cut, targets });
+      const day = monthOne + month * REVIEW_DAYS;
+      marketMonth(book, { world, rows, ids, day, clock: input.clock, harvestMonth: HARVEST_MONTH, cut, targets });
+      // Then goods move between neighbouring hubs, from the cheap market to the dear one, as far as carrying them pays.
+      const flows = tradeMonth(book, { world, rows, cut, toHarvest: monthsToHarvest(day, input.clock, HARVEST_MONTH) });
+      for (const [polityId, amount] of flows.duties) customsEarned.set(polityId, (customsEarned.get(polityId) ?? 0) + amount);
+      lanes = flows.lanes;
       for (const id of ids) {
         const standing = standings.get(id);
         if (standing === undefined) continue;
@@ -414,6 +422,7 @@ export function reviewTheLand(input: LandInput): LandResult {
       }
     }
     world = closeBook(world, book);
+    world = withTradeBooks(world, customsEarned, lanes);
     world = {
       ...world,
       material: {
@@ -517,6 +526,24 @@ export function reviewTheLand(input: LandInput): LandResult {
     }
   }
   return { world: { ...world, economy: { ...economyOf(world), lastReviewStep, lastHarvestYear, marketNews: marketNewsMemory } }, facts, months };
+}
+
+/**
+ * What a pass of trade earned and moved, written into memory: each power's
+ * customs added to what is due its treasury (the tick pays it), and the
+ * last month's busiest lanes between powers by value, largest first.
+ */
+function withTradeBooks(world: WorldState, customsEarned: ReadonlyMap<string, number>, lanes: ReadonlyMap<string, number>): WorldState {
+  const memory = economyOf(world);
+  const due = new Map(memory.customsDue.map((entry) => [entry.polityId, entry.amount]));
+  for (const [polityId, amount] of customsEarned) due.set(polityId, (due.get(polityId) ?? 0) + Math.round(amount));
+  const customsDue = [...due.entries()].filter(([, amount]) => amount > 0).sort((a, b) => a[0].localeCompare(b[0])).map(([polityId, amount]) => ({ polityId, amount })).slice(0, 200);
+  const tradeLanes = [...lanes.entries()]
+    .map(([key, value]) => ({ fromPolityId: key.split(">")[0]!, toPolityId: key.split(">")[1]!, value: Math.round(value) }))
+    .filter((lane) => lane.value > 0)
+    .sort((a, b) => b.value - a.value || a.fromPolityId.localeCompare(b.fromPolityId) || a.toPolityId.localeCompare(b.toPolityId))
+    .slice(0, 60);
+  return { ...world, economy: { ...memory, customsDue, tradeLanes } };
 }
 
 /** The provinces each power holds that war has scarred past the line at which they are laid waste, by id. */

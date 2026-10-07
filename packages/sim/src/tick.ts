@@ -80,6 +80,8 @@ import { lapseAilments } from "./ailments";
 import { reviewPowers } from "./polity-end";
 import { settleUnionOffers } from "./submission";
 import { betweenHarvests, reviewTheLand } from "./economy";
+import { payCustoms } from "./customs";
+import { routeOpenBps } from "./trade-flows";
 import { endObligationsOfEndedAgreements, keepTreaties } from "./treaties";
 import { keepPromises } from "./promises";
 import { workOnTreatyDuties } from "./treaty-duties";
@@ -1634,7 +1636,9 @@ export function runDeterministicTick(given: TickInput): TickResult {
   // The land reckoned for the month and the year; what treaties and debts
   // make happen; and misery and ambition that turn to risings and civil war --
   // before powers are reviewed, so a province full of yearning rises today.
-  const land = reviewTheLand({ world: met.world, toDay: input.toDay, clock: input.clock, targets: () => provinceTargetsFrom(met.world) });
+  const reckoned = reviewTheLand({ world: met.world, toDay: input.toDay, clock: input.clock, targets: () => provinceTargetsFrom(met.world) });
+  // What the month's trade earned each power in customs is paid into its treasury the day it is reckoned.
+  const land = { ...reckoned, world: payCustoms(reckoned.world, input.toDay, input.ids) };
   facts.push(...land.facts);
   const playerPolityId = input.playerCharacterId == null ? null : land.world.characters.find((character) => character.id === input.playerCharacterId)?.polityId ?? null;
   const treaties = keepTreaties({ world: land.world, toDay: input.toDay, ids: input.ids, playerPolityId });
@@ -1799,15 +1803,5 @@ export function structureSite(
   return { provinceId, settlementId, polityId };
 }
 
-/**
- * How open a trading end is, in basis points: whole in peace; a third when
- * its holder is at war; a fifth when it is occupied by somebody else or under
- * blockade. What a war abroad does to a merchant who never sees it.
- */
-export function routeOpenBps(world: WorldState, provinceId: string): number {
-  const province = world.map.provinces.find((candidate) => candidate.id === provinceId);
-  if (province === undefined || province.controllerPolityId === null) return 10_000;
-  const blockaded = world.blockades.some((blockade) => blockade.provinceId === provinceId && blockade.status === "active");
-  if (isOccupied(province) || blockaded) return 2_000;
-  return warsOf(world.polityAgreements, province.controllerPolityId).length > 0 ? 3_500 : 10_000;
-}
+// How open a trading end is: now with the trade flows, which read the same openness (`trade-flows.ts`).
+export { routeOpenBps };

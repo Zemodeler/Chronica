@@ -1,6 +1,7 @@
 import type { WorldState } from "./world-state";
 import { z } from "zod";
 import { ElapsedStepSchema, EntityIdSchema, VisibilitySchema } from "../material-state";
+import { GoodIdSchema, type GoodId } from "./good-ids";
 
 /**
  * What two powers have standing between them (VISION §3, §27).
@@ -70,6 +71,18 @@ export const PolityAgreementKindSchema = z.enum([
    * what a revolt is, and it ends the foedus in the same act.
    */
   "foedus",
+  /**
+   * One power forbids trade with another: all of it, or the goods listed in
+   * its `trade` terms.
+   *
+   * Ordered like tribute, and for a different reason: it is one power's act,
+   * not a bargain, so the order says who laid it. The route is shut both ways
+   * (a merchant of the other power cannot sell in the embargoer's markets, and
+   * the embargoer's cannot buy in the other's), because a one-way embargo on
+   * trade is only a tariff. It stands until the embargoer closes it
+   * (`agreement_close`) or its term runs out, and it does not need a war.
+   */
+  "embargo",
   // Named, so the orchestrator and cognition schemas write the list once and
   // refer to it, rather than spelling it out at each of its six uses.
 ]).meta({ id: "AgreementKind" });
@@ -90,6 +103,7 @@ export const AGREEMENT_KIND_IN_WORDS: Record<PolityAgreementKind, string> = {
   protectorate: "protectorate",
   military_access: "grant of passage for armies",
   foedus: "foedus",
+  embargo: "embargo",
 };
 
 /**
@@ -100,17 +114,38 @@ export const AGREEMENT_KIND_IN_WORDS: Record<PolityAgreementKind, string> = {
  * must come to your aid" expects exactly what the rule makes happen.
  */
 export const AGREEMENT_KIND_EXPLAINED: Record<PolityAgreementKind, string> = {
-  war: "The two powers are at war. Their armies may fight, besiege and take each other's ground, and every ally bound to either by foedus is at war too. A war ends any peace, truce, alliance, pact, tribute or foedus between them, and whatever it paid stops. Breaking a peace, truce, pact or alliance to make it costs the breaker at home and in the trust of every power that deals with it, unless it had a grievance to make war over.",
+  war: "The two powers are at war. Their armies may fight, besiege and take each other's ground, and every ally bound to either by foedus is at war too. A war ends any peace, truce, alliance, pact of non-aggression, tribute or foedus between them, and whatever it paid stops; a trade pact is only suspended, and comes back with the peace. Breaking a peace, truce, pact or alliance to make it costs the breaker at home and in the trust of every power that deals with it, unless it had a grievance to make war over.",
   truce: "The fighting stops until a set day. On that day the truce ends by itself, and the war may begin again.",
   peace: "The war between them is over, on the terms written. An indemnity in it is paid by the period; unpaid three times, the treaty is broken and the power owed has cause for war. It lasts until one of them breaks it, and breaking it is a new war.",
   alliance: "Equals who have promised to stand by each other. Their armies may cross each other's land without leave. When one is attacked it calls on the other, who goes to war or refuses -- and a refusal costs it the ally's trust. Neither is called to a war it began.",
   non_aggression: "Each has promised not to attack the other. It promises nothing more.",
   tributary: "One power pays the other a tenth of what its lands yield each month, unless the terms set another sum. It keeps its own government. Tribute unpaid three times breaks the treaty and gives the power owed cause for war.",
-  trade_pact: "Their merchants may trade with each other on the terms written.",
+  trade_pact: "Their merchants may trade with each other on the terms written: a cap on the customs either may lay on the other's goods, goods let in free, and perhaps the lowest rate either gives anyone. A war between them suspends it (nothing crosses the line while the armies are out), and it resumes by itself on the day the war ends; it is not ended. An embargo laid by either on the other overrides it.",
   protectorate: "One power keeps its own government and laws, and another answers for it abroad. The protector's armies may stand on its ground without leave.",
   military_access: "Leave for one power's armies to march across the other's land. Without it, an army that crosses the border is trespassing, and the host may answer for it.",
   foedus: "An ally bound to a leading power, as Rome's Italian allies are. It keeps its own magistrates and laws and pays nothing, but fights its leader's wars and makes no war, peace or treaty of its own. When its leader goes to war it sends a contingent of its own men, under its own commander.",
+  embargo: "One power forbids trade with the other: every good, or only those named. No merchant carries them between the two powers' markets in either direction until the embargoer closes it or its term runs out. Laying one on a power it holds a trade pact with, without ending the pact first, breaks the pact and costs trust.",
 };
+
+/**
+ * What a trade pact or an embargo says besides its words (`terms`), in a form
+ * the markets can read. All optional, so a pact written in a letter with only
+ * words is a pact with no special terms: it caps nothing, and its partners
+ * trade at each power's ordinary customs.
+ */
+export const TradeTermsSchema = z
+  .object({
+    /** The most customs either power may lay on the other's goods (basis points of their value), or no cap. */
+    tariffCapBps: z.number().int().min(0).max(5_000).nullable().default(null),
+    /** Each pays the other no more than the lowest rate either has agreed with any other power. */
+    mostFavoured: z.boolean().default(false),
+    /** Goods that enter free of customs between them. */
+    exempt: z.array(GoodIdSchema).max(6).default([]),
+    /** For an embargo: the goods it forbids. Empty is every good. */
+    goods: z.array(GoodIdSchema).max(6).default([]),
+  })
+  .strict();
+export type TradeTerms = z.infer<typeof TradeTermsSchema>;
 
 export const PolityAgreementSchema = z
   .object({
@@ -125,6 +160,8 @@ export const PolityAgreementSchema = z
     otherPolityId: EntityIdSchema,
     /** What was agreed, or what the war is over, in plain language. */
     terms: z.string().trim().min(1).max(600),
+    /** For a trade pact or an embargo: what the markets read of it (`tradeTermsBetween`). */
+    trade: TradeTermsSchema.optional(),
     sinceStep: ElapsedStepSchema,
     /** A dated truce ends by itself; everything else runs until somebody ends it. */
     untilStep: ElapsedStepSchema.nullable().default(null),
@@ -264,7 +301,15 @@ export function mayEnterWithoutLeave(
     || (agreement.kind === "military_access" && agreement.polityId === moverPolityId));
 }
 
-/** What a war ends between its two powers: nobody is at peace and at war at once. */
+/**
+ * What a war ends between its two powers: nobody is at peace and at war at once.
+ *
+ * A trade pact is not here, and an embargo is not either, on purpose: war
+ * *suspends* trade between the powers whatever pact stands (`tradeTermsBetween`
+ * reads a war as a closed border), and the pact is there again the day the war
+ * ends, as the merchants' old arrangements were after a real one. Ending it
+ * would make every peace need its trade clause written afresh.
+ */
 export const ENDED_BY_WAR: readonly PolityAgreementKind[] = ["peace", "truce", "alliance", "non_aggression", "foedus", "tributary"];
 
 /**
@@ -335,4 +380,75 @@ export function groundToRetake(world: Pick<WorldState, "elapsedStep" | "map" | "
     if (daysAgo > LOST_GROUND_DAYS || !atWar(world.polityAgreements, polityId, province.controllerPolityId)) return [];
     return [{ provinceId: province.id, name: province.name, holderId: province.controllerPolityId, daysAgo }];
   });
+}
+
+// ── Trade between two powers ───────────────────────────────────────────────
+
+/** What stands between two powers' markets today: whether goods may cross at all, which, and on what customs. */
+export interface TradeBetween {
+  /** "war": nothing crosses, whatever pact stands; "embargo": nothing crosses; null: some goods may. */
+  readonly closed: "war" | "embargo" | null;
+  /** The goods an embargo forbids where it names some (empty: none named). */
+  readonly forbidden: readonly GoodId[];
+  /** The power that laid the embargo, if one stands. */
+  readonly embargoedBy: string | null;
+  /** The pact that is in force, if one is; null while a war holds it suspended. */
+  readonly pact: { readonly id: string; readonly tariffCapBps: number | null; readonly mostFavoured: boolean; readonly exempt: readonly GoodId[] } | null;
+  /** A pact stands but war has suspended it: it resumes with the peace. */
+  readonly pactSuspended: boolean;
+  /** Both a pact and an embargo stand: the embargoer has breached the pact. */
+  readonly pactBreached: boolean;
+}
+
+/**
+ * The terms two powers trade on, from the agreements that stand between their
+ * sides (a power and the leader it follows by foedus are one side).
+ *
+ * War closes the border; an embargo (all goods, or the listed ones) closes it
+ * for what it names; a trade pact, where none of those stands, gives its
+ * customs terms. A pact held by a war is `pactSuspended`, nothing more: the
+ * record is untouched, so the day the war ends the same terms come back.
+ */
+export function tradeTermsBetween(world: Pick<WorldState, "polityAgreements">, a: string, b: string): TradeBetween {
+  const standing = agreementsBetweenSides(world.polityAgreements, a, b);
+  const pact = standing.find((agreement) => agreement.kind === "trade_pact");
+  const embargoes = standing.filter((agreement) => agreement.kind === "embargo");
+  const war = standing.some((agreement) => agreement.kind === "war");
+  const wholeEmbargo = embargoes.some((agreement) => (agreement.trade?.goods ?? []).length === 0);
+  const forbidden = wholeEmbargo ? [] : [...new Set(embargoes.flatMap((agreement) => agreement.trade?.goods ?? []))];
+  let live: TradeBetween["pact"] = null;
+  if (pact !== undefined && !war) {
+    let cap = pact.trade?.tariffCapBps ?? null;
+    if (pact.trade?.mostFavoured === true) {
+      // The best terms either gives anybody: the lowest cap in any pact of either.
+      for (const other of world.polityAgreements) {
+        if (other.status !== "active" || other.kind !== "trade_pact" || other.trade?.tariffCapBps == null) continue;
+        if (![a, b].some((id) => other.polityId === id || other.otherPolityId === id)) continue;
+        cap = cap === null ? other.trade.tariffCapBps : Math.min(cap, other.trade.tariffCapBps);
+      }
+    }
+    live = { id: pact.id, tariffCapBps: cap, mostFavoured: pact.trade?.mostFavoured ?? false, exempt: pact.trade?.exempt ?? [] };
+  }
+  return {
+    closed: war ? "war" : wholeEmbargo ? "embargo" : null,
+    forbidden,
+    embargoedBy: embargoes[0]?.polityId ?? null,
+    pact: live,
+    pactSuspended: pact !== undefined && war,
+    pactBreached: pact !== undefined && embargoes.length > 0,
+  };
+}
+
+/** Whether a good may cross between two powers on these terms. */
+export const mayTradeGood = (terms: TradeBetween, good: GoodId): boolean => terms.closed === null && !terms.forbidden.includes(good);
+
+/**
+ * The customs an importing power lays on a good that comes from another, in
+ * basis points of its value: its own rate, brought down by the pact (a cap,
+ * and nothing at all on the goods the pact lets in free).
+ */
+export function customsOn(terms: TradeBetween, ownRateBps: number, good: GoodId): number {
+  if (terms.pact === null) return ownRateBps;
+  if (terms.pact.exempt.includes(good)) return 0;
+  return terms.pact.tariffCapBps === null ? ownRateBps : Math.min(ownRateBps, terms.pact.tariffCapBps);
 }

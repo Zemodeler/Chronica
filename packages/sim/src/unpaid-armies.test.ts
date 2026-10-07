@@ -78,7 +78,9 @@ describe("an army whose treasury runs dry", () => {
 
   it("costs the Mamertines their men, having first cost them their morale", () => {
     const opened = opening();
-    const morale = runMonths(opened, 11);
+    // Month ten, not eleven (phase D): Messana sells grain across the strait to besieged Rhegium, so its own bread is dearer
+    // and the soldiery's pay, a third of it bread, dearer with it; the chest runs dry a month sooner and the men go a month sooner.
+    const morale = runMonths(opened, 10);
     const desertion = runMonths(opened, 18);
 
     // `arrearsMoralePeriods: 1`, `arrearsDesertionPeriods: 2` -- so spirits go

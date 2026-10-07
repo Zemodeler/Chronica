@@ -21,10 +21,12 @@ import { economyOf } from "../world/economy";
  *    distance, and is the least hated way of paying.
  *  - **land levy**: a fixed sum by the acre, whatever the year. Steady, which
  *    is why a treasury prefers it, and resented for the same reason.
- *  - **customs**: dues on what passes through the province's harbours and
- *    market. A port with a town yields; a hill-valley with no road to anywhere
- *    yields next to nothing. (Until trade flows are modelled the yield is read
- *    off harbour and size.)
+ *  - **customs**: dues on what passes through the province's hub market (a
+ *    portoria on goods that cross it, from within the power as from without,
+ *    paid out of the month's trade flows, `sim/trade-flows.ts`), and what the
+ *    province can bear on top is read off how much its hub really trades. A
+ *    hub on a busy sea lane yields; a hill-valley with no road to anywhere
+ *    yields next to nothing. It needs trade, and cuts of trade cut it.
  *  - **men**: a tribute of manpower owed by allies and subjects. No money, and
  *    the most resented of all, since the men do not come home.
  */
@@ -87,18 +89,22 @@ export function taxPolicyIndex(world: Pick<WorldState, "economy">): (province: P
  * port with a sizeable town is worth more than its land, an inland valley a
  * seventh of it. Men yields no money at all.
  */
-export function regimeFactor(regime: TaxRegime, row: Pick<ProvinceMaterial, "foodSecurityBps">, province: Pick<Province, "settlements">): number {
+export function regimeFactor(regime: TaxRegime, row: Pick<ProvinceMaterial, "foodSecurityBps">, _province: Pick<Province, "settlements">, trade?: number | undefined): number {
   switch (regime) {
     case "tithe": return Math.max(0.35, Math.min(1.3, row.foodSecurityBps / 8_000));
     case "land_levy": return 1;
-    case "customs": {
-      const port = province.settlements.some((settlement) => settlement.kind === "port");
-      const size = province.settlements.reduce((total, settlement) => total + settlement.size, 0);
-      return port ? 1.2 + Math.min(0.8, size / 25) : Math.min(0.5, 0.15 + size / 100);
-    }
+    // What a province bears by customs is what its hub's trade can bear: its quays and stalls
+    // (a fifth of the land) and the goods that pass, which are the market's own flows of the last month.
+    case "customs": return trade === undefined ? CUSTOMS_STALLS_FACTOR : CUSTOMS_STALLS_FACTOR + Math.min(CUSTOMS_TRADE_FACTOR_MAX, CUSTOMS_TRADE_FACTOR_PER_INTENSITY * trade);
     case "men": return 0;
   }
 }
+
+/** What the quays and stalls of a customs province bear, as a share of the land levy: the dues that do not need goods in transit. */
+export const CUSTOMS_STALLS_FACTOR = 0.15;
+/** And what the trade through a hub adds: this much for every whole month's use of the hub's country that crosses it in a month, up to the most. */
+export const CUSTOMS_TRADE_FACTOR_PER_INTENSITY = 2;
+export const CUSTOMS_TRADE_FACTOR_MAX = 1.6;
 
 /**
  * How much order a policy costs a province, as a downward shift in where it

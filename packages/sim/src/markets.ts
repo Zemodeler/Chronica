@@ -67,6 +67,9 @@ export interface HubBook {
   readonly target: number[];
   readonly demand: number[];
   readonly price: number[];
+  /** What trade brought in from other hubs and sent out to them last month, in units (`trade-flows.ts`). */
+  readonly inflow: number[];
+  readonly outflow: number[];
   /** What the hub's grain says a fed country's food security is, from the month's reckoning. */
   food: number;
 }
@@ -100,14 +103,18 @@ export function openBook(world: WorldState, toHarvest: number): Book {
     const target: number[] = [];
     const demand: number[] = [];
     const price: number[] = [];
+    const inflow: number[] = [];
+    const outflow: number[] = [];
     for (const spec of GOODS) {
       const found = entry.get(spec.id);
       stock.push(found?.stock ?? 0);
       target.push(found?.target ?? 0);
       demand.push(found?.demand ?? 0);
       price.push(found?.priceBps ?? 10_000);
+      inflow.push(found?.inflow ?? 0);
+      outflow.push(found?.outflow ?? 0);
     }
-    book.set(id, { stock, target, demand, price, food: 8_000 });
+    book.set(id, { stock, target, demand, price, inflow, outflow, food: 8_000 });
   }
   return book;
 }
@@ -122,6 +129,8 @@ export function closeBook(world: WorldState, book: Book): WorldState {
       target: Math.max(0, Math.round(hub.target[index]!)),
       demand: Math.max(0, Math.round(hub.demand[index]!)),
       priceBps: Math.max(1, Math.round(hub.price[index]!)),
+      inflow: Math.max(0, Math.round(hub.inflow[index]!)),
+      outflow: Math.max(0, Math.round(hub.outflow[index]!)),
     })),
   }));
   return { ...world, economy: { ...economyOf(world), markets } };

@@ -4,6 +4,7 @@ import type { IncomeSource, ProvinceMaterial, TaxRegime } from "../material-stat
 import { deriveDefaultProvinceMaterial } from "./province-material";
 import { ownerOf, ownsAndHolds } from "../world/occupation";
 import { adjacentTo } from "../world/movement";
+import { tradeIntensities } from "../world/markets";
 import { readDepartments } from "../world/departments";
 import { skillShare } from "../characters/aptitude";
 import { DEFAULT_TAX_RATE_BPS, MEN_PER_YEAR_SHARE, REGIME_LEAK_SCALE, policyPressureBps, regimeFactor, taxPolicyIndex, type TaxPolicy } from "./tax-policy";
@@ -195,10 +196,12 @@ export function readProvinceTax(
   steps: number | undefined,
   officeSkill: number,
   polityId: string,
+  /** How much a customs province's hub trades (`tradeIntensity`): its market's flows against its use. */
+  trade?: number | undefined,
 ): ProvinceTaxReading {
   const efficiency = collectionEfficiency(steps, policy.regime, officeSkill);
   const base = (row.taxCapacity * row.stabilityBps) / 10_000;
-  const monthly = policy.regime === "men" ? 0 : base * (policy.rateBps / 10_000) * regimeFactor(policy.regime, row, province) * efficiency;
+  const monthly = policy.regime === "men" ? 0 : base * (policy.rateBps / 10_000) * regimeFactor(policy.regime, row, province, trade) * efficiency;
   const menPerYear = policy.regime === "men" ? Math.floor(row.population * (policy.rateBps / 1_000) * MEN_PER_YEAR_SHARE * (row.stabilityBps / 10_000)) : 0;
   return { provinceId: province.id, policy, monthly, efficiency, menPerYear, held: ownsAndHolds(province, polityId) };
 }
@@ -256,6 +259,7 @@ export function taxBurdens(world: WorldState, options: { readonly officeSkill?: 
   }
 
   const burdens = new Map<string, TaxBurden>();
+  let intensity: Map<string, number> | undefined;
   for (const polityId of polityIds) {
     // What its own land can bear, and how much of its land it still holds.
     // Occupied ground pays nobody (`world/occupation.ts`): not the occupier,
@@ -274,7 +278,7 @@ export function taxBurdens(world: WorldState, options: { readonly officeSkill?: 
     for (const province of owned) {
       const row = materialById.get(province.id) ?? deriveDefaultProvinceMaterial(province, world.elapsedStep);
       const policy = policyOf(province, row);
-      const reading = readProvinceTax(province, row, policy, steps?.get(province.id), skill, polityId);
+      const reading = readProvinceTax(province, row, policy, steps?.get(province.id), skill, polityId, policy.regime === "customs" ? (intensity ??= tradeIntensities(world)).get(province.id) : undefined);
       ownedCapacity += reading.monthly;
       if (!reading.held) continue;
       bearable += reading.monthly;
@@ -329,11 +333,13 @@ export function polityTaxReadings(world: WorldState, polityId: string, options: 
   const policyOf = taxPolicyIndex(world);
   const steps = stepsFromCapital(world, polityId);
   const skill = (options.officeSkill ?? ((id: string): number => readDepartments(world).skill({ kind: "polity", id }, "tax_roll")))(polityId);
+  let intensity: Map<string, number> | undefined;
   return world.map.provinces
     .filter((province) => ownerOf(province) === polityId)
     .map((province) => {
       const row = materialById.get(province.id) ?? deriveDefaultProvinceMaterial(province, world.elapsedStep);
-      return readProvinceTax(province, row, policyOf(province, row), steps?.get(province.id), skill, polityId);
+      const policy = policyOf(province, row);
+      return readProvinceTax(province, row, policy, steps?.get(province.id), skill, polityId, policy.regime === "customs" ? (intensity ??= tradeIntensities(world)).get(province.id) : undefined);
     });
 }
 

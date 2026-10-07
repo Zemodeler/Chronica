@@ -17,6 +17,9 @@ import type { WorldState } from "./world-state";
  * Optional on the world, so every snapshot written before it still loads; a
  * world without one has simply never been reviewed.
  */
+/** No power lays more than this on a good entering its markets: past it nothing would come. */
+export const MAX_CUSTOMS_RATE_BPS = 5_000;
+
 export const EconomyMemorySchema = z
   .object({
     /** The last day the land was reckoned: its people, its taxes, its migrants. */
@@ -87,6 +90,24 @@ export const EconomyMemorySchema = z
     markets: z.array(MarketHubSchema).max(MAX_MARKET_HUBS).default([]),
     /** When a power last heard that grain had gone far too dear or too cheap in its country, so the news is told once a year and not once a month. */
     marketNews: z.array(z.object({ polityId: EntityIdSchema, kind: z.enum(["shortage", "glut"]), atStep: ElapsedStepSchema }).strict()).max(200).default([]),
+    /**
+     * The customs each power lays on goods that enter its markets from another
+     * power's, in basis points of their value (`world/trade.ts`). A power with
+     * no line lays none. Set by `tax_policy_set` with the `customs` scope; a
+     * trade pact may cap what is charged on its partner's goods.
+     */
+    customsRates: z.array(z.object({ polityId: EntityIdSchema, rateBps: z.number().int().min(0).max(MAX_CUSTOMS_RATE_BPS) }).strict()).max(200).default([]),
+    /**
+     * Customs the month's trade flows have earned each power and not yet paid
+     * into its treasury (drachmae). The monthly pass of the markets accrues it
+     * and the tick pays it out the same day (`sim/customs.ts`), so a world run
+     * without the tick (the tests' bare months) simply holds it here.
+     */
+    customsDue: z.array(z.object({ polityId: EntityIdSchema, amount: z.number().int().nonnegative() }).strict()).max(200).default([]),
+    /** Which powers' hubs traded most with which last month, by value in drachmae: what a ruler's slice reads. Capped, largest first. */
+    tradeLanes: z.array(z.object({ fromPolityId: EntityIdSchema, toPolityId: EntityIdSchema, value: z.number().int().nonnegative() }).strict()).max(60).default([]),
+    /** When a power last heard of trade resumed or cut between it and another, so news is told once, not each month. */
+    tradeNews: z.array(z.object({ polityId: EntityIdSchema, otherPolityId: EntityIdSchema, kind: z.enum(["resumed", "cut"]), atStep: ElapsedStepSchema }).strict()).max(200).default([]),
   })
   .strict();
 export type EconomyMemory = z.infer<typeof EconomyMemorySchema>;
@@ -106,6 +127,10 @@ export const EMPTY_ECONOMY_MEMORY: EconomyMemory = {
   wasteNews: [],
   markets: [],
   marketNews: [],
+  customsRates: [],
+  customsDue: [],
+  tradeLanes: [],
+  tradeNews: [],
 };
 
 export const economyOf = (world: Pick<WorldState, "economy">): EconomyMemory => world.economy ?? EMPTY_ECONOMY_MEMORY;

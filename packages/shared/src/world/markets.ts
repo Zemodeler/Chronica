@@ -3,7 +3,7 @@ import { EntityIdSchema } from "../material-state";
 import type { ProvinceMaterial } from "../material-state";
 import { developmentFactor, harvestDevelopmentFactor, provinceGrounds, type ProvinceGround } from "../material/province-material";
 import { GOOD_IDS, GoodIdSchema, type GoodId } from "./good-ids";
-import type { Province } from "./map";
+import type { CrossingType, Province } from "./map";
 import { RouteHeap, adjacentTo } from "./movement";
 import type { WorldState } from "./world-state";
 
@@ -150,6 +150,9 @@ export const MarketEntrySchema = z
     demand: z.number().int().nonnegative().default(0),
     /** Its price, in basis points of the base. Derived from the stock; kept so readers need not recompute it. */
     priceBps: z.number().int().min(1).max(1_000_000).default(10_000),
+    /** Units that came in from other hubs last month, and went out to them (trade flows, `sim/trade-flows.ts`). */
+    inflow: z.number().int().nonnegative().default(0),
+    outflow: z.number().int().nonnegative().default(0),
   })
   .strict();
 export type MarketEntry = z.infer<typeof MarketEntrySchema>;
@@ -196,7 +199,21 @@ export interface MarketGeography {
    * map's own distance units: the graph trade flows will run over (phase D).
    * Neighbours in id order.
    */
-  readonly neighbours: ReadonlyMap<string, readonly { readonly hubId: string; readonly km: number }[]>;
+  readonly neighbours: ReadonlyMap<string, readonly HubLink[]>;
+}
+
+/**
+ * A way from one hub to a neighbouring one: the whole length of the shortest
+ * road between their two countries, and the one crossing on it that joins
+ * them (its length and its kind), which is where a strait or a sea lane is
+ * priced as water and not as land.
+ */
+export interface HubLink {
+  readonly hubId: string;
+  readonly km: number;
+  /** The edge that crosses from one country to the other. */
+  readonly crossing: CrossingType;
+  readonly crossingKm: number;
 }
 
 interface Assignment {
@@ -306,21 +323,22 @@ function buildGeography(world: Pick<WorldState, "map">, labelled: Labelled): Mar
   const country = new Map<string, string[]>(labelled.hubs.map((id) => [id, []]));
   const ids = world.map.provinces.map((province) => province.id).sort();
   for (const id of ids) country.get(labelled.label.get(id)!)?.push(id);
-  const nearest = new Map<string, Map<string, number>>();
+  const nearest = new Map<string, Map<string, HubLink>>();
   for (const edge of world.map.edges) {
     const a = labelled.label.get(edge.from);
     const b = labelled.label.get(edge.to);
     if (a === undefined || b === undefined || a === b) continue;
     const km = (labelled.cost.get(edge.from) ?? 0) + edge.distance + (labelled.cost.get(edge.to) ?? 0);
     for (const [from, to] of [[a, b], [b, a]] as const) {
-      const row = nearest.get(from) ?? new Map<string, number>();
-      if (km < (row.get(to) ?? Infinity)) row.set(to, km);
+      const row = nearest.get(from) ?? new Map<string, HubLink>();
+      const held = row.get(to);
+      if (held === undefined || km < held.km) row.set(to, { hubId: to, km, crossing: edge.crossing, crossingKm: edge.distance });
       nearest.set(from, row);
     }
   }
-  const neighbours = new Map<string, { hubId: string; km: number }[]>();
+  const neighbours = new Map<string, HubLink[]>();
   for (const hub of labelled.hubs) {
-    neighbours.set(hub, [...(nearest.get(hub) ?? new Map<string, number>()).entries()].map(([hubId, km]) => ({ hubId, km })).sort((x, y) => x.hubId.localeCompare(y.hubId)));
+    neighbours.set(hub, [...(nearest.get(hub) ?? new Map<string, HubLink>()).values()].sort((x, y) => x.hubId.localeCompare(y.hubId)));
   }
   return { hubs: labelled.hubs, hubOf: labelled.label, country, neighbours };
 }
@@ -576,6 +594,28 @@ export function sackTheMarket(world: WorldState, provinceId: string, people: num
   return takeCaptives(plundered, provinceId, Math.max(0, people));
 }
 
+/**
+ * How much each hub trades: the value of the goods that crossed it last month
+ * (in and out, at its prices) against the value of what its country uses in a
+ * month. 0 where nothing crossed; 1 where as much passed through as the hub
+ * itself consumed. What a customs province can bear is read off it
+ * (`regimeFactor`), and so is the busiest-hub line of a power's slice.
+ */
+export function tradeIntensities(world: Pick<WorldState, "economy">): Map<string, number> {
+  const intensity = new Map<string, number>();
+  for (const hub of marketsOf(world)) {
+    let through = 0;
+    let used = 0;
+    for (const entry of hub.goods) {
+      const spec = goodSpec(entry.good);
+      through += (entry.inflow + entry.outflow) * spec.basePrice * (entry.priceBps / 10_000);
+      used += entry.demand * spec.basePrice;
+    }
+    intensity.set(hub.hubId, used <= 0 ? 0 : through / used);
+  }
+  return intensity;
+}
+
 /** The units used in a month at a hub, by good, summed over its country. */
 export function hubFlows(world: Pick<WorldState, "map" | "material">): Map<string, { demand: number[]; supply: number[] }> {
   const geography = marketGeography(world);
@@ -611,7 +651,7 @@ export function openingMarkets(world: Pick<WorldState, "map" | "material">, mont
         const months = index === GRAIN ? monthsToHarvest + GRAIN_OPENING_RESERVE_MONTHS : spec.targetMonths;
         const target = index === GRAIN ? Math.round((monthsToHarvest + GRAIN_RESERVE_MONTHS) * demand) : Math.round(spec.targetMonths * demand);
         const stock = Math.round(months * demand);
-        return { good: spec.id, stock, target, demand, priceBps: priceBpsFrom(spec, stock, target) };
+        return { good: spec.id, stock, target, demand, priceBps: priceBpsFrom(spec, stock, target), inflow: 0, outflow: 0 };
       }),
     };
   });
