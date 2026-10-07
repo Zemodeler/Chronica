@@ -513,6 +513,32 @@ The table above is the common run; the research's charges (`docs/plans/governmen
   A quaestor of Rome cannot strike the coin lighter; a rate past custom is asked of the Senate, and the Senate may refuse it. Tests: `the-quaestor-asks-the-senate`, `a-magistrate-lays-no-new-tax`,
   `the-charges-follow-the-constitution`, `every-power-has-a-head-who-can-act`, `the-charges-match-the-sources`.
 
+## What the model is left to
+
+The model's calls are for the human drama. The routine government of a state is kept by its officers, by rule, and a person the model plays is neither shown it nor
+allowed to settle it (`packages/sim/src/kept-by-the-officers.ts`):
+
+- **Taken off the menu.** The cognition prompt says so in a short paragraph (`KEPT_BY_THE_OFFICERS`: tribute and customs, bread, the mint, upkeep, the merchant houses, loans and
+  pacts between states are the officers'; a person's own work is ambition, rivalry, plots, marriages, patronage, factions, oaths, treachery, war counsels, letters, rhetoric, love and
+  grudges), and the delta schema it carries no longer lists `tax_policy_set`, `coinage_debase`, `holding_create`, `holding_improve`, `trade_venture_open`/`_close`, `loan_settle`,
+  the terms of a trade pact, or the offer of a state's loan (`ROUTINE_OPS`). The parser still reads them. The prompt came to 73.9k from 77.4k; its ceiling is 74.5k.
+- **Set aside, quietly.** If he writes one anyway, `burst.ts` drops it before it is applied (no repair call, no refusal told to the model) and writes one line to the burst's
+  `skipped` log with the stage `officers` ("a loan to a state: the officers keep it, by rule"). Dropped: the tax and customs, the coin, estates, ventures, a loan of or to a
+  state (a `foreign` or `polity` lender, or a power's chest as borrower), a trade pact or embargo between powers neither of which is the player's, the works of a structure
+  (`project_create` with a `structure` outcome), and the ending of a pact or embargo. Not dropped: `money_transfer` (bribes, patronage, ransom), `loan_open` between private men,
+  `public_benefaction` (a dole given to win a city is patronage), war, peace, alliance, letters, plots, beliefs, marriages, offices, the levy and armies.
+- **Never the player's.** The player's own order is read with the full schema and prompt, and a man he has put an order to (an attempt issued, received, accepted or delayed) keeps
+  the whole menu while he serves it. Only the cognition pass is filtered (`ProposalPass.byModel`): the rules' own acts (the statecraft pass, the fiscal officers' `sanctioned` acts) are not. The orchestrator's `worldDeltas`
+  are told in the prompt that another state's routine government is not theirs (not filtered by the engine).
+- **Not told the charges.** A model-played person's portrait does not list "In charge of: the tax roll ..." (`describeCharge`, `routineIsKept`); his own purse, debts, estates and
+  pressures stay, as motives of ambition.
+- **A crisis, when it is one.** The chest and the granary are told to a ruler, and to a captain of the power's armies, only when they have become a quarrel
+  (`stateCrisisLine`): the soldiers' pay a month or more behind (`CRISIS_ARREARS_MONTHS`), bread at a famine price in a third of its markets, the coin holding under 85 in a hundred
+  of its silver. Said once, in words of the age, with no figures but the arrears.
+
+Appointments by rule are still to come: the ambitions `wantDepartments` lays on a ruler (to hand part of the government on, to seat a treasurer, a watch, a keeper of grain) stand
+in his portrait until the officers do it. Test: `the-model-is-left-to-its-plots`.
+
 ## Tests that pin behaviour
 
 All under `packages/sim/src` unless noted: `the-books-balance`, `a-market-sets-a-price`, `a-market-moves-grain`,
@@ -521,4 +547,4 @@ All under `packages/sim/src` unless noted: `the-books-balance`, `a-market-sets-a
 `the-office-and-the-roll`, `a-tariff-bites`, `a-trade-pact-lowers-tariffs`, `an-embargo-cuts-trade`,
 `war-suspends-a-pact`, `a-power-hears-of-its-trade`, `a-coin-is-debased`, `a-foreign-payment-is-changed`,
 `the-treasury-reads-the-land` and `a-thousand-provinces` (the cost budget). v54: `a-quaestor-keeps-the-books`, `a-house-follows-the-gap`,
-`the-market-has-merchants`, `the-houses-stay-out-of-the-room`, `the-books-balance-with-houses` and `the-books-are-kept-in-good-time`. H0: `a-treasurer-decides`, `a-consul-cannot-draw-the-treasury-alone`, `two-consuls-do-not-both-tax`, `a-tribune-stops-a-levy`, `the-senate-decrees-the-tribute`, `a-reform-changes-who-may-act`, `the-new-levers-bite` and `no-modern-words`. H0: `a-treasurer-decides`, `a-consul-cannot-draw-the-treasury-alone`, `two-consuls-do-not-both-tax`, `a-tribune-stops-a-levy`, `the-senate-decrees-the-tribute`, `a-reform-changes-who-may-act`, `the-new-levers-bite` and `no-modern-words`.
+`the-market-has-merchants`, `the-houses-stay-out-of-the-room`, `the-books-balance-with-houses` and `the-books-are-kept-in-good-time`. the model's own work: `the-model-is-left-to-its-plots`. H0: `a-treasurer-decides`, `a-consul-cannot-draw-the-treasury-alone`, `two-consuls-do-not-both-tax`, `a-tribune-stops-a-levy`, `the-senate-decrees-the-tribute`, `a-reform-changes-who-may-act`, `the-new-levers-bite` and `no-modern-words`. H0: `a-treasurer-decides`, `a-consul-cannot-draw-the-treasury-alone`, `two-consuls-do-not-both-tax`, `a-tribune-stops-a-levy`, `the-senate-decrees-the-tribute`, `a-reform-changes-who-may-act`, `the-new-levers-bite` and `no-modern-words`.

@@ -49,6 +49,7 @@ import { ruleInWords } from "./mechanics/mechanic-words";
 import { describePlans } from "./plans";
 import { describeDiplomaticBusiness } from "./negotiation-business";
 import { describeNeighbourhood } from "./board";
+import { KEPT_BY_THE_OFFICERS, ROUTINE_OPS, stateCrisisLine } from "./kept-by-the-officers";
 
 /**
  * NPC cognition (VISION §28).
@@ -85,6 +86,17 @@ function shownSchema(): string {
   // A person hands on no part of an order: parts are the orchestrator's.
   const delegation = (proposal?.properties?.delegations as { items?: { properties?: Record<string, unknown> } } | undefined)?.items;
   if (delegation?.properties !== undefined) delete delegation.properties.part;
+  // The routine government is kept by the officers (`kept-by-the-officers.ts`): its acts are not on the menu a person is shown, nor the
+  // terms of a trade pact or the offer of a loan to a state. The parser above still reads them, and the engine sets them aside.
+  const defs = (schema.$defs as { WorldDelta?: { oneOf?: Record<string, unknown>[] } } | undefined)?.WorldDelta;
+  if (defs?.oneOf !== undefined) {
+    defs.oneOf = defs.oneOf.filter((variant) => !ROUTINE_OPS.has(String(((variant.properties as Record<string, { const?: unknown }> | undefined)?.op)?.const)));
+    for (const variant of defs.oneOf) {
+      const fields = variant.properties as Record<string, { const?: unknown }> | undefined;
+      if (fields?.op?.const === "agreement_open") delete fields.trade;
+      if (fields?.op?.const === "loan_open") delete fields.offerId;
+    }
+  }
   return JSON.stringify(schema);
 }
 
@@ -224,6 +236,8 @@ You will be given one section per person. Each section contains only what that
 person currently knows. Treat it as the whole of their knowledge: if something is
 not in their section, they have not heard it, and they must not act on it.
 
+${KEPT_BY_THE_OFFICERS}
+
 For each person, decide what they actually do now. Nobody is here by accident, and
 "nothing" is an answer only when it is a choice: leave them out of "actors" when
 their business truly waits. Where a section says what lies open to them, take one,
@@ -245,8 +259,7 @@ expires, and make the plan depend on that exact letter ("letter_answered", with
 "messageId") or question, with "afterConditionDays" for the time to act after
 the reply arrives. Never count another version of an outstanding request
 as progress. Each actor carries their own responsibility forward: a negotiator
-settles terms, a commander prepares or moves troops, a treasury officer funds the
-work. Shared government aims do not require everyone to negotiate them. They are not waiting for the ruler; they do not know
+settles terms, a commander prepares or moves troops. Shared government aims do not require everyone to negotiate them. They are not waiting for the ruler; they do not know
 what the ruler is doing. Business that will take months is a plan: give it in
 "plan" as up to four steps in order, each an act of that kind, with the days
 by which it should be done and, if it must wait for something, "when". What an act
@@ -443,11 +456,12 @@ const SUBSKILL_WORDS: Readonly<Record<string, string>> = {
  * Printed only where there is something to say, since it is carried for
  * every person in the batch.
  */
-function describeCharge(character: Character, world: WorldState): string[] {
+function describeCharge(character: Character, world: WorldState, routineIsKept = false): string[] {
   if (character.polityId === null) return [];
   const reader = readDepartments(world);
   const scope = { kind: "polity" as const, id: character.polityId };
-  const held = STANDARD_LEVERS.filter((lever) => reader.holding(scope, lever).people.some((person) => person.id === character.id));
+  // The model's own people are not told the routine work of their office: the officers keep it (`kept-by-the-officers.ts`).
+  const held = routineIsKept ? [] : STANDARD_LEVERS.filter((lever) => reader.holding(scope, lever).people.some((person) => person.id === character.id));
   const lines: string[] = [];
   if (held.length > 0) {
     const by = new Map<string, string[]>();
@@ -561,7 +575,7 @@ function describeMind(character: Character): string[] {
   // the batch and most people have no signature instrument at all.
   const instruments: string[] = [];
   if (mind.drives.wealth >= 65 || (character.skills.stewardship ?? 0) >= 70) {
-    instruments.push('money, moved where it obliges somebody -- "money_transfer", "loan_open"');
+    instruments.push('money, moved where it obliges somebody -- "money_transfer", a private "loan_open"');
   }
   if ((character.skills.intrigue ?? 0) >= 70) instruments.push('what others would rather was not known -- agents, "discoveries", "belief_set"');
   if ((character.skills.diplomacy ?? 0) >= 70) instruments.push('other powers, written to directly with "diplomatic_message_send"');
@@ -785,6 +799,8 @@ export interface PortraitOptions {
   readonly extra?: readonly string[] | undefined;
   /** The slice prints the date once, at its head. */
   readonly closeWithDate?: boolean | undefined;
+  /** A person the model plays: the routine government is not his business, so its charges are not listed to him. */
+  readonly routineIsKept?: boolean | undefined;
 }
 
 export function renderCharacterPortrait(
@@ -806,7 +822,7 @@ export function renderCharacterPortrait(
     // How they decide, in the terms the engine will hold them to (`nature.ts`).
     const conduct = conductInWords(world, character);
     if (conduct.length > 0) lines.push("How they decide:", ...conduct.map((line) => `  - ${line}`));
-    lines.push(...describeCharge(character, world));
+    lines.push(...describeCharge(character, world, options.routineIsKept === true));
     // What they want, with the plan for it where they have one. Its own
     // block because a plan needs the calendar, and a mind does not.
     lines.push(...describePlans(character, world, clock, ACTOR_CAPS.ambitions));
@@ -993,11 +1009,14 @@ export function renderCharacterPortrait(
 
 /** One person's section of the batched cognition call. Byte-identical to what it always was. */
 function renderActor(actor: RoutedActor, world: WorldState, clock: ScenarioClock, others: readonly string[]): string {
+  const crisis = stateCrisisLine(world, actor.characterId);
   return renderCharacterPortrait(actor.characterId, actor.name, world, clock, {
     knownFacts: actor.knownFacts,
     impetus: { why: actor.why, ownBusiness: actor.impetus === "own_business" },
     others,
-    ...(actor.note === undefined ? {} : { extra: [actor.note] }),
+    // The state's chest and granary are told only when they have become a quarrel (`stateCrisisLine`).
+    extra: [...(actor.note === undefined ? [] : [actor.note]), ...(crisis === null ? [] : [crisis])],
+    routineIsKept: true,
     closeWithDate: true,
   });
 }

@@ -61,7 +61,7 @@ principle it falls under.
    "Raise two legions" is an instruction to a
    government: decide where, who pays, who commands, how long. Then put the
    change in "deltas" -- the money moves, the force exists, the official is
-   seated. Describing what will happen is not doing it, and an answer with no
+   seated. Describing is not doing: an answer with no
    deltas says the world did not move. A short order delegates method; a
    specific one does not. An order that cannot be met in full is attempted,
    with what it cost or lacked in "frictions". An order to keep going with
@@ -123,8 +123,8 @@ principle it falls under.
 
 5. Countries are full of people. Every power listed under COUNTRIES WITH
    NOBODY IN THEM gets, in this answer, a ruler of its own culture and the
-   forces it would plainly field, under its own polityId. They were always
-   there, so filling them in gets no fact; what they do about events does.
+   forces it would plainly field, under its own polityId. Filling them in
+   gets no fact.
 
 6. What takes time is a project, and a project produces something. Its
    "completionOutcome" is what exists when the last milestone falls -- a force,
@@ -157,8 +157,7 @@ principle it falls under.
    STANDING ARRANGEMENTS, and so does a building: say what either does in
    "effects" and who keeps it in "upkeep"; the engine applies it monthly
    until it is repealed or unpaid. A man's land is a
-   holding, bought or improved from his purse ("holding_create",
-   "holding_improve"); his trade a venture between places, or in one ("trade_venture_open"); men or a ship he pays from his own purse are his to command; a province is a government's, and how it is taxed (tithe, land levy, customs, a tribute of men) is "tax_policy_set" (scope "customs": the tariff on foreign goods); the coin it strikes is "coinage_debase" (less silver: a gain now, dearer bread later; more: costly). A "trade_pact" ("trade": customs cap, goods free) is held by war and back with peace; an "embargo" (laid by the first-named power; "trade" names goods, none is all) shuts trade. A man in an
+   holding ("holding_create", "holding_improve"); his trade a venture ("trade_venture_open"); men or a ship he pays himself are his to command; a province's tax (tithe, land levy, customs, a tribute of men) is "tax_policy_set" (scope "customs": the tariff on foreign goods) and its coin "coinage_debase" (less silver: a gain now, dearer bread later). A "trade_pact" ("trade": customs cap, goods free) is held by war; an "embargo" (laid by the first-named power) shuts trade. These serve the player's own order: another state's routine government (taxes, mint, markets, houses, pacts, upkeep) is kept by its officers, by rule, and is never a "worldDeltas" act. A man in an
    army's ranks is not its commander: "force_membership_set" enlists, discharges or records a desertion. Money comes from somewhere: a government short of it borrows from
    a named lender with "loan_open", revenue from another power names that
    power, and nothing is banked before the body that grants it has granted it.

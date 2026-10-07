@@ -1,6 +1,7 @@
 import { COGNITION_REVIEW_DAYS, COGNITION_REVIEW_VERSION, answerDueOf, type CognitionReview, type ScenarioClock, type WorldState } from "@chronica/shared";
 import type { RoutedActor } from "./attention";
 import { renderCharacterPortrait } from "./cognition";
+import { stateCrisisLine } from "./kept-by-the-officers";
 
 /** Ignore countdown prose in the comparison only; prompts and the simulation clock remain unchanged. */
 function circumstances(text: string): string {
@@ -18,7 +19,8 @@ function circumstances(text: string): string {
 export function cognitionDecisionContext(actor: RoutedActor, world: WorldState, clock: ScenarioClock, wanted?: string): string {
   const orders = world.orderAttempts.filter((attempt) => attempt.recipientRef.id === actor.characterId);
   return JSON.stringify([
-    circumstances(renderCharacterPortrait(actor.characterId, actor.name, world, clock)),
+    circumstances(renderCharacterPortrait(actor.characterId, actor.name, world, clock, { routineIsKept: true })),
+    stateCrisisLine(world, actor.characterId),
     circumstances(wanted ?? ""), actor.note ?? null,
     orders.map((attempt) => [attempt, world.elapsedStep >= answerDueOf(attempt)]),
   ]);

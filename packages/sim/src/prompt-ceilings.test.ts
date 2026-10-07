@@ -26,7 +26,9 @@ describe("the system prompts stay the size they are", () => {
     // a little wider than the orchestrator's for that reason, so a change
     // that pays its way there is not refused here.
     // Raised 63k -> 73k (2026-10-03), for the same schema as the orchestrator's.
-    expect(COGNITION_SYSTEM_PROMPT.length).toBeLessThan(85_000);
+    // Lowered 85k -> 74.5k (2026-10-08): the routine acts (tax, coin, estates, ventures, state loans) left the menu a person is shown
+    // (`kept-by-the-officers.ts`); it measured 73.9k with the paragraph that says so. Raise it only for a real new capability.
+    expect(COGNITION_SYSTEM_PROMPT.length).toBeLessThan(74_500);
   });
 
   it("the historian, the repairer and the reconciler: prose only", () => {

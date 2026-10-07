@@ -92,6 +92,7 @@ import { kindsIn } from "./bare-refs";
 import { misfiledWorldActs, whyMisfiled } from "./apply/misfiled";
 import { hasSomethingNew, playersPeopleFirst, routeAmbientActors, routeAttention } from "./attention";
 import { DEFAULT_SHARDING, renderCharacterPortrait, runCognition } from "./cognition";
+import { setAsideForTheOfficers } from "./kept-by-the-officers";
 import { createCognitionMemory } from "./cognition-memory";
 import { holdAnswerToAuthority, natureObjects } from "./nature";
 import { decideDispatches } from "./dispatches";
@@ -445,7 +446,7 @@ export interface WindowSnapshot {
  * router to look at.
  */
 export interface BurstSkip {
-  readonly stage: "cognition" | "reconcile" | "repair" | "fact_places" | "engine_facts" | "mechanic" | "private_minds" | "invariant" | "delegation" | "parity" | "nature";
+  readonly stage: "cognition" | "reconcile" | "repair" | "fact_places" | "engine_facts" | "mechanic" | "private_minds" | "invariant" | "delegation" | "parity" | "nature" | "officers";
   readonly reason: string;
 }
 
@@ -787,6 +788,8 @@ interface ProposalPass {
   readonly factFloor?: number | undefined;
   /** Acts that are the power's own standing business, not an exercise of the actor's authority: a fiscal officer's (`fiscal-officers.ts`). */
   readonly sanctioned?: ReadonlySet<WorldDelta> | undefined;
+  /** The answer of a person the model plays, as against an act of the rules: the routine government is not his to settle (`kept-by-the-officers.ts`). */
+  readonly byModel?: true | undefined;
 }
 
 /** A part of the order as the orchestrator read it. */
@@ -1705,6 +1708,15 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       ...(assignedIds === undefined ? {} : { assignedIds }),
       ...(pass.sanctioned === undefined ? {} : { sanctionedDeltas: pass.sanctioned }),
     });
+
+    // The routine government of a state is the officers' (`kept-by-the-officers.ts`): a man the model plays is not shown it and, if he writes
+    // it, it is set aside without a word and counted (stage "officers"). His plots, his money moved to oblige somebody and what the player
+    // put to him are untouched.
+    if (actorRef.kind === "character" && actorRef.id !== input.actorRef.id && pass.byModel === true && pass.sanctioned === undefined && intentParts.length === 0 && proposal.deltas.length > 0) {
+      const asked = setAsideForTheOfficers(world, proposal.deltas, { actorId: actorRef.id, playerId: input.actorRef.kind === "character" ? input.actorRef.id : null, playerPolityId: input.actorPolityId ?? null });
+      for (const { reason } of asked.setAside) skipped.push({ stage: "officers", reason });
+      if (asked.setAside.length > 0) proposal = { ...proposal, deltas: asked.kept };
+    }
 
     // A person's nature holds in the large matters whoever is playing them (`nature.ts`): the model's own people, not the player's
     // and not the world's own rule-made acts. An act a man would not do is not carried out, and why is written down.
@@ -4201,7 +4213,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         const reasons = (actor.reasoning ?? "").trim();
         const proposal = reasons === "" || actor.proposal.narrativeSummary.trim() !== "" ? actor.proposal
           : { ...actor.proposal, narrativeSummary: `${responder?.name ?? "They"}, on why: ${reasons}`.slice(0, 600) };
-        const acts = await applyProposal(proposal, actor.actorRef, causalDepth, false, actor.serves, { calls: pays });
+        const acts = await applyProposal(proposal, actor.actorRef, causalDepth, false, actor.serves, { calls: pays, byModel: true });
         if (acts.correction !== undefined && (acts.correction.repairable.length > 0 || acts.correction.naming.length > 0)) owedCorrection.push({ correction: acts.correction, idle: acts.changed === 0 });
         stampWorkFacts(factsBeforeActor);
         roundChanged += acts.changed + (newFacts.length - factsBeforeActor);
