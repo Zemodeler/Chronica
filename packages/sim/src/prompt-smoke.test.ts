@@ -168,7 +168,10 @@ describe("orchestrator prompt", () => {
     // holder, franchise, land and debt laws, the submission clause, a loan offer.
     // Raised 79k -> 79.5k (2026-10-07): the economy rework's "tax_policy_set" (how a power
     // taxes its provinces: regime and rate) and its line in the generated schema.
-    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(79_500);
+    // Raised 79.5k -> 80.2k (2026-10-07): trade between powers (phase D) -- the "embargo" kind, the
+    // shared TradeTerms (a customs cap, goods free, goods forbidden) on a pact, an embargo and a trade
+    // offer, the "customs" scope of "tax_policy_set", and one sentence of how they work.
+    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(80_200);
   });
 });
 

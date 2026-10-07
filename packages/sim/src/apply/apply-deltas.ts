@@ -87,6 +87,7 @@ import {
   describeFerry,
   ferryDays,
   ensureProvinceMaterial,
+  MAX_CUSTOMS_RATE_BPS,
   clampTaxRate,
   economyOf,
   EMPTY_ECONOMY_MEMORY,
@@ -153,7 +154,14 @@ import { carryOutEnactment } from "../enact";
 import { commandChanges } from "../command-changes";
 import { endPolity } from "../polity-end";
 import { LOAN_TERM_PERIODS, loanInstalment } from "../debts";
-import { endObligationsOfEndedAgreements } from "../treaties";
+import { endObligationsOfEndedAgreements, hasGrievance, shiftTrust } from "../treaties";
+
+/** The words added to the news of an embargo when it ended a trade pact that stood: the pact was broken, not closed. */
+const brokenPactNote = (world: WorldState, a: string, b: string): string =>
+  agreementsBetween(world.polityAgreements, a, b).some((agreement) => agreement.kind === "trade_pact") ? " It ends the trade pact between them, which it breaks." : "";
+
+/** What embargoing a power while a trade pact stood with it costs, in the trust that power has in the embargoer: a quarter of a broken peace's forty. */
+const EMBARGO_BREACH_TRUST = 10;
 import { trespassOf } from "../trespass";
 import { SOVEREIGN_AGREEMENTS, chamberThatDecides, fleesHisMaster, listensAnyway, nobodyListens, nobodyRises, notHisToSpend } from "./nobody-listens";
 import { isOwnBusiness } from "./own-business";
@@ -1363,6 +1371,8 @@ export function acceptedAgreementDelta(replied: WorldState, message: WorldState[
     reason: `${polityName(replied, message.toPolityId)} accepted "${message.subject}".`.slice(0, 240),
     // The terms it offered are the treaty's clauses, carried out now.
     ...(message.clauses === undefined ? {} : { clauses: message.clauses as NonNullable<Extract<WorldDelta, { op: "agreement_open" }>["clauses"]> }),
+    // A trade offer's terms become the pact's (a customs cap, most-favoured status, goods let in free).
+    ...(message.trade === undefined || kind !== "trade_pact" ? {} : { trade: message.trade }),
   };
 }
 
@@ -3469,6 +3479,13 @@ function applyOne(
         reject(`${polity.name} is not the power this officer serves: its provinces are taxed by its own government.`);
       }
       const rateBps = clampTaxRate(delta.rateBps);
+      if (delta.scope === "customs") {
+        // The tariff on what comes in from other powers: one line a power, never past what would stop the trade.
+        const memory = economyOf(world);
+        const kept = memory.customsRates.filter((entry) => entry.polityId !== polityId);
+        const customs = Math.min(MAX_CUSTOMS_RATE_BPS, rateBps);
+        return { ...world, economy: { ...memory, customsRates: [...kept, ...(customs > 0 ? [{ polityId, rateBps: customs }] : [])].sort((a, b) => a.polityId.localeCompare(b.polityId)) } };
+      }
       if (delta.scope === "polity") {
         const memory = economyOf(world);
         const kept = memory.taxPolicies.filter((policy) => policy.polityId !== polityId);
@@ -5272,6 +5289,7 @@ function applyOne(
             agreementId: null,
             ...(delta.onRefusal == null ? {} : { onRefusal: delta.onRefusal }),
             ...(delta.clauses === undefined || delta.clauses.length === 0 ? {} : { clauses: delta.clauses }),
+            ...(delta.trade === undefined ? {} : { trade: delta.trade }),
           },
         ],
       };
@@ -5326,6 +5344,7 @@ function applyOne(
           ...(message.proposes === undefined ? {} : { proposes: message.proposes }),
           ...(message.negotiation === undefined ? {} : { negotiation: { ...message.negotiation, positions: [{ issue: "counteroffer", value: `${added ?? ""}; omitted clauses: ${[...refusedAt].join(",")}`.slice(0, 240) }] } }),
           ...(kept === undefined ? {} : { clauses: kept as never }),
+          ...(message.trade === undefined ? {} : { trade: message.trade }),
           reason: `${delta.answerText}`.slice(0, 240),
         }, context, assignedIds, resolve, emitFact, emitAccount);
       }
@@ -5435,7 +5454,9 @@ function applyOne(
       }
       // The same thing twice is not two agreements. Peace declared while peace
       // already stands is a restatement, and a second war is still one war.
-      const standing = agreementsBetween(world.polityAgreements, partyId, otherPartyId).find((agreement) => agreement.kind === delta.kind);
+      // An embargo is one power's act, so each way round is its own: Carthage embargoing Rome stands beside Rome embargoing Carthage.
+      const standing = agreementsBetween(world.polityAgreements, partyId, otherPartyId)
+        .find((agreement) => agreement.kind === delta.kind && (delta.kind !== "embargo" || agreement.polityId === partyId));
       // The acceptance of a letter opens what it offered (`bindTheAcceptance`);
       // the answerer writing the same treaty out beside it is saying so twice.
       if (standing !== undefined && sourceMessageId !== null && standing.sourceMessageId === sourceMessageId) return world;
@@ -5499,6 +5520,10 @@ function applyOne(
         // Nobody is protected by two powers at once. That is the quarrel the
         // second protector is picking, and at Messana it was the war itself.
         protectorate: ["protectorate"],
+        // Trade is either open on the terms of a pact or shut by an embargo, never both between the same two:
+        // an embargo ends the pact (and a pact ends the embargo), and ending a pact by embargo is a breach (below).
+        embargo: ["trade_pact"],
+        trade_pact: ["embargo"],
       };
       const closes = new Set(opposed[delta.kind] ?? []);
       const agreementId = mint("agreement", delta.localId);
@@ -5516,6 +5541,23 @@ function applyOne(
           discoveryState: "public",
           knowableInDays: 0,
           significance: 75,
+        });
+      }
+      // A pact that opens trade, and an embargo that shuts it, are news between the two powers: one line each, never one a good or a province.
+      if ((delta.kind === "trade_pact" || delta.kind === "embargo") && delta.visibility !== "private") {
+        const embargo = delta.kind === "embargo";
+        const goods = (delta.trade?.goods ?? []).map((good) => good.replace(/_/g, " "));
+        emitFact({
+          localId: `${embargo ? "embargo_laid" : "trade_pact_opened"}_${delta.localId}`.slice(0, 60),
+          kind: embargo ? "embargo_laid" : "trade_pact_opened",
+          summary: embargo
+            ? `${polityName(world, partyId)} has laid an embargo on trade with ${polityName(world, otherPartyId)}${goods.length === 0 ? "" : `, of ${goods.join(", ")}`}: no merchant carries ${goods.length === 0 ? "goods" : "them"} between their markets until it is lifted.${brokenPactNote(world, partyId, otherPartyId)}`.slice(0, 600)
+            : `${polityName(world, partyId)} and ${polityName(world, otherPartyId)} have agreed a trade pact: ${delta.terms}`.slice(0, 600),
+          affectedRefs: [{ kind: "polity", id: partyId }, { kind: "polity", id: otherPartyId }],
+          visibility: delta.visibility === "polity" ? "polity" : "public",
+          discoveryState: delta.visibility === "polity" ? "polity" : "public",
+          knowableInDays: 0,
+          significance: embargo ? 50 : 40,
         });
       }
       // What the treaty makes happen, carried out as it is made.
@@ -5565,12 +5607,21 @@ function applyOne(
         const at = polityOfPerson(plot.targetCharacterId);
         return by !== null && at !== null && by !== at && sides.has(by) && sides.has(at) ? { ...plot, outcome: "nothing" as const, resolvedAtStep: atStep } : plot;
       });
+      // An embargo laid on a power whose trade pact still stands ends that pact, and is a breach of it:
+      // the pact should have been closed first (`agreement_close`). It costs the embargoer the trust of its
+      // partner, and of every power that sees what its word on trade is worth, but not a legitimacy hit and
+      // no grievance to make war over, which is what a broken peace is. A pact that was closed first is no breach.
+      const brokenPact = delta.kind === "embargo" ? agreementsBetween(bound.polityAgreements, partyId, otherPartyId).find((agreement) => agreement.kind === "trade_pact") : undefined;
+      const afterBreach = brokenPact === undefined || hasGrievance(bound, partyId, otherPartyId) ? bound : {
+        ...bound,
+        polityStances: shiftTrust(bound.polityStances, otherPartyId, partyId, -EMBARGO_BREACH_TRUST, `${nameOf(partyId)} embargoed them while a trade pact stood`, atStep),
+      };
       // What it ends stops being paid on, here as anywhere (`treaties.ts`).
       return endObligationsOfEndedAgreements({
-        ...bound,
+        ...afterBreach,
         covertPlots: calledOff,
         polityAgreements: [
-          ...bound.polityAgreements.map((agreement) =>
+          ...afterBreach.polityAgreements.map((agreement) =>
             agreement.status === "active" &&
             closes.has(agreement.kind) &&
             ((agreement.polityId === partyId && agreement.otherPolityId === otherPartyId) ||
@@ -5584,6 +5635,7 @@ function applyOne(
             polityId: fromId,
             otherPolityId: toId,
             terms: delta.terms,
+            ...(delta.trade === undefined ? {} : { trade: delta.trade }),
             sinceStep: atStep,
             untilStep: delta.forDays === null ? null : atStep + delta.forDays,
             sourceMessageId,

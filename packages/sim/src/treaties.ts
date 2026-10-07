@@ -14,6 +14,7 @@ import {
   openWar,
   provinceTaxCapacity,
   stableHash,
+  tradeTermsBetween,
   warsOf,
   type EconomyMemory,
   type FactProposalDraft,
@@ -273,6 +274,8 @@ export function keepTreaties(input: TreatyInput): { world: WorldState; facts: Fa
     const broke = brokenPeace(world, war);
     facts.push(...broke.facts);
     world = broke.world;
+    // A trade pact the war finds standing is held, not broken: it costs trust, but a good deal less than a peace did.
+    if (broke.facts.length === 0) world = holdTradePact(world, war);
     const levied = levyContingents(world, war, ids, input.playerPolityId);
     facts.push(...levied.facts);
     world = levied.world;
@@ -296,8 +299,70 @@ export function keepTreaties(input: TreatyInput): { world: WorldState; facts: Fa
     world = withMemory(world, { pendingCalls: still });
   }
 
+  const pacts = trackHeldPacts(world, toDay);
+  facts.push(...pacts.facts);
+  world = pacts.world;
   return { world: endObligationsOfEndedAgreements(world), facts };
 }
+
+/** What a war opened against a power holding a trade pact with the other costs the warmaker in the other's trust: a quarter of a broken peace's forty. */
+export const SUSPENDED_PACT_TRUST = 10;
+
+/**
+ * A war opened between powers who hold a trade pact does not end the pact
+ * (`ENDED_BY_WAR` leaves it out; trade between them is simply shut while the
+ * war lasts, `tradeTermsBetween`, and comes back with the peace). It still
+ * says something of the power that made the war: its victim loses a little
+ * trust in it, unless the victim had given it cause.
+ */
+function holdTradePact(world: WorldState, war: PolityAgreement): WorldState {
+  const breaker = war.polityId;
+  const victim = war.otherPolityId;
+  const pact = agreementsBetween(world.polityAgreements, breaker, victim).find((agreement) => agreement.kind === "trade_pact");
+  if (pact === undefined || hasGrievance(world, breaker, victim)) return world;
+  return { ...world, polityStances: shiftTrust(world.polityStances, victim, breaker, -SUSPENDED_PACT_TRUST, `${nameOf(world, breaker)} made war on them while a trade pact stood`, war.sinceStep) };
+}
+
+/**
+ * Trade pacts held by war, and let go again. A pact between powers at war is
+ * suspended and the markets treat their border as shut; the day the war is
+ * over its terms are back, because the pact was never ended. Held pacts are
+ * remembered in `tradeNews` so that the resumption is news once, as one line
+ * for the pair of powers, and a pact that was never held is no news at all.
+ */
+function trackHeldPacts(world: WorldState, toDay: number): { world: WorldState; facts: FactProposalDraft[] } {
+  const memory = economyOf(world);
+  const facts: FactProposalDraft[] = [];
+  let held = memory.tradeNews.filter((entry) => entry.kind === "cut");
+  for (const pact of world.polityAgreements.filter((agreement) => agreement.status === "active" && agreement.kind === "trade_pact")) {
+    const suspended = tradeTermsBetween(world, pact.polityId, pact.otherPolityId).pactSuspended;
+    const was = held.find((entry) => entry.polityId === pact.polityId && entry.otherPolityId === pact.otherPolityId);
+    if (suspended && was === undefined) {
+      held = [...held, { polityId: pact.polityId, otherPolityId: pact.otherPolityId, kind: "cut" as const, atStep: toDay }];
+    } else if (!suspended && was !== undefined) {
+      held = held.filter((entry) => entry !== was);
+      if (facts.length < MAX_TRADE_FACTS_PER_DAY) {
+        facts.push({
+          localId: `trade_resumed_${pact.id}_${toDay}`.slice(0, 60),
+          kind: "trade_resumed",
+          summary: `Trade between ${nameOf(world, pact.polityId)} and ${nameOf(world, pact.otherPolityId)} resumes under their pact: the war that closed the border is over.`,
+          affectedRefs: [{ kind: "polity", id: pact.polityId }, { kind: "polity", id: pact.otherPolityId }],
+          visibility: "public",
+          discoveryState: "public",
+          knowableInDays: 0,
+          significance: 35,
+        });
+      }
+    }
+  }
+  // A pact that ended in the meantime is not waited on.
+  const standing = new Set(world.polityAgreements.filter((agreement) => agreement.status === "active" && agreement.kind === "trade_pact").map((agreement) => `${agreement.polityId}|${agreement.otherPolityId}`));
+  held = held.filter((entry) => standing.has(`${entry.polityId}|${entry.otherPolityId}`));
+  if (held.length === memory.tradeNews.length && held.every((entry, index) => entry === memory.tradeNews[index])) return { world, facts };
+  return { world: withMemory(world, { tradeNews: held.slice(-200) }), facts };
+}
+
+const MAX_TRADE_FACTS_PER_DAY = 4;
 
 /** Kinds a war breaks faith by ending. A foedus ended by war is a revolt, and is its own story. */
 const FAITH_KINDS: readonly PolityAgreement["kind"][] = ["peace", "truce", "non_aggression", "alliance"];

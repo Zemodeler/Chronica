@@ -29,7 +29,7 @@ import {
   SupportReasonKindSchema,
   VisibilitySchema,
 } from "../material-state";
-import { PolityAgreementKindSchema } from "../world/agreements";
+import { PolityAgreementKindSchema, TradeTermsSchema } from "../world/agreements";
 import { TreatyCompletionGoalSchema } from "../world/goals";
 import { ContingencyEffectSchema } from "../world/contingency";
 import { CovertPlotKindSchema } from "../world/covert-plot";
@@ -1664,14 +1664,19 @@ const PublicBenefactionSchema = z.object({
  * the power as a whole or for one province of it. The power's own provinces
  * only, and the rate never past `MAX_TAX_RATE_BPS`; a rate set higher is
  * brought down to it.
+ *
+ * The third scope, `customs`, sets what the power lays on goods that enter its
+ * markets from other powers (a share of their value, never past
+ * `MAX_CUSTOMS_RATE_BPS`): the tariff the trade flows pay and a trade pact may
+ * cap. It names no regime.
  */
 const TaxPolicySetSchema = z.object({
   op: z.literal("tax_policy_set"),
-  scope: z.enum(["polity", "province"]).describe("polity: the power's default for every province without its own; province: this one only"),
+  scope: z.enum(["polity", "province", "customs"]).describe("polity: default for provinces without their own; province: this one only; customs: tariff on foreign goods (regime ignored)"),
   polityId: EntityIdSchema.describe("the power whose policy it is; for a province it must hold it"),
   provinceId: MaybeIdSchema.default(null),
-  regime: z.enum(["tithe", "land_levy", "customs", "men"]).describe("tithe: share of the harvest, swings with the year; land_levy: steady, resented; customs: dues on trade; men: manpower tribute from allies and subjects, no money"),
-  rateBps: z.number().int().min(0).max(10_000).describe("share of what the land can bear; 1,000 is the ordinary levy; above about 1,200 costs order, and stays costly"),
+  regime: z.enum(["tithe", "land_levy", "customs", "men"]).default("land_levy").describe("tithe: share of the harvest, swings with the year; land_levy: steady, resented; customs: dues on trade; men: manpower tribute from allies and subjects, no money"),
+  rateBps: z.number().int().min(0).max(10_000).describe("share of what the land can bear; 1,000 is the ordinary levy; above about 1,200 costs order, and stays costly. Customs scope: share of the goods' value, 5,000 at most"),
   reason: ReasonSchema,
 }).strict();
 
@@ -1785,6 +1790,8 @@ const DiplomaticMessageSendSchema = z.object({
    */
   // Twenty-four: a war's end cedes a country, not six of its provinces.
   clauses: z.array(TreatyClauseSchema).max(24).optional(),
+  /** For a trade offer: the pact's terms if it is accepted: a cap on customs, most-favoured status, goods let in free. */
+  trade: TradeTermsSchema.optional(),
   /**
    * What the sender does if it is refused, or no answer comes by
    * "replyWithinDays": "war"; "war_if_attacked" when the threat is war only
@@ -1819,6 +1826,15 @@ const AgreementOpenSchema = z.object({
   polityId: RefSchema,
   otherPolityId: RefSchema,
   terms: z.string().trim().min(1).max(600),
+  /**
+   * For a trade pact or an embargo, what the markets read of it: a cap on the
+   * customs either may lay on the other's goods (basis points of their value),
+   * most-favoured status, goods let in free; for an embargo, the goods it
+   * forbids (none named: all of them). A pact or embargo with only words is
+   * one with no special terms: a pact that caps nothing, an embargo of everything.
+   * An embargo is ordered: `polityId` is the power that lays it.
+   */
+  trade: TradeTermsSchema.optional(),
   /**
    * What the treaty actually makes happen, beyond what it is called.
    *

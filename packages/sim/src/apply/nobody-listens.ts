@@ -148,7 +148,7 @@ export function nobodyListens(
         })();
       if (polityId === undefined) return null;
       const chamber = chamberThatDecides(world, polityId, "war");
-      const what = delta.op === "agreement_open" ? (delta.kind === "war" ? "war" : `a ${delta.kind.replace(/_/g, " ")}`) : "an end to the treaty";
+      const what = delta.op === "agreement_open" ? (delta.kind === "war" ? "war" : `${/^[aeiou]/.test(delta.kind) ? "an" : "a"} ${delta.kind.replace(/_/g, " ")}`) : "an end to the treaty";
       return chamber === undefined
         ? `${who} proclaimed ${what} in the name of ${polity(polityId)}. Only its ruler makes war and peace, and the ruler had said nothing of the kind.`
         : `${who} proclaimed ${what} in the name of ${polity(polityId)}. Only the ${chamber.name} could decide it, and nobody acted on his word alone.`;
@@ -430,8 +430,13 @@ export function fleesHisMaster(delta: WorldDelta, world: WorldState, actorId: st
   return `${actor.name} has run away from ${owner}. A runaway slave is hunted, and anybody who shelters him answers for it.`;
 }
 
-/** The agreements only a government makes: war and peace, and the treaties that bind it to another power. */
-export const SOVEREIGN_AGREEMENTS: ReadonlySet<string> = new Set(["war", "peace", "alliance", "non_aggression", "tributary", "protectorate", "foedus"]);
+/**
+ * The agreements only a government makes: war and peace, the treaties that bind
+ * it to another power, and what shuts or opens its markets to one: a trade pact
+ * caps its customs and an embargo cuts a whole country's trade, which no
+ * commander in the field has the standing to do.
+ */
+export const SOVEREIGN_AGREEMENTS: ReadonlySet<string> = new Set(["war", "peace", "alliance", "non_aggression", "tributary", "protectorate", "foedus", "trade_pact", "embargo"]);
 
 /**
  * The chamber of a government that decides a question of this kind: one that

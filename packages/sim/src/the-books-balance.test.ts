@@ -5,6 +5,7 @@ import {
   WorldDeltaSchema,
   WorldStateSchema,
   ensureProvinceMaterial,
+  type PolityAgreement,
   type WorldDelta,
   type WorldState,
 } from "@chronica/shared";
@@ -123,6 +124,44 @@ describe("the books balance", { timeout: 120_000 }, () => {
     // A chest that holds less pays what it holds (with the tithe that came in the same month): nothing is made up.
     const poor = month(bound(25_000, 200_000));
     expect(poor.world.material.transactions.find((transaction) => transaction.cause.id === "syracuse-tribute")?.amount).toBeLessThanOrEqual(25_000 + 62_000);
+  });
+
+  it("explains the customs trade pays too: a year of goods crossing borders under tariffs, a pact and an embargo, nothing unexplained", () => {
+    // Every power lays customs, Carthage and Syracuse have a pact capping them, and Rome has embargoed the Ligurians.
+    const base = opening();
+    const agreementOf = (kind: "trade_pact" | "embargo", polityId: string, otherPolityId: string, trade?: PolityAgreement["trade"]) => ({
+      id: `${kind}_${polityId}_${otherPolityId}`, kind, polityId, otherPolityId, terms: `A ${kind}.`, ...(trade === undefined ? {} : { trade }), sinceStep: 0, untilStep: null,
+      sourceMessageId: null, status: "active" as const, endedAtStep: null, endedReason: null, visibility: "public" as const,
+    });
+    let world: WorldState = {
+      ...base,
+      economy: {
+        ...base.economy!,
+        customsRates: [{ polityId: "carthage", rateBps: 800 }, { polityId: "rome", rateBps: 250 }, { polityId: "syracuse", rateBps: 1_500 }, { polityId: "mamertines", rateBps: 600 }],
+      },
+      polityAgreements: [...base.polityAgreements,
+        agreementOf("trade_pact", "carthage", "syracuse", { tariffCapBps: 500, mostFavoured: false, exempt: ["grain"], goods: [] }),
+        agreementOf("embargo", "rome", "ligurians", { tariffCapBps: null, mostFavoured: false, exempt: [], goods: [] }),
+      ],
+    };
+    let audit = emptyAudit();
+    let customs = 0;
+    for (let month = 1; month <= 12; month += 1) {
+      const toDay = month * 30;
+      const before: WorldState = { ...world, elapsedStep: toDay };
+      const ticked = runDeterministicTick({ world: before, toDay, ids: createIdFactory(`customs-tick-${month}`), warfare: definition.warfare, clock: definition.clock, life: definition.life });
+      const monthly = auditMoney(before, ticked.world);
+      expect(monthly.unexplained, `month ${month}:\n${auditInWords(monthly)}`).toEqual([]);
+      customs += ticked.world.material.transactions.filter((line) => line.cause.id.startsWith("customs_") && !before.material.transactions.some((known) => known.id === line.id)).reduce((sum, line) => sum + line.amount, 0);
+      audit = combineAudits(audit, monthly);
+      world = ticked.world;
+    }
+    expect(unexplainedTotal(audit), auditInWords(audit)).toBe(0);
+    // Customs were paid, through the market's door and nowhere else.
+    expect(customs).toBeGreaterThan(0);
+    expect(audit.doors.market.in).toBeGreaterThanOrEqual(customs);
+    const through = Object.values(audit.doors).reduce((sum, door) => sum + door.in - door.out, 0);
+    expect(totalMoney(world) - totalMoney(opening())).toBe(through);
   });
 
   it("finds money made from nowhere", () => {

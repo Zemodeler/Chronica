@@ -36,6 +36,15 @@ import { INDEMNITY_MEANS_FLOOR, concludePeace, meansOf, provinceWorth, willingTo
  */
 
 const delta = (raw: Record<string, unknown>): WorldDelta => WorldDeltaSchema.parse(raw);
+
+/**
+ * The most either power may lay on the other's goods under the trade a peace
+ * opens: five in a hundred, the ordinary harbour dues of the age (Rome's
+ * portoria was two and a half). The peace carries a modest mutual cap and no
+ * embargo clause: an embargo is a power's own act, and a defeated one has
+ * not the standing to forbid its conqueror's trade.
+ */
+export const PEACE_TRADE_TARIFF_CAP_BPS = 500;
 /** A side asked for more than this many times what it will bear, three sessions in, walks out. */
 const WALK_OUT_AT = 2;
 const WALK_OUT_AFTER_SESSIONS = 3;
@@ -122,7 +131,7 @@ export interface TableTurn {
 }
 
 /** The treaty the terms make: clauses for the peace itself, and the agreements and endings beside it. */
-function treatyOf(world: WorldState, terms: readonly PeaceTerm[], giver: string, taker: string): { clauses: PeaceClause[]; besides: WorldDelta[]; returned: string[] } {
+export function treatyOf(world: WorldState, terms: readonly PeaceTerm[], giver: string, taker: string): { clauses: PeaceClause[]; besides: WorldDelta[]; returned: string[] } {
   const clauses: PeaceClause[] = [];
   const besides: WorldDelta[] = [];
   const returned: string[] = [];
@@ -135,7 +144,7 @@ function treatyOf(world: WorldState, terms: readonly PeaceTerm[], giver: string,
     if (term.kind === "demilitarize") clauses.push({ kind: "undertaking", byPolityId: giver, duty: "other", what: `No army of ${nameOf(world, giver)} in ${world.map.provinces.find((province) => province.id === term.provinceId)?.name ?? term.provinceId}`.slice(0, 120), withinDays: 3_650 });
     if (term.kind === "tribute") besides.push(delta({ op: "agreement_open", localId: `tribute_${giver}`.slice(0, 60), kind: "tributary", polityId: giver, otherPolityId: taker, terms: `${nameOf(world, giver)} pays tribute to ${nameOf(world, taker)}.`, forDays: null, sourceMessageRef: null, visibility: "public", reason: "By the peace." }));
     if (term.kind === "client") besides.push(delta({ op: "agreement_open", localId: `client_${giver}`.slice(0, 60), kind: "protectorate", polityId: giver, otherPolityId: taker, terms: `${nameOf(world, giver)} comes under the protection of ${nameOf(world, taker)}.`, forDays: null, sourceMessageRef: null, visibility: "public", reason: "By the peace." }));
-    if (term.kind === "trade") besides.push(delta({ op: "agreement_open", localId: `trade_${giver}`.slice(0, 60), kind: "trade_pact", polityId: giver, otherPolityId: taker, terms: `${nameOf(world, giver)} opens its markets to ${nameOf(world, taker)}.`, forDays: null, sourceMessageRef: null, visibility: "public", reason: "By the peace." }));
+    if (term.kind === "trade") besides.push(delta({ op: "agreement_open", localId: `trade_${giver}`.slice(0, 60), kind: "trade_pact", polityId: giver, otherPolityId: taker, terms: `${nameOf(world, giver)} opens its markets to ${nameOf(world, taker)}.`, trade: { tariffCapBps: PEACE_TRADE_TARIFF_CAP_BPS }, forDays: null, sourceMessageRef: null, visibility: "public", reason: "By the peace." }));
     if (term.kind === "break_alliance") {
       const alliance = world.polityAgreements.find((agreement) => agreement.status === "active" && agreement.kind === "alliance"
         && [agreement.polityId, agreement.otherPolityId].includes(giver) && [agreement.polityId, agreement.otherPolityId].includes(term.withPolityId));

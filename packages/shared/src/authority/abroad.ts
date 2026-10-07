@@ -125,6 +125,20 @@ function summaryOf(agreement: PolityAgreement, name: (id: string) => string): st
     case "protectorate": return `${second}'s protection over ${first}`;
     case "foedus": return `${first} bound to ${second} by foedus`;
     case "military_access": return `Passage for ${first}'s armies through ${second}'s land`;
+    // Ordered by who laid it, but not a posture: neither answers to the other for it.
+    case "embargo": {
+      const goods = agreement.trade?.goods ?? [];
+      return `${first}'s embargo on trade with ${second}${goods.length === 0 ? "" : `, of ${goods.map((good) => good.replace(/_/g, " ")).join(", ")}`}`;
+    }
+    case "trade_pact": {
+      const terms = agreement.trade;
+      const parts = [
+        terms?.tariffCapBps != null ? `customs capped at ${(terms.tariffCapBps / 100).toFixed(terms.tariffCapBps % 100 === 0 ? 0 : 1)} in a hundred` : null,
+        terms?.mostFavoured === true ? "most-favoured terms" : null,
+        (terms?.exempt ?? []).length > 0 ? `${terms!.exempt.map((good) => good.replace(/_/g, " ")).join(", ")} free of customs` : null,
+      ].filter((part): part is string => part !== null);
+      return `Trade pact between ${first} and ${second}${parts.length === 0 ? "" : `: ${parts.join("; ")}`}`;
+    }
     default: {
       const kind = AGREEMENT_KIND_IN_WORDS[agreement.kind];
       return `${kind.charAt(0).toUpperCase()}${kind.slice(1)} between ${first} and ${second}`;

@@ -144,7 +144,8 @@ export const TradeTermsSchema = z
     /** For an embargo: the goods it forbids. Empty is every good. */
     goods: z.array(GoodIdSchema).max(6).default([]),
   })
-  .strict();
+  .strict()
+  .meta({ id: "TradeTerms" });
 export type TradeTerms = z.infer<typeof TradeTermsSchema>;
 
 export const PolityAgreementSchema = z
