@@ -1,4 +1,4 @@
-import { allOffices, deriveRelationDimension, familyLinksOf, stableHash, type ChamberPower, type GovernmentInstitution, type Office, type WorldDelta, type WorldState } from "@chronica/shared";
+import { allOffices, coinageById, deriveRelationDimension, familyLinksOf, stableHash, type ChamberPower, type GovernmentInstitution, type Office, type WorldDelta, type WorldState } from "@chronica/shared";
 
 /**
  * An order nobody is obliged to carry out does not happen.
@@ -148,7 +148,7 @@ export function nobodyListens(
         })();
       if (polityId === undefined) return null;
       const chamber = chamberThatDecides(world, polityId, "war");
-      const what = delta.op === "agreement_open" ? (delta.kind === "war" ? "war" : `a ${delta.kind.replace(/_/g, " ")}`) : "an end to the treaty";
+      const what = delta.op === "agreement_open" ? (delta.kind === "war" ? "war" : `${/^[aeiou]/.test(delta.kind) ? "an" : "a"} ${delta.kind.replace(/_/g, " ")}`) : "an end to the treaty";
       return chamber === undefined
         ? `${who} proclaimed ${what} in the name of ${polity(polityId)}. Only its ruler makes war and peace, and the ruler had said nothing of the kind.`
         : `${who} proclaimed ${what} in the name of ${polity(polityId)}. Only the ${chamber.name} could decide it, and nobody acted on his word alone.`;
@@ -208,6 +208,16 @@ export function nobodyListens(
       if (ownsAccount(payer) || !world.material.accounts.some((account) => account.id === payer)) return null;
       return `${who} promised that ${delta.label.toLowerCase()} would be paid from money that was never ${who}'s to promise. Nobody has been paid.`;
     }
+    // The collectors answer to the treasury, not to whoever announces a new rate.
+    case "tax_policy_set": {
+      const under = polity(resolve(delta.polityId) ?? delta.polityId);
+      return `${who} announced new rates of tax for ${under}. The collectors take their orders from the treasury, had none, and went on gathering what they always had.`;
+    }
+    // The moneyers answer to the treasury too.
+    case "coinage_debase": {
+      const under = polity(coinageById(world, resolve(delta.coinageId) ?? delta.coinageId)?.issuerPolityId ?? "");
+      return `${who} ordered the mint to strike the coin of ${under} differently. The moneyers take their orders from the treasury, had none, and went on striking what they always had.`;
+    }
     default:
       return null;
   }
@@ -220,7 +230,7 @@ export function nobodyListens(
  */
 const GOVERNMENT_ACTS: ReadonlySet<WorldDelta["op"]> = new Set([
   "agreement_open", "agreement_close", "diplomatic_message_send", "political_procedure_open", "political_procedure_resolve",
-  "office_seat_set", "authority_grant_upsert", "income_source_upsert", "obligation_upsert", "polity_create",
+  "office_seat_set", "authority_grant_upsert", "income_source_upsert", "obligation_upsert", "polity_create", "tax_policy_set", "coinage_debase",
 ]);
 
 /** The government an act abroad would commit, for saying whose it was not. */
@@ -240,6 +250,8 @@ function abroadPolityOf(delta: WorldDelta, world: WorldState, resolve: (ref: str
     case "office_seat_set": return allOffices(world, offices).find((office) => office.id === delta.officeId)?.polityId;
     case "income_source_upsert": return ofAccount(delta.beneficiaryAccountRef);
     case "obligation_upsert": return ofAccount(delta.payerAccountRef);
+    case "tax_policy_set": return id(delta.polityId);
+    case "coinage_debase": return coinageById(world, id(delta.coinageId))?.issuerPolityId ?? undefined;
     case "political_procedure_open":
       return delta.institutionRef === null ? undefined : world.material.institutions.find((institution) => institution.id === id(delta.institutionRef!))?.polityId;
     case "political_procedure_resolve": {
@@ -425,8 +437,13 @@ export function fleesHisMaster(delta: WorldDelta, world: WorldState, actorId: st
   return `${actor.name} has run away from ${owner}. A runaway slave is hunted, and anybody who shelters him answers for it.`;
 }
 
-/** The agreements only a government makes: war and peace, and the treaties that bind it to another power. */
-export const SOVEREIGN_AGREEMENTS: ReadonlySet<string> = new Set(["war", "peace", "alliance", "non_aggression", "tributary", "protectorate", "foedus"]);
+/**
+ * The agreements only a government makes: war and peace, the treaties that bind
+ * it to another power, and what shuts or opens its markets to one: a trade pact
+ * caps its customs and an embargo cuts a whole country's trade, which no
+ * commander in the field has the standing to do.
+ */
+export const SOVEREIGN_AGREEMENTS: ReadonlySet<string> = new Set(["war", "peace", "alliance", "non_aggression", "tributary", "protectorate", "foedus", "trade_pact", "embargo"]);
 
 /**
  * The chamber of a government that decides a question of this kind: one that

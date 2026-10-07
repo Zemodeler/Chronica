@@ -96,7 +96,7 @@ describe("every sum is in the books", () => {
       },
     ]);
     expect(paid.rejected).toEqual([]);
-    expect(balance(paid.world, "gaius-purse")).toBe(1200 - 190);
+    expect(balance(paid.world, "gaius-purse")).toBe(36_000 - 190);
     const lines = paid.world.material.transactions.filter((transaction) => transaction.sourceAccountId === "gaius-purse");
     expect(lines.map((line) => line.amount).sort((a, b) => a - b)).toEqual([90, 100]);
     expect(lines.every((line) => line.cause.kind === "action" && line.cause.explanation.length > 0)).toBe(true);
@@ -139,7 +139,7 @@ describe("a clause that hangs on the vote", () => {
 
   it("does what an order said plainly, beside a vote it did not hang on", () => {
     const paid = as("gaius-genucius", [{ op: "money_transfer", fromAccountRef: "gaius-purse", toAccountRef: null, amount: 100, reason: "Gifts to senators so the fleet passes." }], fleetAsked(), "plain");
-    expect(balance(paid.world, "gaius-purse")).toBe(1100);
+    expect(balance(paid.world, "gaius-purse")).toBe(35_900);
     expect(paid.world.contingencies).toHaveLength(opening().contingencies.length);
   });
 });

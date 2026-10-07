@@ -158,7 +158,7 @@ principle it falls under.
    "effects" and who keeps it in "upkeep"; the engine applies it monthly
    until it is repealed or unpaid. A man's land is a
    holding, bought or improved from his purse ("holding_create",
-   "holding_improve"); his trade a venture between places, or in one ("trade_venture_open"); men or a ship he pays from his own purse are his to command; a province is a government's. A man in an
+   "holding_improve"); his trade a venture between places, or in one ("trade_venture_open"); men or a ship he pays from his own purse are his to command; a province is a government's, and how it is taxed (tithe, land levy, customs, a tribute of men) is "tax_policy_set" (scope "customs": the tariff on foreign goods); the coin it strikes is "coinage_debase" (less silver: a gain now, dearer bread later; more: costly). A "trade_pact" ("trade": customs cap, goods free) is held by war and back with peace; an "embargo" (laid by the first-named power; "trade" names goods, none is all) shuts trade. A man in an
    army's ranks is not its commander: "force_membership_set" enlists, discharges or records a desertion. Money comes from somewhere: a government short of it borrows from
    a named lender with "loan_open", revenue from another power names that
    power, and nothing is banked before the body that grants it has granted it.

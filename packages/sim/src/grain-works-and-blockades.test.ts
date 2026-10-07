@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
-import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, ensureProvinceMaterial, type Force, type WorldState } from "@chronica/shared";
+import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, drawStock, ensureMarkets, ensureProvinceMaterial, type Force, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
 import { createIdFactory } from "./ports";
@@ -40,10 +40,19 @@ describe("bread bought", () => {
     expect(bought.world.material.transactions.some((transaction) => transaction.kind === "purchase" && /Bread/.test(transaction.cause.explanation))).toBe(true);
   });
 
-  it("costs more where the country is hungry", () => {
-    const fed = opening();
-    const hungry: WorldState = { ...fed, material: { ...fed.material, provinceMaterial: fed.material.provinceMaterial.map((row) => (row.provinceId === LATIUM ? { ...row, foodSecurityBps: 3_000 } : row)) } };
+  it("costs more where the country is hungry: where the granary of its market is low", () => {
+    // (Hunger was a row written 3 000; it is now a granary run down, which is what the price reads.)
+    const fed = ensureMarkets(opening());
+    const held = fed.economy!.markets.find((hub) => hub.hubId === LATIUM)?.goods.find((good) => good.good === "grain")?.stock ?? Number.MAX_SAFE_INTEGER;
+    const hungry = drawStock(fed, LATIUM, "grain", Math.min(held, Number.MAX_SAFE_INTEGER) * 0.6).world;
     expect(grainPrice(hungry, "rome", LATIUM)).toBeGreaterThan(grainPrice(fed, "rome", LATIUM));
+  });
+
+  it("raises the price for the next army, by what the first took from the granary", () => {
+    const start = lean(ensureMarkets(opening()));
+    const bought = as([{ op: "force_provision", forceRef: "roman-field-army", how: "buy", days: 20, reason: "Buy grain." }], start);
+    expect(bought.rejected).toEqual([]);
+    expect(grainPrice(bought.world, "rome", army(start).locationId)).toBeGreaterThan(grainPrice(start, "rome", army(start).locationId));
   });
 });
 

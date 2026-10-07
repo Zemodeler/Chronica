@@ -93,7 +93,8 @@ describe("a levy", () => {
   it("enrols Rome's own people only, leaves the allies' men to their treaty, and says when there are no more", () => {
     // A relief force of ten thousand once emptied Etruria and Picenum before
     // the allies' own call-up had found anybody.
-    const before = opening();
+    // With a treasury that can arm every man Rome has: it is the men who run out, not the money.
+    const before = opening(5_000_000);
     const result = applyDeltas(before, [raise(200_000)], context);
     expect(result.rejected).toEqual([]);
     expect(manpower(result.world, ETRURIA)).toBe(manpower(before, ETRURIA));
@@ -114,7 +115,8 @@ describe("a levy", () => {
   });
 
   it("raises only the men there is money to arm", () => {
-    const result = applyDeltas(opening(60), [raise(5_000)], context);
+    // Thirty thousand arms two thousand men at fifteen apiece.
+    const result = applyDeltas(opening(30_000), [raise(5_000)], context);
     expect(raised(result.world).authorizedStrength).toBe(2_000);
     expect(treasury(result.world)).toBe(0);
     expect(result.factProposals.some((fact) => fact.kind === "levy_short" && /money/.test(fact.summary))).toBe(true);

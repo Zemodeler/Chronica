@@ -4,6 +4,9 @@ import {
   isOccupied,
   armiesInSight,
   buildStation,
+  coinagesOf,
+  coinageOfAccount,
+  faceAmount,
   DynamicMapOverlaySchema,
   factsKnownToStation,
   formatWorldDate,
@@ -193,6 +196,10 @@ export function projectWorldView(world: WorldState, meta: WorldViewMeta, viewerC
       id: account.id,
       label: `${viewer?.name ?? "Personal"} purse`,
       balance: account.balance,
+      ...(coinagesOf(world).length === 0 ? {} : (() => {
+        const coin = coinageOfAccount(world, account);
+        return { coinageName: coin.name, faceBalance: faceAmount(account.balance, coin) };
+      })()),
       recentChanges: world.material.transactions
         .filter((transaction) => transaction.sourceAccountId === account.id || transaction.destinationAccountId === account.id)
         .slice(-6)

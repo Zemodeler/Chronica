@@ -1,5 +1,6 @@
 import {
   WorldDeltaSchema,
+  inTalents,
   newsDaysBetween,
   ownerOf,
   stableHash,
@@ -15,7 +16,7 @@ import {
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
 import { diplomaticAnswererOf } from "./letters";
-import { concludePeace, provinceWorth, willingToGive, type PeaceClause } from "./peace";
+import { INDEMNITY_MEANS_FLOOR, concludePeace, meansOf, provinceWorth, willingToGive, type PeaceClause } from "./peace";
 
 /**
  * The peace table (docs/plans/a-living-world.md §8), after Hearts of Iron IV.
@@ -36,6 +37,15 @@ import { concludePeace, provinceWorth, willingToGive, type PeaceClause } from ".
  */
 
 const delta = (raw: Record<string, unknown>): WorldDelta => WorldDeltaSchema.parse(raw);
+
+/**
+ * The most either power may lay on the other's goods under the trade a peace
+ * opens: five in a hundred, the ordinary harbour dues of the age (Rome's
+ * portoria was two and a half). The peace carries a modest mutual cap and no
+ * embargo clause: an embargo is a power's own act, and a defeated one has
+ * not the standing to forbid its conqueror's trade.
+ */
+export const PEACE_TRADE_TARIFF_CAP_BPS = 500;
 /** A side asked for more than this many times what it will bear, three sessions in, walks out. */
 const WALK_OUT_AT = 2;
 const WALK_OUT_AFTER_SESSIONS = 3;
@@ -53,10 +63,7 @@ export function termPrice(world: WorldState, term: PeaceTerm, giver: string, tak
       const province = world.map.provinces.find((candidate) => candidate.id === term.provinceId);
       return province === undefined || province.controllerPolityId !== giver || ownerOf(province) !== taker ? 0 : Math.max(2, Math.round(provinceWorth(world, term.provinceId, taker) / 2));
     }
-    case "indemnity": {
-      const chest = world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === giver && account.status === "active");
-      return Math.round((25 * term.amount * term.periods) / Math.max(500, chest?.balance ?? 0));
-    }
+    case "indemnity": return Math.round((25 * term.amount * term.periods) / Math.max(INDEMNITY_MEANS_FLOOR, meansOf(world, giver)));
     case "hostage": return 8;
     case "submission": return 100;
     case "tribute": return 25;
@@ -105,8 +112,10 @@ export function demandsOf(world: WorldState, table: PeaceTable, taker: string, o
     terms.push({ kind: "cede", provinceId: province.id });
     spent += price;
   }
-  const chest = world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === giver && account.status === "active");
-  const amount = Math.round(Math.max(0, chest?.balance ?? 0) * 0.1);
+  // A tenth of what the loser could pay: its chest and a year's revenue, so a
+  // beaten Carthage is asked for hundreds of talents a year and not for a
+  // tenth of what is in its treasury this month.
+  const amount = Math.round(meansOf(world, giver) * 0.1);
   if (amount > 0) {
     const indemnity: PeaceTerm = { kind: "indemnity", amount, periods: 3 };
     if (spent + termPrice(world, indemnity, giver, taker) <= budget) terms.push(indemnity);
@@ -123,7 +132,7 @@ export interface TableTurn {
 }
 
 /** The treaty the terms make: clauses for the peace itself, and the agreements and endings beside it. */
-function treatyOf(world: WorldState, terms: readonly PeaceTerm[], giver: string, taker: string): { clauses: PeaceClause[]; besides: WorldDelta[]; returned: string[] } {
+export function treatyOf(world: WorldState, terms: readonly PeaceTerm[], giver: string, taker: string): { clauses: PeaceClause[]; besides: WorldDelta[]; returned: string[] } {
   const clauses: PeaceClause[] = [];
   const besides: WorldDelta[] = [];
   const returned: string[] = [];
@@ -136,7 +145,7 @@ function treatyOf(world: WorldState, terms: readonly PeaceTerm[], giver: string,
     if (term.kind === "demilitarize") clauses.push({ kind: "undertaking", byPolityId: giver, duty: "other", what: `No army of ${nameOf(world, giver)} in ${world.map.provinces.find((province) => province.id === term.provinceId)?.name ?? term.provinceId}`.slice(0, 120), withinDays: 3_650 });
     if (term.kind === "tribute") besides.push(delta({ op: "agreement_open", localId: `tribute_${giver}`.slice(0, 60), kind: "tributary", polityId: giver, otherPolityId: taker, terms: `${nameOf(world, giver)} pays tribute to ${nameOf(world, taker)}.`, forDays: null, sourceMessageRef: null, visibility: "public", reason: "By the peace." }));
     if (term.kind === "client") besides.push(delta({ op: "agreement_open", localId: `client_${giver}`.slice(0, 60), kind: "protectorate", polityId: giver, otherPolityId: taker, terms: `${nameOf(world, giver)} comes under the protection of ${nameOf(world, taker)}.`, forDays: null, sourceMessageRef: null, visibility: "public", reason: "By the peace." }));
-    if (term.kind === "trade") besides.push(delta({ op: "agreement_open", localId: `trade_${giver}`.slice(0, 60), kind: "trade_pact", polityId: giver, otherPolityId: taker, terms: `${nameOf(world, giver)} opens its markets to ${nameOf(world, taker)}.`, forDays: null, sourceMessageRef: null, visibility: "public", reason: "By the peace." }));
+    if (term.kind === "trade") besides.push(delta({ op: "agreement_open", localId: `trade_${giver}`.slice(0, 60), kind: "trade_pact", polityId: giver, otherPolityId: taker, terms: `${nameOf(world, giver)} opens its markets to ${nameOf(world, taker)}.`, trade: { tariffCapBps: PEACE_TRADE_TARIFF_CAP_BPS }, forDays: null, sourceMessageRef: null, visibility: "public", reason: "By the peace." }));
     if (term.kind === "break_alliance") {
       const alliance = world.polityAgreements.find((agreement) => agreement.status === "active" && agreement.kind === "alliance"
         && [agreement.polityId, agreement.otherPolityId].includes(giver) && [agreement.polityId, agreement.otherPolityId].includes(term.withPolityId));
@@ -153,7 +162,7 @@ function termsInWords(world: WorldState, terms: readonly PeaceTerm[], giver: str
     switch (term.kind) {
       case "cede": return `${province(term.provinceId)} to ${nameOf(world, taker)}`;
       case "return": return `${province(term.provinceId)} given back to ${nameOf(world, taker)}`;
-      case "indemnity": return `${term.amount} a year for ${term.periods} years`;
+      case "indemnity": return `${term.amount} a year (${inTalents(term.amount)}) for ${term.periods} years`;
       case "hostage": return `${world.characters.find((character) => character.id === term.characterId)?.name ?? "a hostage"} as a hostage`;
       case "submission": return `${nameOf(world, giver)} gives itself up`;
       case "tribute": return "a yearly tribute";
@@ -483,7 +492,7 @@ export function termLabel(world: WorldState, term: PeaceTerm, giver: string, tak
   switch (term.kind) {
     case "cede": return `${province(term.provinceId)} to ${nameOf(world, taker)}`;
     case "return": return `${province(term.provinceId)} given back to ${nameOf(world, taker)}`;
-    case "indemnity": return `${term.amount} a year for ${term.periods} years from ${nameOf(world, giver)}`;
+    case "indemnity": return `${term.amount} a year (${inTalents(term.amount)}) for ${term.periods} years from ${nameOf(world, giver)}`;
     case "hostage": return `${world.characters.find((character) => character.id === term.characterId)?.name ?? "a hostage"} as a hostage`;
     case "submission": return `${nameOf(world, giver)} gives itself up to ${nameOf(world, taker)}`;
     case "tribute": return `${nameOf(world, giver)} pays tribute`;
@@ -504,9 +513,9 @@ function catalogueFor(world: WorldState, ours: string, theirs: string): PeaceTer
   const wanted = theirGround.filter((province) => province.controllerPolityId !== ours && (claimed.has(province.id) || province.settlements.length > 0)).slice(0, 12);
   for (const province of [...held.slice(0, 24), ...wanted]) options.push(option({ kind: "cede", provinceId: province.id }, "ground"));
   for (const province of world.map.provinces.filter((candidate) => candidate.ownerPolityId === ours && candidate.controllerPolityId === theirs).slice(0, 24)) options.push(option({ kind: "return", provinceId: province.id }, "ground"));
-  const chest = world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === theirs && account.status === "active");
+  const means = meansOf(world, theirs);
   for (const share of [0.05, 0.15]) {
-    const amount = Math.max(10, Math.round(Math.max(0, chest?.balance ?? 0) * share));
+    const amount = Math.max(1_000, Math.round(means * share));
     options.push(option({ kind: "indemnity", amount, periods: 3 }, "money"));
   }
   options.push(option({ kind: "tribute" }, "money"), option({ kind: "trade" }, "money"));

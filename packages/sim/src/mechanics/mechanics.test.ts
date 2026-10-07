@@ -28,7 +28,11 @@ const HANNO = { kind: "character" as const, id: "hanno" };
 const NORTHEAST = FIRST_PUNIC_IDS.messana;
 const WEST = FIRST_PUNIC_IDS.lilybaeum;
 
-const world = (): WorldState => ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(firstPunicWarScenario.initialWorld)), 0);
+// This scenario keeps its purses at the old scale, a hundredth of the state's since the ancient accounts were counted properly (`TAX_CAPACITY_PER_POPULATION`), and a rule is priced off the province it stands in: so a man is given a hundred times what he had.
+const world = (): WorldState => {
+  const start = ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(firstPunicWarScenario.initialWorld)), 0);
+  return { ...start, material: { ...start.material, accounts: start.material.accounts.map((account) => (account.owner.kind === "character" ? { ...account, balance: account.balance * 100 } : account)) } };
+};
 const balance = (state: WorldState, id: string): number => state.material.accounts.find((account) => account.id === id)!.balance;
 
 function withEntity(state: WorldState, entity: Partial<GenericEntity> & { id: string }): WorldState {
@@ -157,7 +161,7 @@ describe("what a rule costs", () => {
 
   it("will not take more than half of what a man holds, or set him in debt, unless his order said to pay", () => {
     const poor = withEntity(world(), { id: "dole" });
-    const scarce: WorldState = { ...poor, material: { ...poor.material, accounts: poor.material.accounts.map((account) => (account.id === "marcus-purse" ? { ...account, balance: 30 } : account)) } };
+    const scarce: WorldState = { ...poor, material: { ...poor.material, accounts: poor.material.accounts.map((account) => (account.id === "marcus-purse" ? { ...account, balance: 3_000 } : account)) } };
     const entity = scarce.genericEntities.find((candidate) => candidate.id === "dole")!;
     const refs = readableRefsFor(scarce, MARCUS, entity);
     const checked = validateMechanic(dole("marcus-purse"), scarce, refs, offices);
@@ -273,27 +277,27 @@ describe("a rule that fires each month", () => {
 
 describe("a rule that fires when something becomes true", () => {
   // The setup takes a share of the purse first; the threshold sits below what is left.
-  const trigger: MechanicDraft = { ...dole("marcus-purse", 10), trigger: { kind: "when", predicate: { kind: "account_below", accountId: "marcus-purse", amount: 600 } } };
+  const trigger: MechanicDraft = { ...dole("marcus-purse", 10), trigger: { kind: "when", predicate: { kind: "account_below", accountId: "marcus-purse", amount: 60_000 } } };
   const poorer = (state: WorldState, id: string, to: number): WorldState => ({ ...state, material: { ...state.material, accounts: state.material.accounts.map((account) => (account.id === id ? { ...account, balance: to } : account)) } });
 
   it("fires on the edge, once, and again only after the condition has been false in between", () => {
     const state = attached(withEntity(world(), { id: "alms" }), "alms", trigger);
     const day = state.instant.day;
     expect(run(state, day + 1).fired).toBe(0);
-    expect(balance(state, "marcus-purse")).toBeGreaterThan(600);
-    const fell = poorer(state, "marcus-purse", 500);
+    expect(balance(state, "marcus-purse")).toBeGreaterThan(60_000);
+    const fell = poorer(state, "marcus-purse", 50_000);
     const first = run(fell, day + 2);
     expect(first.fired).toBe(1);
     expect(run(first.world, day + 3).fired).toBe(0);
-    const recovered = poorer(first.world, "marcus-purse", 700);
+    const recovered = poorer(first.world, "marcus-purse", 70_000);
     const armed = run(recovered, day + 4);
     expect(armed.fired).toBe(0);
-    const fellAgain = poorer(armed.world, "marcus-purse", 550);
+    const fellAgain = poorer(armed.world, "marcus-purse", 55_000);
     expect(run(fellAgain, day + 5).fired).toBe(1);
   });
 
   it("does not fire at once for a condition already true when it was written", () => {
-    const already = poorer(world(), "marcus-purse", 500);
+    const already = poorer(world(), "marcus-purse", 50_000);
     const state = attached(withEntity(already, { id: "alms" }), "alms", trigger);
     expect(run(state, state.instant.day + 1).fired).toBe(0);
   });

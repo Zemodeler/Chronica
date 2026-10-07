@@ -206,7 +206,7 @@ describe("a proconsul (L14)", () => {
     expect(grants.every((grant) => grant.source === "law" && grant.expiresAtStep === hold.untilStep)).toBe(true);
     const treasury = grants.find((grant) => grant.scope.id === "rome-treasury")!;
     // A year of what his armies cost: the legion's pay and the hulls' victualling.
-    expect(treasury.cap!.amount).toBe((229 + 40) * 12);
+    expect(treasury.cap!.amount).toBe((65_000 + 3_500) * 12);
   });
 
   it("leaves a garrison and spends from the treasury out of office, and the slice says what he may do", () => {

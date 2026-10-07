@@ -13,8 +13,20 @@ import { provinceTaxCapacity } from "./province-material";
  * living, not a town's trade.
  */
 
+/**
+ * What a private man's wealth is, against what a state's is, from the same
+ * province: three tenths. The shares below were set when a province's tax
+ * capacity was counted in hundreds, and are now shares of millions
+ * (`TAX_CAPACITY_PER_POPULATION`), which left a marked estate in Rome yielding
+ * a hundred and twenty thousand a year, and its owner worth three times the
+ * hundred thousand denarii that put a man in the Senate. At this scale a
+ * senator with a marked estate, a purse of the same size and a venture or two
+ * is worth what the census said: about a hundred thousand.
+ */
+export const PRIVATE_WEALTH_SCALE = 0.3;
+
 /** Of the province's monthly tax capacity: what an estate of each size yields its owner each month. */
-const ESTATE_YIELD_SHARE: Record<EffectBand, number> = { slight: 0.002, marked: 0.005, great: 0.012 };
+const ESTATE_YIELD_SHARE: Record<EffectBand, number> = { slight: 0.002 * PRIVATE_WEALTH_SCALE, marked: 0.005 * PRIVATE_WEALTH_SCALE, great: 0.012 * PRIVATE_WEALTH_SCALE };
 /**
  * Months of its yield an estate costs to buy. Far below what land fetched in
  * any real age, deliberately: at twenty years' rent, no senator in the game
@@ -22,11 +34,11 @@ const ESTATE_YIELD_SHARE: Record<EffectBand, number> = { slight: 0.002, marked: 
  */
 export const ESTATE_PRICE_MONTHS = 20;
 /** Of the province's monthly tax capacity: what one improvement of each size adds to the yield. */
-const IMPROVEMENT_SHARE: Record<EffectBand, number> = { slight: 0.001, marked: 0.0025, great: 0.005 };
+const IMPROVEMENT_SHARE: Record<EffectBand, number> = { slight: 0.001 * PRIVATE_WEALTH_SCALE, marked: 0.0025 * PRIVATE_WEALTH_SCALE, great: 0.005 * PRIVATE_WEALTH_SCALE };
 /** Months of the added yield an improvement costs: it pays for itself in two and a half years. */
 export const IMPROVEMENT_PAYBACK_MONTHS = 30;
 /** However much is spent on it, an estate yields no more than this share of its province each month. */
-const ESTATE_MAX_SHARE = 0.03;
+const ESTATE_MAX_SHARE = 0.03 * PRIVATE_WEALTH_SCALE;
 
 const capacityOf = provinceTaxCapacity;
 

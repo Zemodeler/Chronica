@@ -73,6 +73,8 @@ const ACT_WORDS: Readonly<Record<WorldDeltaOp, string>> = {
   service_contract_close: "dismiss hired companies",
   regime_change: "change the constitution of the state",
   public_benefaction: "give games, feasts and doles",
+  tax_policy_set: "choose how the provinces are taxed",
+  coinage_debase: "strike the coin with less silver, or more",
 };
 
 const DOMAIN_HEADS: Readonly<Record<string, string>> = {

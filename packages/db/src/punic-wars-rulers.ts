@@ -123,7 +123,7 @@ export function foundingPeople(
         traits: [], healthBps: 8_500, prestigeBps: post.role === "ruler" ? 6_500 : 5_500,
         relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null,
       });
-      accounts.push({ id: `${id}-purse`, owner: { kind: "character", id }, currencyId: "drachma", balance: post.role === "ruler" ? 1_200 : 500, status: "active", visibility: "private" });
+      accounts.push({ id: `${id}-purse`, owner: { kind: "character", id }, currencyId: "drachma", balance: post.role === "ruler" ? 36_000 : 15_000, status: "active", visibility: "private" });
       officeSeats.push({
         id: `${officeId}:seat:0`, officeId, seatIndex: 0, holderCharacterId: id, status: "held", vacancyCause: "none",
         termStartedAtStep: 0, termExpiresAtStep: null, appointmentProcedureId: null, removalProcedureId: null,
@@ -288,7 +288,7 @@ export function romanSenators(firstSeatIndex: number): FoundingPeople {
       mind: { drives: senator.drives, temperament: senator.temperament, riskTolerance: senator.temperament.boldness ?? 50, values: [...senator.values], taboos: [], currentPressures: [] },
       healthBps: 8_000, prestigeBps: senator.prestige, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null,
     })),
-    accounts: SENATORS.map((senator) => ({ id: `${senator.id}-purse`, owner: { kind: "character", id: senator.id }, currencyId: "drachma", balance: 800, status: "active", visibility: "private" })),
+    accounts: SENATORS.map((senator) => ({ id: `${senator.id}-purse`, owner: { kind: "character", id: senator.id }, currencyId: "drachma", balance: 24_000, status: "active", visibility: "private" })),
     officeSeats: SENATORS.map((senator, index) => ({
       id: `roman-senator:seat:${firstSeatIndex + index}`, officeId: "roman-senator", seatIndex: firstSeatIndex + index, holderCharacterId: senator.id,
       status: "held", vacancyCause: "none", termStartedAtStep: 0, termExpiresAtStep: null, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: [],

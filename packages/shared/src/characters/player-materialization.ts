@@ -26,8 +26,10 @@ import { difficultyRules } from "../world/pushback";
 // was the only caller.
 
 /** Normalised words of a role or office label, for matching one against the other. */
-function labelTokens(value: string): Set<string> {
-  return new Set(
+function labelTokens(value: string): ReadonlySet<string> {
+  const known = TOKENS_OF.get(value);
+  if (known !== undefined) return known;
+  const tokens: ReadonlySet<string> = new Set(
     value
       .toLowerCase()
       .replace(/[^a-z0-9\s]/g, " ")
@@ -35,7 +37,14 @@ function labelTokens(value: string): Set<string> {
       .map((token) => OFFICE_STEMS[token] ?? token)
       .filter((token) => token.length > 2 && !GENERIC_ROLE_WORDS.has(token)),
   );
+  // The elections read every procedure's label against every office's, month after month: a few hundred
+  // distinct labels, read hundreds of thousands of times. Kept, but never without limit.
+  if (TOKENS_OF.size >= MAX_REMEMBERED_LABELS) TOKENS_OF.clear();
+  TOKENS_OF.set(value, tokens);
+  return tokens;
 }
+const TOKENS_OF = new Map<string, ReadonlySet<string>>();
+const MAX_REMEMBERED_LABELS = 4_096;
 
 /**
  * The office a word is the holding of. "Vettius stands for the military

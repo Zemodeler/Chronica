@@ -104,7 +104,7 @@ export function crossingAdmitted(world: MapWorld, edge: ProvinceEdge, terrains: 
 }
 
 /** A binary min-heap of (cost, province) pairs. */
-class RouteHeap {
+export class RouteHeap {
   private readonly costs: number[] = [];
   private readonly ids: string[] = [];
 

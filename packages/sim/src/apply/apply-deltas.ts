@@ -1,6 +1,7 @@
 import { hiringGroups } from "./action-groups";
 import {
   serveInArmy,
+  bestGapGood,
   takenBy,
   openPeaceTable,
   ownerOf,
@@ -86,6 +87,20 @@ import {
   describeFerry,
   ferryDays,
   ensureProvinceMaterial,
+  MAX_CUSTOMS_RATE_BPS,
+  COINAGE_COOLDOWN_DAYS,
+  MAX_DEBASE_STEP_BPS,
+  MAX_STANDARD_SHARE_BPS,
+  MIN_STANDARD_SHARE_BPS,
+  RECOINED_SHARE_BPS,
+  coinageById,
+  treasuryOf,
+  coinageStock,
+  convertSilver,
+  standardOf,
+  clampTaxRate,
+  economyOf,
+  EMPTY_ECONOMY_MEMORY,
   sackTheProvince,
   settlementShareBps,
   WorldStateSchema,
@@ -149,7 +164,14 @@ import { carryOutEnactment } from "../enact";
 import { commandChanges } from "../command-changes";
 import { endPolity } from "../polity-end";
 import { LOAN_TERM_PERIODS, loanInstalment } from "../debts";
-import { endObligationsOfEndedAgreements } from "../treaties";
+import { endObligationsOfEndedAgreements, hasGrievance, shiftTrust } from "../treaties";
+
+/** The words added to the news of an embargo when it ended a trade pact that stood: the pact was broken, not closed. */
+const brokenPactNote = (world: WorldState, a: string, b: string): string =>
+  agreementsBetween(world.polityAgreements, a, b).some((agreement) => agreement.kind === "trade_pact") ? " It ends the trade pact between them, which it breaks." : "";
+
+/** What embargoing a power while a trade pact stood with it costs, in the trust that power has in the embargoer: a quarter of a broken peace's forty. */
+const EMBARGO_BREACH_TRUST = 10;
 import { trespassOf } from "../trespass";
 import { SOVEREIGN_AGREEMENTS, chamberThatDecides, fleesHisMaster, listensAnyway, nobodyListens, nobodyRises, notHisToSpend } from "./nobody-listens";
 import { isOwnBusiness } from "./own-business";
@@ -328,6 +350,21 @@ function scopeOf(delta: WorldDelta, world: WorldState, resolve: (ref: string) =>
       return { kind: delta.target === "polity" ? "polity" : "institution", id: resolve(delta.targetId) ?? delta.targetId };
     case "province_material_shift":
       return { kind: "province", id: delta.provinceId };
+    // How a power's provinces are taxed is that power's act, whether it is for all of them or one, and
+    // a fiscal one: judged against the chest the revenue goes into, as setting up an income is, so
+    // that a governor who may manage a province does not thereby set the taxes of the realm.
+    case "tax_policy_set": {
+      const polityId = resolve(delta.polityId) ?? delta.polityId;
+      const chest = world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === polityId && account.status === "active");
+      return chest === undefined ? { kind: "polity", id: polityId } : { kind: "account", id: chest.id };
+    }
+    // The coin is struck for the power that issues it: judged against its chest, as its taxes are.
+    case "coinage_debase": {
+      const issuerId = coinageById(world, delta.coinageId)?.issuerPolityId ?? null;
+      if (issuerId === null) return polityFallback;
+      const chest = world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === issuerId && account.status === "active");
+      return chest === undefined ? { kind: "polity", id: issuerId } : { kind: "account", id: chest.id };
+    }
     case "office_seat_set": {
       // Scoped to the power whose office it is: seating a man is an act over a
       // government, and judging it against the office itself would let anybody
@@ -623,6 +660,10 @@ const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   // Taking a state is the power nobody's office grants: every attempt is recorded as a breach.
   regime_change: "override",
   public_benefaction: "spend",
+  // Choosing how provinces are taxed commits the treasury's future revenue, as setting up an income source does.
+  tax_policy_set: "spend",
+  // What the mint strikes is the treasury's own affair, and spends or earns its silver.
+  coinage_debase: "spend",
 };
 
 /** The power an act needs: founding something is proposing it, and keeping it at an account's expense is spending from it. */
@@ -1370,6 +1411,8 @@ export function acceptedAgreementDelta(replied: WorldState, message: WorldState[
     reason: `${polityName(replied, message.toPolityId)} accepted "${message.subject}".`.slice(0, 240),
     // The terms it offered are the treaty's clauses, carried out now.
     ...(message.clauses === undefined ? {} : { clauses: message.clauses as NonNullable<Extract<WorldDelta, { op: "agreement_open" }>["clauses"]> }),
+    // A trade offer's terms become the pact's (a customs cap, most-favoured status, goods let in free).
+    ...(message.trade === undefined || kind !== "trade_pact" ? {} : { trade: message.trade }),
   };
 }
 
@@ -2080,6 +2123,8 @@ function applyOne(
         // A rule's toll is the rule's doing, and is filed under it: an order
         // that set up the arrangement can then call what it takes its own.
         causeId: context.firingMechanic?.entityId ?? context.actorRef.id, explanation: delta.reason,
+        // "Money genuinely leaving the modelled world": a foreign shipwright, a bribe abroad.
+        external: "abroad",
       }, context);
     }
 
@@ -3536,11 +3581,122 @@ function applyOne(
           productiveCapacityBps: clampBps(material.productiveCapacityBps + (delta.productiveCapacityBpsDelta ?? 0)),
           warDamageBps: clampBps(material.warDamageBps + (delta.warDamageBpsDelta ?? 0)),
           taxCapacity: Math.max(0, material.taxCapacity + (delta.taxCapacityDelta ?? 0)),
+          // The month's reckoning rebuilds capacity from the people and their
+          // development; what a hand laid on it is kept beside it to be added again.
+          ...(delta.taxCapacityDelta === undefined || delta.taxCapacityDelta === 0 ? {} : { taxCapacityOffset: Math.max(-10_000_000, Math.min(10_000_000, (material.taxCapacityOffset ?? 0) + delta.taxCapacityDelta)) }),
           displacedPopulation: Math.max(0, material.displacedPopulation + (delta.displacedPopulationDelta ?? 0)),
           lastMaterialUpdateStep: atStep,
         };
       });
       return { ...backfilled, material: { ...backfilled.material, provinceMaterial } };
+    }
+
+    case "tax_policy_set": {
+      const polityId = resolve(delta.polityId) ?? delta.polityId;
+      const polity = world.map.polities.find((candidate) => candidate.id === polityId);
+      if (polity === undefined) reject(`No power "${polityId}" exists to set a tax policy for.`, "reference");
+      // An officer sets his own power's taxes, and nobody else's. The world's
+      // own hand (a mechanic, a scenario) is not an officer and is let by.
+      const actorPolity = context.actorRef.kind === "character" ? world.characters.find((character) => character.id === context.actorRef.id)?.polityId ?? null : context.actorRef.kind === "polity" ? context.actorRef.id : null;
+      if (actorPolity !== null && actorPolity !== polityId && context.actsForTheWorld !== true) {
+        reject(`${polity.name} is not the power this officer serves: its provinces are taxed by its own government.`);
+      }
+      const rateBps = clampTaxRate(delta.rateBps);
+      if (delta.scope === "customs") {
+        // The tariff on what comes in from other powers: one line a power, never past what would stop the trade.
+        const memory = economyOf(world);
+        const kept = memory.customsRates.filter((entry) => entry.polityId !== polityId);
+        const customs = Math.min(MAX_CUSTOMS_RATE_BPS, rateBps);
+        return { ...world, economy: { ...memory, customsRates: [...kept, ...(customs > 0 ? [{ polityId, rateBps: customs }] : [])].sort((a, b) => a.polityId.localeCompare(b.polityId)) } };
+      }
+      if (delta.scope === "polity") {
+        const memory = economyOf(world);
+        const kept = memory.taxPolicies.filter((policy) => policy.polityId !== polityId);
+        return { ...world, economy: { ...memory, taxPolicies: [...kept, { polityId, regime: delta.regime, rateBps }].sort((a, b) => a.polityId.localeCompare(b.polityId)) } };
+      }
+      const provinceId = delta.provinceId === null ? null : resolve(delta.provinceId) ?? delta.provinceId;
+      if (provinceId === null) reject("A tax policy for one province must name it.");
+      const province = world.map.provinces.find((candidate) => candidate.id === provinceId);
+      if (province === undefined) reject(`No province "${provinceId}" exists to tax.`, "reference");
+      // Only ground the power holds: an occupied province is its occupier's to
+      // squeeze, a lost one is nobody's to tax.
+      if (province.controllerPolityId !== polityId) {
+        reject(`${province.name} is not held by ${polity.name}, which cannot set how it is taxed.`);
+      }
+      const backfilled = ensureProvinceMaterial(world, atStep);
+      return {
+        ...backfilled,
+        economy: backfilled.economy ?? EMPTY_ECONOMY_MEMORY,
+        material: {
+          ...backfilled.material,
+          provinceMaterial: backfilled.material.provinceMaterial.map((row) => (row.provinceId === provinceId ? { ...row, taxRegime: delta.regime, taxRateBps: rateBps } : row)),
+        },
+      };
+    }
+
+    case "coinage_debase": {
+      const coinage = coinageById(world, delta.coinageId);
+      if (coinage === undefined) reject(`No coinage "${delta.coinageId}" exists to strike differently.`, "reference");
+      const issuerId = coinage.issuerPolityId;
+      if (issuerId === null) reject(`${coinage.name} has no power of its own to mint it: nobody here may debase or reform it.`);
+      const issuer = world.map.polities.find((candidate) => candidate.id === issuerId);
+      if (issuer === undefined) reject(`The power that strikes ${coinage.name} no longer exists.`, "reference");
+      // Only the issuer's own government strikes its coin; the world's own hand is let by.
+      const actorPolity = context.actorRef.kind === "character" ? world.characters.find((character) => character.id === context.actorRef.id)?.polityId ?? null : context.actorRef.kind === "polity" ? context.actorRef.id : null;
+      if (actorPolity !== null && actorPolity !== issuerId && context.actsForTheWorld !== true) {
+        reject(`${issuer.name} strikes ${coinage.name}; an officer of another power has no mint to change it.`);
+      }
+      const last = coinage.history.at(-1);
+      if (last !== undefined && atStep - last.atStep < COINAGE_COOLDOWN_DAYS) {
+        reject(`The mint of ${coinage.name} struck a new coin only ${atStep - last.atStep} days ago: it will not change again for ${COINAGE_COOLDOWN_DAYS - (atStep - last.atStep)} more.`);
+      }
+      if (delta.targetSilverBps === null && delta.stepBps === null) reject("Name the silver content to strike at, or the change to make to it.");
+      const standard = standardOf(coinage);
+      const wanted = delta.targetSilverBps ?? Math.round((coinage.silverBps * (10_000 + (delta.stepBps ?? 0))) / 10_000);
+      // No act moves it more than a quarter, and no coin is struck below four in ten or above eleven in ten of its standard.
+      const struck = Math.round(Math.max(
+        Math.max(standard * MIN_STANDARD_SHARE_BPS / 10_000, coinage.silverBps * (10_000 - MAX_DEBASE_STEP_BPS) / 10_000),
+        Math.min(Math.min(standard * MAX_STANDARD_SHARE_BPS / 10_000, coinage.silverBps * (10_000 + MAX_DEBASE_STEP_BPS) / 10_000), wanted),
+      ));
+      if (struck === coinage.silverBps) reject(`${coinage.name} is already struck at that silver content.`);
+      const treasuryId = treasuryOf(world, issuerId);
+      if (treasuryId === null) reject(`${issuer.name} keeps no treasury to take the mint's gain or pay for its silver.`, "reference");
+      // What is called in and re-struck in the year of the change: a share of the coin the issuer's countries hold.
+      const recoined = Math.round((coinageStock(world, coinage.id) * RECOINED_SHARE_BPS) / 10_000);
+      const debasing = struck < coinage.silverBps;
+      // Debasing, the same silver makes more coin: the mint keeps the difference as seigniorage. Re-coining
+      // higher, the silver has to be found: what is called in is brought up to the new fineness at the treasury's cost.
+      const sum = debasing
+        ? Math.round((recoined * (coinage.silverBps - struck)) / coinage.silverBps)
+        : Math.round((recoined * (struck - coinage.silverBps)) / coinage.silverBps);
+      const treasury = world.material.accounts.find((account) => account.id === treasuryId)!;
+      if (!debasing && treasury.balance < sum) reject(`Bringing ${coinage.name} up to ${struck} would cost ${sum}, and ${treasury.id} holds ${treasury.balance}.`);
+      const moved = debasing
+        ? moveMoney(world, { from: null, to: treasuryId, amount: sum, kind: "income", causeId: coinage.id, explanation: `Seigniorage: ${coinage.name} struck at ${struck} for ${coinage.silverBps} of silver.`, external: "seigniorage" }, context)
+        : moveMoney(world, { from: treasuryId, to: null, amount: sum, kind: "purchase", causeId: coinage.id, explanation: `Silver to re-strike ${coinage.name} at ${struck}.` }, context);
+      const memory = economyOf(moved);
+      const nextCoinages = memory.coinages.some((candidate) => candidate.id === coinage.id)
+        ? memory.coinages.map((candidate) => candidate.id !== coinage.id ? candidate : {
+          ...candidate,
+          silverBps: struck,
+          standardBps: standard,
+          debasedSinceStep: atStep,
+          history: [...candidate.history, { atStep, fromSilverBps: coinage.silverBps, toSilverBps: struck }].slice(-8),
+        })
+        : memory.coinages;
+      emitFact({
+        localId: `coinage_${debasing ? "debased" : "reformed"}_${coinage.id}_${atStep}`.slice(0, 60),
+        kind: debasing ? "coinage_debased" : "coinage_reformed",
+        summary: debasing
+          ? `${issuer.name} has had its mint strike ${coinage.name} with less silver in it (${struck} of the ${coinage.silverBps} it held): the treasury is the richer by ${sum} for it, and prices will follow the coin down.`.slice(0, 600)
+          : `${issuer.name} has had ${coinage.name} re-struck at a higher fineness (${struck}, from ${coinage.silverBps}), at a cost of ${sum} in silver: its coin will buy more in time.`.slice(0, 600),
+        affectedRefs: [{ kind: "polity", id: issuerId }],
+        visibility: "public",
+        discoveryState: "public",
+        knowableInDays: 0,
+        significance: debasing ? 50 : 40,
+      });
+      return { ...moved, economy: { ...memory, coinages: nextCoinages } };
     }
 
     case "political_procedure_open": {
@@ -4147,7 +4303,7 @@ function applyOne(
       // (`cargoes.ts`), not a trickle every month for ever (play-test L9).
       // A single cargo is done when it is sold; a regular trade sails again.
       const bySea = from.id !== to.id && hasPort(world, from.id) && hasPort(world, to.id);
-      const cargo = bySea ? { cost: terms.price, sailedAtStep: atStep, arrivesAtStep: atStep + voyageDays(world, from.id, to.id), voyages: 0, rollsOver: delta.band !== "slight" } : undefined;
+      const cargo = bySea ? { cost: terms.price, good: bestGapGood(world, from.id, to.id).good, sailedAtStep: atStep, arrivesAtStep: atStep + voyageDays(world, from.id, to.id), voyages: 0, rollsOver: delta.band !== "slight" } : undefined;
       if (cargo !== undefined) {
         emitFact({
           localId: `cargo_${ventureId}`.slice(0, 60), kind: "cargo_sailed",
@@ -4403,7 +4559,9 @@ function applyOne(
         openedAtStep: atStep,
       };
 
-      const lent = moveMoney(world, { from: lendingAccountId, to: borrowerId, amount: principal, kind: "transfer", causeId: loanId, explanation: `Lent: ${taken.terms}` }, context);
+      // A foreign banker's money is credit from outside the accounts, tagged as
+      // such, and what is repaid to him leaves them the same way.
+      const lent = moveMoney(world, { from: lendingAccountId, to: borrowerId, amount: principal, kind: "transfer", causeId: loanId, explanation: `Lent: ${taken.terms}`, external: "credit" }, context);
       return {
         ...lent,
         material: {
@@ -4468,7 +4626,7 @@ function applyOne(
       const lenderAccount = loan.lenderKind === "foreign" || loan.lenderId === null
         ? undefined
         : world.material.accounts.find((account) => account.owner.kind === loan.lenderKind && account.owner.id === loan.lenderId);
-      const repaid = moveMoney(world, { from: borrower.id, to: lenderAccount?.id ?? null, amount: paying, kind: "transfer", causeId: loanId, explanation: `Repaid on ${loan.terms}` }, context);
+      const repaid = moveMoney(world, { from: borrower.id, to: lenderAccount?.id ?? null, amount: paying, kind: "transfer", causeId: loanId, explanation: `Repaid on ${loan.terms}`, external: "credit" }, context);
 
       const outstanding = loan.outstanding - paying;
       const settled = { ...loan, outstanding, status: outstanding === 0 ? ("repaid" as const) : loan.status };
@@ -5336,6 +5494,7 @@ function applyOne(
             agreementId: null,
             ...(delta.onRefusal == null ? {} : { onRefusal: delta.onRefusal }),
             ...(delta.clauses === undefined || delta.clauses.length === 0 ? {} : { clauses: delta.clauses }),
+            ...(delta.trade === undefined ? {} : { trade: delta.trade }),
           },
         ],
       };
@@ -5390,6 +5549,7 @@ function applyOne(
           ...(message.proposes === undefined ? {} : { proposes: message.proposes }),
           ...(message.negotiation === undefined ? {} : { negotiation: { ...message.negotiation, positions: [{ issue: "counteroffer", value: `${added ?? ""}; omitted clauses: ${[...refusedAt].join(",")}`.slice(0, 240) }] } }),
           ...(kept === undefined ? {} : { clauses: kept as never }),
+          ...(message.trade === undefined ? {} : { trade: message.trade }),
           reason: `${delta.answerText}`.slice(0, 240),
         }, context, assignedIds, resolve, emitFact, emitAccount);
       }
@@ -5515,7 +5675,9 @@ function applyOne(
       }
       // The same thing twice is not two agreements. Peace declared while peace
       // already stands is a restatement, and a second war is still one war.
-      const standing = agreementsBetween(world.polityAgreements, partyId, otherPartyId).find((agreement) => agreement.kind === delta.kind);
+      // An embargo is one power's act, so each way round is its own: Carthage embargoing Rome stands beside Rome embargoing Carthage.
+      const standing = agreementsBetween(world.polityAgreements, partyId, otherPartyId)
+        .find((agreement) => agreement.kind === delta.kind && (delta.kind !== "embargo" || agreement.polityId === partyId));
       // The acceptance of a letter opens what it offered (`bindTheAcceptance`);
       // the answerer writing the same treaty out beside it is saying so twice.
       if (standing !== undefined && sourceMessageId !== null && standing.sourceMessageId === sourceMessageId) return world;
@@ -5579,6 +5741,10 @@ function applyOne(
         // Nobody is protected by two powers at once. That is the quarrel the
         // second protector is picking, and at Messana it was the war itself.
         protectorate: ["protectorate"],
+        // Trade is either open on the terms of a pact or shut by an embargo, never both between the same two:
+        // an embargo ends the pact (and a pact ends the embargo), and ending a pact by embargo is a breach (below).
+        embargo: ["trade_pact"],
+        trade_pact: ["embargo"],
       };
       const closes = new Set(opposed[delta.kind] ?? []);
       const agreementId = mint("agreement", delta.localId);
@@ -5596,6 +5762,23 @@ function applyOne(
           discoveryState: "public",
           knowableInDays: 0,
           significance: 75,
+        });
+      }
+      // A pact that opens trade, and an embargo that shuts it, are news between the two powers: one line each, never one a good or a province.
+      if ((delta.kind === "trade_pact" || delta.kind === "embargo") && delta.visibility !== "private") {
+        const embargo = delta.kind === "embargo";
+        const goods = (delta.trade?.goods ?? []).map((good) => good.replace(/_/g, " "));
+        emitFact({
+          localId: `${embargo ? "embargo_laid" : "trade_pact_opened"}_${delta.localId}`.slice(0, 60),
+          kind: embargo ? "embargo_laid" : "trade_pact_opened",
+          summary: embargo
+            ? `${polityName(world, partyId)} has laid an embargo on trade with ${polityName(world, otherPartyId)}${goods.length === 0 ? "" : `, of ${goods.join(", ")}`}: no merchant carries ${goods.length === 0 ? "goods" : "them"} between their markets until it is lifted.${brokenPactNote(world, partyId, otherPartyId)}`.slice(0, 600)
+            : `${polityName(world, partyId)} and ${polityName(world, otherPartyId)} have agreed a trade pact: ${delta.terms}`.slice(0, 600),
+          affectedRefs: [{ kind: "polity", id: partyId }, { kind: "polity", id: otherPartyId }],
+          visibility: delta.visibility === "polity" ? "polity" : "public",
+          discoveryState: delta.visibility === "polity" ? "polity" : "public",
+          knowableInDays: 0,
+          significance: embargo ? 50 : 40,
         });
       }
       // What the treaty makes happen, carried out as it is made.
@@ -5647,12 +5830,21 @@ function applyOne(
         const at = polityOfPerson(plot.targetCharacterId);
         return by !== null && at !== null && by !== at && sides.has(by) && sides.has(at) ? { ...plot, outcome: "nothing" as const, resolvedAtStep: atStep } : plot;
       });
+      // An embargo laid on a power whose trade pact still stands ends that pact, and is a breach of it:
+      // the pact should have been closed first (`agreement_close`). It costs the embargoer the trust of its
+      // partner, and of every power that sees what its word on trade is worth, but not a legitimacy hit and
+      // no grievance to make war over, which is what a broken peace is. A pact that was closed first is no breach.
+      const brokenPact = delta.kind === "embargo" ? agreementsBetween(bound.polityAgreements, partyId, otherPartyId).find((agreement) => agreement.kind === "trade_pact") : undefined;
+      const afterBreach = brokenPact === undefined || hasGrievance(bound, partyId, otherPartyId) ? bound : {
+        ...bound,
+        polityStances: shiftTrust(bound.polityStances, otherPartyId, partyId, -EMBARGO_BREACH_TRUST, `${nameOf(partyId)} embargoed them while a trade pact stood`, atStep),
+      };
       // What it ends stops being paid on, here as anywhere (`treaties.ts`).
       return endObligationsOfEndedAgreements({
-        ...bound,
+        ...afterBreach,
         covertPlots: calledOff,
         polityAgreements: [
-          ...bound.polityAgreements.map((agreement) =>
+          ...afterBreach.polityAgreements.map((agreement) =>
             agreement.status === "active" &&
             closes.has(agreement.kind) &&
             ((agreement.polityId === partyId && agreement.otherPolityId === otherPartyId) ||
@@ -5666,6 +5858,7 @@ function applyOne(
             polityId: fromId,
             otherPolityId: toId,
             terms: delta.terms,
+            ...(delta.trade === undefined ? {} : { trade: delta.trade }),
             sinceStep: atStep,
             untilStep: delta.forDays === null ? null : atStep + delta.forDays,
             sourceMessageId,
@@ -5841,7 +6034,7 @@ function applyOne(
         const purse = payer === null ? undefined : world.material.accounts.find((account) => account.id === payer);
         if (purse === undefined) reject(`Nobody is named to pay the ${got.cost} the bread costs.`, "reference");
         if (purse.balance < got.cost) reject(`The bread costs ${got.cost}, and ${purse.id} holds ${purse.balance}.`);
-        fed = moveMoney(fed, { from: purse.id, to: got.sellerAccountId, amount: got.cost, kind: "purchase", causeId: forceId, explanation: `Bread for ${force.name}.` }, context);
+        fed = moveMoney(fed, { from: purse.id, to: got.sellerAccountId, amount: got.cost, kind: "purchase", causeId: forceId, explanation: `Bread for ${force.name}.`, external: "bread" }, context);
       }
       for (const fact of got.facts) emitFact(fact);
       return fed;
@@ -7022,27 +7215,44 @@ interface Movement {
   readonly explanation: string;
   /** Who may read the line. The paying account's own, by default. */
   readonly visibility?: MoneyTransaction["visibility"];
+  /** For a sum with one end outside the accounts: which door in or out of the books it is (`EXTERNAL_MONEY_KINDS`). */
+  readonly external?: MoneyTransaction["external"];
 }
 
 function moveMoney(world: WorldState, movement: Movement, context: ApplyContext): WorldState {
   if (movement.amount <= 0 || (movement.from === null && movement.to === null) || movement.from === movement.to) return world;
+  // A sum crossing from one coinage to another passes through a money-changer
+  // (`world/coinage.ts`): what arrives is less his cut, which leaves the books
+  // by the `abroad` door; a sum inside one coinage moves whole.
+  const crossing = movement.from !== null && movement.to !== null ? convertSilver(world, movement.from, movement.to, movement.amount) : { received: movement.amount, cut: 0 };
   const accounts = world.material.accounts.map((account) => {
     if (account.id === movement.from) return { ...account, balance: account.balance - movement.amount };
-    if (account.id === movement.to) return { ...account, balance: account.balance + movement.amount };
+    if (account.id === movement.to) return { ...account, balance: account.balance + crossing.received };
     return account;
   });
   const holder = world.material.accounts.find((account) => account.id === (movement.from ?? movement.to));
+  const changersCut: readonly MoneyTransaction[] = crossing.cut <= 0 ? [] : [{
+    id: context.ids.next("txn"),
+    atStep: world.elapsedStep,
+    kind: "transfer",
+    amount: crossing.cut,
+    external: "abroad",
+    sourceAccountId: movement.from!,
+    cause: { kind: "action", id: movement.causeId.slice(0, 120), explanation: "The money-changers' cut on a sum crossing from one coinage to another." },
+    visibility: movement.visibility ?? holder?.visibility ?? "polity",
+  }];
   const transaction: MoneyTransaction = {
     id: context.ids.next("txn"),
     atStep: world.elapsedStep,
     kind: movement.kind,
-    amount: movement.amount,
+    amount: crossing.received,
+    ...(movement.external === undefined || (movement.from !== null && movement.to !== null) ? {} : { external: movement.external }),
     ...(movement.from === null ? {} : { sourceAccountId: movement.from }),
     ...(movement.to === null ? {} : { destinationAccountId: movement.to }),
     cause: { kind: "action", id: movement.causeId.slice(0, 120), explanation: (movement.explanation.trim() || "An act of this turn.").slice(0, 240) },
     visibility: movement.visibility ?? holder?.visibility ?? "polity",
   };
-  return { ...world, material: { ...world.material, accounts, transactions: [...world.material.transactions, transaction] } };
+  return { ...world, material: { ...world.material, accounts, transactions: [...world.material.transactions, transaction, ...changersCut] } };
 }
 
 /**

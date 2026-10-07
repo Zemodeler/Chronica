@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { BlocInterestSchema, ChamberPowerSchema, FranchiseSchema, QuestionConcernSchema } from "./political-parts";
+import { GoodIdSchema } from "./world/good-ids";
 
 // Named, so every JSON schema generated for a prompt states it once and points
 // at it: inlined, it was 73 copies of the same string in the orchestrator's.
@@ -53,6 +54,12 @@ export const MoneyAccountSchema = z.object({
   id: EntityIdSchema,
   owner: AccountOwnerSchema,
   currencyId: EntityIdSchema,
+  /**
+   * The coinage the money in it is struck in (`world/coinage.ts`). Absent: the
+   * coinage of the owner's power, or foreign silver. The balance itself is
+   * always in silver units, whatever coin it is held in.
+   */
+  coinageId: EntityIdSchema.optional(),
   balance: MoneyAmountSchema,
   status: z.enum(["active", "locked", "closed"]),
   visibility: VisibilitySchema,
@@ -193,10 +200,32 @@ export const MoneyReservationSchema = z
   });
 export type MoneyReservation = z.infer<typeof MoneyReservationSchema>;
 
+/**
+ * Where money enters or leaves the books other than between two accounts.
+ *
+ * A world's money is conserved except at these doors, each one a real thing
+ * outside the accounts the model keeps: the land and its people, who are
+ * taxed, rented and tithed but keep no purse of their own; the market, which
+ * buys what a merchant carries and sells what a ship is fitted with; plunder
+ * from a sacked town; credit from a banker the world does not name; the
+ * thousands nobody names, who are paid wages, and who bring what they have
+ * saved when they take service; bread bought from the country at large; money
+ * an order sends abroad (which is also where a money-changer's cut on a sum
+ * crossing from one coinage to another goes); the seigniorage a mint earns by
+ * striking the same silver into more coin; and the means a man arrives in the
+ * world with. A one-sided transaction that names none of them is money from nowhere
+ * (`sim/money-audit.ts`).
+ */
+export const EXTERNAL_MONEY_KINDS = ["harvest", "market", "plunder", "credit", "the_unnamed", "bread", "abroad", "seigniorage", "endowment"] as const;
+export const ExternalMoneyKindSchema = z.enum(EXTERNAL_MONEY_KINDS);
+export type ExternalMoneyKind = z.infer<typeof ExternalMoneyKindSchema>;
+
 export const MoneyTransactionSchema = z
   .object({
     id: EntityIdSchema,
     sourceActionId: EntityIdSchema.nullable().optional(),
+    /** For a transaction with only one side: which door in or out of the books it is (`EXTERNAL_MONEY_KINDS`). */
+    external: ExternalMoneyKindSchema.optional(),
     atStep: ElapsedStepSchema,
     kind: z.enum([
       "income",
@@ -1086,6 +1115,20 @@ export const ForceSchema = z.object({
 export type Force = z.infer<typeof ForceSchema>;
 
 /**
+ * How a power takes its share from a province.
+ *
+ * - `tithe`: a share of the harvest, so it swings with the year and costs little to gather.
+ * - `land_levy`: a fixed sum by the land, steady and resented.
+ * - `customs`: dues on what passes through its harbours and markets.
+ * - `men`: a tribute of manpower, owed by allies and subjects, which is no money at all.
+ */
+export const TAX_REGIMES = ["tithe", "land_levy", "customs", "men"] as const;
+export const TaxRegimeSchema = z.enum(TAX_REGIMES);
+export type TaxRegime = z.infer<typeof TaxRegimeSchema>;
+/** However a ruler writes it, no more than this share of what a province can bear is asked: past six tenths nothing is left to take. */
+export const MAX_TAX_RATE_BPS = 6_000;
+
+/**
  * Compact, canonical, per-province material state (docs/14 Phase 2:
  * background material society).
  *
@@ -1107,6 +1150,34 @@ export const ProvinceMaterialSchema = z
     displacedPopulation: z.number().int().nonnegative(),
     warDamageBps: BasisPointsSchema,
     lastMaterialUpdateStep: ElapsedStepSchema,
+    /**
+     * How developed the province is, 0-10 000: its roads, harbours, estates,
+     * drainage and the habit of trade, which is what sets how many people its
+     * ground can carry and how much of what they make a government can reach.
+     * Derived from its town, its ground and its harbour where a row has none
+     * (`deriveInitialDevelopment`), moved a few hundred points a year by peace,
+     * order and a light tax, and knocked down by war much faster than it comes
+     * back (`sim/economy.ts`). Absent on a row written before it existed; read
+     * through `developmentOf`.
+     */
+    developmentBps: BasisPointsSchema.optional(),
+    /**
+     * What war and plunder have left on it: a memory that caps development at
+     * its potential less this share and fades over decades, not years. A raid
+     * leaves a little and a sack a great deal; repeated campaigns stack.
+     */
+    scarBps: BasisPointsSchema.optional(),
+    /** How its people are taxed, where the power that holds it has said so for this province alone; else the power's own policy, else the old uniform levy. */
+    taxRegime: TaxRegimeSchema.optional(),
+    /** The share taken, in basis points of what the province can bear; with `taxRegime`. */
+    taxRateBps: z.number().int().min(0).max(MAX_TAX_RATE_BPS).optional(),
+    /**
+     * What a hand laid on the province's tax capacity (`province_material_shift`'s
+     * `taxCapacityDelta`) has left: the capacity is reckoned afresh every month
+     * from its people and their development, so a standing shift is kept here
+     * and added to each reckoning rather than overwritten by it.
+     */
+    taxCapacityOffset: z.number().int().min(-10_000_000).max(10_000_000).optional(),
   })
   .strict();
 export type ProvinceMaterial = z.infer<typeof ProvinceMaterialSchema>;
@@ -1196,6 +1267,13 @@ export const TradeVentureSchema = z
     cargo: z.object({
       /** What the goods cost: what is sold at the other end, at a margin. */
       cost: MoneyAmountSchema,
+      /**
+       * The good it carries (`world/markets.ts`): the margin is the gap
+       * between that good's price at the two ends. Absent on a cargo sailed
+       * before goods had markets, which is taken to be whichever pays best
+       * between its ports.
+       */
+      good: GoodIdSchema.optional(),
       sailedAtStep: ElapsedStepSchema,
       arrivesAtStep: ElapsedStepSchema,
       /** Cargoes landed so far. */

@@ -1,5 +1,6 @@
 import type { WorldState } from "../world/world-state";
 import type { EffectBand } from "../world/standing-effects";
+import { PRIVATE_WEALTH_SCALE } from "./estates";
 import { provinceTaxCapacity } from "./province-material";
 
 /**
@@ -14,7 +15,7 @@ import { provinceTaxCapacity } from "./province-material";
  */
 
 /** Of the lesser province's monthly tax capacity: what a venture of each size returns its owner each month. */
-const VENTURE_RETURN_SHARE: Record<EffectBand, number> = { slight: 0.003, marked: 0.008, great: 0.018 };
+const VENTURE_RETURN_SHARE: Record<EffectBand, number> = { slight: 0.003 * PRIVATE_WEALTH_SCALE, marked: 0.008 * PRIVATE_WEALTH_SCALE, great: 0.018 * PRIVATE_WEALTH_SCALE };
 /** Months of its return a venture costs to set going: ships hired, goods bought, agents placed. */
 export const VENTURE_PRICE_MONTHS = 15;
 

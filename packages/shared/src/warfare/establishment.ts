@@ -363,8 +363,8 @@ export function doctrineNetGain(effects: readonly DoctrineEffect[]): number {
   return Math.max(0, net);
 }
 
-/** What a doctrine's keep costs a month, per thousand men it covers: two for every point it gains on what it gives up. */
-export const DOCTRINE_UPKEEP_PER_THOUSAND_PER_POINT = 2;
+/** What a doctrine's keep costs a month, per thousand men it covers: six hundred (a sixteenth of what a thousand men are paid) for every point it gains on what it gives up. */
+export const DOCTRINE_UPKEEP_PER_THOUSAND_PER_POINT = 600;
 
 /** How long a formation takes to be refitted to a new way of fighting. */
 export function refitDaysFor(effects: readonly DoctrineEffect[]): number {

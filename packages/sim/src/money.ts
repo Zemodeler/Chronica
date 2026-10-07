@@ -2,6 +2,8 @@ import {
   boundedId,
   computeOpinion,
   ESTATE_PRICE_MONTHS,
+  LEGIONARY_PAY_GROSS,
+  PAY_STOPPAGES_SHARE,
   stableHash,
   type FactProposalDraft,
   type MoneyObligation,
@@ -21,17 +23,9 @@ import type { IdFactory } from "./ports";
 
 // ── A soldier's pay ──────────────────────────────────────────────────────────
 
-/**
- * What a legionary is owed a month, in drachmae, before stoppages: two obols a
- * day, as Polybius gives it (6.39), thirty days to the month.
- */
-export const LEGIONARY_PAY_GROSS = 10;
-/**
- * And what is stopped out of it for his grain, his clothes and the arms he is
- * issued, which Polybius says the quaestor deducted: about a third. A legionary
- * keeps seven a month, a centurion twice that, a horseman three times.
- */
-export const PAY_STOPPAGES_SHARE = 1 / 3;
+// The rates are the world's (`shared/world/economy.ts`), so the treasury's
+// outlay for an army and the pay of the named men in it are counted from one.
+export { LEGIONARY_PAY_GROSS, PAY_STOPPAGES_SHARE };
 const CENTURION_PAY_MULTIPLE = 2;
 const HORSEMAN_PAY_MULTIPLE = 3;
 
@@ -113,16 +107,16 @@ export function monthlyOutgoingsOf(world: WorldState, purseId: string): number {
 }
 
 // ── Loans offered ────────────────────────────────────────────────────────────
-
-/** Below this a purse is low whatever it owes: a man cannot keep a household on less. */
-const LOW_PURSE_FLOOR = 150;
+/** Below this a purse is low whatever it owes: a senator's household runs to a few thousand a month. */
+/** Below this a purse is low whatever it owes: a senator cannot keep a household on less than a few months of what it spends, a legionary's pay for forty years. */
+const LOW_PURSE_FLOOR = 4_500;
 /** Or below this many months of what it is bound to pay out. */
 const LOW_PURSE_MONTHS = 2;
 /** How many men offer at once. */
 const MAX_LENDERS = 3;
 /** A lender is a man who cares for money -- and has it. */
 const LENDER_WEALTH_DRIVE = 60;
-const LENDER_MIN_BALANCE = 500;
+const LENDER_MIN_BALANCE = 15_000;
 /** Of his own money, the most a lender puts in one man's hands. */
 const LENDER_SHARE = 0.25;
 /** Of what a man has coming in each month, and of what he could pledge. */

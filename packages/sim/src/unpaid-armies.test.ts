@@ -33,8 +33,8 @@ const opening = (): WorldState => {
     ...world,
     material: {
       ...world.material,
-      accounts: world.material.accounts.map((account) => (account.id === "mamertine-treasury" ? { ...account, balance: 600 } : account)),
-      incomeSources: world.material.incomeSources.map((source) => (source.id === "mamertine-tolls" ? { ...source, amount: 90 } : source)),
+      accounts: world.material.accounts.map((account) => (account.id === "mamertine-treasury" ? { ...account, balance: 70_000 } : account)),
+      incomeSources: world.material.incomeSources.map((source) => (source.id === "mamertine-tolls" ? { ...source, amount: 10_500 } : source)),
     },
   };
 };
@@ -78,7 +78,9 @@ describe("an army whose treasury runs dry", () => {
 
   it("costs the Mamertines their men, having first cost them their morale", () => {
     const opened = opening();
-    const morale = runMonths(opened, 11);
+    // Month ten, not eleven (phase D): Messana sells grain across the strait to besieged Rhegium, so its own bread is dearer
+    // and the soldiery's pay, a third of it bread, dearer with it; the chest runs dry a month sooner and the men go a month sooner.
+    const morale = runMonths(opened, 10);
     const desertion = runMonths(opened, 18);
 
     // `arrearsMoralePeriods: 1`, `arrearsDesertionPeriods: 2` -- so spirits go

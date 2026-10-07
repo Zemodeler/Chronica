@@ -6,6 +6,11 @@ import {
   kmFrom,
   COUNTRYSIDE_KM,
   REFERENCE_PROVINCE_KM,
+  drawStock,
+  ensureMarkets,
+  grainPriceFor,
+  provinceGrainPriceBps,
+  stockIn,
   sameConfederation,
   stableHash,
   warfareWith,
@@ -15,6 +20,7 @@ import {
   type Force,
   type ScenarioWarfareRules,
   type WorldState,
+  applyForagingScar,
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
 
@@ -41,6 +47,14 @@ const clampBps = (value: number): number => Math.max(0, Math.min(10_000, Math.ro
 
 /** Of a country's people, the share of a day's bread it can spare an army for every day asked. */
 const SPARE_SHARE = 0.05;
+/**
+ * What a market can spare an army out of its grain: a fifth of what its
+ * granaries hold. The rest is the town's own bread, and an army that takes
+ * more is not buying but looting (a sack). A man eats four modii a month
+ * (`GOODS`), a hundred and thirty-odd thousandths of a man-day's ration a modius.
+ */
+const STOCK_SPARE_SHARE = 0.2;
+const MODII_PER_MAN_DAY = 4 / 30;
 /** A requisition takes half as much again as a market would sell. */
 const REQUISITION_REACH = 1.5;
 /** A loaded wagon covers a reference province in three days. */
@@ -49,20 +63,20 @@ const CONVOY_KM_PER_DAY = REFERENCE_PROVINCE_KM / 3;
 const CARRIAGE_PER_KM = 0.1 / REFERENCE_PROVINCE_KM;
 /** How far a convoy is sent at most. */
 const CONVOY_REACH_KM = 12 * REFERENCE_PROVINCE_KM;
-/** Where no power says what its soldiers are paid, what a thousand men's pay is a month. */
-const DEFAULT_PAY_PER_THOUSAND = 30;
 
 const friendlyTo = (world: WorldState, polityId: string, other: string | null): boolean =>
   other !== null && (other === polityId || sameConfederation(world.polityAgreements, polityId, other));
 
 /**
  * What bread for a thousand men for a day costs here: half a day's pay at the
- * power's own rate, up to three times that where the country is going hungry.
+ * power's own rate, at the one price grain has (`grainPriceFor`): the price of
+ * the market the province trades in, which is what its granary holds against
+ * what its people need. Cheap where the granary is full, up to four times as
+ * dear where it is nearly bare, and dearer for every army that buys from it.
  */
 export function grainPrice(world: WorldState, polityId: string, provinceId: string): number {
-  const pay = world.map.polities.find((polity) => polity.id === polityId)?.soldierPayPerThousand ?? DEFAULT_PAY_PER_THOUSAND;
-  const food = world.material.provinceMaterial.find((row) => row.provinceId === provinceId)?.foodSecurityBps ?? 10_000;
-  return (pay / 60) * (1 + (10_000 - food) / 5_000);
+  const pay = world.map.polities.find((polity) => polity.id === polityId)?.soldierPayPerThousand ?? null;
+  return grainPriceFor(pay, provinceGrainPriceBps(world, provinceId));
 }
 
 /** The provinces round this one that feed an army standing in it: what "the country" meant when a province was a region. */
@@ -73,25 +87,40 @@ function countryAround(world: WorldState, provinceId: string): readonly Province
 
 const spareOf = (row: ProvinceMaterial): number => Math.floor(row.population * (row.foodSecurityBps / 10_000) * SPARE_SHARE * 30);
 
-/** How many man-days of bread a country can give up. */
+/**
+ * How many man-days of bread a country can give up: what its people can spare
+ * day by day (as fed as they are), and never more than a fifth of what the
+ * granary of its market holds.
+ */
 function spareManDays(world: WorldState, provinceId: string): number {
-  return countryAround(world, provinceId).reduce((sum, row) => sum + spareOf(row), 0);
+  const people = countryAround(world, provinceId).reduce((sum, row) => sum + spareOf(row), 0);
+  return Math.min(people, Math.floor((stockIn(world, provinceId, "grain") * STOCK_SPARE_SHARE) / MODII_PER_MAN_DAY));
 }
 
-/** Bread taken from the country round a province: each part of it gives, and is hungrier, in proportion to what it could spare. */
+/**
+ * Bread taken from the country round a province: the market's granary gives
+ * it up, its price answering at once, and each part of the country is angrier
+ * (and, where it was taken by force, a little scarred) in proportion to what it
+ * could spare. The land is no hungrier for it on the day: its food is read off
+ * the granary at the month's reckoning.
+ */
 function drawOn(world: WorldState, provinceId: string, manDays: number, ceiling: number, anger: number): WorldState {
   const country = countryAround(world, provinceId);
   const total = country.reduce((sum, row) => sum + spareOf(row), 0);
   const parts = new Map(country.map((row) => [row.provinceId, total === 0 ? 0 : spareOf(row) / total]));
+  const drawn = drawStock(world, provinceId, "grain", manDays * MODII_PER_MAN_DAY).world;
   return {
-    ...world,
+    ...drawn,
     material: {
-      ...world.material,
-      provinceMaterial: world.material.provinceMaterial.map((row) => {
+      ...drawn.material,
+      provinceMaterial: drawn.material.provinceMaterial.map((row) => {
         const share = parts.get(row.provinceId);
         if (share === undefined) return row;
         const eaten = Math.min(ceiling, Math.round(((manDays * share) / Math.max(1, row.population)) * 20_000 / 30));
-        return { ...row, foodSecurityBps: clampBps(row.foodSecurityBps - eaten), stabilityBps: clampBps(row.stabilityBps - anger) };
+        // A requisition strips the farms as well as the granaries: a requisitioning army leaves a
+        // little scar for what it took (the quarter of it that was not left to the farmers), a purchase none.
+        const taken = { ...row, stabilityBps: clampBps(row.stabilityBps - anger) };
+        return anger > 0 ? applyForagingScar(taken, Math.round(eaten / 4)) : taken;
       }),
     },
   };
@@ -119,7 +148,9 @@ export interface Provisioned {
 }
 
 /** Bread bought or taken where the army stands. A refusal is thrown as a string. */
-export function breadWhereItStands(world: WorldState, force: Force, how: "buy" | "requisition", daysAsked: number, day: number): Provisioned {
+export function breadWhereItStands(opened: WorldState, force: Force, how: "buy" | "requisition", daysAsked: number, day: number): Provisioned {
+  // A world nobody has reckoned yet has its markets opened here, so the army has a granary to buy from.
+  const world = ensureMarkets(opened);
   const men = fitOf(force);
   if (men === 0) throw new GrainRefused("An army with no men in it needs no bread.");
   const province = world.map.provinces.find((candidate) => candidate.id === force.locationId);
@@ -176,7 +207,8 @@ export function breadWhereItStands(world: WorldState, force: Force, how: "buy" |
  * A convoy sent: bread bought where it is sent from, at that country's price
  * and the carriage on top, on the road for as long as the road is long.
  */
-export function sendConvoy(world: WorldState, force: Force, fromProvinceId: string, days: number, day: number, ids: IdFactory): Provisioned & { readonly convoy: Convoy } {
+export function sendConvoy(opened: WorldState, force: Force, fromProvinceId: string, days: number, day: number, ids: IdFactory): Provisioned & { readonly convoy: Convoy } {
+  const world = ensureMarkets(opened);
   const from = world.map.provinces.find((candidate) => candidate.id === fromProvinceId);
   if (from === undefined) throw new GrainRefused(`No province "${fromProvinceId}" exists to send a convoy from.`);
   const home = friendlyTo(world, force.polityId, from.controllerPolityId)

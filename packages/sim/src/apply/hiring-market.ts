@@ -36,7 +36,8 @@ export function hireAtThePlace(
     creationReason: `A ${what} of ${placeName}, found there when men were hired.`.slice(0, 300),
     ageYearsAtStart: 40,
     prestigeBps: 2_500,
-    startingMoney: 200,
+    // What a man of his trade has put by: a few years of a legionary's pay (120 a year). Opened as the means he arrives with (`auditMoney`: an endowment).
+    startingMoney: 600,
   });
   if (made === null) return null;
   return { world: made.world, characterId: made.character.id, placeName };

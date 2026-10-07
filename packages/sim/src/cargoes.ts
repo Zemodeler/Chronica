@@ -2,7 +2,11 @@ import {
   atWar,
   isNavalForce,
   kmBetween,
-  provinceGrainPriceBps,
+  bestGapGood,
+  marketPriceBps,
+  coinageOf,
+  coinageOfPolity,
+  conversionBps,
   tradePremiumBps,
   warfareWith,
   type FactProposalDraft,
@@ -33,10 +37,22 @@ const MARKET_DAYS = 10;
 /** Where the map gives no route, a voyage of a month. */
 const UNKNOWN_VOYAGE_DAYS = 30;
 const MAX_VOYAGE_DAYS = 60;
-/** What a cargo makes over its cost: a quarter in an ordinary year, between three twentieths and two fifths. */
+/**
+ * What a cargo makes over its cost: a quarter in an ordinary year, between
+ * eight in a hundred and forty-five. The floor is what a merchant makes even
+ * carrying between equal markets in a bad month; the ceiling what a famine's
+ * gap can pay. A cargo of a good that is cheap at the one end and dear at the
+ * other earns well, the reverse badly, and a long voyage and a war at either
+ * end take some of it back.
+ */
 const BASE_MARGIN_BPS = 2_500;
-export const MIN_MARGIN_BPS = 1_500;
-export const MAX_MARGIN_BPS = 4_000;
+export const MIN_MARGIN_BPS = 800;
+export const MAX_MARGIN_BPS = 4_500;
+/** What each day at sea beyond the first ten costs a cargo of its margin, in basis points: the longer the voyage the more it risks and the longer the money lies idle. */
+const MARGIN_LOST_PER_DAY_BPS = 10;
+const FREE_VOYAGE_DAYS = 10;
+/** How much of the gap in a good's price at the two ends a cargo's margin takes up. */
+const GAP_SHARE = 0.5;
 /** A cargo that cannot come in -- an enemy fleet off its port, or the port the enemy's -- waits this long, and tries again. */
 const HELD_DAYS = 15;
 /** Voyages landed for one venture in one tick, at most: the tick's own guard against a pathological span. */
@@ -52,15 +68,24 @@ export function voyageDays(world: WorldState, fromProvinceId: string, toProvince
 /**
  * What a cargo makes over its cost, in basis points.
  *
- * Grain carried from a cheap market into a dear one does well and the other
- * way badly (`tradePremiumBps`, the same reading a venture's monthly return
- * takes); and a war at either end, an occupation or a blockade, makes buyers
- * fewer and the voyage dearer.
+ * The good it carries is bought where it is cheap and sold where it is dear:
+ * the margin is half the gap between that good's price at the two ends
+ * (`tradePremiumBps`, the same reading a venture's monthly return takes) on
+ * top of the ordinary quarter, less a toll for every day of the voyage past
+ * ten and for whatever war has reached either end, an occupation or a
+ * blockade. A cargo that names no good carries whichever pays best between
+ * its two ports, which between ports of one price is grain, as every old
+ * venture was.
  */
-export function cargoMarginBps(world: WorldState, venture: Pick<TradeVenture, "fromProvinceId" | "toProvinceId">): number {
-  const premium = tradePremiumBps(provinceGrainPriceBps(world, venture.fromProvinceId), provinceGrainPriceBps(world, venture.toProvinceId));
+export function cargoMarginBps(world: WorldState, venture: Pick<TradeVenture, "fromProvinceId" | "toProvinceId"> & { readonly cargo?: Pick<NonNullable<TradeVenture["cargo"]>, "good"> | undefined }): number {
+  const good = venture.cargo?.good;
+  const gap = good === undefined
+    ? bestGapGood(world, venture.fromProvinceId, venture.toProvinceId)
+    : { good, fromBps: marketPriceBps(world, venture.fromProvinceId, good), toBps: marketPriceBps(world, venture.toProvinceId, good) };
+  const premium = tradePremiumBps(gap.fromBps, gap.toBps);
   const open = Math.min(routeOpenBps(world, venture.fromProvinceId), routeOpenBps(world, venture.toProvinceId));
-  const margin = BASE_MARGIN_BPS + Math.round((premium - 10_000) * 0.3) - Math.round((10_000 - open) * 0.12);
+  const days = voyageDays(world, venture.fromProvinceId, venture.toProvinceId);
+  const margin = BASE_MARGIN_BPS + Math.round((premium - 10_000) * GAP_SHARE) - Math.round((10_000 - open) * 0.12) - Math.max(0, days - FREE_VOYAGE_DAYS) * MARGIN_LOST_PER_DAY_BPS;
   return Math.max(MIN_MARGIN_BPS, Math.min(MAX_MARGIN_BPS, margin));
 }
 
@@ -133,10 +158,16 @@ export function landCargoes(world: WorldState, toDay: number, ids: IdFactory, wa
         });
       }
       const margin = cargoMarginBps(world, venture);
-      const sold =Math.max(1, Math.round((cargo.cost * (10_000 + margin)) / 10_000));
+      // What the far market pays is in its own power's coin: a merchant bringing it home to a purse
+      // in another coinage pays the money-changers' cut, which never enters the books.
+      const farPolity = world.map.provinces.find((province) => province.id === venture.toProvinceId)?.controllerPolityId ?? null;
+      const changed = farPolity === null ? 10_000 : conversionBps(world, coinageOfPolity(world, farPolity).id, coinageOf(world, purse.id).id);
+      const sold = Math.max(1, Math.round((cargo.cost * (10_000 + margin) * changed) / 100_000_000));
       accounts = accounts.map((account) => (account.id === purse.id ? { ...account, balance: account.balance + sold } : account));
       transactions.push({
-        id: ids.next("txn"), atStep: cargo.arrivesAtStep, kind: "income", amount: sold, destinationAccountId: purse.id,
+        // The market at the far end buys what the ship carried: its price is the
+        // cost and the margin the route earns, and the margin is the market's.
+        id: ids.next("txn"), atStep: cargo.arrivesAtStep, kind: "income", amount: sold, destinationAccountId: purse.id, external: "market",
         cause: { kind: "scheduled_income", id: venture.incomeSourceId, explanation: `Sale of the cargo of ${venture.title}`.slice(0, 240) }, visibility: "private",
       });
       const balance = accounts.find((account) => account.id === purse.id)!.balance;
@@ -144,7 +175,7 @@ export function landCargoes(world: WorldState, toDay: number, ids: IdFactory, wa
       if (again) {
         accounts = accounts.map((account) => (account.id === purse.id ? { ...account, balance: account.balance - cargo.cost } : account));
         transactions.push({
-          id: ids.next("txn"), atStep: cargo.arrivesAtStep, kind: "purchase", amount: cargo.cost, sourceAccountId: purse.id,
+          id: ids.next("txn"), atStep: cargo.arrivesAtStep, kind: "purchase", amount: cargo.cost, sourceAccountId: purse.id, external: "market",
           cause: { kind: "action", id: venture.id, explanation: `The next cargo of ${venture.title}`.slice(0, 240) }, visibility: "private",
         });
       }

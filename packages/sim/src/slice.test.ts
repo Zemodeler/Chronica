@@ -141,7 +141,9 @@ describe("what the player's government can see of the world", () => {
     // Moved 19.5k -> 20k (2026-10-03): the play-test fixes -- every power named
     // with its id, the actor's standing and the gates ahead, a proconsul's
     // powers, and orders already answered kept apart from those awaiting one.
-    expect(text.length).toBeLessThan(20_000);
+    // Moved 20k -> 20.25k (2026-10-07): Rome opens with two trade pacts (v49), one line each among its agreements.
+    // Moved 20.25k -> 20.5k (2026-10-07): the merge of the economy rework with the work on moods and dispatches.
+    expect(text.length).toBeLessThan(20_500);
   });
 });
 
@@ -685,8 +687,8 @@ describe("what a soldier costs", () => {
     }));
 
   it("is told to whoever keeps the treasury, so new legions are priced at Rome's rate rather than guessed", () => {
-    // Twenty thousand men at 35 a thousand is 700 a month, of an income near 1 800.
-    expect(forConsul("gaius-genucius")).toContain("Our soldiers are paid 35/month for every 1,000 men.");
+    // Twenty thousand men at ten thousand a thousand is 200 000 a month, of an income near 160 000: four more legions are more than Rome can keep.
+    expect(forConsul("gaius-genucius")).toContain("Our soldiers are paid 10,000/month for every 1,000 men.");
   });
 });
 

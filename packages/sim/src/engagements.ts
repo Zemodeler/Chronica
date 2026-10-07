@@ -20,6 +20,7 @@ import {
   type Force,
   type ScenarioWarfareRules,
   type WorldState,
+  applyForagingScar,
 } from "@chronica/shared";
 import { resolveEngagement, type BattleAccount } from "./battle";
 import { remember } from "./grievances";
@@ -720,12 +721,12 @@ function ravage(world: WorldState, provinceId: string, watchers: readonly Force[
     ...world,
     material: {
       ...world.material,
-      provinceMaterial: world.material.provinceMaterial.map((row) => (row.provinceId !== provinceId ? row : {
+      provinceMaterial: world.material.provinceMaterial.map((row) => (row.provinceId !== provinceId ? row : applyForagingScar({
         ...row,
         foodSecurityBps: Math.max(0, row.foodSecurityBps - 300),
         stabilityBps: Math.max(0, row.stabilityBps - 200),
         warDamageBps: Math.min(10_000, row.warDamageBps + 300),
-      })),
+      }, 300))),
     },
     characters: commanderId === null ? world.characters : world.characters.map((character) => (character.id === commanderId
       ? { ...character, prestigeBps: Math.max(0, character.prestigeBps - PROVOKED_STANDING_BPS) }

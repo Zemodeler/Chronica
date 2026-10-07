@@ -345,7 +345,7 @@ export function houseFamilies(people: readonly Record<string, unknown>[]): House
   const person = (head: Person, id: string, name: string, age: number, prestigeBps: number, gender: "male" | "female", why: string, traits: readonly string[] = []): Person => {
     const made = personFor({
       id, name, polityId: head.polityId, cultureId: head.cultureId, faithId: head.faithId, provinceId: head.locationProvinceId,
-      age, prestigeBps, focus: gender === "female" ? "diplomacy" : "learning", traits, gender, officeId: null, balance: age < 14 ? 0 : 100,
+      age, prestigeBps, focus: gender === "female" ? "diplomacy" : "learning", traits, gender, officeId: null, balance: age < 14 ? 0 : 3_000,
     }, 0);
     characters.push({ ...made.character, creationReason: why });
     accounts.push(made.account);

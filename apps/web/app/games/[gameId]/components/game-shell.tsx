@@ -837,6 +837,7 @@ export function GameShell({
           which={surface === "purse" ? "own" : "kept"}
           books={room?.sheets?.[surface === "purse" ? "own" : "kept"] ?? null}
           administration={surface === "books" ? room?.sheets?.administration ?? null : null}
+          onDraft={orderingCharacterId ? (text) => { setDeskDraft(text); openSurface("council"); } : undefined}
           focus={arrival?.surface === "books" && arrival.tab !== undefined ? { tab: arrival.tab, key: arrival.key } : undefined}
           onClose={closeSurface}
           side={sheetSideFor(roomStyle, surface)}

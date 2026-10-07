@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ElapsedStepSchema, EntityIdSchema, SignedScoreSchema, VisibilitySchema } from "../material-state";
-import { PolityAgreementKindSchema, type PolityAgreementKind } from "./agreements";
+import { PolityAgreementKindSchema, TradeTermsSchema, type PolityAgreementKind } from "./agreements";
 import { aptitude, skillShare } from "../characters/aptitude";
 import { leaning } from "../characters/traits";
 import type { Character } from "../characters/character";
@@ -102,6 +102,8 @@ export const DiplomaticMessageSchema = z
      * and carried out when it is accepted, not when it is written.
      */
     clauses: z.array(z.record(z.string(), z.unknown())).max(24).optional(),
+    /** For a trade offer: the terms of the pact it opens when accepted (a customs cap, most-favoured status, goods let in free). */
+    trade: TradeTermsSchema.optional(),
     /**
      * What its sender does if it is refused or goes unanswered: an ultimatum's
      * threat. Rome sent Syracuse "if you are not with us you are against us"
@@ -171,7 +173,8 @@ const MEANT_BY_KIND: Partial<Record<DiplomaticMessageKind, PolityAgreementKind>>
 
 export function offeredAgreementKinds(message: Pick<DiplomaticMessage, "kind" | "proposes">): readonly PolityAgreementKind[] {
   const meant = MEANT_BY_KIND[message.kind];
-  return [...new Set([...(message.proposes ?? []), ...(meant === undefined ? [] : [meant])])];
+  // An embargo is one power's own act, not a bargain that can be accepted: a letter does not offer one.
+  return [...new Set([...(message.proposes ?? []), ...(meant === undefined ? [] : [meant])])].filter((kind) => kind !== "embargo");
 }
 
 /** Plain correspondence must not lose an explicit offer merely because it came from the tray. */
