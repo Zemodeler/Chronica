@@ -3638,18 +3638,26 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   // powers nobody is playing. Applied as the world's business, at the first
   // depth, so what it does is news its neighbours answer.
   // What the rules read, now: the cast is the model's, and so is whoever has
-  // been asked this burst; the player's own power is never the rules' to move.
+  // been asked this burst; a power the player actually rules is never the rules' to move.
+  // A power he merely lives in is: a peasant, a legionary, a merchant or a
+  // senator holds none of its decisions, so Rome goes to war, sues for peace,
+  // raises its levy and answers its letters by rule as every other power does,
+  // and a man in the ranks does not watch the world move round a frozen country.
+  // His own armies, letters and commands stay his (`playerCharacterId`, and
+  // `rulerOf` never names him). Two consuls, or any college that rules, are
+  // the same case as a king: he is one of `rulers`, so the power stays his.
+  // The colleague's side does not move on its own, because a war declared in
+  // the name of a state while its player-consul sits in the same chair would
+  // be a decision taken over his head; his orders are the state's.
   const statecraftInput = (): StatecraftInput => {
-    const playerPolityId = input.actorPolityId ?? null;
     const reader = readDepartments(world);
     const interests = playerInterests(world, playerId, input.offices);
     return {
       world,
       gameId: input.gameId,
-      excludedPolityIds: new Set<string>([
-        ...(playerPolityId === null ? [] : [playerPolityId]),
-        ...world.map.polities.filter((polity) => reader.rulers(polity.id).some((ruler) => ruler.id === playerId)).map((polity) => polity.id),
-      ]),
+      excludedPolityIds: new Set<string>(
+        world.map.polities.filter((polity) => reader.rulers(polity.id).some((ruler) => ruler.id === playerId)).map((polity) => polity.id),
+      ),
       playedByModel: new Set([...answeredBy.keys(), ...world.cast.members
         .filter((member) => interests.detailOf(member.characterId) !== "background")
         .map((member) => member.characterId)]),
@@ -3750,17 +3758,6 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       }
     }
   };
-  const authorOf = new Map<string, string>();
-  let lastAskedDay: number | null = null;
-  let factsSeenByLastRound = 0;
-  let lastRoundKey = 0;
-  let hops = 0;
-  // Rounds in a row that were paid for and changed nothing in the world. Two of
-  // them mean the reactions have run dry, however much depth and budget remain:
-  // only whoever a plan or a letter still wants is asked until news starts a
-  // new chain.
-  let idleRounds = 0;
-
   /**
    * Answers the model gave when a letter was sent, now that the story has reached the day they come back (`letter-reply.ts`).
    *
@@ -3788,6 +3785,17 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       }
     }
   };
+  const authorOf = new Map<string, string>();
+  let lastAskedDay: number | null = null;
+  let factsSeenByLastRound = 0;
+  let lastRoundKey = 0;
+  let hops = 0;
+  // Rounds in a row that were paid for and changed nothing in the world. Two of
+  // them mean the reactions have run dry, however much depth and budget remain:
+  // only whoever a plan or a letter still wants is asked until news starts a
+  // new chain.
+  let idleRounds = 0;
+
   // What the player's open order parts read as when the burst began, and how many facts there were (5.8).
   const orderStateOf = (state: WorldState): string => state.orders.filter((order) => order.actorCharacterId === (input.actorRef.kind === "character" ? input.actorRef.id : null))
     .flatMap((order) => order.parts.filter((part) => part.closedAtStep === null).map((part) => `${order.id}:${part.said}:${orderPartStatus(state, part)}`)).sort().join("|");
@@ -3795,6 +3803,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   const somethingHappenedToTheOrders = (): boolean => orderStateOf(world) !== orderStateAtStart;
   const factsAtStart = newFacts.length;
 
+  // An answer whose day has already come is given before anything else is asked.
+  if (playerDecision === null) await releaseHeldAnswers();
   while (playerDecision === null) {
     const elapsedDays = world.instant.day - startDay;
     if (elapsedDays >= maxDays) {
@@ -3806,8 +3816,6 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // chronicled, and the rest of the span is the next order's.
     if (input.shouldStop?.() === true) {
       stopReason = "deadline";
-  // An answer whose day has already come is given before anything else is asked.
-  if (playerDecision === null) await releaseHeldAnswers();
       break;
     }
     // Time is walked in hops, and a hop that nobody answers costs nothing but
@@ -3882,6 +3890,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     tickTo(world.instant.day);
     fireDueEvents();
     report({ kind: "advanced", date: today() });
+    await releaseHeldAnswers();
     await runStatecraft();
 
     const playerCharacterIds = input.actorRef.kind === "character" ? [input.actorRef.id] : [];
@@ -3893,7 +3902,6 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       chainStartIterations = iterations;
       chainNewsFrom = factsSeenByLastRound;
       chainNewsAfterKey = lastRoundKey;
-    await releaseHeldAnswers();
     }
     // News to this chain if word of it reached any of those who answer since
     // the chain's last look -- by the road, not the day it happened.

@@ -109,7 +109,7 @@ const RAID_EVERY_DAYS = 120;
 export interface StatecraftInput {
   readonly world: WorldState;
   readonly gameId: string;
-  /** Powers the rules never act for: the player's own, and any power the player rules. */
+  /** Powers the rules never act for: those the player rules (alone or as one of a college). Not the one he merely lives in. */
   readonly excludedPolityIds: ReadonlySet<string>;
   /** People the model is playing now: their armies and their letters are theirs, not the rules'. */
   readonly playedByModel: ReadonlySet<string>;
@@ -699,9 +699,8 @@ function allianceAgainstThreats(
 export function answerByRule(world: WorldState, message: DiplomaticMessage, input: StatecraftInput, rulerOf: (polityId: string) => Character | undefined): StatecraftDecision | null {
   if (message.status !== "awaiting_reply" || !isDelivered(message, world.instant.day) || message.heldAnswer !== undefined) return null;
   if (input.excludedPolityIds.has(message.toPolityId) || message.fromCharacterId === input.playerCharacterId) return null;
-  // Letters between powers are the rules' and are basic; a letter to the player's circle is the model's (`letter-voice.ts`, `cognition.ts`).
-  const playerPolity = input.playerCharacterId === null ? null : world.characters.find((character) => character.id === input.playerCharacterId)?.polityId ?? null;
-  if (playerPolity !== null && (message.toPolityId === playerPolity || message.fromPolityId === playerPolity)) return null;
+  // Letters between powers are the rules' and are basic; a letter to the player himself is the model's (`letter-voice.ts`, `cognition.ts`),
+  // as is one to a power he rules (excluded above). A letter to a power he only lives in goes to its ruler, who answers it as any other does.
   if (message.toCharacterId === input.playerCharacterId && input.playerCharacterId !== null) return null;
   const answerer = message.toCharacterId === null ? rulerOf(message.toPolityId) : world.characters.find((character) => character.id === message.toCharacterId && character.alive);
   if (answerer === undefined || input.playedByModel.has(answerer.id)) return null;
@@ -718,14 +717,14 @@ export function answerByRule(world: WorldState, message: DiplomaticMessage, inpu
 
   const letter = writeLetter(answerer, day, verdict.intent, { us: nameOf(message.toPolityId), them: nameOf(message.fromPolityId), reason: verdict.reason, ...verdict.extra }, "{us} answers {them}", verdict.weak);
   // A man of no honour may say yes and mean no: nothing here, and nothing in the world, shows it (`intendsToBreak`).
+  // An offer of trade he would take on other terms, or one written to somebody who does not decide it, is answered "countered":
+  // the first sends his terms back as an offer of his own, the second only says who does decide (`trade-verdict.ts`).
+  const answer = verdict.counter !== undefined || verdict.redirect !== undefined ? "countered" : verdict.accepted ? "accepted" : "refused";
   return {
     polityId: message.toPolityId, actorCharacterId: answerer.id, act: "answer_letter", targetPolityId: message.fromPolityId,
     why: `${answer} "${message.subject}": ${verdict.why}`.slice(0, 400),
     deltas: [delta({ op: "diplomatic_message_answer", messageRef: message.id, answer, answerText: letter.body, agreementKind: null, ...(verdict.counter === undefined ? {} : { counterTrade: verdict.counter }), reason: letter.body.slice(0, 240) })],
     facts: [],
-  // An offer of trade he would take on other terms, or one written to somebody who does not decide it, is answered "countered":
-  // the first sends his terms back as an offer of his own, the second only says who does decide (`trade-verdict.ts`).
-  const answer = verdict.counter !== undefined || verdict.redirect !== undefined ? "countered" : verdict.accepted ? "accepted" : "refused";
   };
 }
 
