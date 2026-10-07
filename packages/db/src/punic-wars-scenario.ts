@@ -566,9 +566,18 @@ const WRITTEN_OUT: ReadonlySet<string> = new Set(["rome", "carthage", "syracuse"
 
 const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
   schemaVersion: 3,
-  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 47, libraryVersion: 1 },
+  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 48, libraryVersion: 1 },
   elapsedStep: 0,
   instant: { day: 0, minute: 0 },
+  // How the powers tax their ground, where the age said so (v48). Every other
+  // power is taxed as it always was, by one steady levy at the ordinary rate:
+  // Rome's tributum and the rents of its public land, Carthage's tribute on
+  // its Libyan subjects, the allies' own taxes. Syracuse alone is written
+  // down: under the lex Hieronica the grain-lands of Sicily paid a tithe of
+  // the harvest, the decuma, which Rome inherited from Hiero and kept -- so
+  // the king's revenue swings with the year, and a drought is a thin year for
+  // his treasury as well as for his people.
+  economy: { taxPolicies: [{ polityId: "syracuse", regime: "tithe", rateBps: 1_000 }] },
   map: {
     settlementCatalogueVersion: 40,
     polities: [
