@@ -92,6 +92,20 @@ month; one at peace, fed (stability 4,500, food 5,500 at least), orderly and lig
 `REGROWTH_BPS = 20` a month, 240 a year, slower where scarred and faster beside a more developed neighbour. A thing
 that takes a decade to build can be undone in a season and takes a generation to put back.
 
+**Regions pull apart in peace (v53+).** Peace used to lift every province the same ~240 a year, so the spread
+between provinces never widened. Growth is now `REGROWTH_BPS` (20 a month) times: `reinvestmentOf(rate)` (1.5 at a tax of 4 in
+100 or less, 1.0 at the ordinary 10, 0.5 at 15, 0.1 at 20, none past it; a `men` province counts at the ordinary money rate),
+`tradeAccessOf` (an isolated province 0.4; +0.35 if it is its country's hub; +0.3 for a port and +0.15 for a river on a steady
+market; + up to 1.0 for the traffic through its hub, `hubTradeOf`, the lanes' units against what the country uses, eight points
+of access per whole month's use, outlying provinces at 0.6 of it), order (0.7 at the least, 1.3 at perfect), a richer
+neighbour (up to +25%), the scar, and the room left (a quarter of the way to the ceiling, at least 1,000, tapers it).
+`regions-pull-apart.test.ts`: a lightly taxed, trade-linked port gains over 1,500 in five years at the same start as an
+isolated, heavily taxed hilltop which gains under 250 (the real pair: 2,236 and 173). The five-year peace run of the whole
+Punic map (6,394 provinces), before and after (p10 / median / p90, spread, sd): start 2,218 / 2,829 / 3,957, 1,739, 743; v52
+year 5 3,414 / 4,024 / 5,156, 1,742, 761; v53+ year 5 2,813 / 3,409 / 4,599, 1,786, 819. Mean growth is about half of what it
+was (an isolated province at an ordinary tax builds a 100 a year): most of the map has no trade to build on and stagnates, and the
+trade-linked fringe pulls away.
+
 War writes a **scar** (`scarBps`) through `scarredBy`/`applyWarDamage` in `province-material.ts`: an event of severity s
 takes `DEVELOPMENT_LOSS_PER_SEVERITY = 0.5` times s of development at once and adds `SCAR_PER_SEVERITY = 0.35` times s of
 the room left to the scar, so campaigns stack. The scar caps development at `potential x (1 - scar)` and fades

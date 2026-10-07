@@ -1,6 +1,7 @@
 import {
   CUSTOMARY_TAX_RATE_BPS,
   DEFAULT_TAX_RATE_BPS,
+  GOODS,
   MIN_DEVELOPMENT_BPS,
   astronomicalYearOf,
   calendarDateOf,
@@ -12,6 +13,7 @@ import {
   hasMarkets,
   isOccupied,
   marketGeography,
+  moneyRateBps,
   ordinaryCrop,
   polityGrainPriceBps,
   provinceGrounds,
@@ -229,12 +231,66 @@ const WASTE_NEWS_REPEAT_DAYS = 720;
  */
 const STEADY_MAX_PRICE_BPS = 14_000;
 
-/** How hard a rate presses on growth: reinvestment is what a light tax leaves, and a heavy one does not. */
-function reinvestmentOf(rateBps: number): number {
-  if (rateBps <= 600) return 1.3;
-  if (rateBps <= DEFAULT_TAX_RATE_BPS + 200) return 1;
-  if (rateBps <= OVERTAX_RATE_BPS) return 1 - 0.6 * ((rateBps - (DEFAULT_TAX_RATE_BPS + 200)) / (OVERTAX_RATE_BPS - (DEFAULT_TAX_RATE_BPS + 200)));
+/**
+ * How hard a rate presses on growth: reinvestment is what a light tax leaves
+ * and a heavy one does not (v53+ widened it, since a tenth was all that
+ * separated a province taxed at four in a hundred from one taxed at fifteen).
+ * A province taxed at four tenths of a tenth or less reinvests a half again as
+ * much as one at the ordinary rate (1.0); at fifteen in a hundred it builds
+ * half as fast; at the two tenths a land can bear it hardly builds at all, and
+ * past it nothing does (and it begins to fall: `OVERTAX_FALL_CAP_BPS`).
+ */
+export function reinvestmentOf(rateBps: number): number {
+  if (rateBps <= 400) return 1.5;
+  if (rateBps <= DEFAULT_TAX_RATE_BPS) return 1.5 - 0.5 * ((rateBps - 400) / (DEFAULT_TAX_RATE_BPS - 400));
+  if (rateBps <= 1_500) return 1 - 0.5 * ((rateBps - DEFAULT_TAX_RATE_BPS) / 500);
+  if (rateBps <= OVERTAX_RATE_BPS) return 0.5 - 0.4 * ((rateBps - 1_500) / (OVERTAX_RATE_BPS - 1_500));
   return 0;
+}
+
+/**
+ * What trade does for a province's growth, as a multiple of the ordinary rate
+ * (`REGROWTH_BPS`): the merchants build where goods move.
+ *
+ * Every province grew the same two hundred and forty a year in peace, since the
+ * only things that told them apart were a harbour (a fifth more) and a river (a
+ * tenth) and a richer neighbour. Now a province with no market worth the name
+ * builds two fifths as fast as the ordinary; the hub of its country is a third
+ * more of the ordinary, a harbour or a river on a market with steady prices
+ * (`STEADY_MAX_PRICE_BPS`) add to it, and so does the traffic through its hub
+ * (the units that came and went by the trade lanes last month, against what the
+ * country uses, `hubTrade`), up to the busiest. A plain with a port on a busy lane
+ * builds five times as fast as a hilltop with a track to nowhere.
+ */
+export const ISOLATED_ACCESS = 0.4;
+const HUB_ACCESS = 0.35;
+const PORT_ACCESS = 0.3;
+const RIVER_ACCESS = 0.15;
+/** A hub's traffic is a few in a hundred of its country's use (a median of eight, a busy one seventy): this much access for each whole month's use that crosses it, to at most the cap. */
+const TRADE_ACCESS_PER_INTENSITY = 8;
+const MAX_TRADE_ACCESS = 1;
+/** A province that is not itself the hub shares in the traffic of the hub it trades in at this share: the goods come to it by the roads. */
+const OUTLYING_SHARE_OF_TRAFFIC = 0.6;
+export function tradeAccessOf(ground: Pick<ProvinceGround, "port" | "river">, isHub: boolean, steadyMarket: boolean, hubTrade: number): number {
+  return ISOLATED_ACCESS
+    + (isHub ? HUB_ACCESS : 0)
+    + (steadyMarket ? (ground.port ? PORT_ACCESS : 0) + (ground.river ? RIVER_ACCESS : 0) : 0)
+    + (steadyMarket ? Math.min(MAX_TRADE_ACCESS, TRADE_ACCESS_PER_INTENSITY * hubTrade) * (isHub ? 1 : OUTLYING_SHARE_OF_TRAFFIC) : 0);
+}
+
+/** How steady order helps growth: from 0.7 at the least a province grows at (4,500) to 1.3 at perfect order. */
+const stabilityGrowth = (stabilityBps: number): number => 0.7 + 0.6 * Math.max(0, Math.min(1, (stabilityBps - GROWS_ABOVE_STABILITY_BPS) / (10_000 - GROWS_ABOVE_STABILITY_BPS)));
+
+/** What a hub's trade comes to against what its country uses, from the month's book (the same reading as `tradeIntensities`, in arrays). */
+function hubTradeOf(entry: { readonly inflow: readonly number[]; readonly outflow: readonly number[]; readonly demand: readonly number[]; readonly price: readonly number[] }): number {
+  let through = 0;
+  let used = 0;
+  for (let good = 0; good < GOODS.length; good += 1) {
+    const base = GOODS[good]!.basePrice;
+    through += ((entry.inflow[good] ?? 0) + (entry.outflow[good] ?? 0)) * base * ((entry.price[good] ?? 10_000) / 10_000);
+    used += (entry.demand[good] ?? 0) * base;
+  }
+  return used <= 0 ? 0 : through / used;
 }
 
 /** What one province is under this month, read once before the months are reckoned. */
@@ -256,7 +312,7 @@ interface Standing {
  * an occupier's presence; the scar fades in peace, faster under a light tax
  * and a rebuilding, and not at all under an army.
  */
-function monthOfDevelopment(row: ProvinceMaterial, standing: Standing, neighbourDevelopment: number | null, steadyMarket: boolean): ProvinceMaterial {
+function monthOfDevelopment(row: ProvinceMaterial, standing: Standing, neighbourDevelopment: number | null, steadyMarket: boolean, isHub = false, hubTrade = 0): ProvinceMaterial {
   const { ground } = standing;
   const development = row.developmentBps ?? ground.startingDevelopmentBps;
   const scar = row.scarBps ?? 0;
@@ -273,13 +329,15 @@ function monthOfDevelopment(row: ProvinceMaterial, standing: Standing, neighbour
   let next = development;
   if (fall > 0) next = development - fall;
   else if (!atWar && !standing.occupied && row.stabilityBps >= GROWS_ABOVE_STABILITY_BPS && row.foodSecurityBps >= GROWS_ABOVE_FOOD_BPS && development < ceiling) {
-    // A harbour and a river bring trade only where the market they open onto is steady (`STEADY_MAX_PRICE_BPS`).
-    const access = 1 + (steadyMarket ? (ground.port ? 0.2 : 0) + (ground.river ? 0.1 : 0) : 0)
-      + (neighbourDevelopment !== null && neighbourDevelopment > development ? Math.min(0.25, (neighbourDevelopment - development) / 10_000) : 0);
+    // Trade: a harbour and a river count only where the market they open onto is steady (`STEADY_MAX_PRICE_BPS`), and so does the traffic through the hub; a province with none of it builds a quarter as fast (`tradeAccessOf`).
+    const trade = tradeAccessOf(ground, isHub, steadyMarket, hubTrade);
+    // A richer neighbour pulls it up a little, as the road to it is the road to its trade.
+    const pull = 1 + (neighbourDevelopment !== null && neighbourDevelopment > development ? Math.min(0.25, (neighbourDevelopment - development) / 10_000) : 0);
     // A scarred province is slower to build again: the merchants are gone.
     const scarred = Math.max(0.1, 1 - (1.5 * scar) / 10_000);
-    const room = Math.min(1, (ceiling - development) / 1_000);
-    next = development + REGROWTH_BPS * reinvestmentOf(standing.rateBps) * access * scarred * room;
+    // Diminishing returns: the nearer the ceiling, the less is left to build (the last quarter of the way, and never less than a thousand).
+    const room = Math.max(0, Math.min(1, (ceiling - development) / Math.max(1_000, 0.25 * ceiling)));
+    next = development + REGROWTH_BPS * reinvestmentOf(standing.rateBps) * trade * pull * stabilityGrowth(row.stabilityBps) * scarred * room;
   }
   // Held above what the scar lets it reach, it sinks toward the ceiling, not through it.
   if (next > ceiling) next = Math.max(ceiling, next - ABOVE_CEILING_FALL_BPS);
@@ -354,7 +412,7 @@ export function reviewTheLand(input: LandInput): LandResult {
       standings.set(province.id, {
         ground,
         // Open ground is taxed by nobody and pays nobody; it is left to grow at the customary rate.
-        rateBps: province.controllerPolityId === null ? CUSTOMARY_TAX_RATE_BPS : policyOf(province, row).rateBps,
+        rateBps: province.controllerPolityId === null ? CUSTOMARY_TAX_RATE_BPS : moneyRateBps(policyOf(province, row)),
         occupied: isOccupied(province),
         developmentShiftBps: targets.get(province.id)?.developmentShiftBps ?? 0,
       });
@@ -392,6 +450,7 @@ export function reviewTheLand(input: LandInput): LandResult {
       // Development follows the people, a province at a time in id order so the
       // reckoning is the same on every machine; a neighbour's trade is its
       // neighbours' as they stood at the month's start of this pass.
+      const hubTrades = new Map<string, number>();
       for (const id of ids) {
         const standing = standings.get(id);
         if (standing === undefined) continue;
@@ -400,7 +459,12 @@ export function reviewTheLand(input: LandInput): LandResult {
         // A province whose market keeps its grain at about the ordinary price is one merchants can count on.
         const grainPrice = book.get(geography.hubOf.get(id) ?? "")?.price[0] ?? 10_000;
         const steady = grainPrice <= STEADY_MAX_PRICE_BPS;
-        rows.set(id, monthOfDevelopment(row, standing, near.length === 0 ? null : near.reduce((sum, value) => sum + value, 0) / near.length, steady));
+        const hubId = geography.hubOf.get(id) ?? "";
+        const hubBook = book.get(hubId);
+        // The traffic through its hub is read once a hub a month, not once a province.
+        let trade = hubTrades.get(hubId);
+        if (trade === undefined) { trade = hubBook === undefined ? 0 : hubTradeOf(hubBook); hubTrades.set(hubId, trade); }
+        rows.set(id, monthOfDevelopment(row, standing, near.length === 0 ? null : near.reduce((sum, value) => sum + value, 0) / near.length, steady, hubId === id, trade));
       }
       // People who fled go on to the quietest fed country next to them. The
       // rest wait, and the recovery pass brings some of them home.
