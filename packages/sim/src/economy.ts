@@ -23,6 +23,7 @@ import {
   type FactProposalDraft,
   type HarvestKind,
   type ProvinceGround,
+  type ProvinceSite,
   type ProvinceMaterial,
   type ProvinceTargets,
   type ScenarioClock,
@@ -272,11 +273,103 @@ const TRADE_ACCESS_PER_INTENSITY = 8;
 const MAX_TRADE_ACCESS = 1;
 /** A province that is not itself the hub shares in the traffic of the hub it trades in at this share: the goods come to it by the roads. */
 const OUTLYING_SHARE_OF_TRAFFIC = 0.6;
-export function tradeAccessOf(ground: Pick<ProvinceGround, "port" | "river">, isHub: boolean, steadyMarket: boolean, hubTrade: number): number {
+/** A coast without a harbour of size has the sea to carry its goods (half a port's gain); mountains with no road open to them take a third of the isolation away again (v55). */
+const COASTAL_ACCESS = 0.15;
+const ENCLOSED_ACCESS = -0.15;
+export function tradeAccessOf(ground: Pick<ProvinceGround, "port" | "river"> & { readonly site?: Pick<ProvinceSite, "coastal" | "enclosed" | "agglomeration" | "court"> }, isHub: boolean, steadyMarket: boolean, hubTrade: number): number {
   return ISOLATED_ACCESS
+    + (ground.site?.enclosed === true ? ENCLOSED_ACCESS : 0)
     + (isHub ? HUB_ACCESS : 0)
-    + (steadyMarket ? (ground.port ? PORT_ACCESS : 0) + (ground.river ? RIVER_ACCESS : 0) : 0)
-    + (steadyMarket ? Math.min(MAX_TRADE_ACCESS, TRADE_ACCESS_PER_INTENSITY * hubTrade) * (isHub ? 1 : OUTLYING_SHARE_OF_TRAFFIC) : 0);
+    + (steadyMarket ? (ground.port ? PORT_ACCESS : ground.site?.coastal === true ? COASTAL_ACCESS : 0) + (ground.river ? RIVER_ACCESS : 0) : 0)
+    + (steadyMarket ? Math.min(MAX_TRADE_ACCESS, TRADE_ACCESS_PER_INTENSITY * hubTrade) * (isHub ? 1 : OUTLYING_SHARE_OF_TRAFFIC) : 0)
+    + (steadyMarket && ground.site !== undefined ? AGGLOMERATION_ACCESS * ground.site.agglomeration + COURT_ACCESS * ground.site.court : 0);
+}
+
+/**
+ * What else sets the speed of building in peace (v55), each a multiple of the
+ * ordinary rate, each documented by why it was so:
+ *
+ * - Agglomeration (in `tradeAccessOf`, `AGGLOMERATION_ACCESS`, `COURT_ACCESS`): a big
+ *   town's hinterland builds faster because the market, the labour and the
+ *   demand are a day's walk away (Campania round Rome); a court near spends
+ *   and garrisons a little more. It is counted with the traffic of the hub, as
+ *   one more way a place is in reach of buyers.
+ * - Tenure: a province held for generations by a power that holds it firmly
+ *   has its roads kept, its estates settled and its courts known; a province
+ *   just taken has its elite fled, its law unsure and its taxes new. It builds
+ *   at half the rate when taken, at the full rate after ten years, and a few
+ *   in a hundred more after thirty. Its holder's own cohesion and the firmness of
+ *   its hold count with it.
+ * - Crowding: a land over its carrying capacity (people past what the fields
+ *   feed) invests in nothing; one with room and few hands has slack to build on.
+ * - Frontier: a province next to ground that war has burned, or next to ground
+ *   nobody holds (raiders, deserters), diverts its means to watching and builds less,
+ *   even where it is itself at peace.
+ * - Cumulative advantage: a place that has already gone far toward its ceiling
+ *   (roads, a market, skilled hands) builds on it faster than one still at the start; the
+ *   room it has left tapers it again at the last (`room`).
+ * - Luck: each province's own, a few in a hundred either way, so that two alike
+ *   do not move together.
+ */
+const AGGLOMERATION_ACCESS = 0.45;
+const COURT_ACCESS = 0.1;
+const TENURE_AT_TAKING = 0.5;
+const TENURE_FULL_YEARS = 10;
+const TENURE_BONUS = 0.05;
+const TENURE_BONUS_YEARS = 30;
+const DAYS_PER_YEAR = 360;
+const CROWDED_AT = 1;
+const CROWD_FACTOR_AT_CROWDED = 0.7;
+const SLACK_AT = 0.9;
+const SLACK_FACTOR = 1.1;
+const FRONTIER_WAR_SLOWING = 1.5;
+const FRONTIER_MAX_SLOWING = 0.5;
+const UNCLAIMED_BORDER_FACTOR = 0.92;
+const COMPOUND_FLOOR = 0.75;
+const COMPOUND_SPAN = 0.75;
+const COMPOUND_FROM = 0.25;
+const COMPOUND_OVER = 0.45;
+/** Roads and harbours need keeping up: this share of the development, a month, is lost to it where little is built, so a poor and isolated province stands still or slips back. It fades with the room left, since the ceiling is where building and keeping up meet (v55). */
+const UPKEEP_SHARE_PER_MONTH = 0.0017;
+/** The most a province can build in a month, however many things favour it (a boom town of the age adds some five hundred a year, no more). */
+const MAX_BUILT_BPS_PER_MONTH = 38;
+
+/** What the land around a province, and whoever holds it, are doing this month. */
+interface Surroundings {
+  /** The worst war damage in any neighbouring province (bps). */
+  readonly warNearBps: number;
+  /** Whether it borders ground that nobody holds. */
+  readonly unclaimedBorder: boolean;
+  /** The day of the month's reckoning, for how long its holder has held it. */
+  readonly day: number;
+}
+const CALM: Surroundings = { warNearBps: 0, unclaimedBorder: false, day: 0 };
+
+/** A province's holding, for the tenure of a power over it. */
+export function tenureFactorOf(heldYears: number, firmnessBps: number, cohesionBps: number): number {
+  const base = heldYears >= TENURE_FULL_YEARS
+    ? 1 + TENURE_BONUS * Math.min(1, (heldYears - TENURE_FULL_YEARS) / (TENURE_BONUS_YEARS - TENURE_FULL_YEARS))
+    : TENURE_AT_TAKING + (1 - TENURE_AT_TAKING) * (Math.max(0, heldYears) / TENURE_FULL_YEARS);
+  return base * (0.75 + 0.25 * (firmnessBps / 10_000)) * (0.85 + 0.3 * (cohesionBps / 10_000));
+}
+
+/** How crowding or slack changes the building: 0.7 for a land whose people have filled what its fields carry, 1.1 for one with nine tenths of them or fewer (people settle near the capacity, so the band is narrow). */
+export function crowdingFactorOf(people: number, capacity: number): number {
+  const ratio = people / Math.max(1, capacity);
+  if (ratio >= CROWDED_AT) return CROWD_FACTOR_AT_CROWDED;
+  if (ratio <= SLACK_AT) return SLACK_FACTOR;
+  return SLACK_FACTOR + (CROWD_FACTOR_AT_CROWDED - SLACK_FACTOR) * ((ratio - SLACK_AT) / (CROWDED_AT - SLACK_AT));
+}
+
+/** What a neighbour's burning and an unguarded border cost a province that is itself at peace. */
+export function frontierFactorOf(warNearBps: number, unclaimedBorder: boolean): number {
+  return (1 - Math.min(FRONTIER_MAX_SLOWING, (FRONTIER_WAR_SLOWING * warNearBps) / 10_000)) * (unclaimedBorder ? UNCLAIMED_BORDER_FACTOR : 1);
+}
+
+/** A head start compounds: from 0.75 of the ordinary rate at a quarter of the way to the ceiling to 1.5 at seven tenths of it. Measured against the ceiling the ground allows, not the one a scar or a rebuilding leaves: a war-torn province has lost its head start. */
+export function compoundingFactorOf(development: number, ceiling: number): number {
+  const reached = development / Math.max(1, ceiling);
+  return COMPOUND_FLOOR + COMPOUND_SPAN * Math.max(0, Math.min(1, (reached - COMPOUND_FROM) / COMPOUND_OVER));
 }
 
 /** How steady order helps growth: from 0.7 at the least a province grows at (4,500) to 1.3 at perfect order. */
@@ -300,6 +393,11 @@ interface Standing {
   readonly rateBps: number;
   readonly occupied: boolean;
   readonly developmentShiftBps: number;
+  /** The day its holder took it in war, where it was taken; null where it has been the holder's as long as the map has told. */
+  readonly heldSince: number | null;
+  /** How firmly it is held and how united its holder is: what a long tenure is worth. */
+  readonly firmnessBps: number;
+  readonly cohesionBps: number;
 }
 
 /**
@@ -313,7 +411,7 @@ interface Standing {
  * an occupier's presence; the scar fades in peace, faster under a light tax
  * and a rebuilding, and not at all under an army.
  */
-function monthOfDevelopment(row: ProvinceMaterial, standing: Standing, neighbourDevelopment: number | null, steadyMarket: boolean, isHub = false, hubTrade = 0): ProvinceMaterial {
+function monthOfDevelopment(row: ProvinceMaterial, standing: Standing, neighbourDevelopment: number | null, steadyMarket: boolean, isHub = false, hubTrade = 0, around: Surroundings = CALM): ProvinceMaterial {
   const { ground } = standing;
   const development = row.developmentBps ?? ground.startingDevelopmentBps;
   const scar = row.scarBps ?? 0;
@@ -332,13 +430,19 @@ function monthOfDevelopment(row: ProvinceMaterial, standing: Standing, neighbour
   else if (!atWar && !standing.occupied && row.stabilityBps >= GROWS_ABOVE_STABILITY_BPS && row.foodSecurityBps >= GROWS_ABOVE_FOOD_BPS && development < ceiling) {
     // Trade: a harbour and a river count only where the market they open onto is steady (`STEADY_MAX_PRICE_BPS`), and so does the traffic through the hub; a province with none of it builds a quarter as fast (`tradeAccessOf`).
     const trade = tradeAccessOf(ground, isHub, steadyMarket, hubTrade);
+    const site = ground.site;
     // A richer neighbour pulls it up a little, as the road to it is the road to its trade.
     const pull = 1 + (neighbourDevelopment !== null && neighbourDevelopment > development ? Math.min(0.25, (neighbourDevelopment - development) / 10_000) : 0);
     // A scarred province is slower to build again: the merchants are gone.
     const scarred = Math.max(0.1, 1 - (1.5 * scar) / 10_000);
     // Diminishing returns: the nearer the ceiling, the less is left to build (the last quarter of the way, and never less than a thousand).
     const room = Math.max(0, Math.min(1, (ceiling - development) / Math.max(1_000, 0.25 * ceiling)));
-    next = development + REGROWTH_BPS * reinvestmentOf(standing.rateBps) * trade * pull * stabilityGrowth(row.stabilityBps) * scarred * room;
+    // Where it is (soil, specialisation, luck), what stands near it (a market town, a court), how long and how firmly its power has held it, how crowded it is, and how near a war.
+    const heldYears = standing.heldSince === null ? TENURE_BONUS_YEARS : (around.day - standing.heldSince) / DAYS_PER_YEAR;
+    const place = site.soilGrowth * site.specialGrowth * site.luck;
+    const standingOfPower = tenureFactorOf(heldYears, standing.firmnessBps, standing.cohesionBps) * crowdingFactorOf(row.population, carryingCapacityOf(ground.baselinePeople, development, ground.startingDevelopmentBps)) * frontierFactorOf(around.warNearBps, around.unclaimedBorder);
+    const built = REGROWTH_BPS * reinvestmentOf(standing.rateBps) * trade * pull * stabilityGrowth(row.stabilityBps) * scarred * room * place * standingOfPower * compoundingFactorOf(development, ground.potentialBps);
+    next = development + Math.min(MAX_BUILT_BPS_PER_MONTH, built) - UPKEEP_SHARE_PER_MONTH * development * room;
   }
   // Held above what the scar lets it reach, it sinks toward the ceiling, not through it.
   if (next > ceiling) next = Math.max(ceiling, next - ABOVE_CEILING_FALL_BPS);
@@ -406,6 +510,12 @@ export function reviewTheLand(input: LandInput): LandResult {
     const policyOf = taxPolicyIndex(world);
     const standings = new Map<string, Standing>();
     const targets = input.targets?.() ?? new Map<string, ProvinceTargets>();
+    // Whose it is and how long: its holder's unity, and the day it was taken where it was (`lostBy`, or the start of its active control record where one was opened after the map began).
+    const cohesionOf = new Map(world.map.polities.map((polity) => [polity.id, polity.cohesionBps]));
+    const recordedSince = new Map<string, number>();
+    for (const record of world.map.controlRecords) {
+      if (record.status === "active" && record.locationKind === "province" && record.startedAtStep > 0) recordedSince.set(record.locationId, record.startedAtStep);
+    }
     for (const province of world.map.provinces) {
       const ground = grounds.get(province.id);
       const row = rows.get(province.id);
@@ -416,6 +526,9 @@ export function reviewTheLand(input: LandInput): LandResult {
         rateBps: province.controllerPolityId === null ? CUSTOMARY_TAX_RATE_BPS : moneyRateBps(policyOf(province, row)),
         occupied: isOccupied(province),
         developmentShiftBps: targets.get(province.id)?.developmentShiftBps ?? 0,
+        heldSince: Math.max(province.lostBy?.atStep ?? -1, recordedSince.get(province.id) ?? -1) < 0 ? null : Math.max(province.lostBy?.atStep ?? -1, recordedSince.get(province.id) ?? -1),
+        firmnessBps: province.controlFirmnessBps,
+        cohesionBps: (province.controllerPolityId === null ? undefined : cohesionOf.get(province.controllerPolityId)) ?? 7_000,
       });
     }
     // The markets, as a book of arrays the months work on and write back once.
@@ -455,7 +568,18 @@ export function reviewTheLand(input: LandInput): LandResult {
       for (const id of ids) {
         const standing = standings.get(id);
         if (standing === undefined) continue;
-        const near = adjacentTo(world, id).map((other) => rows.get(other.provinceId)?.developmentBps).filter((value): value is number => value !== undefined);
+        // The neighbours: how developed on the whole, how burned the worst of them, and whether one is nobody's.
+        let neighbourSum = 0;
+        let neighbourCount = 0;
+        let warNear = 0;
+        let unclaimedBorder = false;
+        for (const other of standing.ground.site.neighbours) {
+          const beside = rows.get(other);
+          if (beside === undefined) continue;
+          if (beside.developmentBps !== undefined) { neighbourSum += beside.developmentBps; neighbourCount += 1; }
+          if (beside.warDamageBps > warNear) warNear = beside.warDamageBps;
+          if (!owned.has(other)) unclaimedBorder = true;
+        }
         const row = rows.get(id)!;
         // A province whose market keeps its grain at about the ordinary price is one merchants can count on.
         const grainPrice = book.get(geography.hubOf.get(id) ?? "")?.price[0] ?? 10_000;
@@ -465,7 +589,7 @@ export function reviewTheLand(input: LandInput): LandResult {
         // The traffic through its hub is read once a hub a month, not once a province.
         let trade = hubTrades.get(hubId);
         if (trade === undefined) { trade = hubBook === undefined ? 0 : hubTradeOf(hubBook); hubTrades.set(hubId, trade); }
-        rows.set(id, monthOfDevelopment(row, standing, near.length === 0 ? null : near.reduce((sum, value) => sum + value, 0) / near.length, steady, hubId === id, trade));
+        rows.set(id, monthOfDevelopment(row, standing, neighbourCount === 0 ? null : neighbourSum / neighbourCount, steady, hubId === id, trade, { warNearBps: warNear, unclaimedBorder, day }));
       }
       // People who fled go on to the quietest fed country next to them. The
       // rest wait, and the recovery pass brings some of them home.

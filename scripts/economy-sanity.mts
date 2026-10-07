@@ -56,6 +56,15 @@ function read(world: WorldState, polityId: string, income: number, customs: numb
   };
 }
 
+/** How far apart the provinces of the whole map are in development (v55): p10 / median / p90, the gap between the tenth and the ninetieth, the sd, and any province at the floor or the top of the scale. */
+function spreadLine(label: string, state: WorldState): void {
+  const values = state.material.provinceMaterial.map((row) => row.developmentBps ?? 0).sort((a, b) => a - b);
+  const at = (share: number): number => values[Math.min(values.length - 1, Math.floor(share * values.length))]!;
+  const mean = values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
+  const sd = Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / Math.max(1, values.length));
+  console.log(`  development of all ${values.length} provinces, ${label}: p10 ${at(0.1)} / median ${at(0.5)} / p90 ${at(0.9)}, p90-p10 ${at(0.9) - at(0.1)}, sd ${Math.round(sd)}, mean ${Math.round(mean)}, at the floor ${values.filter((value) => value <= 500).length}, at 10,000 ${values.filter((value) => value >= 10_000).length}`);
+}
+
 const idFor = createIdFactory("sanity");
 let world = ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
 // `--v50`: the opening as scenario v50 had it (no authored regimes beyond Syracuse's tithe), for a before and after.
@@ -80,6 +89,7 @@ const snapshot = (): Map<string, Reading> => new Map(chosen.map((id) => [id, rea
 
 const started = Date.now();
 line(`START ${formatWorldDate(world.instant, definition.clock)}${war ? " (war variant)" : ""}`, snapshot());
+spreadLine("start", world);
 const context = () => ({ now: world.instant, actorRef: { kind: "character" as const, id: "gaius-genucius" }, actsForTheWorld: true, offices: definition.government.offices, warfare: definition.warfare, terrains: definition.terrains ?? definition.map.terrains, ids: idFor, gameId: "sanity" });
 let target: { id: string; name: string } | null = null;
 let profiler: Session | null = null;
@@ -128,6 +138,7 @@ for (let month = 0; month < monthsToRun; month += 1) {
     const perYear = 12 / every;
     for (const id of chosen) { income.set(id, income.get(id)! * perYear); customs.set(id, customs.get(id)! * perYear); }
     line(`${formatWorldDate(world.instant, definition.clock)} (month ${month + 1}, ${((Date.now() - started) / 1000).toFixed(0)}s)`, snapshot());
+    spreadLine(`year ${(month + 1) / 12}`, world);
     if (target !== null) {
       const row = world.material.provinceMaterial.find((r) => r.provinceId === target!.id)!;
       const hub = marketGeography(world).hubOf.get(target.id)!;

@@ -3,6 +3,7 @@ import type { Province } from "../world/map";
 import type { ProvinceLevel, ProvinceMaterial } from "../material-state";
 import { liveProvinceIds } from "./live-provinces";
 import { stableHash } from "../determinism";
+import { EXPORT_PREMIUM_BPS, MAX_EXPORT_PREMIUM_BPS, provinceSites, type ProvinceSite } from "./province-site";
 
 // Background material society (docs/14 Phase 2).
 //
@@ -153,18 +154,40 @@ const START_DEVELOPMENT_BY_TERRAIN: Readonly<Record<string, number>> = {
   "desert-steppe": 2_000,
 };
 const START_DEVELOPMENT_OTHERWISE = 2_800;
+/*
+ * What the ground can carry, by terrain (v55 widened it): a coastal plain and its
+ * river valleys are the granaries of the age (Campania, the Po, the Nile, the
+ * Guadalquivir), hills carry vines and olives, uplands only terraces and flocks,
+ * passes little, and the steppe and the desert next to nothing but at a spring.
+ */
 const POTENTIAL_BY_TERRAIN: Readonly<Record<string, number>> = {
-  "coastal-plain": 9_000,
-  hills: 7_000,
-  "hills-uplands": 6_000,
-  "mountain-pass": 5_000,
-  "desert-steppe": 4_200,
+  "coastal-plain": 8_400,
+  hills: 6_000,
+  "hills-uplands": 4_600,
+  "mountain-pass": 4_200,
+  "desert-steppe": 3_000,
 };
-const POTENTIAL_OTHERWISE = 6_500;
+const POTENTIAL_OTHERWISE = 5_500;
 const PORT_START_BONUS_BPS = 500;
 const PORT_POTENTIAL_BONUS_BPS = 700;
-const RIVER_POTENTIAL_BONUS_BPS = 400;
+const RIVER_POTENTIAL_BONUS_BPS = 600;
+/** A place on the sea without a harbour of size (a strait, a coast road) has the sea's carriage, half a port's gain. */
+const COASTAL_POTENTIAL_BONUS_BPS = 350;
+/** Markets and labour within a few days lift what a place can become (a city's hinterland: Campania round Rome, the Delta round Alexandria). */
+const AGGLOMERATION_POTENTIAL_BPS = 1_600;
+/** A court near spends, garrisons, builds. */
+const COURT_POTENTIAL_BPS = 500;
+/** A mine, a spring in the desert, a caravan town: what the ground holds that the terrain does not say. */
+const MINERAL_POTENTIAL_BPS = 900;
+const OASIS_POTENTIAL_BPS = 2_400;
+const CARAVAN_POTENTIAL_BPS = 800;
+/** Walled in by mountains with no open road, a place cannot trade its way up; a crossroads can. */
+const ENCLOSED_POTENTIAL_BPS = -600;
+const CROSSROADS_POTENTIAL_BPS = 300;
 const MAX_START_DEVELOPMENT_BPS = 7_000;
+const SOFT_CEILING_FROM_BPS = 8_500;
+/** A province's ceiling is at least this far above its start, so no map begins with a province already over what it could be. */
+const POTENTIAL_ABOVE_START_BPS = 300;
 const MIN_START_DEVELOPMENT_BPS = 2_000;
 
 /** The size of a province's towns, in the map's own units. */
@@ -188,11 +211,33 @@ export function deriveInitialDevelopment(province: Pick<Province, "id" | "settle
   return Math.max(MIN_START_DEVELOPMENT_BPS, Math.min(MAX_START_DEVELOPMENT_BPS, value));
 }
 
-/** What a province's development can reach in peace: its ground, a harbour, a river, the weight of its towns. */
-export function developmentPotential(province: Pick<Province, "settlements" | "terrainId">, onARiver = false): number {
+/**
+ * What a province's development can reach in peace, from its permanent factors
+ * only (v55): the fertility of its terrain, a harbour or a coast, a navigable
+ * river, the weight of its towns, the markets and the court within reach (`site`:
+ * agglomeration), what its ground sells beyond its own use (a mine, the goods its
+ * terrain and quays supply in `markets.ts`), a spring or a caravan town in the
+ * desert, and whether mountains wall it in or roads cross at it. Order, tax and
+ * tenure do not change it; they change how fast it is reached.
+ */
+export function developmentPotential(province: Pick<Province, "settlements" | "terrainId">, onARiver = false, site?: ProvinceSite): number {
   const ground = POTENTIAL_BY_TERRAIN[province.terrainId] ?? POTENTIAL_OTHERWISE;
   const towns = Math.min(800, Math.round(250 * Math.log2(1 + settledSize(province) / 4)));
-  return clampBps(ground + towns + (hasPort(province) ? PORT_POTENTIAL_BONUS_BPS : 0) + (onARiver ? RIVER_POTENTIAL_BONUS_BPS : 0));
+  const harbour = hasPort(province);
+  let value = ground + towns + (harbour ? PORT_POTENTIAL_BONUS_BPS : 0) + (onARiver ? RIVER_POTENTIAL_BONUS_BPS : 0);
+  if (site !== undefined) {
+    if (site.coastal && !harbour) value += COASTAL_POTENTIAL_BONUS_BPS;
+    value += Math.round(AGGLOMERATION_POTENTIAL_BPS * site.agglomeration) + Math.round(COURT_POTENTIAL_BPS * site.court);
+    value += Math.min(MAX_EXPORT_PREMIUM_BPS, Math.round(EXPORT_PREMIUM_BPS * site.exportIndex));
+    if (site.mineral) value += MINERAL_POTENTIAL_BPS;
+    if (site.oasis) value += OASIS_POTENTIAL_BPS;
+    if (site.caravan) value += CARAVAN_POTENTIAL_BPS;
+    if (site.enclosed) value += ENCLOSED_POTENTIAL_BPS;
+    if (site.crossroads) value += CROSSROADS_POTENTIAL_BPS;
+  }
+  // Past the best of the plains the gains thin out (a city's hinterland is not twice a rich plain's), so no ceiling is pinned at the top of the scale for want of room.
+  if (value > SOFT_CEILING_FROM_BPS) value = SOFT_CEILING_FROM_BPS + (value - SOFT_CEILING_FROM_BPS) / 2;
+  return clampBps(value);
 }
 
 /**
@@ -248,6 +293,8 @@ export interface ProvinceGround {
   readonly baselinePeople: number;
   readonly port: boolean;
   readonly river: boolean;
+  /** Where it is: the permanent facts that shape its ceiling and the speed of its building (`province-site.ts`). */
+  readonly site: ProvinceSite;
 }
 
 const groundByProvinces = new WeakMap<readonly Province[], Map<string, ProvinceGround>>();
@@ -263,14 +310,19 @@ export function provinceGrounds(world: Pick<WorldState, "map">): Map<string, Pro
     onRiver.add(edge.to);
   }
   const grounds = new Map<string, ProvinceGround>();
+  const sites = provinceSites(world);
   for (const province of world.map.provinces) {
     const river = onRiver.has(province.id);
+    const site = sites.get(province.id)!;
+    const startingDevelopmentBps = deriveInitialDevelopment(province);
     grounds.set(province.id, {
-      potentialBps: developmentPotential(province, river),
-      startingDevelopmentBps: deriveInitialDevelopment(province),
+      // Never less than a little above where it begins: a province that starts over its ceiling would sink for no reason.
+      potentialBps: Math.max(developmentPotential(province, river, site), Math.min(10_000, startingDevelopmentBps + POTENTIAL_ABOVE_START_BPS)),
+      startingDevelopmentBps,
       baselinePeople: peopleOf(province),
       port: hasPort(province),
       river,
+      site,
     });
   }
   groundByProvinces.set(world.map.provinces, grounds);

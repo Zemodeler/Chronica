@@ -106,6 +106,41 @@ year 5 3,414 / 4,024 / 5,156, 1,742, 761; v53+ year 5 2,813 / 3,409 / 4,599, 1,7
 was (an isolated province at an ordinary tax builds a 100 a year): most of the map has no trade to build on and stagnates, and the
 trade-linked fringe pulls away.
 
+**Where a province lies decides what it becomes (v55).** Five years of peace left the map's best and worst tenth as far apart as
+they began (p90 - p10 1,750, then 1,759), because most provinces had no trade and the rest were lifted together. Nine more
+differences now shape the ceiling and the speed, all derived from the map in `packages/shared/src/material/province-site.ts`
+(`provinceSites`, worked out once per map like `provinceGrounds`, nothing stored) and `economy.ts`:
+
+- **The ceiling** (`developmentPotential`, the permanent facts only): the fertility of the terrain (plain 8,400, hills 6,000, uplands
+  4,600, pass 4,200, steppe 3,000); a port +700, a coast without one +350, a river +600; the weight of the towns; **agglomeration**, up
+  to +1,600 for the market towns and cities within reach (a bounded search over the map's distances, a town of 20 or more
+  settled units pulling with the root of its size, fading over about 55 units) and up to +500 for a capital's court nearby; **resources**,
+  up to +450 for what the terrain and the quays sell beyond the province's own bread (read off `GOODS.supplyByTerrain`), +900 for a mine
+  (7 in 100 hills and 12 in 100 uplands, by `stableHash`), +2,400 for an oasis (6 in 100 of the steppe) and +800 for a caravan town;
+  **roads and passes**: -600 for a province reached by passes alone (walled in), +300 for a crossroads of seven roads. Past 8,500 the
+  gains count half, so no ceiling is pinned at the top of the scale; a ceiling is never less than 300 above a province's start.
+- **The speed** (`monthOfDevelopment`), each a multiple of the ordinary 20 a month: **soil** (plain 1.3, hills 1.0, uplands 0.65,
+  steppe 0.4, an oasis 1.15), **specialisation** (1 to 1.35 for a mine and the exportable goods), a province's own **luck** (0.95 to
+  1.05, `stableHash` of its id), **agglomeration and court as trade access** (`tradeAccessOf`: +0.45 and +0.1 at the most, beside the
+  hub's traffic, a coast +0.15, walled in -0.15), **institutional quality** (`tenureFactorOf`: half the rate when its holder has just taken it
+  in war, `lostBy`, the full rate after ten years, 5 in 100 more after thirty, times 0.75 to 1.0 for the firmness of the hold and 0.85 to
+  1.15 for the holder's cohesion; beside the tax rate and the order already counted), **crowding** (`crowdingFactorOf`: 0.7 for a land whose
+  people fill what its fields carry, 1.1 for one with a tenth of slack), the **frontier** (`frontierFactorOf`: up to half off for a
+  neighbour's war damage, 8 in 100 off beside ground nobody holds), and **cumulative advantage** (`compoundingFactorOf`: 0.75 at a quarter of the way to
+  the ground's ceiling, 1.5 at seven tenths, measured against the ceiling the scar and a rebuilding do not move, so a war-torn province
+  has lost its head start). A province builds at most 38 a month however much favours it, and loses `UPKEEP_SHARE_PER_MONTH` (0.17 in 100 of
+  its development, faded to nothing at the ceiling) to the keeping-up of its roads, so a poor, isolated province stands still or
+  slips back (Tripolitania's steppe, -120 in ten years; a fortress upland walled in by passes, -240).
+- The war-scar rules, the asymmetric rebuild and the tax rate's effect are unchanged; the neighbours are read from `site.neighbours`,
+  not rebuilt each month.
+
+The whole Punic map (6,455 provinces), peace, p10 / median / p90, p90 - p10, sd: start 2,205 / 2,824 / 3,955, 1,750, 745; v53 year 5
+2,809 / 3,449 / 4,615, 1,806, 833 and year 10 3,402 / 4,098 / 5,340, 1,938, 933; v55 year 5 2,354 / 3,134 / 4,558, 2,204 (1.26 times the
+start), 981 and year 10 2,547 / 3,589 / 5,827, 3,280 (1.87 times), 1,355. The mean grows 91 a year (v53: 129) and the favoured
+tenth about 300; the provinces next to a city build a median 1,975 in ten years, the isolated 424, the steppe 184, those walled in by
+passes 68. `regions-diverge-over-a-decade.test.ts` holds the spread, the modest mean, the rich port against the walled upland, the
+newly conquered against the long held, the bounds and the determinism.
+
 War writes a **scar** (`scarBps`) through `scarredBy`/`applyWarDamage` in `province-material.ts`: an event of severity s
 takes `DEVELOPMENT_LOSS_PER_SEVERITY = 0.5` times s of development at once and adds `SCAR_PER_SEVERITY = 0.35` times s of
 the room left to the scar, so campaigns stack. The scar caps development at `potential x (1 - scar)` and fades

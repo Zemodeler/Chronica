@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { punicWarsScenario } from "@chronica/db";
-import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, type WorldState } from "@chronica/shared";
+import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, provinceGrounds, type WorldState } from "@chronica/shared";
 import { reviewTheLand, reinvestmentOf, tradeAccessOf, ISOLATED_ACCESS } from "./economy";
 
 /**
@@ -18,7 +18,19 @@ import { reviewTheLand, reinvestmentOf, tradeAccessOf, ISOLATED_ACCESS } from ".
  */
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 const PORT = "it-hn4oo";
-const HILLTOP = "it-0w7sa";
+/**
+ * The hilltop was once Campania's `it-0w7sa`; with v55 it is a mine in the hinterland of Naples and Capua and rightly no longer isolated,
+ * so the isolated hilltop is now an upland walled in by passes, with no town, no mine and no court within reach: the first by id.
+ */
+const HILLTOP = ((): string => {
+  const world = ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
+  const grounds = provinceGrounds(world);
+  return world.map.provinces.map((province) => province.id).sort().find((id) => {
+    const province = world.map.provinces.find((candidate) => candidate.id === id)!;
+    const site = grounds.get(id)!.site;
+    return province.terrainId === "hills-uplands" && province.settlements.length === 0 && site.enclosed && !site.mineral && site.agglomeration === 0 && site.court < 0.05;
+  })!;
+})();
 const START = 2_500;
 
 const opening = (): WorldState => ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
@@ -78,15 +90,17 @@ describe("regions pull apart in peace", () => {
   });
 
   it("builds less and less as a province nears its ceiling", () => {
-    // From the same place, a province far below the ceiling gains more in a year than one that is nearly at it.
+    // From the same place, a province far below the ceiling gains more in a year than one that is nearly at it. (The port is the one that builds at all: v55's isolated upland builds nothing in a year.)
+    const ceiling = provinceGrounds(opening()).get(PORT)!.potentialBps;
     const far = reviewTheLand({ world: reviewTheLand({ world: pair({ port: 1_000, hilltop: 1_000 }), toDay: 0, clock: definition.clock }).world, toDay: 360, clock: definition.clock }).world;
     const gain = (world: WorldState, id: string) => world.material.provinceMaterial.find((row) => row.provinceId === id)!.developmentBps! - START;
     const nearly = (() => {
       const base = pair({ port: 1_000, hilltop: 1_000 });
-      const high = { ...base, material: { ...base.material, provinceMaterial: base.material.provinceMaterial.map((row) => (row.provinceId === HILLTOP ? { ...row, developmentBps: 5_900 } : row)) } };
+      const high = { ...base, material: { ...base.material, provinceMaterial: base.material.provinceMaterial.map((row) => (row.provinceId === PORT ? { ...row, developmentBps: ceiling - 300 } : row)) } };
       return reviewTheLand({ world: reviewTheLand({ world: high, toDay: 0, clock: definition.clock }).world, toDay: 360, clock: definition.clock }).world;
     })();
-    expect(gain(nearly, HILLTOP) + START - 5_900).toBeLessThan(0.5 * gain(far, HILLTOP));
+    expect(gain(far, PORT)).toBeGreaterThan(50);
+    expect(gain(nearly, PORT) + START - (ceiling - 300)).toBeLessThan(0.5 * gain(far, PORT));
   });
 
   it("reads trade, tax and order as plain functions", () => {
