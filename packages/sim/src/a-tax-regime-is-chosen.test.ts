@@ -93,18 +93,20 @@ describe("a tax regime is chosen", () => {
     expect(yields(busy, valley.id, "customs")).toBeLessThan(yields(busy, valley.id, "land_levy") * 0.5);
   });
 
-  it("asks men of an ally and no money: a tribute of manpower", () => {
+  it("asks men of an ally, and leaves it its own land levy less the call-up's share: a tribute of manpower (v53)", () => {
     const base = opening();
     const before = taxBurdens(base).get("rome")!;
     const tribute = withRow(base, LATIUM, { taxRegime: "men", taxRateBps: 1_000 });
     const entry = reading(tribute, "rome", LATIUM);
-    expect(entry.monthly).toBe(0);
+    // No money to the overlord; the holder's own levy, at the ordinary rate and three fifths of it, stays.
+    const levy = reading(withRow(base, LATIUM, { taxRegime: "land_levy", taxRateBps: 1_000 }), "rome", LATIUM);
+    expect(entry.monthly).toBeCloseTo(levy.monthly * 0.6, 5);
     expect(entry.menPerYear).toBeGreaterThan(1_000);
     const after = taxBurdens(tribute).get("rome")!;
     expect(after.menPerYear).toBe(entry.menPerYear);
-    // Its money is gone from what Rome's lands bear, and shows in no regime but this.
+    // Two fifths of its levy is gone from what Rome's lands bear, and the rest shows as this regime's.
     expect(after.bearable).toBeLessThan(before.bearable);
-    expect(after.bearableByRegime?.men ?? 0).toBe(0);
+    expect(after.bearableByRegime?.men ?? 0).toBeCloseTo(entry.monthly, 3);
     // And a province that pays in men resents it more than one that pays a tithe, at the same rate.
     expect(after.provinceStabilityShiftBps?.get(LATIUM)).toBeLessThan(taxBurdens(withRow(base, LATIUM, { taxRegime: "tithe", taxRateBps: 1_000 })).get("rome")!.provinceStabilityShiftBps!.get(LATIUM)!);
   });

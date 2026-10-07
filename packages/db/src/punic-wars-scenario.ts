@@ -24,8 +24,20 @@ const italianPolities = [
   ["lucanians", "Lucanians"], ["bruttians", "Bruttians"], ["apulian-cities", "Apulian cities"], ["messapians", "Messapians"],
 ] as const;
 
-/** Rome's allies by foedus, who owe it men and not money (v51). */
+/** Rome's allies by foedus, who owe it men and not money (v51), and keep a treasury and a land levy of their own (v53). */
 const ALLIES_IN_MEN: readonly string[] = ["etruscan-cities", "umbrians", "picentes", "marsi-paeligni", "samnites", "lucanians", "bruttians", "apulian-cities"];
+/**
+ * What each ally of the foedus takes in a month from its own land (v53), in drachmae at the scale of v52: about three
+ * tenths of what its provinces can bear after the contingent has had its share (`MEN_LEVY_RESERVE_SHARE`), so that
+ * every ally asks less of its land than the customary half, as Rome does (`taxBurdens`). The Etruscan cities and the
+ * Apulian ones, the largest, take in about a fifth of Rome's; the Samnites, beaten twice and robbed of land, a twenty-fifth.
+ * The chest it opens with is four months of it, and the city's magistracies, garrisons and works spend four fifths.
+ */
+const ALLY_NAMES: Readonly<Record<string, string>> = Object.fromEntries(italianPolities.map(([id, name]) => [id, name]));
+const ALLY_REVENUE: Readonly<Record<string, number>> = {
+  "etruscan-cities": 100_000, umbrians: 40_000, picentes: 40_000, "marsi-paeligni": 40_000,
+  samnites: 21_000, lucanians: 48_000, bruttians: 48_000, "apulian-cities": 116_000,
+};
 
 /**
  * The coinages of 270 BCE (v50), with the silver in one unit of each against
@@ -694,7 +706,7 @@ const WRITTEN_OUT: ReadonlySet<string> = new Set(["rome", "carthage", "syracuse"
 
 const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
   schemaVersion: 3,
-  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 52, libraryVersion: 1 },
+  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 53, libraryVersion: 1 },
   elapsedStep: 0,
   instant: { day: 0, minute: 0 },
   // How the powers tax their ground, where the age said so (v48). Every other
@@ -975,6 +987,8 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
       { id: "carthage-treasury", owner: { kind: "polity", id: "carthage" }, currencyId: "drachma", balance: 18_600_000, status: "active", visibility: "polity" },
       { id: "syracuse-treasury", owner: { kind: "polity", id: "syracuse" }, currencyId: "drachma", balance: 1_612_000, status: "active", visibility: "polity" },
       { id: "mamertine-treasury", owner: { kind: "polity", id: "mamertines" }, currencyId: "drachma", balance: 775_000, status: "active", visibility: "polity" },
+      // The allies of the foedus kept their own chests (v53): their own laws, their own magistrates and a land levy of their own, with a tribute of men to Rome on top.
+      ...ALLIES_IN_MEN.map((polityId) => ({ id: `${polityId}-treasury`, owner: { kind: "polity" as const, id: polityId }, currencyId: "drachma", balance: 4 * ALLY_REVENUE[polityId]!, status: "active" as const, visibility: "polity" as const })),
       // The chest each army carries. Empty at the opening -- nobody has taken
       // anything yet -- but real, because it is where plunder lands and what
       // an army paid out of what it takes is paid from. Without one, an order
@@ -1303,6 +1317,8 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
         id: `${holdingId}-yield`, kind: "land" as const, label: `Yield of ${title}`, beneficiaryAccountId: purse,
         originKind: "holding" as const, originId: holdingId, amount, cadenceSteps: 30, nextDueStep: 30, active: true,
       })),
+      // And the allies' own land levy (v53), which the `men` regime leaves them (`tax-policy.ts`): raised in their own provinces, paid into their own chests.
+      ...ALLIES_IN_MEN.map((polityId) => ({ id: `${polityId}-land-levy`, kind: "tax" as const, label: `The land levy of the ${ALLY_NAMES[polityId] ?? polityId}`, beneficiaryAccountId: `${polityId}-treasury`, originKind: "polity" as const, originId: polityId, amount: ALLY_REVENUE[polityId]!, cadenceSteps: 30, nextDueStep: 30, active: true })),
       { id: "mamertine-tolls", kind: "trade", label: "Tolls on the strait", beneficiaryAccountId: "mamertine-treasury", originKind: "polity", originId: "mamertines", amount: 77_500, cadenceSteps: 30, nextDueStep: 30, collectionRateBps: 7_000, active: true },
     ],
     /**
@@ -1325,6 +1341,7 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
       // at ten a man, so that the pool their shares came out of could not
       // have paid them.)
       { id: "rome-legion-pay", kind: "army_pay", label: "Pay of the legions, and grain for their allies", payerAccountId: "rome-treasury", amount: 65_000, cadenceSteps: 30, nextDueStep: 30, priority: 900, arrears: 0, missedPeriods: 0, active: true },
+      ...ALLIES_IN_MEN.map((polityId) => ({ id: `${polityId}-upkeep`, kind: "salary" as const, label: `The magistracies, garrisons and works of the ${ALLY_NAMES[polityId] ?? polityId}`, payerAccountId: `${polityId}-treasury`, amount: Math.round(ALLY_REVENUE[polityId]! * 0.8), cadenceSteps: 30, nextDueStep: 30, priority: 500, arrears: 0, missedPeriods: 0, active: true })),
       { id: "rome-magistracies", kind: "salary", label: "The magistracies and the public works", payerAccountId: "rome-treasury", amount: 19_000, cadenceSteps: 30, nextDueStep: 30, priority: 500, arrears: 0, missedPeriods: 0, active: true },
       { id: "carthage-fleet-pay", kind: "army_pay", label: "Pay of the fleet and its crews", payerAccountId: "carthage-treasury", amount: 55_000, cadenceSteps: 30, nextDueStep: 30, priority: 900, arrears: 0, missedPeriods: 0, active: true },
       { id: "carthage-mercenaries", kind: "army_upkeep", label: "The hired men of Libya and Iberia", payerAccountId: "carthage-treasury", amount: 38_000, cadenceSteps: 30, nextDueStep: 30, priority: 850, arrears: 0, missedPeriods: 0, active: true },

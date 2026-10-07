@@ -7,7 +7,7 @@ import { adjacentTo } from "../world/movement";
 import { tradeIntensities } from "../world/markets";
 import { readDepartments } from "../world/departments";
 import { skillShare } from "../characters/aptitude";
-import { DEFAULT_TAX_RATE_BPS, MEN_PER_YEAR_SHARE, REGIME_LEAK_SCALE, policyPressureBps, regimeFactor, taxPolicyIndex, type TaxPolicy } from "./tax-policy";
+import { DEFAULT_TAX_RATE_BPS, MEN_PER_YEAR_SHARE, REGIME_LEAK_SCALE, moneyRateBps, policyPressureBps, regimeFactor, taxPolicyIndex, type TaxPolicy } from "./tax-policy";
 
 /**
  * What a government's own lands can be made to pay.
@@ -207,9 +207,10 @@ export function readProvinceTax(
   /** How much a customs province's hub trades (`tradeIntensity`): its market's flows against its use. */
   trade?: number | undefined,
 ): ProvinceTaxReading {
-  const efficiency = collectionEfficiency(steps, policy.regime, officeSkill);
+  // The money a `men` province raises for its holder is a local land levy, and leaks as one; the men it owes the overlord lose nothing to distance.
+  const efficiency = collectionEfficiency(steps, policy.regime === "men" ? "land_levy" : policy.regime, officeSkill);
   const base = (row.taxCapacity * row.stabilityBps) / 10_000;
-  const monthly = policy.regime === "men" ? 0 : base * (policy.rateBps / 10_000) * regimeFactor(policy.regime, row, province, trade) * efficiency;
+  const monthly = base * (moneyRateBps(policy) / 10_000) * regimeFactor(policy.regime, row, province, trade) * efficiency;
   const menPerYear = policy.regime === "men" ? Math.floor(row.population * (policy.rateBps / 1_000) * MEN_PER_YEAR_SHARE * (row.stabilityBps / 10_000)) : 0;
   return { provinceId: province.id, policy, monthly, efficiency, menPerYear, held: ownsAndHolds(province, polityId) };
 }
@@ -295,7 +296,7 @@ export function taxBurdens(world: WorldState, options: { readonly officeSkill?: 
       if (reading.menPerYear > 0 && row.population > 0) manpowerShift.set(province.id, reading.menPerYear / (row.population * MANPOWER_FRACTION_OF_POPULATION));
       byRegime[policy.regime] = (byRegime[policy.regime] ?? 0) + reading.monthly;
       if (reading.monthly > 0) {
-        rated += reading.monthly * (policy.rateBps / DEFAULT_TAX_RATE_BPS);
+        rated += reading.monthly * (moneyRateBps(policy) / DEFAULT_TAX_RATE_BPS);
         weights += reading.monthly;
       }
       if (policy.explicit) {

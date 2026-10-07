@@ -263,6 +263,8 @@ export const PUNIC_WARS_VERSIONS: readonly BuiltInScenarioVersion[] = [
   // Version 52 sets the state to the rule that an army costs its share of the income:
   // 10,000 men a fifth of Rome's revenue, 20,000 two fifths (docs/economy.md).
   { version: 52, notes: "The treasuries are richer, in proportion. A land bears about three times what it did, and every power's authored revenue, chest and tribute rises with it: Rome takes in 500,000 a month where it took 162,000, Carthage some 1,460,000, Syracuse 192,000, the Mamertines 54,000 net of their collection, so that Carthage and Syracuse stand to Rome as they did. A soldier is paid as before, ten drachmae a month, and so an army of ten thousand now costs Rome a fifth of its income and an army of twenty thousand two fifths: a long war of that size can be kept up and is felt. Private fortunes are unchanged." },
+  // Version 53 gives the allies of the foedus a chest and a land levy of their own beside the tribute of men.
+  { version: 53, notes: "The allies of the foedus keep their own treasuries. Each of the eight (the Etruscan cities, the Umbrians, Picentes, Marsi and Paeligni, Samnites, Lucanians, Bruttians and the Apulian cities) opens with a chest of four months’ takings, raises a land levy of its own from its provinces (from 21,000 a month for the Samnites to 116,000 for the Apulian cities) and spends four fifths of it on its magistrates, garrisons and works. They still owe Rome men and no money: a province that pays in men now also pays its holder the ordinary land levy, less two fifths that the call-up eats, where before it paid nobody anything. The call-up also now bears on the allies’ own rolls of men, which it had not." },
 ];
 
 /** The version the code seeds: the last one written down. */

@@ -59,15 +59,20 @@ describe("the treasury reads the land", () => {
     expect(readTheRegions(roman, "rome", true)!.regions.flatMap((region) => region.provinces).find((line) => line.id === sicilian[0]!.id)!.policy.regime).toBe("tithe");
   });
 
-  it("asks the allies for men and not coin, and zeroes no treasury that has income", () => {
+  it("asks the allies for men to Rome and leaves them a land levy and a chest of their own (v53), zeroing no treasury that has income", () => {
     const w = world();
     const samnites = readTheRegions(w, "samnites", true)!;
     expect(samnites.defaultPolicy).toEqual({ regime: "men", rateBps: 500, explicit: true });
     expect(samnites.regions.flatMap((region) => region.provinces).every((line) => line.policy.regime === "men" && line.menPerYear > 0)).toBe(true);
-    // Only the powers with a chest and a tax roll are weighed against what their land can bear, and none of them is a tribute of men.
+    // Every power with a chest and a tax roll is weighed against what its land can bear, the allies too: the men they owe Rome are no money, but the levy they keep is.
     const burdens = taxBurdens(w);
-    for (const id of ["rome", "carthage", "syracuse"]) expect(burdens.get(id)!.collectedShare).toBeGreaterThan(0.5);
-    expect(burdens.has("samnites")).toBe(false);
+    for (const id of ["rome", "carthage", "syracuse", "samnites", "etruscan-cities", "apulian-cities"]) expect(burdens.get(id)!.collectedShare).toBeGreaterThan(0.5);
+    const samnite = burdens.get("samnites")!;
+    expect(samnite.menPerYear).toBeGreaterThan(1_000);
+    expect(samnite.bearable).toBeGreaterThan(0);
+    expect(samnite.asked / samnite.bearable).toBeLessThan(0.5);
+    expect(samnite.bearableByRegime?.men).toBeCloseTo(samnite.bearable, 0);
+    expect(w.material.accounts.find((account) => account.id === "samnites-treasury")!.balance).toBeGreaterThan(0);
   });
 
   it("reads the markets, and the trade pacts in force, for a power that holds hubs", () => {

@@ -112,7 +112,7 @@ The default rate is `DEFAULT_TAX_RATE_BPS = 1_000`; above `CUSTOMARY_TAX_RATE_BP
 | tithe | follows food security, 0.35 to 1.3 of land levy | 0.6 | 150 |
 | land_levy | steady, 1 | 1 | 400 |
 | customs | `CUSTOMS_STALLS_FACTOR` 0.15 plus up to 1.6 for the trade through the hub | 0.5 | 100 |
-| men | no money; a tribute of `MEN_PER_YEAR_SHARE = 0.05` of the people a year at the default rate | 0 | 250 |
+| men | no money to the overlord; a tribute of `MEN_PER_YEAR_SHARE = 0.05` of the people a year at the default rate. The holder keeps its own land levy at the ordinary rate times `1 - MEN_LEVY_RESERVE_SHARE` (0.6), v53 | land levy's (1) for the holder's money, 0 for the men | 250 |
 
 **Collection efficiency by distance.** A province loses `LEAK_PER_STEP = 0.005` of its yield per step from the capital,
 scaled by its regime and eased by a good tax office (at best 0.4 of the leak saved), and never below
@@ -219,7 +219,7 @@ year its coin is strained; nothing is debased for it.
 
 v47 puts money at the age's scale and tags every door; v48 adds development, scars and tax regimes (Syracuse opens on a
 tithe); v49 adds goods, hubs, flows, customs and Rome's two pacts; v50 adds the coinages. v51 (taxes by province in
-`punic-wars-taxes.ts`) sits on them. Notes for each are in `packages/db/src/built-in-versions.ts`.
+`punic-wars-taxes.ts`) sits on them, v52 sets the income to the army-cost rule and v53 gives the allies chests. Notes for each are in `packages/db/src/built-in-versions.ts`.
 
 ## Where things live
 
@@ -244,10 +244,17 @@ tithe); v49 adds goods, hubs, flows, customs and Rome's two pacts; v50 adds the 
   tariff), and show it in `trade-view.ts`. Tests: `a-trade-pact-lowers-tariffs`, `an-embargo-cuts-trade`.
 - **A new door for money:** add it to `EXTERNAL_MONEY_KINDS` and `money-audit.ts`; `the-books-balance` must stay clean.
 
-**Open decision (the `men` regime).** `men` yields no money, so a power with every province under it would have nothing
-to collect. The scenario sets it only for Rome's allies by foedus, who keep no treasury or tax roll. If a later scenario
-gives a tribute-paying ally a treasury, `taxBurdens` should count a share of a `men` province's land levy for the
-overlord's roll rather than none.
+**The `men` regime and the allies' chests (v53).** `men` yields the overlord no money, but it is not the end of the
+holder's own taxes: a city of the foedus kept its own chest, magistrates and land levy, and sent men on top. In a `men`
+province the holder raises its ordinary land levy (`moneyRateBps`, always `DEFAULT_TAX_RATE_BPS`; the policy's own rate is the
+rate of the tribute of men) times 0.6, for its own treasury; the other two fifths (`MEN_LEVY_RESERVE_SHARE = 0.4`) is what
+the call-up consumes. The money leaks with distance as a land levy; the men do not. v53 gives each of the eight allies a
+treasury (four months of levy), a levy source (Etruscans 100,000 a month, Apulians 116,000, Umbrians, Picentes and Marsi
+40,000, Lucanians and Bruttians 48,000, Samnites 21,000, each about 0.30 of what its provinces bear) and an upkeep
+obligation of four fifths of it; `an-ally-keeps-its-own-chest.test.ts` pins it. A consequence: allies now have a
+`taxBurdens` entry, so the manpower shift a tribute of men gives the rolls (`provinceManpowerShift`, applied in
+`tick.ts`) now reaches their provinces, which it never did while they had no burden. A `men` province's resentment is
+unchanged.
 
 ## Tests that pin behaviour
 

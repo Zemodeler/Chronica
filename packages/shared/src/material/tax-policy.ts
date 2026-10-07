@@ -27,8 +27,13 @@ import { economyOf } from "../world/economy";
  *    province can bear on top is read off how much its hub really trades. A
  *    hub on a busy sea lane yields; a hill-valley with no road to anywhere
  *    yields next to nothing. It needs trade, and cuts of trade cut it.
- *  - **men**: a tribute of manpower owed by allies and subjects. No money, and
- *    the most resented of all, since the men do not come home.
+ *  - **men**: a tribute of manpower owed by allies and subjects to their
+ *    overlord, and the most resented of all, since the men do not come home.
+ *    It is *no money to the overlord*, but it is not the end of the holder's
+ *    own taxes (v53): a city of the foedus kept its own treasury, its own
+ *    magistrates and its own land levy, and sent men on top. In a `men`
+ *    province the holder still raises its ordinary land levy, less the share
+ *    the contingent eats (`MEN_LEVY_RESERVE_SHARE`), for its own chest.
  */
 
 /** The share of what a province can bear that the old uniform levy took, and what a regime takes unless its ruler says otherwise. */
@@ -37,6 +42,14 @@ export const DEFAULT_TAX_RATE_BPS = 1_000;
 export const CUSTOMARY_TAX_RATE_BPS = 1_200;
 /** Of the people in a province, the share a year a `men` tribute takes at the default rate: a twentieth of the tenth. */
 export const MEN_PER_YEAR_SHARE = 0.05;
+/**
+ * Of a `men` province's land levy, the share the overlord's call-up consumes before it reaches the holder's own
+ * chest: the contingents the ally sends are armed, fed and paid by it, and the fields lose the hands. What is
+ * left (`1 - this`, three fifths) is the holder's own take, raised at the ordinary rate
+ * (`DEFAULT_TAX_RATE_BPS`), for its own treasury, magistrates and garrisons. The `rateBps` of a `men` policy
+ * is the rate of the tribute of men, not of this levy.
+ */
+export const MEN_LEVY_RESERVE_SHARE = 0.4;
 /** What each regime costs in order, per thousand basis points of rate, over and above the cost of the rate itself. */
 export const REGIME_RESENTMENT_BPS: Readonly<Record<TaxRegime, number>> = { tithe: 150, land_levy: 400, customs: 100, men: 250 };
 /** Each additional thousand basis points of rate above the customary one lowers where order settles by this much. */
@@ -91,7 +104,7 @@ export function taxPolicyIndex(world: Pick<WorldState, "economy">): (province: P
  * it is 1, in a drought year about a third, in a glut a third more. Land levy
  * is steady. Customs is read off harbour and size until trade is modelled: a
  * port with a sizeable town is worth more than its land, an inland valley a
- * seventh of it. Men yields no money at all.
+ * seventh of it. Men yields the holder its ordinary land levy less the overlord's reserve (`MEN_LEVY_RESERVE_SHARE`), and the overlord no money.
  */
 export function regimeFactor(regime: TaxRegime, row: Pick<ProvinceMaterial, "foodSecurityBps">, _province: Pick<Province, "settlements">, trade?: number | undefined): number {
   switch (regime) {
@@ -100,9 +113,16 @@ export function regimeFactor(regime: TaxRegime, row: Pick<ProvinceMaterial, "foo
     // What a province bears by customs is what its hub's trade can bear: its quays and stalls
     // (a fifth of the land) and the goods that pass, which are the market's own flows of the last month.
     case "customs": return trade === undefined ? CUSTOMS_STALLS_FACTOR : CUSTOMS_STALLS_FACTOR + Math.min(CUSTOMS_TRADE_FACTOR_MAX, CUSTOMS_TRADE_FACTOR_PER_INTENSITY * trade);
-    case "men": return 0;
+    // The holder's own land levy less what the overlord's levy of men reserves (v53). The tribute itself is men, counted apart.
+    case "men": return 1 - MEN_LEVY_RESERVE_SHARE;
   }
 }
+
+/**
+ * The rate at which a policy's money is raised: its own, except that a `men` policy's rate is the rate of the
+ * tribute of men and its money is levied at the ordinary rate (`MEN_LEVY_RESERVE_SHARE`).
+ */
+export const moneyRateBps = (policy: TaxPolicy): number => (policy.regime === "men" ? DEFAULT_TAX_RATE_BPS : policy.rateBps);
 
 /** What the quays and stalls of a customs province bear, as a share of the land levy: the dues that do not need goods in transit. */
 export const CUSTOMS_STALLS_FACTOR = 0.15;
