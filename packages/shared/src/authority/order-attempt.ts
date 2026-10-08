@@ -71,10 +71,10 @@ export type OrderStanding = z.infer<typeof OrderStandingSchema>;
  * carried out.
  */
 export const RequestAskSchema = z.object({
-  kind: z.enum(["put_question", "appoint_to_post", "take_as_legate", "speak_for", "grant_funds", "other"]),
-  /** The chamber, rank or question it is about. Unbounded in the schema the model reads, where every character is paid on every call. */
+  kind: z.enum(["put_question", "appoint_to_post", "take_as_legate", "speak_for", "grant_funds", "supply", "other"]),
+  /** The chamber, rank or question it is about; for "supply", the army to be fed (and "amount" the days). Unbounded in the schema the model reads, where every character is paid on every call. */
   ref: RefSchema.optional(),
-  /** Money asked for: positive, which the engine holds it to (`sim/requests.ts`). */
+  /** Money asked for, or the days of bread for a supply: positive, which the engine holds it to (`sim/requests.ts`). */
   amount: z.number().optional(),
 }).strict().describe("A favour asked; ref: chamber, rank or question");
 export type RequestAsk = z.infer<typeof RequestAskSchema>;

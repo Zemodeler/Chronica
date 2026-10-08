@@ -1,4 +1,5 @@
 import {
+  adjustPolityLegitimacy,
   allOffices,
   answerDueOf,
   appointersOf,
@@ -26,6 +27,10 @@ import {
   type RequestAsk,
   type WorldState,
 } from "@chronica/shared";
+import { applyDeltas } from "./apply/apply-deltas";
+import type { ApplyContext } from "./apply/context";
+import { assessExecution } from "./delegation";
+import { payerOf, planSupply } from "./supply-plan";
 import { isKin, willingnessOf } from "./apply/asking";
 import { orderAnswerCauses } from "./apply/apply-deltas";
 import { sovereignChamberOf } from "./constitutions";
@@ -66,6 +71,8 @@ export interface RequestsInput {
   readonly offices: readonly Office[];
   readonly ids: IdFactory;
   readonly playerCharacterId: string | null;
+  /** The scenario's rules, where the answer is an act the engine applies (the bread of an army: `supply`). Without them such a request is refused for want of a way to carry it out. */
+  readonly rules?: Pick<ApplyContext, "warfare" | "terrains" | "successionRules" | "wealth" | "gameId"> | undefined;
 }
 
 /** Days an accepted request with nothing to read it by is left before it is closed by the promise behind it. */
@@ -126,6 +133,7 @@ export function askOfRequest(attempt: OrderAttempt): RequestAsk {
   const words = attempt.instruction;
   if (/\blegat(e|us)\b/i.test(words)) return { kind: "take_as_legate" };
   if (/\b(optio|signifer|standard-bearer|centurion|centurio|decurion|promot\w*|make me|raise me)\b/i.test(words)) return { kind: "appoint_to_post" };
+  if (/\b(supply|provision|victual|feed)\b.{0,60}\b(army|legions?|troops|men|host)\b|\bfind\b.{0,20}\b(bread|grain|supplies|supply|provisions)\b/i.test(words)) return { kind: "supply" };
   if (/\b(put|lay|bring|move|propose|raise)\b.{0,60}\b(senate|assembly|comitia|council|people|plebs|vote)\b/i.test(words)) return { kind: "put_question" };
   if (/\b(speak|vote|stand)\s+(for|with)\b|\b(back|support|endorse)\s+(me|my|him|his)\b/i.test(words)) return { kind: "speak_for" };
   const money = /\b(lend|give|grant|advance|pay)\b.{0,40}?(\d[\d,]*)/i.exec(words);
@@ -312,6 +320,41 @@ function grantable(world: WorldState, attempt: OrderAttempt, ask: RequestAsk, in
         }),
       };
     }
+    case "supply": {
+      // The bread of an army, found by the officer's rule (`supply-plan.ts`) in his hands (`assessExecution`), and done under the standing of the man who gave the order.
+      const mine = world.material.forces.filter((candidate) => candidate.commanderCharacterId === askerId || candidate.controllerCharacterId === askerId || candidate.memberCharacterIds.includes(askerId));
+      const force = world.material.forces.find((candidate) => candidate.id === ask.ref)
+        ?? [...mine, ...world.material.forces.filter((candidate) => candidate.commanderCharacterId === giverId)].sort((a, b) => b.personnel.reduce((sum, row) => sum + row.fit, 0) - a.personnel.reduce((sum, row) => sum + row.fit, 0) || a.id.localeCompare(b.id))[0];
+      const refused = `${giver.name} found no bread for ${force?.name ?? "the army"}`;
+      if (force === undefined) return { ok: false, reason: `there is no army of ${asker.name}'s to feed`, refused };
+      if (input.rules === undefined) return { ok: false, reason: "he has no way to carry it out here", refused };
+      const days = Math.max(1, Math.min(360, Math.round(ask.amount ?? 30)));
+      const hand = assessExecution(world, giverId, "fiscal");
+      const stays = /\b(stay|stays|staying|winter|wintering|remain|quarters|siege|depot)\b/i.test(attempt.instruction);
+      const plan = planSupply(world, force, days, { day: atStep, payAccountId: payerOf(world, askerId, force), stays, hand, warfare: input.rules.warfare });
+      if (!plan.ok) return { ok: false, reason: plan.refusal ?? "nothing could be found", refused };
+      const context: ApplyContext = {
+        now: { day: atStep, minute: 540 }, actorRef: { kind: "character", id: askerId }, offices: input.offices, ids: input.ids, playerCharacterId: input.playerCharacterId,
+        orderDeltas: new Set(plan.deltas), ...input.rules,
+      };
+      const tried = applyDeltas(world, [...plan.deltas], context);
+      const carry = (current: WorldState): WorldState => applyDeltas(current, [...plan.deltas], context).world;
+      const bread = tried.applied.filter((entry) => entry.delta.op === "force_provision").length;
+      if (bread === 0) return { ok: false, reason: tried.rejected[0]?.reason.slice(0, 240) ?? "the chest would not open for it", refused };
+      const asked = tried.rejected.length > 0 ? ` -- but ${tried.rejected[0]!.reason.slice(0, 200).replace(/\s+/g, " ")}` : "";
+      return {
+        ok: true,
+        refused,
+        done: `${giver.name} found the bread for ${force.name}: ${plan.words.replace(/\.$/, "")}${asked}`,
+        carryOut: (current) => {
+          const polityId = force.polityId;
+          const after = carry(current);
+          return plan.legitimacyCost > 0
+            ? { ...after, material: { ...after.material, polityLegitimacy: adjustPolityLegitimacy(after.material.polityLegitimacy, polityId, -plan.legitimacyCost, `Bread taken from the country for ${force.name}`, `requisition:${force.id}:${atStep}`) } }
+            : after;
+        },
+      };
+    }
     case "other":
       return {
         ok: true,
@@ -332,6 +375,11 @@ const RAISES_A_FRIEND = 40;
  * The engine's answer for a man who was asked and has not answered: can he,
  * will he, and on what terms. Carried out on a yes, and the asker told.
  */
+/** The engine's answer for a man who was asked and has not answered (`answerFor`), as the rule's answers use it (`order-by-rule.ts`). */
+export function answerByTheEngine(world: WorldState, attempt: OrderAttempt, input: Omit<RequestsInput, "world">): { world: WorldState; facts: FactProposalDraft[] } {
+  return answerFor(world, attempt, input);
+}
+
 function answerFor(world: WorldState, attempt: OrderAttempt, input: Omit<RequestsInput, "world">): { world: WorldState; facts: FactProposalDraft[] } {
   const askerId = attempt.issuerRef.id;
   const giverId = attempt.recipientRef.id;

@@ -1742,7 +1742,8 @@ export function runDeterministicTick(given: TickInput): TickResult {
   const debts = settleDebts({ before: input.world, world: treaties.world });
   facts.push(...debts.facts);
   // Requests answered when they fall due, by the engine where nobody else has (`requests.ts`).
-  const asked = answerRequests({ world: debts.world, toDay: input.toDay, offices: input.government?.offices ?? [], ids: input.ids, playerCharacterId: input.playerCharacterId ?? null });
+  const asked = answerRequests({ world: debts.world, toDay: input.toDay, offices: input.government?.offices ?? [], ids: input.ids, playerCharacterId: input.playerCharacterId ?? null,
+    ...(input.warfare === undefined ? {} : { rules: { warfare: input.warfare, gameId: "tick" } }) });
   facts.push(...asked.facts);
   // Promises between people, settled on their day by what was done (`promises.ts`).
   // What a treaty bound a power nobody plays to do on the ground, begun or done (`treaty-duties.ts`).

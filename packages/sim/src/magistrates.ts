@@ -34,6 +34,7 @@ import { defianceOf } from "./insubordination";
 import { readTheBooks, grainStress, motionsByPower, qualityOf, weigh, type Asked, type Books, type Matter } from "./fiscal-officers";
 import { grainPrice } from "./grain";
 import { housesFor, monthlyBill, victuallerOf } from "./army-victualling";
+import { suppliedByDelegation } from "./supply-plan";
 import type { StatecraftDecision, StatecraftInput } from "./statecraft";
 
 /**
@@ -137,6 +138,8 @@ interface Cx {
   readonly log: ReadonlyMap<string, number>;
   readonly offices: NonNullable<MagistrateInput["offices"]>;
   readonly roll: (...keys: string[]) => number;
+  /** Where the power is the player's, the only armies the officers feed: those he has handed to one (`supply-plan.ts`, `suppliedByDelegation`). */
+  readonly only?: ReadonlySet<string> | undefined;
 }
 
 type Routine = (cx: Cx) => Doing | null;
@@ -376,9 +379,9 @@ const theLevy: Routine = (cx) => {
 const theSupply: Routine = (cx) => {
   const { world, polity, books } = cx;
   const reading = cx.board.get(polity.id);
-  if (reading === undefined || reading.wars.length === 0 || books.balance <= books.owed) return null;
+  if (reading === undefined || (cx.only === undefined && reading.wars.length === 0) || books.balance <= books.owed) return null;
   const hungry = world.material.forces
-    .filter((force) => force.polityId === polity.id && force.outlaw !== true && fitStrengthOf(force) > 0 && !isNavalForce(force, undefined)
+    .filter((force) => (cx.only === undefined || cx.only.has(force.id)) && force.polityId === polity.id && force.outlaw !== true && fitStrengthOf(force) > 0 && !isNavalForce(force, undefined)
       && force.provisionStatus !== "provisioned" && since(cx, "supply", force.id) >= REST_DAYS.supply
       // An army a house is feeding is left to it, unless the bread has been three weeks late.
       && (victuallerOf(world, force.id) === undefined || force.provisionedThroughStep + SUPPLY_LATE_DAYS < cx.day))
@@ -620,17 +623,22 @@ export function decideMagistrates(input: MagistrateInput, already: readonly Stat
   const decisions: StatecraftDecision[] = [];
   const fiscalCoin = new Set(already.filter((decision) => decision.deltas.some((entry) => entry.op === "coinage_debase")).map((decision) => decision.polityId));
 
+  const served = suppliedByDelegation(world, input.playerCharacterId, day);
   for (const polity of [...world.map.polities].sort((a, b) => a.id.localeCompare(b.id))) {
-    if (input.excludedPolityIds.has(polity.id)) continue;
+    // A power the player rules is not the officers' to move: but the army he has handed to one to feed is kept fed, month by month, by him.
+    const only = input.excludedPolityIds.has(polity.id) ? new Set([...served].filter((id) => world.material.forces.some((force) => force.id === id && force.polityId === polity.id))) : undefined;
+    if (only !== undefined && only.size === 0) continue;
     const kept = books.get(polity.id);
     const book: Books = kept ?? { treasuryId: "", balance: 0, owed: 0, arrears: 0, income: 0, debt: 0 };
     const cx: Cx = {
       input, world, polity: { id: polity.id, name: polity.name }, day, month, books: book, reader, board, motions, log, offices,
       roll: (...keys) => stableHash([input.gameId, "magistrate", polity.id, month, ...keys]),
+      ...(only === undefined ? {} : { only }),
     };
     let spoke = false;
     for (const { run, chest } of ROUTINES) {
       if (chest && kept === undefined) continue;
+      if (only !== undefined && run !== theSupply) continue;
       const doing = run(cx);
       if (doing === null) continue;
       if (doing.kind === "mint" && fiscalCoin.has(polity.id)) continue;

@@ -103,6 +103,8 @@ import { materializeFacts } from "./facts";
 import { answerByTemper } from "./insubordination";
 import { answerForTheSilent } from "./requests";
 import { stanceOfPart } from "./stance";
+import { matchOrderTemplates } from "./order-templates";
+import { answerOrdersByRule } from "./order-by-rule";
 import { recordActiveIntents } from "./intents";
 import { decideNarratorSeeds, engineWork, recordSeedsOffered, seedParticipants, seedWasTaken, type NarratorSeed } from "./narrator";
 import { chooseNemesis, conductInWords, nemesisStance, recordNemesis, retireNemesis, shouldRetire, stanceInWords, stationOf } from "./nemesis";
@@ -1655,6 +1657,23 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       if (fact.sourceActionId !== null) continue;
       const owner = fact.affectedEntities.map((entity) => byWork.get(entity.id)).find((ref) => ref !== undefined);
       if (owner !== undefined) newFacts[at] = { ...fact, sourceActionId: owner };
+    }
+  };
+  /** The people the model plays: the standing cast and the nemesis. An order put to anybody else is answered by rule. */
+  const castIdsNow = (): ReadonlySet<string> => new Set<string>([...world.cast.members.map((member) => member.characterId), ...(nemesis === undefined ? [] : [nemesis.characterId])]);
+  const settleOrdersByRule = (): void => {
+    if (playerId === null || input.actorRef.kind !== "character") return;
+    const answered = answerOrdersByRule(world, {
+      castIds: castIdsNow(), issuerId: playerId, toDay: world.elapsedStep, offices: input.offices, ids, playerCharacterId: playerId,
+      rules: { warfare: input.warfare, ...(input.terrains === undefined ? {} : { terrains: input.terrains }), ...(input.successionRules === undefined ? {} : { successionRules: input.successionRules }),
+        ...(input.wealth === undefined ? {} : { wealth: input.wealth }), gameId: input.gameId },
+    });
+    if (answered.answered.length === 0 && answered.delayed.length === 0) return;
+    world = answered.world;
+    if (answered.facts.length > 0) {
+      const told = materializeFacts({ proposals: answered.facts, now: world.instant, forces: world.material.forces, atStep: world.elapsedStep, ids, causalDepth: 0, assignedIds: new Map() });
+      newFacts.push(...told.facts);
+      for (const [factId, weight] of told.significanceByFactId) significanceByFactId.set(factId, weight);
     }
   };
   const applyProposal = async (
@@ -3485,11 +3504,14 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // While the order is being read, the people the world would ask anyway are already being asked: the rotation of
     // senators, kings and councillors does not wait on what the player wrote. Their answers are used in the first round
     // if the round asks them still, and dropped if it does not (`reuseEarly`).
-    if (input.orderText !== null && input.continuation !== true && input.prefetch === true) {
+    // The common routine orders are read by rule and need no orchestrator (`order-templates.ts`); what is not in the table is the orchestrator's, whole.
+    const templated = playerId !== null && input.orderText !== null && input.continuation !== true && input.answeredDecision === undefined
+      ? matchOrderTemplates(world, playerId, input.orderText, input.warfare) : null;
+    if (input.orderText !== null && input.continuation !== true && input.prefetch === true && templated === null) {
       const early = routeAmbientActors({
         world, cognitionEligible: playerInterests(world, playerId, input.offices).eligibleCharacterIds, facts: [...input.knownFacts, ...newFacts], offices: input.offices,
         excludeCharacterIds: playerId === null ? [] : [playerId], max: EARLY_ASKED, priorityCharacterIds: [], nemesisCharacterId: nemesis?.characterId ?? null,
-        dueStepOwners: new Map(), castMembers: new Map(), ownPolityId: input.actorPolityId,
+        dueStepOwners: new Map(), castMembers: new Map(), castIds: castIdsNow(), ownPolityId: input.actorPolityId,
       });
       if (early.length > 0) {
         const pending = runCognition(input.port, early, world, input.clock, DEFAULT_SHARDING);
@@ -3497,7 +3519,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         prefetch.current = { ids: new Set(early.map((actor) => actor.characterId)), pending };
       }
     }
-    const orchestration = holdForArrival(input.continuation === true && input.orderText === null ? quietOrchestration() : approachFirst(givenItsDestination(await orchestrate(input.port, slice, kindsIn(world)), world), world));
+    const orchestration = holdForArrival(input.continuation === true && input.orderText === null ? quietOrchestration() : approachFirst(givenItsDestination(templated !== null ? { output: templated.output, calls: 0, parseFailure: null, salvaged: [] as string[], repairedFrom: null } : await orchestrate(input.port, slice, kindsIn(world)), world), world));
     modelCalls += orchestration.calls;
     iterations += 1;
     if (orchestration.parseFailure !== null) parseFailures.push(orchestration.parseFailure);
@@ -3523,7 +3545,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       // "storm the breach; nobody holds it" is told, not pursued.
       && !(orchestration.output.intent.parts.length > 0 && orchestration.output.intent.parts.every((part) => (part.whyNot ?? "").trim() !== ""))
       && input.orderText !== null && input.answeredDecision === undefined
-      && orchestration.parseFailure === null && !/\?\s*$/.test(input.orderText.trim())
+      && orchestration.parseFailure === null && !/\?\s*$/.test(input.orderText.trim()) && templated === null
       && input.actorRef.kind === "character"
     ) {
       const pursuing = pursuitOf(world, input.actorRef, orchestration.output.intent.summary, input.orderText);
@@ -3583,6 +3605,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     orderFactIds = newFacts.slice(factsBefore).map((fact) => fact.id);
     windowOrderFactIds = orderFactIds;
     if (orchestration.output.playerDecision !== null) playerDecision = orchestration.output.playerDecision;
+    // What the order handed on to a man who is not the model's is answered for him by his temper, and done (`order-by-rule.ts`).
+    settleOrdersByRule();
 
     // Who the stirrings landed on decides who is asked first what they do about
     // it. The ledger was written when they were offered: a batch is not
@@ -3949,7 +3973,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     const orderPeople = new Set(world.orderAttempts
       .filter((attempt) => attempt.issuerRef.id === input.actorRef.id && ["issued", "received", "delayed", "accepted"].includes(attempt.status))
       .map((attempt) => attempt.recipientRef.id));
-    // A letter come to a man the model is never asked about is read by the rules (`readByTheRules`).
+    // A letter come to a man the model is never asked about is read by the rules (`readByTheRules`), and what the player's order put to such a man is answered.
+    settleOrdersByRule();
     if (playerId !== null) world = readByTheRules(world, playerInterests(world, playerId, input.offices).detailOf);
     const interests = playerInterests(world, playerId, input.offices);
     const attention = routeAttention({
@@ -3964,6 +3989,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       authorOf,
       ownPolityId: input.actorPolityId,
       firstCharacterIds: orderPeople,
+      castIds: castIdsNow(),
     });
 
     // Actors who care but do not warrant a model call still record what they
@@ -4026,6 +4052,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       nemesisCharacterId: nemesis?.characterId ?? null,
       dueStepOwners: wanted,
       castMembers: castThisRound,
+      castIds: castIdsNow(),
       ownPolityId: input.actorPolityId,
     });
 
