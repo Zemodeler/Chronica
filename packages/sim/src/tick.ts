@@ -90,6 +90,7 @@ import { betweenHarvests, reviewTheLand } from "./economy";
 import { payCustoms } from "./customs";
 import { keepMerchantHouses } from "./merchant-houses";
 import { keepGentes } from "./gentes";
+import { keepTheState } from "./keeping-the-state";
 import { routeOpenBps } from "./trade-flows";
 import { EMBARGO_BREACH_TRUST, endObligationsOfEndedAgreements, keepTreaties, shiftTrust } from "./treaties";
 import { keepPromises } from "./promises";
@@ -114,8 +115,8 @@ import { keepCommandTenure } from "./command-tenure";
 import { keepDepartments } from "./departments";
 import { assignOverseers, polityOfWork } from "./overseers";
 import { fillAppointments } from "./appointments";
-import { reviewSkills } from "./skill-decline";
 import { appointByRule } from "./appointed-by-rule";
+import { reviewSkills } from "./skill-decline";
 import { sweepThreadsOverTheCap } from "./storyline-cap";
 
 /** A blockade looser than this does not shut a port's trade. */
@@ -1405,9 +1406,9 @@ export function runDeterministicTick(given: TickInput): TickResult {
   let polityStances = recovered.polityStances;
   const unread = (message: (typeof recovered.diplomacy)[number]): boolean => {
     if (message.toCharacterId === null || message.toCharacterId === input.playerCharacterId) return false;
-    // Put to him, and the burst never got round to asking him what he said:
     // Answered already, and on its way back to the writer: the answer is given on its day, whatever the term (`letter-reply.ts`).
     if (message.heldAnswer !== undefined) return true;
+    // Put to him, and the burst never got round to asking him what he said:
     // his turn is owed him, and his silence is not yet his (E06).
     if (message.putToRecipientOnDay != null) return isOwedATurn(recovered, message.toCharacterId);
     return recovered.characters.some((character) => character.id === message.toCharacterId && character.alive);
@@ -1465,7 +1466,6 @@ export function runDeterministicTick(given: TickInput): TickResult {
         significance: 70,
       });
     }
-    return ignored;
     // A notice of embargo, left unanswered, is carried out as a refusal would be: the sender lays the embargo it named.
     if (message.onRefusal === "embargo") {
       const laid = layEmbargo(agreements, {
@@ -1492,6 +1492,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
         significance: 50,
       });
     }
+    return ignored;
   });
   // One letter sent to many is one matter, and its silences one fact. Rome's
   // call for aid went to eight allies; six said nothing, and the Chronicle
@@ -1715,8 +1716,10 @@ export function runDeterministicTick(given: TickInput): TickResult {
   // What the month's trade earned each power in customs is paid into its treasury the day it is reckoned.
   // And the merchant houses look to their cargoes once the markets have moved and the customs are in (`merchant-houses.ts`).
   const housed = keepMerchantHouses(payCustoms(reckoned.world, input.toDay, input.ids), input.toDay, input.ids, input.playerCharacterId ?? null);
-  const land = { ...reckoned, world: housed.world };
-  facts.push(...land.facts, ...housed.facts);
+  // And each power keeps its state: the upkeep of what it holds, the costs of its government, the works it lets (`keeping-the-state.ts`).
+  const theState = keepTheState({ world: housed.world, toDay: input.toDay, ids: input.ids, offices: input.government?.offices, playerCharacterId: input.playerCharacterId ?? null });
+  const land = { ...reckoned, world: theState.world };
+  facts.push(...land.facts, ...housed.facts, ...theState.facts);
   // And the noble families keep their heads, honours, rites, grudges and marriages, a month at a time (`gentes.ts`).
   const kinned = keepGentes(land.world, input.toDay);
   land.world = kinned.world;
