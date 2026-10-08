@@ -49,11 +49,17 @@ export function notablePeople(
 
   const chosen: NotablePerson[] = [];
   const fromPolity = new Map<string, number>();
+  const officesShown = new Set<string>();
   for (const { character, office } of ranked) {
     if (chosen.length >= limit) break;
     const key = character.polityId ?? "";
     const count = fromPolity.get(key) ?? 0;
     if (count >= perPolity) continue;
+    // Two men of one office from one power would crowd out the rest (2026-10-08: two censors, rank 5,
+    // took both of Rome's places and the consuls, rank 4, were left out), so a second holder waits.
+    const shown = office === undefined ? null : `${key}/${office.id}`;
+    if (shown !== null && officesShown.has(shown)) continue;
+    if (shown !== null) officesShown.add(shown);
     fromPolity.set(key, count + 1);
     chosen.push({
       name: character.name,

@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ABANDONED_ERROR, BURST_NO_PROGRESS_MS, BURST_STALE_MS, STUCK_ERROR, isStale, livenessAt, noProgressAllowedMs, toBurstStatus, type BurstRow, type ProgressRow } from "./burst-status";
+
+// 2026-10-08: which model answers is read from the machine's local AI settings file. These tests are
+// about the clock, not the machine: a developer who has picked the free adapter locally must not turn
+// every burst into one that can never be called stuck.
+vi.mock("@chronica/ai", () => ({ getSelectedLocalAiProvider: () => "openai" }));
 
 const at = (ms: number) => new Date(1_700_000_000_000 + ms);
 const row = (overrides: Partial<BurstRow> = {}): BurstRow => ({
