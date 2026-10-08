@@ -22,5 +22,6 @@ export * from "./agenda";
 export * from "./trade-desk";
 export * from "./charge-vocabulary";
 export * from "./competence";
+export * from "./office-view";
 export * from "./period-words";
 export * from "../world/act-marks";
