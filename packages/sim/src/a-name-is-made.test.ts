@@ -240,20 +240,20 @@ describe("L2: standing is earned by deeds, the same way every time", () => {
 });
 
 describe("L7: games, feasts and doles", () => {
-  const feast = { op: "public_benefaction", payerAccountRef: null, amount: 200, kind: "feast", provinceId: null, reason: "A feast and games for the neighbourhood" };
+  const feast = { op: "public_benefaction", payerAccountRef: null, amount: 500, kind: "feast", provinceId: null, reason: "A feast and games for the neighbourhood" };
 
-  it("spends 200 of his own drachmae on a feast and games, as his own business, and is the better spoken of", () => {
-    const world = legionary(300);
+  it("spends 500 of his own drachmae on a feast and games, as his own business, and is the better spoken of", () => {
+    const world = legionary(600);
     const purse = me(world).personalAccountId;
     const balance = (state: WorldState) => state.material.accounts.find((account) => account.id === purse)!.balance;
     const result = act(world, PLAYER, feast);
     expect(result.rejected).toHaveLength(0);
     expect(result.breaches).toHaveLength(0);
-    expect(balance(result.world)).toBe(balance(world) - 200);
+    expect(balance(result.world)).toBe(balance(world) - 500);
     const gain = me(result.world).prestigeBps - 2_000;
     expect(gain).toBeGreaterThan(0);
     expect(gain).toBeLessThanOrEqual(800);
-    expect(result.factProposals.some((fact) => fact.kind === "public_benefaction" && /Titus Vettius gave the people of .* a feast at his own cost, 200 spent/.test(fact.summary))).toBe(true);
+    expect(result.factProposals.some((fact) => fact.kind === "public_benefaction" && /Titus Vettius gave the people of .* a feast at his own cost, 500 spent/.test(fact.summary))).toBe(true);
     // The same again within the year is worth less.
     const again = act(result.world, PLAYER, feast);
     expect(me(again.world).prestigeBps - me(result.world).prestigeBps).toBeLessThan(gain);

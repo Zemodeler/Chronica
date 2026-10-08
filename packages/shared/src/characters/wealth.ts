@@ -77,12 +77,12 @@ export const DEFAULT_WEALTH_BANDS: readonly WealthBand[] = [
   {
     id: "substantial", label: "money enough to be courted for it",
     words: ["merchant", "shipowner", "equestrian", "equites", "eques", "knight", "landowner", "banker", "financier", "publican", "magistrate", "officer", "tribune", "decurion"],
-    min: 10_000, max: 150_000,
+    min: 25_000, max: 150_000,
   },
   {
     id: "great", label: "a fortune that is itself a kind of office",
     words: ["patrician", "senatorial", "senator", "aristocracy", "aristocrat", "noble", "nobility", "consul", "king", "queen", "prince", "royal", "dynast", "tyrant", "suffete", "magnate"],
-    min: 25_000, max: 500_000,
+    min: 60_000, max: 500_000,
   },
 ];
 

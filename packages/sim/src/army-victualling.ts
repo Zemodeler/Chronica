@@ -14,6 +14,7 @@ import { buyGrain, sourcesFor } from "./grain-purchases";
 import { grainPrice } from "./grain";
 import { purseOfHouse } from "./merchant-houses";
 import { endContract } from "./contracts";
+import { awardByBids, settleBids } from "./bids";
 import type { IdFactory } from "./ports";
 import { safeLocalId } from "./safe-local-id";
 
@@ -77,8 +78,8 @@ export function housesFor(world: WorldState, polityId: string): MerchantHouse[] 
 }
 
 /** The price a house is paid for every thousand man-days of bread that reaches the army: the market's, where the army stands, and the margin. */
-export function priceOfBread(world: WorldState, polityId: string, provinceId: string): number {
-  return Math.max(1, Math.round((grainPrice(world, polityId, provinceId) * (10_000 + MARGIN_BPS)) / 10_000));
+export function priceOfBread(world: WorldState, polityId: string, provinceId: string, marginBps: number = MARGIN_BPS): number {
+  return Math.max(1, Math.round((grainPrice(world, polityId, provinceId) * (10_000 + marginBps)) / 10_000));
 }
 
 /** What a month's bread for an army costs at that price: the figure the chamber weighs when the contract is laid before it. */
@@ -100,14 +101,16 @@ export function openVictualling(world: WorldState, force: Force, termDays: numbe
   if (force.outlaw === true) return { refusal: `${force.name} is nobody's army, and no house of any power will feed it.` };
   if (victuallerOf(world, force.id) !== undefined) return { refusal: `${force.name} is fed by a firm already.` };
   const houses = housesFor(world, force.polityId);
-  const house = houses[stableHash([force.id, "victualler", Math.floor(atStep / 30)]) % Math.max(1, houses.length)];
+  // The best bid of a firm wins it (`bids.ts`: the lowest margin, the more reliable first); where nobody bid better than the usual margin, the lot decides as before.
+  const award = awardByBids(world, "army_bread", houses, MARGIN_BPS);
+  const house = award?.house ?? houses[stableHash([force.id, "victualler", Math.floor(atStep / 30)]) % Math.max(1, houses.length)];
   if (house === undefined) return { refusal: `No house of ${world.map.polities.find((polity) => polity.id === force.polityId)?.name ?? force.polityId} has the means to feed ${force.name}.` };
   const head = world.characters.find((character) => character.id === house.headCharacterId && character.alive);
   const purse = purseOfHouse(world, house);
   const payer = world.material.accounts.find((account) => account.id === payerAccountId);
   if (head === undefined || purse === null || payer === undefined) return { refusal: `${house.name} has nobody to put his hand to the contract.` };
   const term = Math.max(SHORTEST_TERM, Math.min(LONGEST_TERM, Math.round(termDays)));
-  const price = priceOfBread(world, force.polityId, force.locationId);
+  const price = priceOfBread(world, force.polityId, force.locationId, award?.marginBps ?? MARGIN_BPS);
   const contractId = ids.next("contract");
   const obligationId = ids.next("obligation");
   const label = `The bread of ${force.name}: ${house.name}, for ${Math.round(term / 30)} months`.slice(0, 160);
@@ -138,7 +141,9 @@ export function openVictualling(world: WorldState, force: Force, termDays: numbe
     affectedRefs: [{ kind: "force", id: force.id }, { kind: "character", id: head.id }, { kind: "province", id: force.locationId }],
     visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 35,
   }];
-  return { world: first.world, facts, contract: first.world.material.contracts.find((candidate) => candidate.id === contractId)!, house };
+  if (award === null) return { world: first.world, facts, contract: first.world.material.contracts.find((candidate) => candidate.id === contractId)!, house };
+  const settled = settleBids(first.world, award, `the bread of ${force.name}`, atStep);
+  return { world: settled.world, facts: [...facts, ...settled.facts], contract: settled.world.material.contracts.find((candidate) => candidate.id === contractId)!, house };
 }
 
 /**

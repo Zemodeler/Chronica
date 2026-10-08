@@ -54,13 +54,16 @@ import { safeLocalId } from "./safe-local-id";
 /** The most cargoes a house starts in a month. */
 const MAX_OPENED_PER_MONTH = 2;
 /** What a house keeps in hand: this much, or this share of its purse, whichever is the more. */
-const RESERVE_FLOOR = 12_000;
+const RESERVE_FLOOR = 6_000;
 const RESERVE_SHARE = 0.35;
 /** The most one cargo costs, and the share of the purse it may be. */
 const MAX_STAKE = 36_000;
 const MAX_STAKE_SHARE = 0.28;
 /** Too small a cargo is not worth a ship. */
-const MIN_STAKE = 3_000;
+const MIN_STAKE = 2_500;
+/** What a house must have in its purse to sail a cargo at all: what it keeps in hand, and the least a cargo is. Below it the firm sits idle (`house_found` says so). */
+export const HOUSE_SAILING_FLOOR = RESERVE_FLOOR + MIN_STAKE;
+export const HOUSE_RESERVE_IN_HAND = RESERVE_FLOOR;
 /** A price gap this much over even (basis points of premium) is the least a house sails for. */
 const MIN_PREMIUM_BPS = 10_400;
 /** What it must expect to clear over its cost, after losses, crew and duty, to sail: basis points. */

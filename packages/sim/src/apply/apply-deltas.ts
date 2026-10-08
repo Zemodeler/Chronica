@@ -4268,6 +4268,10 @@ function applyOne(
         if (force.commanderCharacterId === characterId) reject(`${person.name} already commands ${force.name}.`);
         if (force.memberCharacterIds.includes(characterId)) return world;
         if (force.memberCharacterIds.length >= 40) reject(`${force.name} carries as many named men as it can.`);
+        // A senator did not stand in the ranks of a legion: he went to the army as a military tribune (elected), or as a legate on the consul's staff (the consul takes him).
+        if (world.material.officeSeats.some((seat) => seat.holderCharacterId === characterId && seat.status === "held" && /senator|elder/i.test(seat.officeId))) {
+          reject(`${person.name} sits in the council: a senator does not stand in the ranks. He goes to ${force.name} as a military tribune, if the people elect him, or as a legate, if the consul takes him on his staff.`);
+        }
         // One army at a time: a man who takes service in one has left the other.
         return {
           ...world,
@@ -4416,8 +4420,9 @@ function applyOne(
       if (cargo !== undefined) {
         emitFact({
           localId: safeLocalId(`cargo_${ventureId}`).slice(0, 60), kind: "cargo_sailed",
-          summary: `${delta.title}: a cargo worth ${cargo.cost} sails from ${from.name} for ${to.name}, and should come in within ${cargo.arrivesAtStep - atStep} days.`,
+          summary: `${delta.title}: your cargo, worth ${cargo.cost}, sailed from ${from.name} for ${to.name}, and should come in within ${cargo.arrivesAtStep - atStep} days.`,
           affectedRefs: [{ kind: "character", id: ownerId }, { kind: "province", id: from.id }, { kind: "province", id: to.id }],
+          knownToRefs: [{ kind: "character", id: ownerId }],
           visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 20,
         });
       }
@@ -4464,6 +4469,13 @@ function applyOne(
       if (venture.status === "closed") return world;
       // A cargo already at sea still comes in and is sold; the trade is wound
       // up after it rather than with the ship lost to nobody.
+      // Closing a venture pays nothing: the money put in stays in the trade, and the owner is told so.
+      emitFact({
+        localId: safeLocalId(`venture_closed_${ventureId}`).slice(0, 60), kind: "venture_closed",
+        summary: `${venture.title} is wound up. Closing a venture pays nothing back: what went into it is spent, and the trade earns no more${venture.cargo !== undefined && venture.cargo.arrivesAtStep > atStep ? ", but the cargo already at sea comes in and is sold" : ""}.`.slice(0, 400),
+        affectedRefs: [{ kind: "character", id: venture.ownerCharacterId }], knownToRefs: [{ kind: "character", id: venture.ownerCharacterId }],
+        visibility: "private", discoveryState: "private", knowableInDays: 0, significance: 30,
+      });
       if (venture.cargo !== undefined && venture.cargo.arrivesAtStep > atStep) {
         return {
           ...world,

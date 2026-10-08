@@ -45,7 +45,7 @@ const as = (characterId: string): ApplyContext => ({
   offices: definition.government.offices,
   warfare: definition.warfare,
   terrains: definition.map.terrains,
-  ids: createIdFactory(`trade-${characterId}`),
+  ids: createIdFactory(`t5-${characterId}`),
   gameId: "game-1",
 });
 /** Parsed as the engine parses every answer, so each op carries its defaults. */
@@ -65,7 +65,7 @@ const balance = (world: WorldState, accountId: string) => world.material.account
 const tick = (world: WorldState, toDay: number) => runDeterministicTick({ world, toDay, ids: createIdFactory(`trade-tick-${toDay}`), warfare: definition.warfare });
 
 const THE_VENTURE: WorldDelta = {
-  op: "trade_venture_open", localId: "the_run", title: "The Messana run", ownerCharacterRef: "leptines-syracuse",
+  op: "trade_venture_open", localId: "the_oil_run", title: "The Messana run", ownerCharacterRef: "leptines-syracuse",
   fromProvinceId: SYRACUSE, toProvinceId: MESSANA, band: "marked", paidFromAccountRef: "leptines-purse",
   reason: "Leptines puts a ship and a cargo of oil on the strait.",
 };
@@ -136,10 +136,10 @@ describe("a merchant and his trade", () => {
     const landed = tick(before.world, cargo.arrivesAtStep);
     const sold = landed.world.material.transactions.filter((row) => row.kind === "income" && row.cause.id === venture.incomeSourceId);
     expect(sold).toHaveLength(1);
-    // Between three twentieths and two fifths over what it cost.
-    expect(sold[0]!.amount).toBeGreaterThanOrEqual(Math.round(cargo.cost * 1.15));
-    expect(sold[0]!.amount).toBeLessThanOrEqual(Math.round(cargo.cost * 1.4));
-    expect(landed.factProposals.some((fact) => fact.kind === "cargo_sold" && fact.summary.includes("came in at") && fact.summary.includes(`sold for ${sold[0]!.amount}`))).toBe(true);
+    // Between a twentieth and a quarter over what it cost (five to twenty-four in the hundred a voyage, before the crew and the dock).
+    expect(sold[0]!.amount).toBeGreaterThanOrEqual(Math.round(cargo.cost * 1.04));
+    expect(sold[0]!.amount).toBeLessThanOrEqual(Math.round(cargo.cost * 1.25));
+    expect(landed.factProposals.some((fact) => fact.kind === "cargo_sold" && fact.summary.includes("landed at") && fact.summary.includes(`sold for ${sold[0]!.amount}`))).toBe(true);
     // A regular trade ("marked") buys the next cargo and sails again; the profit stays.
     expect(cargoReturn(opened, landed.world)).toBe(sold[0]!.amount - cargo.cost);
     expect(landed.world.material.ventures[0]!.status).toBe("running");

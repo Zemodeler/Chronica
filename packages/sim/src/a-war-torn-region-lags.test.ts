@@ -30,7 +30,9 @@ import { months } from "./passing-months";
  */
 
 const LATIUM = PUNIC_IDS.rome;
-const opening = (): WorldState => ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
+// This is about how a region's war scars heal, read as it was calibrated: before Ostia gave Latium a harbour (batch 3), which moves its development ceiling a little.
+const withoutOstia = (world: WorldState): WorldState => ({ ...world, map: { ...world.map, provinces: world.map.provinces.map((province) => ({ ...province, settlements: province.settlements.filter((town) => town.id !== "settlement-ostia") })) } });
+const opening = (): WorldState => ensureProvinceMaterial(withoutOstia(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld))), 0);
 const rowOf = (world: WorldState, id: string): ProvinceMaterial => world.material.provinceMaterial.find((row) => row.provinceId === id)!;
 const withRow = (world: WorldState, id: string, patch: Partial<ProvinceMaterial>): WorldState => ({
   ...world,

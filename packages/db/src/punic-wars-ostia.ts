@@ -12,5 +12,5 @@ import type { PUNIC_WARS_GRAPH_SETTLEMENTS } from "./punic-wars-map-graph";
  * coastal colonies of citizens, Ostia among them, claiming their exemption from service in 207), its size a guess.
  */
 export const OSTIA_SETTLEMENTS: readonly (typeof PUNIC_WARS_GRAPH_SETTLEMENTS)[number][] = [
-  { id: "settlement-ostia", name: "Ostia", kind: "port", provinceId: "it-l865w", controllerPolityId: "rome", size: 8, fortificationLevel: 2 },
+  { id: "settlement-ostia", name: "Ostia", kind: "port", provinceId: "it-l865w", controllerPolityId: "rome", size: 3, fortificationLevel: 2 },
 ];

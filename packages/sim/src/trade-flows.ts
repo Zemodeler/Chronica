@@ -11,6 +11,7 @@ import {
   provinceGrounds,
   taxPolicyIndex,
   tradeTermsBetween,
+  adjacentTo,
   warsOf,
   type CrossingType,
   type GoodId,
@@ -102,26 +103,54 @@ const GRAIN = 0;
 export const HAUL_CHEAPER_PER_LIFT = 0.55;
 
 /**
- * How open a trading end is, in basis points: whole in peace; a third when its
- * holder is at war; a fifth when it is occupied by somebody else or under
- * blockade. What a war abroad does to a merchant who never sees it. (Moved
- * here from the tick, which still exports it: the flows and the ventures read
- * the same openness.)
+ * How open a trading end is, in basis points: whole in peace; a third when an enemy of its holder stands in it; two thirds when one stands in a province next to it
+ * or in the lane to it; nine tenths when its holder is at war and the war is elsewhere (the freight rates and the insurers' fears); a fifth when it is occupied by
+ * somebody else or under blockade. A tiny war with a one-town Campanian garrison used to cut every venture of Rome's to a third, however far the garrison
+ * stood: what a war does to a merchant now depends on whether the enemy is at his ports. (Moved here from the tick, which still exports it: the flows and the
+ * ventures read the same openness.)
  */
 export function routeOpenBps(world: WorldState, provinceId: string): number {
   const province = world.map.provinces.find((candidate) => candidate.id === provinceId);
   if (province === undefined || province.controllerPolityId === null) return 10_000;
   const blockaded = world.blockades.some((blockade) => blockade.provinceId === provinceId && blockade.status === "active");
-  return openBpsOf(world, province, blockaded);
+  return openBpsOf(world, province, blockaded, undefined, true);
 }
 
-function openBpsOf(world: Pick<WorldState, "polityAgreements">, province: Pick<Province, "controllerPolityId" | "ownerPolityId">, blockaded: boolean, wars?: Map<string, boolean>): number {
+/** Where each power has men, by province, read once for a list of forces. */
+const presenceByForces = new WeakMap<WorldState["material"]["forces"], Map<string, Set<string>>>();
+function presenceOf(world: Pick<WorldState, "material">): Map<string, Set<string>> {
+  const known = presenceByForces.get(world.material.forces);
+  if (known !== undefined) return known;
+  const found = new Map<string, Set<string>>();
+  for (const force of world.material.forces) {
+    if (force.outlaw === true) continue;
+    const here = found.get(force.locationId);
+    if (here === undefined) found.set(force.locationId, new Set([force.polityId]));
+    else here.add(force.polityId);
+  }
+  presenceByForces.set(world.material.forces, found);
+  return found;
+}
+
+/** How shut a province is to its holder by a war elsewhere or at hand: what its enemies' men are doing about it. */
+function warOpenBps(world: Pick<WorldState, "polityAgreements" | "material" | "map">, provinceId: string, polityId: string): number {
+  const enemies = new Set(warsOf(world.polityAgreements, polityId));
+  if (enemies.size === 0) return 10_000;
+  const presence = presenceOf(world);
+  const hostile = (id: string): boolean => [...(presence.get(id) ?? [])].some((power) => enemies.has(power));
+  if (hostile(provinceId)) return 3_500;
+  if (adjacentTo(world, provinceId).some((neighbour) => hostile(neighbour.provinceId))) return 6_500;
+  return 9_000;
+}
+
+function openBpsOf(world: Pick<WorldState, "polityAgreements" | "material" | "map">, province: Pick<Province, "id" | "controllerPolityId" | "ownerPolityId">, blockaded: boolean, wars?: Map<string, boolean>, byThePresenceOfTheEnemy = false): number {
   if (province.controllerPolityId === null) return 10_000;
   if (isOccupied(province) || blockaded) return 2_000;
   const known = wars?.get(province.controllerPolityId);
   const atWar = known ?? warsOf(world.polityAgreements, province.controllerPolityId).length > 0;
   wars?.set(province.controllerPolityId, atWar);
-  return atWar ? 3_500 : 10_000;
+  // A venture is shut by the enemy's men at its ends; a hub's flows keep the old reading, a third for any war its holder is in (the markets' calibration, `docs/economy.md`).
+  return atWar ? (byThePresenceOfTheEnemy ? warOpenBps(world, province.id, province.controllerPolityId) : 3_500) : 10_000;
 }
 
 export interface FlowInput {

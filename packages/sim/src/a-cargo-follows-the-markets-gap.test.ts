@@ -83,15 +83,15 @@ describe("a cargo follows the markets' gap", () => {
     expect(bestGapGood(base, from, to).good).toBe("grain");
   });
 
-  it("stays between eight and forty-five in a hundred whatever the gap", () => {
+  it("stays between five and twenty-four in a hundred a voyage whatever the gap", () => {
     for (const [near, far] of [[4, 0.02], [0.02, 4], [1, 1]] as const) {
       const world = stocked(stocked(base, fromHub, "metals", near), toHub, "metals", far);
       const margin = cargoMarginBps(world, { fromProvinceId: from, toProvinceId: to, cargo: { good: "metals" } });
       expect(margin).toBeGreaterThanOrEqual(MIN_MARGIN_BPS);
       expect(margin).toBeLessThanOrEqual(MAX_MARGIN_BPS);
     }
-    expect(MIN_MARGIN_BPS).toBe(800);
-    expect(MAX_MARGIN_BPS).toBe(4_500);
+    expect(MIN_MARGIN_BPS).toBe(500);
+    expect(MAX_MARGIN_BPS).toBe(2_400);
     // The widest gap pays the most the ceiling allows, and the reverse the least.
     const widest = cargoMarginBps(stocked(stocked(base, fromHub, "metals", 4), toHub, "metals", 0.02), { fromProvinceId: from, toProvinceId: to, cargo: { good: "metals" } });
     const narrowest = cargoMarginBps(stocked(stocked(base, fromHub, "metals", 0.02), toHub, "metals", 4), { fromProvinceId: from, toProvinceId: to, cargo: { good: "metals" } });

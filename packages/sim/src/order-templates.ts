@@ -15,6 +15,7 @@ import {
 } from "@chronica/shared";
 import { chestOfPower, payerOf, planSupply } from "./supply-plan";
 import { safeLocalId } from "./safe-local-id";
+import { bidClause, refugeClause } from "./trade-templates";
 import { FLEET_HULLS, fleetBegun, fleetWork } from "./a-fleet-by-decree";
 
 /**
@@ -337,7 +338,7 @@ function levyClause(world: WorldState, playerId: string, text: string): Clause |
   };
 }
 
-const TEMPLATES: readonly ((world: WorldState, playerId: string, text: string, warfare?: ScenarioWarfareRules) => Clause | null)[] = [supplyClause, holdClause, taxClause, buildClause, fleetClause, levyClause];
+const TEMPLATES: readonly ((world: WorldState, playerId: string, text: string, warfare?: ScenarioWarfareRules) => Clause | null)[] = [supplyClause, holdClause, taxClause, buildClause, fleetClause, levyClause, bidClause, refugeClause];
 
 /** The clauses of an order: its lines, and its sentences. */
 export function clausesOf(order: string): string[] {

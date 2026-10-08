@@ -11,12 +11,12 @@ describe("what a person of this standing is worth", () => {
   it("does not leave a merchant invented to lend money with nothing to lend", () => {
     // Which is the bug that put `wealth` on `character_create` at all, solved
     // in one direction and left open in the other.
-    // A merchant is worth ten thousand drachmae at the least: eighty-odd years of a legionary's pay.
-    expect(clampWealth(4, "A merchant of Ostia")).toBeGreaterThanOrEqual(10_000);
+    // A merchant is worth twenty-five thousand drachmae at the least (a first venture, or a firm that can sail): two hundred years of a legionary pay.
+    expect(clampWealth(4, "A merchant of Ostia")).toBeGreaterThanOrEqual(25_000);
   });
 
   it("keeps the model's judgment inside the band, because a rich merchant and a poor one are both merchants", () => {
-    expect(clampWealth(12_000, "merchant")).toBe(12_000);
+    expect(clampWealth(12_000, "merchant")).toBe(25_000);
     expect(clampWealth(120_000, "merchant")).toBe(120_000);
     // And a senator is about a hundred thousand, the census figure the scale is set to.
     expect(clampWealth(100_000, "senator")).toBe(100_000);

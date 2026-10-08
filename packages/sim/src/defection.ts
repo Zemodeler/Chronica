@@ -65,14 +65,24 @@ function kinOf(world: WorldState, man: Character): Character[] {
   return world.characters.filter((character) => ids.has(character.id) && character.alive && character.polityId === man.polityId).sort((a, b) => a.id.localeCompare(b.id)).slice(0, MOST_HOSTAGES);
 }
 
+/**
+ * The man who would receive a guest for a power: the head the constitution names, or, where it names none yet, the man of most standing among those who sit in
+ * its highest chairs (a consul, a suffete, a king).
+ */
+export function receiverOf(world: WorldState, polityId: string, notHim: string | null = null): Character | undefined {
+  const ruler = readDepartments(world).rulers(polityId).find((candidate) => candidate.alive && candidate.id !== notHim);
+  if (ruler !== undefined) return ruler;
+  const chairs = world.material.officeSeats.filter((seat) => seat.status === "held" && seat.holderCharacterId !== null && /consul|suffete|king|ruler|leader|tyrant|dictator|strategos/i.test(seat.officeId)).map((seat) => seat.holderCharacterId!);
+  return world.characters.filter((character) => character.alive && character.polityId === polityId && character.id !== notHim && chairs.includes(character.id)).sort((a, b) => b.prestigeBps - a.prestigeBps || a.id.localeCompare(b.id))[0];
+}
+
 export function receiveDefector(world: WorldState, man: Character, hostPolityId: string, atStep: number): Defection {
   const homeId = man.polityId;
   const host = world.map.polities.find((polity) => polity.id === hostPolityId);
   if (homeId === null || host === undefined || homeId === hostPolityId) return { world, facts: [], statuses: [] };
   const home = world.map.polities.find((polity) => polity.id === homeId);
   const homeName = home?.name ?? homeId;
-  const reader = readDepartments(world);
-  const receiver = reader.rulers(hostPolityId).find((ruler) => ruler.alive && ruler.id !== man.id);
+  const receiver = receiverOf(world, hostPolityId, man.id);
   // Turned away: the ruler thinks too ill of him, or he is somebody's prisoner already.
   if (man.disqualifyingStatuses.some((status) => ["captured", "hostage", "imprisoned"].includes(status))) {
     return { refusal: `${man.name} is held, and cannot come to ${host.name}.`, world, facts: [], statuses: [] };

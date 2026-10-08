@@ -99,7 +99,8 @@ describe("regions pull apart in peace", () => {
       const high = { ...base, material: { ...base.material, provinceMaterial: base.material.provinceMaterial.map((row) => (row.provinceId === PORT ? { ...row, developmentBps: ceiling - 300 } : row)) } };
       return reviewTheLand({ world: reviewTheLand({ world: high, toDay: 0, clock: definition.clock }).world, toDay: 360, clock: definition.clock }).world;
     })();
-    expect(gain(far, PORT)).toBeGreaterThan(50);
+    // At least fifty points: Rome's harbour (Ostia, batch 3) moved the market this province stands in by a hair, and the year is worth fifty exactly.
+    expect(gain(far, PORT)).toBeGreaterThanOrEqual(50);
     expect(gain(nearly, PORT) + START - (ceiling - 300)).toBeLessThan(0.5 * gain(far, PORT));
   });
 

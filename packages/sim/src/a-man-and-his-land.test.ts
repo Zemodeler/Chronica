@@ -60,7 +60,9 @@ describe("a man and his land", () => {
     // An estate authored in the scenario is the same kind of thing as one bought in play.
     // (The scenario writes its estates in round figures; Latium's own capacity, now that it is
     // reckoned from the province's development, makes the same estate a fiftieth less.)
-    expect(Math.abs((estateTerms(world, LATIUM, "slight")?.monthlyYield ?? 0) - 1_200)).toBeLessThanOrEqual(24);
+    // Since batch 3 an estate bought in play pays what land paid, six in the hundred a year, a tenth of what the scenario's old round figures pay its leading men
+    // (flagged for the version bump: `docs/plans/playtest-fixes.md`); the price is as it was.
+    expect(Math.abs((estateTerms(world, LATIUM, "slight")?.monthlyYield ?? 0) * 10 - 1_200)).toBeLessThanOrEqual(240);
   });
 
   it("lets a private citizen improve his own estate from his own purse, lawfully", () => {
@@ -96,7 +98,8 @@ describe("a man and his land", () => {
   });
 
   it("lets him buy land with his own money, at the engine's price", () => {
-    const world = opening();
+    const poor = opening();
+    const world: WorldState = { ...poor, material: { ...poor.material, accounts: poor.material.accounts.map((account) => (account.id === "curius-purse" ? { ...account, balance: 400_000 } : account)) } };
     const terms = estateTerms(world, LATIUM, "slight")!;
     const buy: WorldDelta = {
       op: "holding_create", localId: "the_new_farm", title: "A farm on the Anio", provinceId: LATIUM,

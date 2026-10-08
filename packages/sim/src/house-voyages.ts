@@ -34,11 +34,11 @@ export const CREW_SHARE_BPS = 600;
 /** What a house gives the power it lives under of what a cargo clears over its cost, in basis points: its rates and liturgies (the treasury's share of a merchant's year). */
 export const LITURGY_OF_PROFIT_BPS = 600;
 /** A cargo's chance of being lost on a voyage by sea before the days and the war are counted, in basis points. */
-const SEA_BASE_LOSS_BPS = 90;
+const SEA_BASE_LOSS_BPS = 50;
 /** And over land, which has its own bandits and its own tolls. */
 const LAND_BASE_LOSS_BPS = 40;
 /** Each day of the voyage adds this much to the chance. */
-const LOSS_PER_DAY_BPS = 7;
+const LOSS_PER_DAY_BPS = 4;
 /** A war or a blockade at either end adds this much. */
 const WAR_LOSS_BPS = 350;
 /** However bad it is, a voyage is lost no oftener than this. */

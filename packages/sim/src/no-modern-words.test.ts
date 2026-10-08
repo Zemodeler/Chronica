@@ -93,6 +93,14 @@ const NEW_FILES = [
   "./the-appeal-goes-to-the-people.ts",
   "./a-fleet-by-decree.ts",
   "../../db/src/punic-wars-sicily.ts",
+  // Playtest fix batch 3: the cursus and the bar of a conviction, a state's loan and a default's price, a defector, the firms' bids, the merchant's start and Ostia.
+  "../../shared/src/characters/cursus.ts",
+  "./lending.ts",
+  "./defection.ts",
+  "./bids.ts",
+  "./trade-templates.ts",
+  "../../db/src/punic-wars-ostia.ts",
+  "../../db/src/punic-wars-merchant-start.ts",
 ];
 
 describe("no modern words", () => {

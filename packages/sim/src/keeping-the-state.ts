@@ -12,6 +12,7 @@ import {
   type Structure,
   type WorldState,
 } from "@chronica/shared";
+import { awardByBids, settleBids } from "./bids";
 import { purseOfHouse } from "./merchant-houses";
 import type { IdFactory } from "./ports";
 import { CONTRACTOR_GAIN_BPS, MADE, planWork, whoLetsTheWorks, worksAYear } from "./public-works";
@@ -300,6 +301,7 @@ export function keepTheState(input: KeepingInput): { world: WorldState; facts: F
   contracts = contracts.filter((candidate) => !settled.some((done) => done.projectId === candidate.projectId));
 
   // ── 3. New works ─────────────────────────────────────────────────────
+  let bidsSettled: WorldState["genericEntities"] | null = null;
   const year = Math.floor(toDay / YEAR);
   for (const { polityId } of due) {
     const book = books.get(polityId)!;
@@ -318,8 +320,10 @@ export function keepTheState(input: KeepingInput): { world: WorldState; facts: F
     if (cover <= 0) continue;
     const plan = planWork(start, polityId, annual, memory.works.length + contracts.length + begun, contracts);
     if (plan === null) continue;
-    const house = chooseHouse(start, polityId, `${plan.name}:${toDay}`);
-    const price = house === null ? plan.cost : Math.round((plan.cost * (10_000 + CONTRACTOR_GAIN_BPS)) / 10_000);
+    // The best bid of a firm takes the work (`bids.ts`); where nobody bid better than the usual gain, the lot decides as before.
+    const award = awardByBids(start, "public_work", economyOf(start).houses.filter((candidate) => candidate.status === "trading" && (candidate.seatPolityId ?? candidate.polityId) === polityId && purseOfHouse(start, candidate)?.active === true), CONTRACTOR_GAIN_BPS, plan.kind);
+    const house = award?.house ?? chooseHouse(start, polityId, `${plan.name}:${toDay}`);
+    const price = house === null ? plan.cost : Math.round((plan.cost * (10_000 + (award?.marginBps ?? CONTRACTOR_GAIN_BPS))) / 10_000);
     if (price > cover * WORK_SHARE_OF_COVER) continue;
     const id = `works:${plan.kind}:${input.ids.next("works")}`;
     const contract: PublicWorkContract = {
@@ -334,10 +338,16 @@ export function keepTheState(input: KeepingInput): { world: WorldState; facts: F
     // The first instalment goes out the day it is let.
     const first = contractsPay(contract, book, balanceOf, move, transactions, input.ids, toDay, house, start);
     contracts = contracts.map((candidate) => (candidate.projectId === id ? first : candidate));
+    if (award !== null) {
+      const settledBids = settleBids({ ...start, genericEntities: bidsSettled ?? start.genericEntities }, award, plan.name.charAt(0).toLowerCase() + plan.name.slice(1), toDay);
+      bidsSettled = settledBids.world.genericEntities;
+      facts.push(...settledBids.facts);
+    }
   }
 
   // ── 4. What it all did to the world ──────────────────────────────────
   let world: WorldState = start;
+  if (bidsSettled !== null) world = { ...world, genericEntities: bidsSettled };
   if (balances.size > 0) world = { ...world, material: { ...world.material, accounts: world.material.accounts.map((account) => (balances.has(account.id) ? { ...account, balance: balances.get(account.id)! } : account)) } };
   if (transactions.length > 0) world = { ...world, material: { ...world.material, transactions: [...world.material.transactions, ...transactions] } };
   if (newStructures.length > 0) world = { ...world, structures: [...world.structures, ...newStructures] };

@@ -126,7 +126,10 @@ export function cursusRefusal(world: WorldState, office: Pick<Office, "id" | "ki
     const held = rungOf(tenure.officeId);
     if (held === undefined || tenure.officeId === office.id) continue;
     highest = Math.max(highest, held);
-    lastEnded = Math.max(lastEnded, tenure.lastHeldAtStep);
+    // An office he still sits in has not ended: a man rising mid-term lays the lesser down on winning the greater, and the year's rest is counted from offices that are over.
+    const sitting = world.material.officeSeats.some((seat) => seat.officeId === tenure.officeId && seat.holderCharacterId === character.id && seat.status === "held");
+    // A tenure written at the world's first day is a career before it began: how long ago, nobody wrote, and it is taken to be long ago.
+    if (!sitting && tenure.lastHeldAtStep > 0) lastEnded = Math.max(lastEnded, tenure.lastHeldAtStep);
     if (held >= rung && !(held === rung)) return `${character.name} has been ${tenure.officeId.replace(/^roman-/, "")} and does not stand again for a lesser office.`;
     if (held === rung) return `${character.name} has held an office of this rung (${tenure.officeId.replace(/^roman-/, "")}) and does not hold another beside it.`;
   }

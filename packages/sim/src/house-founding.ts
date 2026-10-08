@@ -23,6 +23,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { findKinsman, merchantFit, spokenFor } from "./house-succession";
+import { HOUSE_SAILING_FLOOR, HOUSE_RESERVE_IN_HAND as RESERVE_IN_HAND } from "./merchant-houses";
 import type { IdFactory } from "./ports";
 import { safeLocalId } from "./safe-local-id";
 
@@ -389,6 +390,11 @@ export function foundHouseByOrder(
   const balance = purseOf(world, founder);
   const keepsBooks = head !== undefined && head !== null && head.id !== founder.id;
   const capital = Math.min(delta.capital, balance);
+  // A firm below what it takes to sail a cargo is a name on a door: the houses never sailed anything and nobody said why (play-test, the merchant's firm, idle eight turns).
+  const working = keepsBooks ? capital + purseOf(world, head!) : balance;
+  if (working < HOUSE_SAILING_FLOOR) {
+    return { refusal: `A firm needs at least ${HOUSE_SAILING_FLOOR} to sail: it keeps ${RESERVE_IN_HAND} in hand and sends no cargo of less than ${HOUSE_SAILING_FLOOR - RESERVE_IN_HAND}. ${keepsBooks ? "It would have" : `${founder.name} has`} ${working}.`, kind: "world" };
+  }
   if (capital < MIN_ORDERED_CAPITAL) return { refusal: `${founder.name} has ${balance} in his purse: a firm is not founded on less than ${MIN_ORDERED_CAPITAL}.`, kind: "world" };
   // A man who is his own head puts his whole purse behind it: the head's purse is the house's capital, and what he names is the least he will have in it.
   return foundTheHouse(world, { founder, head: keepsBooks ? head! : null, heirId: heir?.id ?? null, name: delta.name, kind: delta.kind, homeProvinceId: homeId, capital: keepsBooks ? capital : 0 }, world.elapsedStep, ids, false);

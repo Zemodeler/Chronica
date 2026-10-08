@@ -1,6 +1,8 @@
 import { GovernmentFormSchema, ScenarioDefinitionSchema, WorldStateSchema, formArmies, ordoOfRomanName, type GovernmentForm, type ScenarioDefinition, type WorldState } from "@chronica/shared";
 import { PUNIC_IDS } from "./punic-ids";
 import { PUNIC_DOCTRINES, PUNIC_ESTABLISHMENTS, SEASONED_ARMIES } from "./punic-wars-establishments";
+import { OSTIA_SETTLEMENTS } from "./punic-wars-ostia";
+import { EQUESTRIAN_FLOOR, SENATORIAL_FLOOR } from "./punic-wars-merchant-start";
 import { POLITY_META, PUNIC_WARS_GRAPH_EDGES, PUNIC_WARS_GRAPH_POLITIES, PUNIC_WARS_GRAPH_PROVINCES, PUNIC_WARS_GRAPH_SETTLEMENTS } from "./punic-wars-map-graph";
 import { foundingPeople, knownRulerId, romanSenators, withFinerSkills } from "./punic-wars-rulers";
 import { WORLD_PRESSURES, withWorldPolitics } from "./punic-wars-politics";
@@ -310,9 +312,9 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
         words: ["soldier", "legionary", "ranker", "assidui", "smallholder", "farmer", "artisan", "craftsman", "smith", "veteran"] },
       { id: "citizen", label: "a household of some standing", min: 1_200, max: 12_000,
         words: ["citizen", "plebeian", "plebian", "commoner", "centurion", "shopkeeper", "trader", "scribe", "clerk", "priest", "physician", "teacher"] },
-      { id: "equestrian", label: "money enough to be courted for it", min: 10_000, max: 150_000,
+      { id: "equestrian", label: "money enough to be courted for it", min: EQUESTRIAN_FLOOR, max: 150_000,
         words: ["merchant", "shipowner", "equestrian", "equites", "eques", "knight", "landowner", "banker", "financier", "publican", "officer", "tribune", "decurion", "magistrate"] },
-      { id: "senatorial", label: "a fortune that is itself a kind of office", min: 25_000, max: 500_000,
+      { id: "senatorial", label: "a fortune that is itself a kind of office", min: SENATORIAL_FLOOR, max: 500_000,
         words: ["patrician", "senatorial", "senator", "aristocracy", "aristocrat", "noble", "nobility", "consul", "praetor", "king", "queen", "prince", "royal", "dynast", "tyrant", "suffete"] },
     ],
     defaultBandId: "citizen",
@@ -673,7 +675,7 @@ const governmentFormFor = (polityId: string): GovernmentForm | null => {
 };
 
 const settlementsByProvince = new Map<string, (typeof PUNIC_WARS_GRAPH_SETTLEMENTS)[number][]>();
-for (const settlement of PUNIC_WARS_GRAPH_SETTLEMENTS) {
+for (const settlement of [...PUNIC_WARS_GRAPH_SETTLEMENTS, ...OSTIA_SETTLEMENTS]) {
   const at = settlementsByProvince.get(settlement.provinceId);
   if (at === undefined) settlementsByProvince.set(settlement.provinceId, [{ ...settlement }]);
   else at.push({ ...settlement });
