@@ -29,6 +29,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { ballotsOfBloc, seatsOf, votesBySeat, type Ballot } from "./ballots";
+import { theSeaIsLostLean } from "./the-sea-is-lost";
 import { clientsFromName, kinOf } from "./gens-loyalty";
 import { carryOutEnactment } from "./enact";
 import type { IdFactory } from "./ports";
@@ -362,7 +363,9 @@ export function blocLeanings(world: WorldState, procedure: PoliticalProcedure, i
   // triumph asked, as the man's war went (`command-tenure.ts`).
   const tried = judgmentLean(world, procedure, institution.polityId);
   const tenure = tenureLean(world, procedure);
-  const judged = { lean: tried.lean + tenure.lean, reasons: [...tried.reasons, ...tenure.reasons] };
+  // A question of ships, put to a chamber whose war is lost at sea, is helped by the war's need (`the-sea-is-lost.ts`).
+  const sea = theSeaIsLostLean(world, procedure);
+  const judged = { lean: tried.lean + tenure.lean + sea.lean, reasons: [...tried.reasons, ...tenure.reasons, ...sea.reasons] };
   return institution.votingBlocs.map((bloc) => {
     const reasons: string[] = [`its own disposition (${bloc.baseSupport})`];
     let lean = bloc.baseSupport;

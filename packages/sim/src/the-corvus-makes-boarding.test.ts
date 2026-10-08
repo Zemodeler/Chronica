@@ -4,6 +4,7 @@ import { applyDeltas } from "./apply/apply-deltas";
 import { CORVUS_MOTION, THE_CORVUS, decideAFleet } from "./a-fleet-by-decree";
 import { createIdFactory } from "./ports";
 import { holdVotes } from "./senate";
+import { THE_SEA_IS_LOST_LEAN, theSeaIsLostLean } from "./the-sea-is-lost";
 import { atWar, context, definition, forceOf, inputFor, romeAndCarthageAlone } from "./war-plan-kit";
 
 /**
@@ -56,5 +57,15 @@ describe("the corvus makes boarding", () => {
     const later = { ...counted.world, elapsedStep: DAY + 12 + 400 };
     expect(boardingOf(later, "roman-fleet")).toBeGreaterThan(boardingOf(world, "roman-fleet"));
     expect(adopted.effects).toEqual(expect.arrayContaining([expect.objectContaining({ lever: "march_speed", direction: "lower" })]));
+  });
+
+  it("is not moved by Carthage, whose crews are the better seamen, and the need of the war weighs on the Senate's vote for it", () => {
+    const moves = decideAFleet({ ...inputFor(world), offices }, rulerOf(world));
+    expect(moves.some((decision) => decision.polityId === "carthage")).toBe(false);
+    const question = { label: `Motion of Gaius Genucius Clepsina: that ${CORVUS_MOTION}`, institutionId: "roman-senate" };
+    expect(theSeaIsLostLean(world, question).lean).toBe(THE_SEA_IS_LOST_LEAN);
+    expect(theSeaIsLostLean(world, { ...question, label: "Motion of Gaius Genucius Clepsina: that a levy be held" }).lean).toBe(0);
+    // A fleet is wanted where the enemy holds the sea (110 hulls against 60): the same need.
+    expect(theSeaIsLostLean(world, { ...question, label: "Motion of Gaius Genucius Clepsina: that a fleet of a hundred quinqueremes and twenty triremes be built" }).lean).toBe(THE_SEA_IS_LOST_LEAN);
   });
 });

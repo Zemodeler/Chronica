@@ -32,10 +32,11 @@ export const FLEET_HULLS = 120;
 /** What a hull costs the chest, building and fitting, in the scenario's drachmae: a quinquereme was some two talents of timber, iron and labour in the age, six thousand drachmae to the talent. */
 export const HULL_COST = 12_000;
 /** The least a fleet's yard takes: timber to fell and season, then the building, then the benches. */
+/** Each stage falls due this many days after the work begins: sixty, a hundred and ten, a hundred and fifty. */
 const STAGES: readonly { readonly label: string; readonly days: number; readonly share: number }[] = [
   { label: "Timber felled and the keels laid on the model of the Carthaginian ship", days: 60, share: 0.4 },
-  { label: "The hulls built and launched", days: 50, share: 0.35 },
-  { label: "The rowers trained on benches ashore, and the ships manned", days: 40, share: 0.25 },
+  { label: "The hulls built and launched", days: 110, share: 0.35 },
+  { label: "The rowers trained on benches ashore, and the ships manned", days: 150, share: 0.25 },
 ];
 
 /** The words of the question the chamber is asked. */
@@ -51,6 +52,11 @@ export const THE_CORVUS: MilitaryReform = {
     kinds: ["warship"],
   }],
 };
+
+/** Whether one power's ships are the better handled: it holds a way of war that raises what its crews' drill can come to, and the other holds none. */
+const seamanshipOf = (world: WorldState, polityId: string): boolean => world.doctrines.some((doctrine) => doctrine.polityId === polityId && doctrine.lapsedAtStep === null
+  && doctrine.appliesTo?.categoryIds?.includes("warship") === true && doctrine.effects.some((effect) => effect.lever === "drill_ceiling" && effect.direction === "raise"));
+const beatsAtSeamanship = (world: WorldState, polityId: string, otherId: string): boolean => seamanshipOf(world, polityId) && !seamanshipOf(world, otherId);
 
 const warships = (world: WorldState, polityId: string) => world.material.forces.filter((force) => force.polityId === polityId && force.outlaw !== true && force.personnel.some((row) => row.categoryId === "warship" && row.fit > 0));
 
@@ -156,7 +162,9 @@ export function decideAFleet(input: Pick<StatecraftInput, "world" | "excludedPol
     }
     // Ships, and no way yet to close with the enemy's: the boarding-bridge, once, as a way of war.
     const has = world.doctrines.some((doctrine: Doctrine) => doctrine.polityId === polity.id && doctrine.lapsedAtStep === null && /corvus|boarding/iu.test(doctrine.label));
-    if (mineAfloat > 0 && !has) {
+    // Only a power whose enemy has the better seamen needs it: Rome against the Carthaginians, who row and manoeuvre as nobody else can; Carthage had no use for it.
+    const betterSeamen = enemies.some((enemy) => beatsAtSeamanship(world, enemy, polity.id));
+    if (mineAfloat > 0 && !has && betterSeamen) {
       const matter: Matter = { kind: "corvus", act: "war", concerns: ["war"], label: CORVUS_MOTION, deltas: [], text: CORVUS_MOTION, why: `${enemyName}'s ships are better handled, and the way to beat them is to hold them fast and fight them as on land` };
       const way = asked(matter);
       if (way === null || way === "own") continue;

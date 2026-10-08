@@ -126,6 +126,7 @@ for (let month = 0; month < years * 12; month += 1) {
     if (free || args.includes("--armies")) {
       const where = (f: (typeof world.material.forces)[number]) => `${f.name.slice(0, 22)} ${fitStrengthOf(f)} @${world.map.provinces.find((p) => p.id === f.locationId)?.name ?? f.locationId}`;
       const side = (polity: string) => world.material.forces.filter((f) => f.polityId === polity && fitStrengthOf(f) > 0);
+      console.log(`    fleet motions: ${world.material.politicalProcedures.filter((p) => /a fleet of|boarding-bridge/.test(p.label)).map((p) => `${p.label.slice(0, 60)} => ${p.outcome ?? p.stage}`).join("; ") || "none"}; shipbuilding works: ${world.projects.filter((w) => w.kind === "shipbuilding").map((w) => `${w.label} ${w.status}`).join("; ") || "none"}`);
       console.log(`    rome-carthage: war ${carthageWarDay === null ? "not opened" : `opened day ${carthageWarDay}`}; rome ${side("rome").map(where).join("; ")}; carthage ${side("carthage").map(where).join("; ")}; roman warships ${side("rome").reduce((n, f) => n + f.personnel.filter((row) => row.categoryId === "warship").reduce((m, row) => m + row.fit, 0), 0)}`);
     }
     console.log(`${formatWorldDate(world.instant, definition.clock)}: wars ${r.wars}, battles (cum) ${r.battles}, engagements opened ${r.engagements}, sieges laid ${r.sieges}, march orders ${r.orders} (flips ${r.flips}), plan shifts ${r.planShifts}, objective changes ${r.retargets}, modes ${modeCount()}, naval moves ${r.naval}, men under arms ${r.men}, armies ${army}, cpu/month ${(r.cpu / 12).toFixed(0)} ms`);
