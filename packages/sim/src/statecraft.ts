@@ -9,6 +9,8 @@ import {
   enemiesOf,
   fitStrengthOf,
   isDelivered,
+  isOwnToDo,
+  mayAct,
   isNavalForce,
   kmFromAny,
   readDepartments,
@@ -20,6 +22,8 @@ import {
   type DiplomaticMessage,
   type FactProposal,
   type Office,
+  type PoliticalProcedure,
+  type QuestionConcern,
   type ScenarioHistoricalPressure,
   type ScenarioWarfareRules,
   type StatecraftAct,
@@ -34,7 +38,9 @@ import { alarmOf } from "./pushback";
 import { appetiteOf, dispositionOf, leastOdds, natureInWords, peaceReluctance, tilt, type Disposition } from "./disposition";
 import { plainName, writeLetter } from "./letter-craft";
 import { favouredNeighbour } from "./quirks";
-import { decideFiscal } from "./fiscal-officers";
+import { decideFiscal, motionsByPower, weigh, type Asked } from "./fiscal-officers";
+import { consultTheFriends, decideCouncils } from "./bodies";
+import { decideMagistrates, type Skim } from "./magistrates";
 import { perceivedRatio } from "./perceive";
 import { STEP_DAYS, letterVerdict } from "./letter-verdict";
 
@@ -133,6 +139,8 @@ export interface StatecraftDecision {
   readonly why: string;
   readonly deltas: readonly WorldDelta[];
   readonly facts: readonly FactProposal[];
+  /** What the man's own hand keeps of what he handled, taken after the act (`skimTheHand`). */
+  readonly skim?: Skim | undefined;
 }
 
 const delta = (raw: Record<string, unknown>): WorldDelta => WorldDeltaSchema.parse(raw);
@@ -144,8 +152,40 @@ const fact = (raw: Record<string, unknown>): FactProposal => FactProposalSchema.
 const roll = (gameId: string, day: number, ...keys: string[]): ((span: number) => number) =>
   (span) => (span <= 0 ? 0 : stableHash([gameId, "statecraft", String(Math.floor(day / 30)), ...keys]) % span);
 
+/** What a ruler's move comes to when the constitution may make it the chamber's: his own, asked of the chamber (the motion is his decision), or waiting on one that is not his to put. */
+export type Passage =
+  | { readonly how: "own"; readonly decreed: boolean }
+  | { readonly how: "asked"; readonly decision: StatecraftDecision }
+  | { readonly how: "wait" };
+const OWN: Passage = { how: "own", decreed: false };
+
+/**
+ * Weighs an act of the state's own against the ruler's competence (`mayAct`), as the man at the books weighs his (`weigh`): his own where it is his, or where the chamber has
+ * decreed it and he is carrying it out; laid before the chamber (once, and not again while it waits or for a season after it failed) where it is the chamber's; left where it
+ * is none of his. A power with no constitution on record or no offices to read it from acts as it always did.
+ */
+export function passage(world: WorldState, input: StatecraftInput, motions: ReadonlyMap<string, readonly PoliticalProcedure[]>, ruler: Character, polity: { readonly id: string; readonly name: string }, act: "war" | "peace" | "pacts", label: string, concerns: readonly QuestionConcern[]): Passage {
+  const offices = input.offices;
+  if (offices === undefined) return OWN;
+  const may = mayAct(world, ruler.id, act, { offices });
+  if (may === null || isOwnToDo(may.grade)) return OWN;
+  if (may.grade !== "by_the_body" || may.body === null) return { how: "wait" };
+  const day = world.instant.day;
+  const weighed: "own" | Asked | null = weigh(world, ruler, polity, { kind: act, act, concerns, label, deltas: [], text: label, why: label }, {
+    offices, mine: motions.get(polity.id) ?? [], day, month: String(Math.floor(day / 30)), carriedDay: undefined, asked: [],
+  });
+  if (weighed === "own") return { how: "own", decreed: true };
+  if (weighed === null) return { how: "wait" };
+  return {
+    how: "asked",
+    decision: { polityId: polity.id, actorCharacterId: ruler.id, act: "magistrate", targetPolityId: null, why: weighed.why.slice(0, 400), deltas: [weighed.delta], facts: [] },
+  };
+}
+
 export function decideStatecraft(input: StatecraftInput): StatecraftDecision[] {
   const { world } = input;
+  let motionIndex: Map<string, PoliticalProcedure[]> | undefined;
+  const motionsOf = (): Map<string, PoliticalProcedure[]> => (motionIndex ??= motionsByPower(world));
   const board = readBoard(world);
   const rulers = readDepartments(world);
   const day = world.instant.day;
@@ -184,8 +224,24 @@ export function decideStatecraft(input: StatecraftInput): StatecraftDecision[] {
       continue;
     }
     if (road.step === "wait") continue;
-    if (wars < NEW_WARS_PER_MONTH && rolled) {
-      decisions.push(openTheWar(world, candidate.polityId, candidate.ruler, candidate.neighbour, candidate.act === "revolt" ? "revolt" : "declare_war", candidate.why, nameOf));
+    // A war is the chamber's where the constitution says so (the Senate's, in Rome; the Elders', in Carthage): the ruler lays it before the chamber, and makes it
+    // the month after it carries (`passage`). A king who has friends to ask asks them, and pays if he goes against them (`consultTheFriends`).
+    const way = candidate.act === "declare_war" && wars < NEW_WARS_PER_MONTH && (rolled || input.offices !== undefined)
+      ? passage(world, input, motionsOf(), candidate.ruler, { id: candidate.polityId, name: candidate.reading.name }, "war", `war be made on ${candidate.neighbour.name}`, ["war"])
+      : OWN;
+    if (way.how === "asked" && rolled) {
+      decisions.push(way.decision);
+      moved.add(candidate.polityId);
+      continue;
+    }
+    if (wars < NEW_WARS_PER_MONTH && way.how === "own" && (rolled || way.decreed)) {
+      let opened = openTheWar(world, candidate.polityId, candidate.ruler, candidate.neighbour, candidate.act === "revolt" ? "revolt" : "declare_war", candidate.why, nameOf);
+      if (candidate.act === "declare_war" && input.offices !== undefined) {
+        const friends = consultTheFriends(world, candidate.polityId, candidate.ruler, { label: `war be made on ${candidate.neighbour.name}`, concerns: ["war"] }, input.gameId);
+        if (friends?.against === true && friends.heeds) continue;
+        if (friends?.cost != null) opened = { ...opened, deltas: [...opened.deltas, friends.cost], why: `${opened.why.slice(0, 340)}; against the advice of the ${friends.council.name}`.slice(0, 400) };
+      }
+      decisions.push(opened);
       moved.add(candidate.polityId);
       moved.add(candidate.neighbour.polityId);
       wars += 1;
@@ -207,10 +263,10 @@ export function decideStatecraft(input: StatecraftInput): StatecraftDecision[] {
   }
 
   // Wars that have done what they were for, or exhausted both sides, end.
-  decisions.push(...peacesByRule(world, input, rulerOf, moved));
+  decisions.push(...peacesByRule(world, input, rulerOf, moved, motionsOf));
 
   // Alliances against a common threat, for powers that did not just go to war.
-  decisions.push(...allianceAgainstThreats(world, board, input, rulerOf, moved));
+  decisions.push(...allianceAgainstThreats(world, board, input, rulerOf, moved, motionsOf));
 
   // ── 3. Armies at war ───────────────────────────────────────────────────
   // Not for a power making peace this month: its armies' orders would be
@@ -248,7 +304,13 @@ export function decideStatecraft(input: StatecraftInput): StatecraftDecision[] {
 
   // ── 4. The books ───────────────────────────────────────────────────────
   // Each power nobody plays has a man who keeps them: tax, customs, credit, coin, pacts (`fiscal-officers.ts`).
-  decisions.push(...decideFiscal(input));
+  const fiscal = decideFiscal(input);
+  decisions.push(...fiscal);
+  // And the magistrates at their charges: the bread, the levy, the cases, the rites, the census, the mint, the envoys (`magistrates.ts`).
+  decisions.push(...decideMagistrates(input, fiscal));
+  // And the king takes the advice of his friends, or overrules it (`bodies.ts`).
+  const reader = readDepartments(world);
+  decisions.push(...decideCouncils({ world, gameId: input.gameId, excludedPolityIds: input.excludedPolityIds, playedByModel: input.playedByModel, playerCharacterId: input.playerCharacterId, rulers: (polityId) => reader.rulers(polityId) }));
   return decisions;
 }
 
@@ -635,6 +697,7 @@ function allianceAgainstThreats(
   input: StatecraftInput,
   rulerOf: (polityId: string) => Character | undefined,
   moved: Set<string>,
+  motionsOf: () => ReadonlyMap<string, readonly PoliticalProcedure[]>,
 ): StatecraftDecision[] {
   const decisions: StatecraftDecision[] = [];
   const allied = (polityId: string): boolean => world.polityAgreements.some((agreement) => agreement.status === "active" && agreement.kind === "alliance" && (agreement.polityId === polityId || agreement.otherPolityId === polityId));
@@ -663,6 +726,15 @@ function allianceAgainstThreats(
       // A chance a month, like a war: an embassy takes a season to agree.
       if (score < ALLIANCE_AT || roll(input.gameId, world.instant.day, reading.polityId, partner.polityId, "ally")(12) >= Math.min(3, Math.floor((score - ALLIANCE_AT) / 5))) continue;
       const why = `${threat.name} is stronger than either, and both distrust it`;
+      // An alliance is a treaty: the Senate's to make where the constitution says so.
+      const way = passage(world, input, motionsOf(), ruler, { id: reading.polityId, name: reading.name }, "pacts", `an alliance be made with ${partner.name}`, ["peace", "war"]);
+      if (way.how === "asked") {
+        decisions.push(way.decision);
+        moved.add(reading.polityId);
+        moved.add(partner.polityId);
+        break;
+      }
+      if (way.how === "wait") continue;
       decisions.push({
         polityId: reading.polityId, actorCharacterId: ruler.id, act: "alliance", targetPolityId: partner.polityId, why,
         deltas: [delta({
@@ -755,7 +827,7 @@ export function intendsToBreak(world: WorldState, ruler: Character, otherPolityI
  * the war left each side holding. Neither side's war may be the player's, and
  * a war either side is still fighting with the model is left to the model.
  */
-function peacesByRule(world: WorldState, input: StatecraftInput, rulerOf: (polityId: string) => Character | undefined, moved: Set<string>): StatecraftDecision[] {
+function peacesByRule(world: WorldState, input: StatecraftInput, rulerOf: (polityId: string) => Character | undefined, moved: Set<string>, motionsOf: () => ReadonlyMap<string, readonly PoliticalProcedure[]>): StatecraftDecision[] {
   const decisions: StatecraftDecision[] = [];
   const nameOf = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
   const ground = (polityId: string): number => world.map.provinces.filter((province) => province.controllerPolityId === polityId).length;
@@ -807,6 +879,15 @@ function peacesByRule(world: WorldState, input: StatecraftInput, rulerOf: (polit
         : spent ? "both sides are spent"
           : ahead ? `${nameOf(victor)} has the better of a long war`
             : "the war has gone nowhere for a year and a half";
+    // Peace is the chamber's where the constitution says so, as war is: the speaker lays it before the Senate and makes it the month after it carries.
+    const way = passage(world, input, motionsOf(), speaker, { id: speaker.polityId ?? victor, name: nameOf(speaker.polityId ?? victor) }, "peace", `peace be made with ${nameOf(loser)}`, ["peace"]);
+    if (way.how === "asked") {
+      decisions.push(way.decision);
+      moved.add(a);
+      moved.add(b);
+      continue;
+    }
+    if (way.how === "wait") continue;
     const terms = surrender
       ? `${nameOf(loser)} gives itself up to ${nameOf(victor)}.`
       : `Peace between ${nameOf(victor)} and ${nameOf(loser)}, each keeping the ground it holds.`;

@@ -52,6 +52,10 @@ const NEW_FILES = [
   "./gentes.ts",
   "./adoption.ts",
   "./gens-loyalty.ts",
+  // H2 and H3: the magistrates at their charges and the bodies that sit.
+  "./magistrates.ts",
+  "./bodies.ts",
+  "../../shared/src/material/taxation.ts",
   "../../db/src/punic-wars-gentes.ts",
   "../../db/src/punic-wars-fasti.ts",
 ];

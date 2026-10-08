@@ -32,6 +32,7 @@ export const StatecraftActSchema = z.enum([
   "letter",
   "dispatch",
   "fiscal",
+  "magistrate",
   "hold",
 ]);
 export type StatecraftAct = z.infer<typeof StatecraftActSchema>;
@@ -51,7 +52,7 @@ export const StatecraftEntrySchema = z
 export type StatecraftEntry = z.infer<typeof StatecraftEntrySchema>;
 
 /** How many decisions are kept: about two years of a busy world. */
-export const STATECRAFT_LOG_MAX = 600;
+export const STATECRAFT_LOG_MAX = 900;
 
 export const StatecraftLedgerSchema = z
   .object({

@@ -533,6 +533,61 @@ export function chargeHolders(world: WorldState, polityId: string, act: ActKind,
     .map(({ rank: _rank, order: _order, ...holder }) => holder);
 }
 
+const seatIndexes = new WeakMap<object, { living: Set<string>; seats: Map<string, WorldState["material"]["officeSeats"][number][]> }>();
+/** The living men and the held seats of every power, grouped once for a world. */
+function seatIndex(world: WorldState): { living: Set<string>; seats: Map<string, WorldState["material"]["officeSeats"][number][]> } {
+  let known = seatIndexes.get(world);
+  if (known === undefined) {
+    const polityOf = new Map<string, string | null>();
+    const living = new Set<string>();
+    for (const character of world.characters) {
+      if (!character.alive) continue;
+      living.add(character.id);
+      polityOf.set(character.id, character.polityId);
+    }
+    const seats = new Map<string, WorldState["material"]["officeSeats"][number][]>();
+    for (const seat of world.material.officeSeats) {
+      if (seat.status !== "held" || seat.holderCharacterId === null) continue;
+      const polity = polityOf.get(seat.holderCharacterId);
+      if (polity === undefined || polity === null) continue;
+      const list = seats.get(polity);
+      if (list === undefined) seats.set(polity, [seat]);
+      else list.push(seat);
+    }
+    known = { living, seats };
+    seatIndexes.set(world, known);
+  }
+  return known;
+}
+
+/**
+ * The men of a power who work a lever, in the order a charge is looked for: those of the department that holds it
+ * (the head first), then any who hold an office whose name says it (an aedile for the markets, a censor for the roll).
+ * Living men seated in office only, one entry a man. Empty where nobody has been given it: it is then the ruler's own.
+ */
+export function holdersOfLever(world: WorldState, polityId: string, lever: string, offices: readonly Office[] = NO_OFFICES): { readonly characterId: string; readonly officeId: string; readonly officeLabel: string; readonly head: boolean }[] {
+  const parts = partsOf(world, offices);
+  const found: { characterId: string; officeId: string; officeLabel: string; head: boolean; order: number; rank: number }[] = [];
+  const seen = new Set<string>();
+  const departments = parts.departments.get(polityId) ?? [];
+  const taken = departments.some((department) => (department.levers as readonly string[]).includes(lever));
+  const { living, seats } = seatIndex(world);
+  for (const seat of seats.get(polityId) ?? []) {
+    const holder = seat.holderCharacterId!;
+    if (seen.has(holder) || !living.has(holder)) continue;
+    const office = parts.byId.get(seat.officeId);
+    if (office === undefined || office.polityId !== polityId || office.successionRuleId === "abolished") continue;
+    const inDepartment = departments.find((department) => (department.levers as readonly string[]).includes(lever) && (department.officeIds.includes(office.id) || department.headOfficeId === office.id));
+    const byName = !taken && namedLevers(office.label).includes(lever);
+    if (inDepartment === undefined && !byName) continue;
+    seen.add(holder);
+    found.push({ characterId: holder, officeId: office.id, officeLabel: office.label, head: inDepartment?.headOfficeId === office.id, order: inDepartment === undefined ? 1 : 0, rank: office.rank ?? 0 });
+  }
+  return found
+    .sort((a, b) => a.order - b.order || Number(b.head) - Number(a.head) || b.rank - a.rank || a.characterId.localeCompare(b.characterId))
+    .map(({ order: _order, rank: _rank, ...entry }) => entry);
+}
+
 // ── Money ──────────────────────────────────────────────────────────────────
 
 /**

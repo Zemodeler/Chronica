@@ -105,6 +105,7 @@ import { reviewUnrest } from "./unrest";
 import type { IdFactory } from "./ports";
 import { holdElections, type ElectionGovernment } from "./elections";
 import { holdVotes } from "./senate";
+import { keepTheBodies } from "./bodies";
 import { ensureConstitutions, keepThrones } from "./constitutions";
 import { reviewSociety } from "./society";
 import { occupyOpenCountry } from "./occupation";
@@ -1801,10 +1802,14 @@ export function runDeterministicTick(given: TickInput): TickResult {
       ...(input.playerCharacterId === undefined ? {} : { playerCharacterId: input.playerCharacterId }),
     });
 
-  // And every other question before a chamber whose day has come is counted.
-  const votes = input.government === undefined
+  // The bodies sit: the war ratified, the omens read, the tribunes' sides taken, the day's agenda set (`bodies.ts`) -- and then every question whose day has come is counted.
+  const sitting = input.government === undefined
     ? { world: elections.world, facts: [] as readonly FactProposalDraft[] }
-    : holdVotes({ world: elections.world, offices: input.government.offices, successionRules: input.government.successionRules, toDay: input.toDay, ids: input.ids, playerCharacterId: input.playerCharacterId ?? null });
+    : keepTheBodies({ world: elections.world, offices: input.government.offices, successionRules: input.government.successionRules, toDay: input.toDay, playerCharacterId: input.playerCharacterId ?? null });
+  facts.push(...sitting.facts);
+  const votes = input.government === undefined
+    ? { world: sitting.world, facts: [] as readonly FactProposalDraft[] }
+    : holdVotes({ world: sitting.world, offices: input.government.offices, successionRules: input.government.successionRules, toDay: input.toDay, ids: input.ids, playerCharacterId: input.playerCharacterId ?? null });
 
   // What a year's end does to a commander's army: prorogued, kept until his
   // successor arrives, handed over -- and what he answers for, out of office.

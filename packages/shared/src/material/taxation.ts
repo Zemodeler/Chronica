@@ -231,6 +231,28 @@ const monthly = (source: IncomeSource): number =>
   source.cadenceSteps <= 0 ? 0 : (source.amount * source.collectionRateBps) / 10_000 * (30 / source.cadenceSteps);
 
 /** Every power's burden, keyed by polity. Powers asking nothing of their land are absent. */
+/** The five years a census holds good. */
+export const LUSTRUM_DAYS = 5 * 360;
+
+/** The day the last census of a power was taken, from the record its censors left (`generic_entity_create` of kind "census"). */
+export function lastCensus(world: Pick<WorldState, "genericEntities">, polityId: string): number | null {
+  let last: number | null = null;
+  for (const entity of world.genericEntities) {
+    if (entity.kind !== "census" || entity.ownerRef?.kind !== "polity" || entity.ownerRef.id !== polityId || "retiredAtStep" in entity.attributes) continue;
+    const at = Number(entity.attributes["atStep"] ?? NaN);
+    if (Number.isFinite(at) && (last === null || at > last)) last = at;
+  }
+  return last;
+}
+
+/** How truly a roll counts the people: a census taken in the last five years a hundredth better, and one that has gone stale loses a quarter of a point a year past the fifth, to four in a hundred. A power that has never had one is counted as it always was. */
+export function rollFreshness(world: Pick<WorldState, "genericEntities" | "elapsedStep">, polityId: string): number {
+  const last = lastCensus(world, polityId);
+  if (last === null) return 1;
+  const age = world.elapsedStep - last;
+  return age <= LUSTRUM_DAYS ? 1.01 : 1 - Math.min(0.04, ((age - LUSTRUM_DAYS) / 360) * 0.0025);
+}
+
 export function taxBurdens(world: WorldState, options: { readonly officeSkill?: (polityId: string) => number; readonly censusSkill?: (polityId: string) => number } = {}): Map<string, TaxBurden> {
   // Who is asked for what, by each power's own domestic revenues. A power's
   // own tax rolls are written at the rate it has chosen (`rateScale`, below),
@@ -282,7 +304,7 @@ export function taxBurdens(world: WorldState, options: { readonly officeSkill?: 
     const owned = ownedBy.get(polityId) ?? [];
     const steps = stepsFromCapital(world, polityId);
     const skill = officeSkill(polityId);
-    const counted = 1 + skillShare(censusSkill(polityId), ECONOMIC_LEVER_REACH.census);
+    const counted = (1 + skillShare(censusSkill(polityId), ECONOMIC_LEVER_REACH.census)) * rollFreshness(world, polityId);
     let bearable = 0;
     let ownedCapacity = 0;
     let rated = 0;

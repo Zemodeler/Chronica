@@ -11,6 +11,7 @@ import {
   coinageById,
   computeOpinion,
   economyOf,
+  fitStrengthOf,
   mayAct,
   monthlyTakings,
   spendingAllowance,
@@ -21,6 +22,7 @@ import {
   type WorldDelta,
   type WorldState,
 } from "@chronica/shared";
+import { grainPrice } from "../grain";
 import type { ApplyContext } from "./context";
 import { SOVEREIGN_AGREEMENTS } from "./nobody-listens";
 
@@ -129,6 +131,30 @@ export function gatedAct(delta: WorldDelta, world: WorldState, resolve: (ref: st
       const months = Math.max(1, Math.round((delta.termDays ?? 90) / 30));
       const amount = delta.advance + delta.monthlyPay * months;
       return { act: "spending", polityId, magnitude: undefined, amount, label: `${amount} be promised from the treasury of ${nameOf(world, polityId)} to hire men` };
+    }
+    // Bread bought or sent for an army is spending from the chest of the power that pays (the army's, "army only": a consul's own word to his allowance); taken from the country it costs the chest nothing.
+    case "force_provision": {
+      if (delta.how === "requisition") return null;
+      const force = world.material.forces.find((candidate) => candidate.id === id(delta.forceRef));
+      if (force === undefined) return null;
+      const paid = delta.payAccountRef == null ? undefined : world.material.accounts.find((account) => account.id === id(delta.payAccountRef!));
+      if (paid !== undefined && !(paid.owner.kind === "polity" && paid.owner.id === force.polityId)) return null;
+      const amount = Math.max(1, Math.round((fitStrengthOf(force) * delta.days / 1_000) * grainPrice(world, force.polityId, force.locationId)));
+      return { act: "spending", polityId: force.polityId, magnitude: undefined, amount, label: `${amount} be drawn from the chest of ${nameOf(world, force.polityId)} for the bread of ${force.name}` };
+    }
+    // A work begun out of the chest is spending it, for all it is paid for in instalments.
+    case "project_create": {
+      const polityId = ownerOfAccount(delta.fundingAccountRef);
+      if (polityId === null) return null;
+      const amount = delta.milestones.reduce((sum, stage) => sum + stage.costAmount, 0);
+      if (amount <= 0) return null;
+      return { act: "spending", polityId, magnitude: undefined, amount, label: `${amount} be spent out of the chest of ${nameOf(world, polityId)} on ${delta.label}` };
+    }
+    // Calling the men out is the levy: a consul's with his colleague, a praetor's, the Elders' in Carthage.
+    case "force_create": {
+      if (delta.outlaw === true || delta.fromForceRef != null) return null;
+      const polityId = id(delta.polityId);
+      return { act: "levy", polityId, magnitude: undefined, label: `a levy be held in ${nameOf(world, polityId)}` };
     }
     case "public_benefaction": {
       if (delta.kind !== "dole") return null;

@@ -247,7 +247,7 @@ function isUnclaimedSeatQuestion(procedure: PoliticalProcedure, electiveOffices:
 }
 
 /** Open chamber questions in the world, with the body hearing each. A candidacy for an elected office waits for its election. */
-function openQuestions(world: WorldState, electiveOffices: readonly Office[] = []): { procedure: PoliticalProcedure; institution: GovernmentInstitution }[] {
+export function openQuestions(world: WorldState, electiveOffices: readonly Office[] = []): { procedure: PoliticalProcedure; institution: GovernmentInstitution }[] {
   return world.material.politicalProcedures.flatMap((procedure) => {
     if (!OPEN_STAGES.has(procedure.stage)) return [];
     if (!(isChamberQuestion(procedure) || isUnclaimedSeatQuestion(procedure, electiveOffices)) || isElectiveCandidacy(procedure, electiveOffices)) return [];
@@ -259,7 +259,7 @@ function openQuestions(world: WorldState, electiveOffices: readonly Office[] = [
 }
 
 /** Each supporter's latest word on a question. Positions are append-only; a man who turned counts once, as he now stands. */
-function latestPositions(world: WorldState, procedureId: string): SupportPosition[] {
+export function latestPositions(world: WorldState, procedureId: string): SupportPosition[] {
   const latest = new Map<string, SupportPosition>();
   for (const position of world.material.supportPositions) {
     if (position.procedureId !== procedureId) continue;
@@ -402,7 +402,7 @@ export function blocLeanings(world: WorldState, procedure: PoliticalProcedure, i
 }
 
 /** The count, as the chamber's own rules have it. */
-function countVote(id: string, procedure: PoliticalProcedure, institution: GovernmentInstitution, leanings: readonly BlocLeaning[], atStep: number): VoteRecord {
+export function countVote(id: string, procedure: PoliticalProcedure, institution: GovernmentInstitution, leanings: readonly BlocLeaning[], atStep: number): VoteRecord {
   const weightOf = (choice: BlocLeaning["choice"]) => leanings.reduce((sum, leaning) => sum + leaning.split[choice], 0);
   const yesWeight = weightOf("yes");
   const noWeight = weightOf("no");

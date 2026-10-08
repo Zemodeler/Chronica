@@ -469,6 +469,43 @@ function settleMoney(world: WorldState, toDay: number, before: WorldState): { wo
   };
 }
 
+/**
+ * What a magistrate's own hand keeps of what he spent for the state (docs/plans/government.md, "H2 as built"): the greedy man who gives out the
+ * bread keeps a share of it, as a department's officer keeps a share of what he collected. The same graft: a transfer from the chest to his purse
+ * (or his patron's), written down as a diversion an audit can find. Nothing for an honest man; at most `MAX_DIVERSION_SHARE`.
+ */
+export function skimTheHand(world: WorldState, input: { readonly manId: string; readonly polityId: string; readonly handled: number; readonly cause: string; readonly departmentId: string | null }): { world: WorldState; amount: number } {
+  const person = world.characters.find((character) => character.id === input.manId && character.alive);
+  const treasury = world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === input.polityId && account.status === "active");
+  if (person === undefined || treasury === undefined || input.handled <= 0) return { world, amount: 0 };
+  const share = diversionShare(greedOf(person), 1, remotenessFrom(world, person, input.polityId));
+  const take = Math.min(Math.floor(input.handled * share), Math.max(0, treasury.balance));
+  if (take <= 0) return { world, amount: 0 };
+  const to = destinationFor(world, person);
+  if (to === treasury.id) return { world, amount: 0 };
+  const toDay = world.elapsedStep;
+  const scope: DepartmentScope = { kind: "polity", id: input.polityId };
+  const found = world.diversions.findIndex((row) => row.byCharacterId === person.id && row.departmentId === input.departmentId && row.scope.id === scope.id && row.foundAtStep === null);
+  const diversions = found >= 0
+    ? world.diversions.map((row, index) => (index === found ? { ...row, amount: row.amount + take, lastAtStep: toDay, toAccountId: to } : row))
+    : [...world.diversions, { id: mintId("diversion", person.id, scope.id, input.departmentId ?? "office", toDay), byCharacterId: person.id, scope, departmentId: input.departmentId, amount: take, toAccountId: to, firstAtStep: toDay, lastAtStep: toDay, foundAtStep: null } satisfies Diversion].slice(-600);
+  return {
+    amount: take,
+    world: {
+      ...world,
+      diversions,
+      material: {
+        ...world.material,
+        accounts: world.material.accounts.map((account) => (account.id === treasury.id ? { ...account, balance: account.balance - take } : account.id === to ? { ...account, balance: account.balance + take } : account)),
+        transactions: [...world.material.transactions, {
+          id: mintId("txn", "diversion", person.id, to, toDay), atStep: toDay, kind: "diversion" as const, amount: take, sourceAccountId: treasury.id, destinationAccountId: to,
+          cause: { kind: "action" as const, id: person.id, explanation: `What ${person.name} kept back of ${input.cause}`.slice(0, 200) }, visibility: "private" as const,
+        }],
+      },
+    },
+  };
+}
+
 // ── Audits (§9) ─────────────────────────────────────────────────────────────
 
 const AUDIT_FLOOR = 0.1;

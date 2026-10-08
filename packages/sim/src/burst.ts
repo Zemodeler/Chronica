@@ -138,6 +138,7 @@ import type { RequestLedger } from "./request-ledger";
 import { findInvariantViolations } from "./invariants";
 import { debatersOf, electiveOfficesOf, voteCalendarDays } from "./senate";
 import { ensureConstitutions } from "./constitutions";
+import { skimTheHand } from "./departments";
 import { decideStatecraft, ledgerEntry, rulerOptions, type StatecraftInput } from "./statecraft";
 import { castDossier, reviewCast } from "./cast";
 import { reviewPushback } from "./pushback";
@@ -3739,9 +3740,11 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         touchesUs ? 0 : budget.maxCausalDepth,
         true,
         [],
-        { calls: "none", factFloor: farBusinessFloor(relations, [decision.polityId, decision.targetPolityId]), ...(decision.act === "fiscal" ? { sanctioned: new Set(decision.deltas) } : {}) },
+        { calls: "none", factFloor: farBusinessFloor(relations, [decision.polityId, decision.targetPolityId]), ...(decision.act === "fiscal" || decision.act === "magistrate" ? { sanctioned: new Set(decision.deltas) } : {}) },
       );
       stampWorkFacts(before);
+      // What the greedy man's hand kept of what he handled, found by audits like any other graft (`departments.ts`).
+      if (decision.skim !== undefined && acts.changed > 0) world = skimTheHand(world, { ...decision.skim, departmentId: null }).world;
       // A dispatch changes nothing in the world, and is written in the ledger all the same: that is how it is not written twice.
       if (acts.changed > 0 || decision.act === "dispatch") entries.push(ledgerEntry(decision, world.instant.day));
     }

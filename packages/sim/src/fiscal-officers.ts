@@ -31,6 +31,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { convenersOf } from "./apply/asking";
+import { bodyHasRoom } from "./bodies";
 import { purseOfHouse } from "./merchant-houses";
 import { modelHasActedOnTheBooks } from "./played-ruler-books";
 import type { StatecraftDecision, StatecraftInput } from "./statecraft";
@@ -133,7 +134,7 @@ export function fiscalSliceLine(world: Pick<WorldState, "statecraft" | "instant"
   return `Its accounts: ${latest.why.replace(/\b(tax|customs|credit|coinage|pact|embargo): /g, "").slice(0, 220)}`;
 }
 
-interface Books {
+export interface Books {
   readonly treasuryId: string;
   readonly balance: number;
   /** What it pays out a month by obligation: army pay, upkeep, salaries, tribute, debts. */
@@ -148,7 +149,16 @@ interface Books {
 const perMonth = (amount: number, cadenceSteps: number): number => (cadenceSteps <= 0 ? 0 : (amount * 30) / cadenceSteps);
 
 /** Every power's books, in one walk of the obligations, the sources and the loans. */
-function readTheBooks(world: WorldState): Map<string, Books> {
+const booksCache = new WeakMap<WorldState, Map<string, Books>>();
+export function readTheBooks(world: WorldState): Map<string, Books> {
+  const known = booksCache.get(world);
+  if (known !== undefined) return known;
+  const read = readTheBooksNow(world);
+  booksCache.set(world, read);
+  return read;
+}
+
+function readTheBooksNow(world: WorldState): Map<string, Books> {
   const polityOf = new Map<string, string>();
   const treasuryOf = new Map<string, { id: string; balance: number }>();
   for (const account of world.material.accounts) {
@@ -186,7 +196,16 @@ function readTheBooks(world: WorldState): Map<string, Books> {
 }
 
 /** How many of a power's hubs it has, and how many of them hold grain at a famine price, in one walk of the markets. */
-function grainStress(world: WorldState): Map<string, { hubs: number; short: number }> {
+const stressCache = new WeakMap<WorldState, Map<string, { hubs: number; short: number }>>();
+export function grainStress(world: WorldState): Map<string, { hubs: number; short: number }> {
+  const known = stressCache.get(world);
+  if (known !== undefined) return known;
+  const read = readStress(world);
+  stressCache.set(world, read);
+  return read;
+}
+
+function readStress(world: WorldState): Map<string, { hubs: number; short: number }> {
   const holder = new Map(world.map.provinces.map((province) => [province.id, province.controllerPolityId]));
   const stress = new Map<string, { hubs: number; short: number }>();
   for (const hub of economyOf(world).markets) {
@@ -203,11 +222,11 @@ function grainStress(world: WorldState): Map<string, { hubs: number; short: numb
 
 const delta = (raw: Record<string, unknown>): WorldDelta => WorldDeltaSchema.parse(raw);
 const fact = (raw: Record<string, unknown>): FactProposal => FactProposalSchema.parse(raw);
-const pct = (bps: number): string => `${(bps / 100).toFixed(bps % 100 === 0 ? 0 : 1)}%`;
-const monthsWord = (months: number): string => (months >= 99 ? "many months" : months < 0.1 ? "next to nothing" : `${months.toFixed(1)} months`);
+export const pct = (bps: number): string => `${(bps / 100).toFixed(bps % 100 === 0 ? 0 : 1)}%`;
+export const monthsWord = (months: number): string => (months >= 99 ? "many months" : months < 0.1 ? "next to nothing" : `${months.toFixed(1)} months`);
 
 /** What the man at the books is worth, 5 to 100: his skill at the tax roll and what his temper adds to the work. */
-function qualityOf(skill: number, officer: Character): number {
+export function qualityOf(skill: number, officer: Character): number {
   return Math.max(5, Math.min(100, Math.round(skill + officeTemper(officer))));
 }
 
@@ -238,8 +257,8 @@ function footingOf(world: WorldState, officer: Character, act: ActKind, offices:
 }
 
 /** One thing the officer would do, and how it would be put to the chamber if it is not his to do. */
-interface Matter {
-  readonly kind: FiscalKind;
+export interface Matter {
+  readonly kind: string;
   readonly act: ActKind;
   /** In the act's own unit (`WITHIN_UNIT`), where it has a figure. */
   readonly magnitude?: number;
@@ -251,7 +270,7 @@ interface Matter {
   readonly why: string;
 }
 
-const inAHundred = (bps: number): string => `${(bps / 100).toFixed(bps % 100 === 0 ? 0 : 1)} in a hundred`;
+export const inAHundred = (bps: number): string => `${(bps / 100).toFixed(bps % 100 === 0 ? 0 : 1)} in a hundred`;
 /** The figure a motion's words end in or begin with, in basis points or silver; null where it has none. */
 function figureIn(label: string): number | null {
   const rate = /at ([0-9.]+) in a hundred$/u.exec(label);
@@ -266,7 +285,7 @@ const stemOf = (label: string): string => label.replace(/ at [0-9.]+ in a hundre
  * The motions the officers have put (a deliberation opened by an officer about his own power), by the power: what is waiting on a vote,
  * what carried and is not yet carried out, and what failed lately. Read off the world's own questions, with nothing stored beside them.
  */
-function motionsByPower(world: WorldState): Map<string, PoliticalProcedure[]> {
+export function motionsByPower(world: WorldState): Map<string, PoliticalProcedure[]> {
   const found = new Map<string, PoliticalProcedure[]>();
   for (const procedure of world.material.politicalProcedures) {
     if (procedure.type !== "council_deliberation" || procedure.subjectKind !== "polity" || procedure.subjectId === null || !procedure.label.startsWith("Motion of ")) continue;
@@ -277,10 +296,10 @@ function motionsByPower(world: WorldState): Map<string, PoliticalProcedure[]> {
   return found;
 }
 
-const thatOf = (procedure: PoliticalProcedure): string => procedure.label.slice(procedure.label.indexOf(": that ") + 7);
+export const thatOf = (procedure: PoliticalProcedure): string => procedure.label.slice(procedure.label.indexOf(": that ") + 7);
 
 /** The man who puts a motion to the chamber: himself where his office convenes it, else the best known of those who do, else himself (a chamber nobody is named to convene). */
-function sponsorOf(world: WorldState, officer: Character, bodyId: string): Character {
+export function sponsorOf(world: WorldState, officer: Character, bodyId: string): Character {
   const chamber = world.material.institutions.find((institution) => institution.id === bodyId);
   if (chamber === undefined) return officer;
   const conveners = convenersOf(world, chamber);
@@ -291,9 +310,9 @@ function sponsorOf(world: WorldState, officer: Character, bodyId: string): Chara
   return best ?? officer;
 }
 
-interface Asked { readonly kind: FiscalKind; readonly label: string; readonly text: string; readonly why: string; readonly delta: WorldDelta }
+export interface Asked { readonly kind: string; readonly label: string; readonly text: string; readonly why: string; readonly delta: WorldDelta }
 
-interface Weighing {
+export interface Weighing {
   readonly offices: readonly Office[];
   /** The motions already put about this power. */
   readonly mine: readonly PoliticalProcedure[];
@@ -310,7 +329,7 @@ interface Weighing {
  * decree), the motion to lay before the chamber where it is the chamber's and nothing of it is waiting or lately failed, and null where it is none of his
  * or is already before the chamber.
  */
-function weigh(world: WorldState, officer: Character, polity: { readonly id: string; readonly name: string }, matter: Matter, context: Weighing): "own" | Asked | null {
+export function weigh(world: WorldState, officer: Character, polity: { readonly id: string; readonly name: string }, matter: Matter, context: Weighing): "own" | Asked | null {
   const { offices, mine, day, month } = context;
   const stand = footingOf(world, officer, matter.act, offices, matter.magnitude);
   if (stand.how === "own") return "own";
@@ -324,7 +343,7 @@ function weigh(world: WorldState, officer: Character, polity: { readonly id: str
   if (decreed) return "own";
   const waiting = mine.some((procedure) => procedure.outcome === null && stemOf(thatOf(procedure)) === stem);
   const failed = mine.some((procedure) => procedure.outcome !== null && procedure.outcome !== "passed" && stemOf(thatOf(procedure)) === stem && (procedure.resolvedAtStep ?? 0) > day - MOTION_REST_DAYS);
-  if (waiting || failed || context.asked.some((entry) => stemOf(entry.label) === stem)) return null;
+  if (waiting || failed || context.asked.some((entry) => stemOf(entry.label) === stem) || !bodyHasRoom(world, stand.body.id)) return null;
   const sponsor = sponsorOf(world, officer, stand.body.id);
   const chamber = stand.body.name.replace(/^the\s+/iu, "");
   return {
@@ -426,10 +445,10 @@ export function decideFiscal(input: Pick<StatecraftInput, "world" | "gameId" | "
      * on a vote, nor for a season after one failed), carried out as far as the chamber decreed where it has, and left where it is none of his.
      */
     const submit = (matter: Matter): void => {
-      const weighed = weigh(world, officer, polity, matter, { offices, mine, day, month, carriedDay: last.get(matter.kind), asked });
+      const weighed = weigh(world, officer, polity, matter, { offices, mine, day, month, carriedDay: last.get(matter.kind as FiscalKind), asked });
       if (weighed === "own") {
         deltas.push(...matter.deltas);
-        parts.push({ kind: matter.kind, text: matter.text, why: matter.why });
+        parts.push({ kind: matter.kind as FiscalKind, text: matter.text, why: matter.why });
       } else if (weighed !== null) asked.push(weighed);
     };
     const taxPolicy = memory.taxPolicies.find((policy) => policy.polityId === polity.id);

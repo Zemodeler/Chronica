@@ -27,7 +27,7 @@ export function modelHasActedOnTheBooks(world: Pick<WorldState, "actMarks" | "st
   for (const mark of world.actMarks) {
     if (mark.polityId !== polityId || !FISCAL_ACTS.includes(mark.act) || today - mark.atStep > MODEL_ACT_PRECEDENCE_DAYS || mark.atStep > today) continue;
     // The rules' own decisions are marked as well, so that nobody decides the same thing twice in a season; the log says which these are.
-    const rules = world.statecraft.log.some((entry) => entry.act === "fiscal" && entry.polityId === polityId && Math.abs(entry.day - mark.atStep) <= SAME_DAY);
+    const rules = world.statecraft.log.some((entry) => (entry.act === "fiscal" || entry.act === "magistrate") && entry.polityId === polityId && Math.abs(entry.day - mark.atStep) <= SAME_DAY);
     if (!rules) return true;
   }
   return false;

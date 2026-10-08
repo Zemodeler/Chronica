@@ -65,6 +65,23 @@ describe("every power has a head who can act", () => {
     expect(undecided).toEqual([]);
   });
 
+  it("has a living man seated to decide each act of the purse and each treaty act: not an office with an empty seat", () => {
+    const seated = (polityId: string, act: ActKind): boolean => world.material.officeSeats.some((seat) => {
+      if (seat.status !== "held" || seat.holderCharacterId === null) return false;
+      const office = everyOffice.find((candidate) => candidate.id === seat.officeId);
+      if (office === undefined || office.polityId !== polityId) return false;
+      if (!world.characters.some((character) => character.id === seat.holderCharacterId && character.alive)) return false;
+      const line = competenceOf(world, office.id, government.offices)?.acts[act];
+      return line !== undefined && (isOwnToDo(line.grade) || (line.grade === "by_the_body" && line.body !== null));
+    });
+    const nobody = powers(world).flatMap((record) => [...FISCAL_ACTS, "embargoes" as ActKind]
+      .filter((act) => !(act === "spending" && !hasChest(world, record.polityId)) && !seated(record.polityId, act)
+        // A tribal people has no standing tax and no loans (the research: its chief takes tribute and plunder, and has no chest to borrow for): by its form, nobody decides them.
+        && !(record.form === "tribal_confederation" && (act === "tax_rate" || act === "loans")))
+      .map((act) => `${record.polityId}: nobody seated may decide ${act}`));
+    expect(nobody).toEqual([]);
+  });
+
   it("finds a man of the power to write to about its treaties and its customs", () => {
     const lacking = powers(world).filter((record) => chargeHolders(world, record.polityId, "pacts", government.offices).length === 0).map((record) => record.polityId);
     expect(lacking).toEqual([]);
