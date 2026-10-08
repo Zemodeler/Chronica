@@ -25,8 +25,11 @@ describe("Punic Wars built-in scenario", () => {
     const forces = punicWarsScenario.initialWorld.material.forces;
     expect(forces.filter((force) => force.personnel.every((category) => category.categoryId === "infantry")).map((force) => force.id).sort()).toEqual(["campanian-legion", "carthaginian-garrison-agrigentum", "carthaginian-garrison-panormus", "mamertine-garrison"]);
     expect(forces.find((force) => force.id === "roman-field-army")!.personnel.map((category) => category.label)).toEqual([
-      "Hastati of Legio I", "Principes of Legio I", "Triarii of Legio I", "Velites of Legio I", "Equites of Legio I",
-      "Allied cohorts of the first Ala of the allies", "Extraordinarii of the first Ala of the allies", "Allied horse of the first Ala of the allies",
+      // Two legions and two alae, the consular army as Polybius counts it (6.20-26), drawn up by the establishment (`punic-wars-sicily.ts`).
+      "Hastati of Legio I", "Principes of Legio I", "Triarii of Legio I", "Hastati of Legio II", "Principes of Legio II", "Triarii of Legio II",
+      "Velites of Legio I", "Velites of Legio II", "Equites of Legio I", "Equites of Legio II",
+      "Allied cohorts of the first Ala of the allies", "Extraordinarii of the first Ala of the allies", "Allied cohorts of the second Ala of the allies", "Extraordinarii of the second Ala of the allies",
+      "Allied horse of the first Ala of the allies", "Allied horse of the second Ala of the allies",
     ]);
     // Three war fleets, and the allied Greek hulls, which carry and do not fight.
     expect(forces.filter((force) => force.personnel.some((category) => category.categoryId === "warship"))).toHaveLength(3);
@@ -355,8 +358,8 @@ describe("the Punic Wars map as authoritative world state", () => {
     expect(unreachable).toEqual([]);
   });
 
-  it("keeps Rome's town in Rome's province, and Etna and the strait in Messana's", () => {
-    expect(byId.get(PUNIC_IDS.rome)?.settlements.map((settlement) => settlement.id)).toEqual(["settlement-rome"]);
+  it("keeps Rome's town and her harbour Ostia in Rome's province, and Etna and the strait in Messana's", () => {
+    expect(byId.get(PUNIC_IDS.rome)?.settlements.map((settlement) => settlement.id)).toEqual(["settlement-rome", "settlement-ostia"]);
     expect(byId.get(PUNIC_IDS.messana)?.positions?.map((position) => position.id))
       .toEqual(["position-mount-etna", "position-messana-strait"]);
     expect(provinces.filter((province) => (province.positions ?? []).length > 0).map((province) => province.id)).toEqual([PUNIC_IDS.messana]);

@@ -52,6 +52,7 @@ import { directTheWar } from "./war-direction";
 import { STEP_DAYS, letterVerdict } from "./letter-verdict";
 import { safeLocalId } from "./safe-local-id";
 import { decideCallsForHelp, decideTheAppealWar, theAppealBehind } from "./the-appeal-goes-to-the-people";
+import { decideAFleet } from "./a-fleet-by-decree";
 
 /**
  * The world AI: every power's big moves, by rule (docs/plans/a-living-world.md §2).
@@ -278,6 +279,9 @@ export function decideStatecraft(input: StatecraftInput): StatecraftDecision[] {
 
   // A people hard pressed in its war writes to the strong powers near it for help (`the-appeal-goes-to-the-people.ts`).
   decisions.push(...decideCallsForHelp(world, input.excludedPolityIds, input.playedByModel, rulerOf, day));
+
+  // A power at war with a sea power and with no ships of its own moves a fleet; with ships, the boarding-bridge (`a-fleet-by-decree.ts`).
+  decisions.push(...decideAFleet(input, rulerOf));
 
   // A war the people voted on an appeal, when the Senate would not, is made by the consul (`the-appeal-goes-to-the-people.ts`).
   for (const war of decideTheAppealWar(world, input.excludedPolityIds, rulerOf, day)) {

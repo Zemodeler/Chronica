@@ -24,8 +24,33 @@ const OFFICERS = [
 
 const FORCE_COMMON = { polityId: "carthage", moraleBps: 8_000, cohesionBps: 8_000, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: "carthage-sicilian-hired-men", payArrearsPeriods: 0, history: [] } as const;
 
-/** The opening world with Carthage's army, and its garrisons, in Sicily. */
+/**
+ * The consular army of 270 at the strength Polybius counts (6.20-26): two legions of 4,200 foot and 300 horse with the allies' foot as many again (a little under strength, as
+ * allied contingents were) and their horse in threes. The opening gave it one legion and one ala, 8,860 men, which no consular army was; Rome's other consul
+ * kept the city (the scenario's own note on Cornelius), so one army is in the field, as it was after Pyrrhus: the two legions and their allies before Rhegium.
+ * Doubled by rows, so that the establishment draws it up as Legio I and II and the first two alae on the first morning (`formArmies`).
+ */
+export function withTheConsularArmyAtFullStrength(world: WorldState): WorldState {
+  const army = world.material.forces.find((force) => force.id === "roman-field-army");
+  if (army === undefined || army.authorizedStrength >= 18_000) return world;
+  const doubled = { ...army, authorizedStrength: army.authorizedStrength * 2, personnel: army.personnel.map((row) => ({ ...row, fit: row.fit * 2 })) };
+  return {
+    ...world,
+    material: {
+      ...world.material,
+      forces: world.material.forces.map((force) => (force.id === army.id ? doubled : force)),
+      // The legionaries' pay is a legion's: twice the legions, twice the pay (the allies are fed, not paid).
+      obligations: world.material.obligations.map((obligation) => (obligation.id === army.payObligationId ? { ...obligation, amount: obligation.amount * 2 } : obligation)),
+    },
+  };
+}
+
+/** The opening world with Carthage's army, and its garrisons, in Sicily; and the consular army at the strength Polybius counts. */
 export function withCarthageInSicily(world: WorldState): WorldState {
+  return withTheConsularArmyAtFullStrength(withCarthageHoldingSicily(world));
+}
+
+function withCarthageHoldingSicily(world: WorldState): WorldState {
   const taken = new Set(world.characters.map((character) => character.id));
   const characters: Record<string, unknown>[] = [];
   const accounts: Record<string, unknown>[] = [];

@@ -6,7 +6,9 @@
  * before the last one was reached), plan shifts, naval moves, men under arms, and the months' cpu cost.
  * Closes with the money audit (unexplained must be 0). No provider is called.
  *
- *   npx tsx scripts/war-sanity.mts [years=5] [--actor=<characterId>] [--actor-polity=<polityId>]
+ *   npx tsx scripts/war-sanity.mts [years=5] [--actor=<characterId>] [--actor-polity=<polityId>] [--free]
+ *
+ * `--free` leaves the war with Carthage unopened: the report then says whether, and when, the rules went to it of themselves, and what stood in Sicily.
  */
 import { punicWarsScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, WorldDeltaSchema, ensureProvinceMaterial, fitStrengthOf, isNavalForce, formatWorldDate, type WorldState } from "@chronica/shared";
@@ -43,8 +45,10 @@ const flipLog: string[] = [];
 let pendingBefore = new Map<string, string>();
 const lastObjective = new Map<string, string>();
 const priorIssued = new Map<string, number>();
+const free = args.includes("--free");
+let carthageWarDay: number | null = null;
 for (let month = 0; month < years * 12; month += 1) {
-  if (month === 6) {
+  if (month === 6 && !free) {
     world = applyDeltas(world, [WorldDeltaSchema.parse({ op: "agreement_open", localId: "sanity-war", kind: "war", polityId: "carthage", otherPolityId: "rome", terms: "The war for Sicily.", forDays: null, sourceMessageRef: null, visibility: "public", reason: "War." })], context() as never).world;
   }
   const year = Math.floor(month / 12);
@@ -104,6 +108,7 @@ for (let month = 0; month < years * 12; month += 1) {
     if (planSignature.has(key) && planSignature.get(key) !== signature) row.planShifts += 1;
     planSignature.set(key, signature);
   }
+  if (carthageWarDay === null && world.polityAgreements.some((a) => a.kind === "war" && a.status === "active" && [a.polityId, a.otherPolityId].includes("rome") && [a.polityId, a.otherPolityId].includes("carthage"))) carthageWarDay = world.instant.day;
   row.wars = world.polityAgreements.filter((a) => a.kind === "war" && a.status === "active").length;
   row.battles = battlesOf(world);
   row.men = menOf(world);
@@ -117,6 +122,11 @@ for (let month = 0; month < years * 12; month += 1) {
         const cp = campaigns.find((c) => c.forceId === force.id);
         console.log(`    ${force.polityId.padEnd(22)} ${force.name.slice(0, 30).padEnd(30)} ${String(fitStrengthOf(force)).padStart(6)} at ${force.locationId} ${cp === undefined ? "no orders" : `${cp.mode} ${cp.objective.provinceId ?? cp.objective.forceId} (to ${cp.expiresStep})`}${force.hold === true ? " HOLD" : ""}`);
       }
+    }
+    if (free || args.includes("--armies")) {
+      const where = (f: (typeof world.material.forces)[number]) => `${f.name.slice(0, 22)} ${fitStrengthOf(f)} @${world.map.provinces.find((p) => p.id === f.locationId)?.name ?? f.locationId}`;
+      const side = (polity: string) => world.material.forces.filter((f) => f.polityId === polity && fitStrengthOf(f) > 0);
+      console.log(`    rome-carthage: war ${carthageWarDay === null ? "not opened" : `opened day ${carthageWarDay}`}; rome ${side("rome").map(where).join("; ")}; carthage ${side("carthage").map(where).join("; ")}; roman warships ${side("rome").reduce((n, f) => n + f.personnel.filter((row) => row.categoryId === "warship").reduce((m, row) => m + row.fit, 0), 0)}`);
     }
     console.log(`${formatWorldDate(world.instant, definition.clock)}: wars ${r.wars}, battles (cum) ${r.battles}, engagements opened ${r.engagements}, sieges laid ${r.sieges}, march orders ${r.orders} (flips ${r.flips}), plan shifts ${r.planShifts}, objective changes ${r.retargets}, modes ${modeCount()}, naval moves ${r.naval}, men under arms ${r.men}, armies ${army}, cpu/month ${(r.cpu / 12).toFixed(0)} ms`);
   }

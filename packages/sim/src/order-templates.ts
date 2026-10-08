@@ -15,6 +15,7 @@ import {
 } from "@chronica/shared";
 import { chestOfPower, payerOf, planSupply } from "./supply-plan";
 import { safeLocalId } from "./safe-local-id";
+import { FLEET_HULLS, fleetBegun, fleetWork } from "./a-fleet-by-decree";
 
 /**
  * The common routine orders, understood by rule (the user's rule, 2026-10-08: "Orders from a player should still be automatic: an order like 'find supply for my army'
@@ -286,6 +287,33 @@ function buildClause(world: WorldState, playerId: string, text: string): Clause 
   };
 }
 
+/** "Build a fleet", "build sixty ships", "lay down a hundred quinqueremes": a work in the yard, paid out of the state's chest (and put to the Senate where the chest is not his to open). */
+function fleetClause(world: WorldState, playerId: string, text: string): Clause | null {
+  const match = /^(?:please\s+)?(?:build|raise|lay\s+down|fit\s+out|have\s+built|construct)\s+(?:us\s+)?(?:a\s+|the\s+)?(?:new\s+)?(?:(?:fleet|navy|squadron)\b|(?:(?:\d[\d,]*|one|two|three|four|five|six|eight|ten|twelve|twenty|thirty|forty|fifty|sixty|ninety|hundred)\s+)(?:war\s*ships?|ships|galleys|quinqueremes|triremes)\b)/i.exec(text.trim());
+  if (match === null) return null;
+  const player = world.characters.find((character) => character.id === playerId);
+  if (player?.polityId == null) return null;
+  const hundred = /\bhundred\b/i.test(text) ? 100 : null;
+  const hulls = hundred ?? numberIn(text) ?? FLEET_HULLS;
+  if (!(hulls >= 5 && hulls <= 400)) return null;
+  const polity = world.map.polities.find((candidate) => candidate.id === player.polityId)?.name ?? "the state";
+  if (!hasACharge(world, player.id, player.polityId)) {
+    return {
+      part: { said: text.trim().slice(0, 200), whyNot: `${player.name} holds no charge in ${polity}: the public chest is opened on a magistrate's word, and no fleet is built for the state on a private man's.` },
+      deltas: [], delegations: [], template: "fleet", domain: "military", note: `${player.name} has no charge in the state; nobody lays keels on his word.`,
+    };
+  }
+  const work = fleetWork(world, player.polityId, player.id, hulls);
+  if (work === null) {
+    return { part: { said: text.trim().slice(0, 200), whyNot: `${polity}'s chest cannot bear the building of ships now, or it has no harbour of its own to build them in.` }, deltas: [], delegations: [], template: "fleet", domain: "military" };
+  }
+  return {
+    part: { said: text.trim().slice(0, 200) },
+    deltas: [fleetBegun(work, player.polityId, player)], delegations: [], template: "fleet", domain: "military",
+    note: `${work.completionOutcome.amount} hulls are to be laid down, at ${work.total} drachmae.`,
+  };
+}
+
 function levyClause(world: WorldState, playerId: string, text: string): Clause | null {
   const match = /^(?:please\s+)?(?:raise|levy|muster|recruit|enlist)\s+(?:a\s+(?:levy|force)\s+of\s+)?(\d[\d,]*|one|two|three|four|five|six|eight|ten|twelve|twenty)\s*(?:thousand\s+)?(?:more\s+)?men\b/i.exec(text.trim());
   if (match === null) return null;
@@ -309,7 +337,7 @@ function levyClause(world: WorldState, playerId: string, text: string): Clause |
   };
 }
 
-const TEMPLATES: readonly ((world: WorldState, playerId: string, text: string, warfare?: ScenarioWarfareRules) => Clause | null)[] = [supplyClause, holdClause, taxClause, buildClause, levyClause];
+const TEMPLATES: readonly ((world: WorldState, playerId: string, text: string, warfare?: ScenarioWarfareRules) => Clause | null)[] = [supplyClause, holdClause, taxClause, buildClause, fleetClause, levyClause];
 
 /** The clauses of an order: its lines, and its sentences. */
 export function clausesOf(order: string): string[] {
