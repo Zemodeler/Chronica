@@ -4,6 +4,7 @@ import { ScenarioDefinitionSchema, SOLDIER_PAY_PER_THOUSAND, WorldStateSchema, e
 import { createIdFactory } from "./ports";
 import { runDeterministicTick } from "./tick";
 import { withMiddlingManagers } from "./middling-managers";
+import { keepingSpent } from "./keeping-test-kit";
 
 /**
  * "A 20,000-man army should cost 40% of Rome's income; a 10,000-man army 20%."
@@ -37,13 +38,13 @@ function romeKeeping(men: number): WorldState {
   };
 }
 
-/** One month: what the treasury took in, what it paid out to the army, and what was left of the chest. */
+/** One month: what the treasury took in, what it paid out to the army, and what was left of the chest (the upkeep of the state and its costs, which the same month paid, added back to what it took in). */
 function aMonthWith(men: number) {
   const before = romeKeeping(men);
   const chest = (world: WorldState): number => world.material.accounts.find((account) => account.id === "rome-treasury")!.balance;
   const pay = before.material.obligations.find((obligation) => obligation.id === "rome-legion-pay")!.amount;
   const after = runDeterministicTick({ world: before, toDay: 30, ids: createIdFactory(`army-${men}`), warfare: definition.warfare }).world;
-  return { pay, income: chest(after) - chest(before) + pay, chest: chest(after), opened: chest(before) };
+  return { pay, income: chest(after) - chest(before) + pay + keepingSpent(before, after, "rome"), chest: chest(after), opened: chest(before) };
 }
 
 describe("an army costs its share", () => {

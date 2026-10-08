@@ -38,6 +38,22 @@ const NEW_FILES = [
   // H1: the charges written down for the powers we know, and the officers who lay what is not theirs before the chamber.
   "../../db/src/punic-wars-charges.ts",
   "./fiscal-officers.ts",
+  // What a state spends to go on being one: the upkeep, the costs of government, the works it lets, and the books of a played ruler.
+  "../../shared/src/world/keeping.ts",
+  "./the-upkeep-of-a-state.ts",
+  "./public-works.ts",
+  "./keeping-the-state.ts",
+  "./played-ruler-books.ts",
+  // The noble families (docs/plans/gentes.md): what they say, and the files that say it.
+  "../../shared/src/world/gentes.ts",
+  "../../shared/src/characters/roman-names.ts",
+  "../../shared/src/characters/gens-standing.ts",
+  "../../shared/src/authority/your-gens.ts",
+  "./gentes.ts",
+  "./adoption.ts",
+  "./gens-loyalty.ts",
+  "../../db/src/punic-wars-gentes.ts",
+  "../../db/src/punic-wars-fasti.ts",
 ];
 
 describe("no modern words", () => {

@@ -38,12 +38,14 @@ import {
   readOfficeInsights,
   readConstitutionHistory,
   readLaws,
+  readYourGens,
   readStandingOrders,
   readAdministration,
   buildAgenda,
   type Agenda,
   type Administration,
   type ConstitutionReading,
+  type GensReading,
   type LawsReading,
   type StandingOrders,
   type OfficeInsights,
@@ -114,6 +116,8 @@ export interface RoomSheets {
   readonly constitution: ConstitutionReading;
   /** Its measures in force and before the councils (`readLaws`). */
   readonly laws: LawsReading;
+  /** His own gens, if he is of one (`readYourGens`): its name, weight, honours, rites, kin, feuds and marriages. */
+  readonly gens: GensReading | null;
   /** His conditional orders (`readStandingOrders`), for the writing desk. */
   readonly standingOrders: StandingOrders;
   /** The departments of the state he keeps books for (`readAdministration`), for the ledger stand. */
@@ -207,6 +211,7 @@ export async function getRoomContents(gameId: string): Promise<RoomContents | nu
     const state = readTheState(world, characterId, offices, clock, view.scenarioGovernment?.successionRules ?? []);
     const constitution = readConstitutionHistory(world, characterId, offices, clock);
     const laws = readLaws(world, characterId, offices, clock);
+    const gens = readYourGens(world, characterId);
     const standingOrders = readStandingOrders(world, characterId, offices, clock);
     const administration = readAdministration(world, characterId, offices, clock);
     const matters = mattersInHand(world, characterId, offices, clock);
@@ -217,7 +222,7 @@ export async function getRoomContents(gameId: string): Promise<RoomContents | nu
     return {
       // A man in the ranks has his own place in an army, whether or not he commands one.
       forces: forces.forces.length > 0 || service !== null,
-      standing: standing.nothing === null || publicState,
+      standing: standing.nothing === null || publicState || gens !== null,
       books: kept.accounts.length > 0 || administration.departments.length > 0,
       purse: own.accounts.length > 0,
       states: roomStates(world, characterId, offices, view.scenarioClock, view.scenarioWarfare),
@@ -236,7 +241,7 @@ export async function getRoomContents(gameId: string): Promise<RoomContents | nu
           parts: order.parts.map((part) => ({ label: part.said, status: orderPartLabel(orderPartStatus(world, part), part, world), detail: part.refusal ?? part.whyNot ?? part.note })),
         })),
         insights: readOfficeInsights({ world, characterId, offices, clock, warfare: view.scenarioWarfare, facts, ownBooks: own, keptBooks: kept, muster: forces }),
-        own, kept, forces, service, standing, state, constitution, laws, standingOrders, administration, agenda, self, story,
+        own, kept, forces, service, standing, state, constitution, laws, gens, standingOrders, administration, agenda, self, story,
         calendar: whatComesNext(world, characterId, offices, clock),
         underWay: ordersUnderWay(world, characterId, offices, clock),
         promises: promisesOf(world, characterId, clock),

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import type { ConstitutionReading, LawsReading, StateOffice, StateReading, TradeProposalKind } from "@chronica/shared";
+import type { ConstitutionReading, GensReading, LawsReading, StateOffice, StateReading, TradeProposalKind } from "@chronica/shared";
 import { Sheet, type SheetSide } from "../../../components/ui/sheet";
 import { Tabs, type TabSection } from "../../../components/ui/tabs";
 import { Era } from "../../../components/ui/era";
@@ -13,6 +13,7 @@ import { Explains, Linkify, Name, useGlossary } from "./notes";
 import { PermissionRequirements, LeavingOffice, useOfficeInsights } from "./office-insights";
 import { ConstitutionSheet } from "./constitution-sheet";
 import { LawsSheet } from "./laws-sheet";
+import { GensSheet } from "./gens-sheet";
 
 /**
  * What a person holds: the offices, the powers, and the land -- and the state
@@ -81,7 +82,7 @@ function sentencesByHolding(powers: readonly PowerReading[]): { over: string; sa
   });
 }
 
-export function StandingPanel({ standing, state, constitution, laws, peace, gameId, onChanged, focus, onClose, side, onWriteTo, onProposeTrade, onOpenLetters }: {
+export function StandingPanel({ standing, state, constitution, laws, gens, peace, gameId, onChanged, focus, onClose, side, onWriteTo, onProposeTrade, onOpenLetters }: {
   readonly standing: Standing | null;
   /** The peace tables his power sits at (`readPeaceTables`). */
   readonly peace?: PeaceTablesView | null | undefined;
@@ -91,6 +92,8 @@ export function StandingPanel({ standing, state, constitution, laws, peace, game
   readonly state: StateReading | null;
   readonly constitution: ConstitutionReading | null;
   readonly laws: LawsReading | null;
+  /** His own gens, where he has one (`readYourGens`). */
+  readonly gens?: GensReading | null | undefined;
   /** Where the player was sent from elsewhere: a tab, and a measure to open on it. */
   readonly focus?: { readonly tab: string; readonly key?: string | undefined } | undefined;
   readonly onClose: () => void;
@@ -111,6 +114,7 @@ export function StandingPanel({ standing, state, constitution, laws, peace, game
   // A citizen who holds nothing has no "You" page, only the state they live under.
   const sections: TabSection[] = standing === null ? [] : [
     ...(standing.nothing === null ? [{ id: "you", title: "You", content: <You standing={standing} /> }] : []),
+    ...(gens != null ? [{ id: "gens", title: "Your gens", content: <GensSheet gens={gens} /> }] : []),
     ...(theState && state !== null
       ? [{ id: "state", title: "The state", marked: state.legitimacy?.shaky === true, content: <TheState state={state} showGovernment={!history} /> }]
       : []),

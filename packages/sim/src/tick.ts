@@ -90,6 +90,7 @@ import { betweenHarvests, reviewTheLand } from "./economy";
 import { payCustoms } from "./customs";
 import { keepMerchantHouses } from "./merchant-houses";
 import { keepGentes } from "./gentes";
+import { keepTheState } from "./keeping-the-state";
 import { routeOpenBps } from "./trade-flows";
 import { EMBARGO_BREACH_TRUST, endObligationsOfEndedAgreements, keepTreaties, shiftTrust } from "./treaties";
 import { keepPromises } from "./promises";
@@ -115,7 +116,6 @@ import { keepDepartments } from "./departments";
 import { assignOverseers, polityOfWork } from "./overseers";
 import { fillAppointments } from "./appointments";
 import { reviewSkills } from "./skill-decline";
-import { appointByRule } from "./appointed-by-rule";
 import { sweepThreadsOverTheCap } from "./storyline-cap";
 
 /** A blockade looser than this does not shut a port's trade. */
@@ -1714,9 +1714,11 @@ export function runDeterministicTick(given: TickInput): TickResult {
   const reckoned = reviewTheLand({ world: met.world, toDay: input.toDay, clock: input.clock, targets: () => withGovernment(provinceTargetsFrom(met.world), met.world, readDepartments(met.world)) });
   // What the month's trade earned each power in customs is paid into its treasury the day it is reckoned.
   // And the merchant houses look to their cargoes once the markets have moved and the customs are in (`merchant-houses.ts`).
-  const housed = keepMerchantHouses(payCustoms(reckoned.world, input.toDay, input.ids), input.toDay, input.ids);
-  const land = { ...reckoned, world: housed.world };
-  facts.push(...land.facts, ...housed.facts);
+  const housed = keepMerchantHouses(payCustoms(reckoned.world, input.toDay, input.ids), input.toDay, input.ids, input.playerCharacterId ?? null);
+  // And each power keeps its state: the upkeep of what it holds, the costs of its government, the works it lets (`keeping-the-state.ts`).
+  const theState = keepTheState({ world: housed.world, toDay: input.toDay, ids: input.ids, offices: input.government?.offices, playerCharacterId: input.playerCharacterId ?? null });
+  const land = { ...reckoned, world: theState.world };
+  facts.push(...land.facts, ...housed.facts, ...theState.facts);
   // And the noble families keep their heads, honours, rites, grudges and marriages, a month at a time (`gentes.ts`).
   const kinned = keepGentes(land.world, input.toDay);
   land.world = kinned.world;
@@ -1827,14 +1829,9 @@ export function runDeterministicTick(given: TickInput): TickResult {
   const kept = keepDepartments(opened, input.toDay, input.world);
   // Every open work has a man over it; a new one, or one whose man is gone, gets one.
   // Posts made and left empty are filled; then every open work gets a man over it.
-  // The ruler of a power nobody plays makes the charge his state lacks, in the month's review, and the post is filled just below (`appointed-by-rule.ts`).
-  const reviewedToday = society.world.society.lastReviewStep === input.toDay && tenure.world.society.lastReviewStep !== input.toDay;
-  const byRule = input.government === undefined || !reviewedToday || input.toDay <= 0
-    ? { world: kept.world, facts: [] as readonly FactProposalDraft[] }
-    : appointByRule({ world: kept.world, government: input.government, toDay: input.toDay, ids: input.ids, playerCharacterId: input.playerCharacterId ?? null });
   const appointed = input.government === undefined
-    ? { world: byRule.world, facts: [] as readonly FactProposalDraft[] }
-    : fillAppointments({ world: byRule.world, government: input.government, toDay: input.toDay, playerCharacterId: input.playerCharacterId ?? null });
+    ? { world: kept.world, facts: [] as readonly FactProposalDraft[] }
+    : fillAppointments({ world: kept.world, government: input.government, toDay: input.toDay, playerCharacterId: input.playerCharacterId ?? null });
   const overseen = assignOverseers(appointed.world, input.playerCharacterId ?? null);
   // And once a year, what age and disuse have done to everybody's gifts.
   const aged = reviewSkills(overseen, input.toDay);
@@ -1844,7 +1841,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
   const occupied = occupyOpenCountry(aged, input.toDay);
   return {
     world: forgetSettledPressures(reconcileCapitals(occupied.world), input.toDay),
-    factProposals: [...facts, ...plans.facts, ...plots.facts, ...lives.facts, ...contracts.facts, ...thrones.facts, ...elections.facts, ...votes.facts, ...tenure.facts, ...society.facts, ...kept.facts, ...byRule.facts, ...appointed.facts, ...occupied.facts],
+    factProposals: [...facts, ...plans.facts, ...plots.facts, ...lives.facts, ...contracts.facts, ...thrones.facts, ...elections.facts, ...votes.facts, ...tenure.facts, ...society.facts, ...kept.facts, ...appointed.facts, ...occupied.facts],
     notes,
     died: [...plots.died, ...lives.died],
     sprungContingencies: plans.sprung,

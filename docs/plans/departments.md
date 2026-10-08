@@ -41,8 +41,6 @@ Where the build differs from the design below, the build is what holds:
 - **Pressure** gives the ruler of an organised power with three or more
   provinces an ambition to hand work off (when his workload is −9 or worse)
   or to appoint a treasurer (when his chest is in debt).
-  Since the government-H1 follow-up the ambition is the record only: a power nobody rules in person makes the charge by rule, and a ruler the model plays is not shown it
-  (`sim/appointed-by-rule.ts`; docs/plans/government.md, "Appointments by rule").
 - **Built 2026-09-28** (characters pass):
   - insubordination, decided when an order is given (`sim/insubordination.ts`):
     loyalty, fear, duty, conscience, ambition, faction, a salaried post and

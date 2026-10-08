@@ -867,6 +867,7 @@ export function GameShell({
           state={room?.sheets?.state ?? null}
           constitution={room?.sheets?.constitution ?? null}
           laws={room?.sheets?.laws ?? null}
+          gens={room?.sheets?.gens ?? null}
           peace={room?.sheets?.peace ?? null}
           gameId={gameId}
           onChanged={() => setRoomRevision((n) => n + 1)}

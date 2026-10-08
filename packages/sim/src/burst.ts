@@ -93,7 +93,6 @@ import { misfiledWorldActs, whyMisfiled } from "./apply/misfiled";
 import { hasSomethingNew, playersPeopleFirst, routeAmbientActors, routeAttention } from "./attention";
 import { DEFAULT_SHARDING, renderCharacterPortrait, runCognition } from "./cognition";
 import { setAsideForTheOfficers } from "./kept-by-the-officers";
-import { keepOutOfOtherStatesBooks } from "./the-orchestrator-keeps-out";
 import { createCognitionMemory } from "./cognition-memory";
 import { holdAnswerToAuthority, natureObjects } from "./nature";
 import { decideDispatches } from "./dispatches";
@@ -1679,13 +1678,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     const behind = pass.later !== undefined ? { facts: proposal.facts, acts: [], claims: [], dropped: [] }
       : actsBehindFacts(proposal.facts, [...(proposal.worldDeltas ?? []), ...proposal.deltas], world, input.actorRef.kind === "character" ? input.actorRef.id : null);
     for (const reason of behind.dropped) skipped.push({ stage: "engine_facts", reason });
-    // Another state's routine government is not the world's to carry (`the-orchestrator-keeps-out.ts`): set aside, and counted.
-    const statedWorldActs = [...(proposal.worldDeltas ?? []), ...(proposal.worldDeltas === undefined ? [] : behind.acts)];
-    const keptOut = actsForTheWorld && proposal.worldDeltas !== undefined
-      ? keepOutOfOtherStatesBooks(world, statedWorldActs, { playerId: input.actorRef.kind === "character" ? input.actorRef.id : null, playerPolityId: input.actorPolityId ?? null })
-      : { kept: statedWorldActs, setAside: [] as { delta: WorldDelta; reason: string }[] };
-    for (const { reason } of keptOut.setAside) skipped.push({ stage: "officers", reason });
-    const worldDeltas = keptOut.kept;
+    const worldDeltas = [...(proposal.worldDeltas ?? []), ...(proposal.worldDeltas === undefined ? [] : behind.acts)];
     // The world's own business written into the order is the world's, whichever
     // list it arrived in (`misfiledWorldActs`). Left where it stands, so what
     // it makes is made before whatever in the order names it.

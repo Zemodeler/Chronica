@@ -148,4 +148,61 @@ Carthage and the kings (all `Gens` with the same structure; no order):
 
 ## As built
 
-(Filled in below as each stage lands.)
+### Engine (S2)
+
+* **The record**: `world.gentes` (`shared/src/world/gentes.ts`), `Character.dynastyId` is now the gens id (`gens-cornelius`; the
+  merchant firms keep `house-...` ids, so the two never meet), with optional `praenomen`, `nomen` and `cognomen` on the character
+  (`characters/roman-names.ts` parses a name written as one string, and reads a woman's nomen back to her father's gens).
+  The order is read from the gens first, then the nomen; the old list is the last fallback and no longer calls the Claudii Caninae
+  or the Scipiones Asinae plebeian.
+* **The monthly pass** (`sim/gentes.ts`, called from the tick beside the merchant firms; a call inside a month returns the same world):
+  gives every Roman a gens (making one for a nomen nobody has borne), adds the curule honours its men have won since the last look,
+  names the head (most honours, then standing, then age) and recomputes imagines and dignitas, passes the sacra to the heir of the dead
+  keeper if he is of the gens and else to the head (never to a stranger; a gens with no man keeps them waiting), feeds feuds from the
+  worst opinion a living man holds of a man of another gens and cools every feud 25 points a month (a feud begun at 1,800 to 2,200
+  lasts a generation untouched), and fades alliances 20 points a month.
+* **Nobilitas** (`nobilitasOf`, `nobilitasBps`, `nobilitasWeightBps`): a man is a *nobilis* if others of his own branch sat in the
+  consul's chair (+400 a consulship to +1,600), *gentilis* if only his gens did (+250 and +100 a consulship, to +1,000), a *novus homo*
+  if nobody did (-600), and each adds a fifth of a twentieth of the gens's dignitas (to +500). The sum is weighed by the office: the
+  consulship and censorship in full, the praetorship seven tenths, the aedileship four, the quaestorship a quarter, a priesthood
+  a third and a half, the tribunate a tenth. It is added to the electors' reckoning in `candidateScore` and so decides who is
+  thought of and who wins. It also gives a man's word in the Senate a client or two (`clientsFromName`: a thousand points, one man).
+* **Marriage** (`marriage.ts`): a grudge between the families counts against the suitor (up to 40), an old marriage for him (up to 15),
+  the difference in dignitas up to 8 either way; an accepted match records an alliance on both gentes (strength 4,500 on a first match,
+  renewed by a second to 7,000 and so on) and the news says which two are bound.
+* **The Senate** (`gens-loyalty.ts`, used by `ballotsOfBloc`): the seats of one gens in one bloc are drawn a quarter of the way to
+  their mean, the head counting double, and a seat of a gens at feud with the mover leans against his motion by a 800th of the heat, at
+  most twelve points of a hundred. No political group is made for a gens (it would put eighty household groups into the model's slice,
+  the state's own view and the orders' "faction against"); the loyalty is read from `dynastyId` and the head.
+* **Adoption** (`sim/adoption.ts`): `adoptIntoGens` and `adoptionBar` with the rules above, the Roman name (`adoptedRomanName`: the
+  adopter's praenomen, nomen and cognomen and the old nomen as -ianus), the family graph, the social link and the contract of adoption
+  that the merchant firms' succession writes, and the heir named so `settleEstate` carries the estate. The firms' own adoption
+  (`house-succession.ts`) keeps its private helper and its own naming (a steward or freedman takes the head's names), which is the
+  freedman's custom and not the -ianus of a true adoptee; the two write the same links. A childless head of a gens of forty-five and
+  more looks once a year (a one-in-eight chance) for a young kinsman by marriage of his own order, and failing that names a young
+  man of his own gens his heir. **Not built**: a player's or a model's act to adopt (the letter kinds are a model-facing schema, and the
+  prompt ceilings are over); the engine function is ready for it.
+* **Births**: a child is of the father's gens and order and bears the parts of the name; the eldest son has the father's names ("the
+  Younger"), a younger son the next given name of the gens's own, a daughter her father's nomen in the feminine ("Cornelia",
+  "Cornelia Minor") with her father's name for a surname so two girls are not confused.
+* **The old rites**: `priestlyBar` refuses a plebeian any office whose id or label names the king of the rites, a flamen or the Salii,
+  in `admissionRefusal`, whatever else the office asks, so an office the world makes (or a later scenario writes) is covered.
+* **Model-facing**: one phrase in a man's STANDING line and in the PEOPLE list ("of the Cornelii, a noble", "of the Curii, a new man").
+
+### The seed (S3)
+
+* `db/src/punic-wars-fasti.ts`: the consuls 366 to 270 and the censors 300 to 265. `db/src/punic-wars-gentes.ts`: the tables and
+  `seatGentes`, hooked in once at the end of `withFoundingPeople`. Scenario v56.
+* Sixty gentes at the opening: the 55 Roman (every gens that had a consul since 366 or has a man alive in the roster; the nine
+  merchant-firm Romans take theirs at the first tick) and the nine foreign houses. Each Roman is of his gens; the 12 Cornelii, 9 Fabii,
+  7 Aemilii, 6 Claudii, 4 Valerii and the rest are the living members.
+* 38 characters added: 32 Romans (the consulars Rufinus, Lentulus Caudinus, Merenda, Dolabella, Barbatus, Aemilius Lepidus, Servilius Tucca, Nautius Rutilus,
+  Domitius Calvinus, Aelius Paetus, Caedicius Noctua, Sulpicius Saverrio, Papirius Praetextatus, Quinctius Claudus, Fabius Licinus,
+  the young men of 261 to 244 and the boy Fabius Verrucosus, with two women) and 6 of the kings' houses. Each carries "Historical
+  (H|M)" or "Invented or doubtful (L)" in its creation reason. They hold no office and are not in the model's cast.
+* Opening ties: every marriage in the world is an alliance between two gentes (at 6,000, with a date years back); two feuds the sources
+  attest (the Fabii against the Claudii over the freedmen's enrolment of 304; Rufinus's against Fabricius, who struck him off the roll in
+  275).
+* The player's view: "Your gens" on the standing sheet (`GensSheet`, from `readYourGens`): the name and branch, noble, of a noble
+  gens or a new man, its weight, the images, the first man, the rites and tomb, the kin, the friends by marriage, the feuds and the latest
+  honours.

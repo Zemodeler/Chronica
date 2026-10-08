@@ -55,6 +55,8 @@ const opening = (): WorldState => {
   const world = withoutBlasio({
     ...parsed,
     characters: parsed.characters.filter((character) => !V34_SENATORS.has(character.id)),
+    // Their kin stay and are nobody's now, as with Blasio: the families written for the gentes (v56) reach some of them.
+    familyLinks: parsed.familyLinks.filter((link) => !V34_SENATORS.has(link.characterId) && !V34_SENATORS.has(link.relatedCharacterId)),
     material: { ...parsed.material, officeSeats: parsed.material.officeSeats.filter((seat) => seat.holderCharacterId === null || !V34_SENATORS.has(seat.holderCharacterId)) },
   });
   return {

@@ -15,6 +15,7 @@ export * from "./matters";
 export * from "./office-insights";
 export * from "./constitution-history";
 export * from "./laws";
+export * from "./your-gens";
 export * from "./standing-orders";
 export * from "./administration";
 export * from "./agenda";

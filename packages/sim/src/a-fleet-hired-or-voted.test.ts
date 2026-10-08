@@ -4,6 +4,7 @@ import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, ensurePro
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
 import { createIdFactory } from "./ports";
+import { keepingSpent } from "./keeping-test-kit";
 import { holdVotes } from "./senate";
 import { runDeterministicTick } from "./tick";
 
@@ -86,7 +87,8 @@ describe("a fleet built", () => {
     // What the consul's hand makes of 100 is his; that the treasury pays it, and not his purse, is the point.
     const cost = begun.world.projects[0]!.milestones[0]!.costAmount;
     expect(cost).toBeGreaterThan(0);
-    expect(balance(done, "rome-treasury")).toBe(balance(begun.world, "rome-treasury") - cost);
+    // (What the state paid the same month to keep itself, the upkeep and the costs of government, is not the fleet's.)
+    expect(balance(done, "rome-treasury") + keepingSpent(begun.world, done, "rome")).toBe(balance(begun.world, "rome-treasury") - cost);
     expect(balance(done, purse)).toBe(balance(begun.world, purse));
   });
 

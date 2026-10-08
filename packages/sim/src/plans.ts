@@ -13,7 +13,6 @@ import {
 import type { IdFactory } from "./ports";
 import { firedBetween, holdsIn, watchReading } from "./watch";
 import { predicateInWords } from "./mechanics/mechanic-words";
-import { isManagementWant } from "./management-talk";
 
 /**
  * People who plan, not only react (gap document §5).
@@ -452,9 +451,9 @@ function dayInWords(day: number, clock: ScenarioClock): string {
  * "serves"; the ones done and missed are printed because a plan he
  * cannot see the history of is a plan he will lay again from the start.
  */
-export function describePlans(character: Character, world: WorldState, clock: ScenarioClock, limit: number, leaveOutManagement = false): string[] {
+export function describePlans(character: Character, world: WorldState, clock: ScenarioClock, limit: number): string[] {
   const today = world.instant.day;
-  const ambitions = activeAmbitions(character).filter((ambition) => !leaveOutManagement || !isManagementWant(ambition)).slice(0, limit);
+  const ambitions = activeAmbitions(character).slice(0, limit);
   if (ambitions.length === 0) return [];
   const lines = ["They want:"];
   for (const ambition of ambitions) {

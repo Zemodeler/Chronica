@@ -4,6 +4,7 @@ export { PUNIC_WARS_SCENARIO_ID, PUNIC_WARS_SLUG, punicWarsScenario, punicWarsFo
 export { PUNIC_IDS, type PunicPlace } from "./punic-ids";
 export { PUNIC_WARS_MAP_ASSET } from "./punic-map-asset";
 export { foundingPeople, romanSenators, seatFoundingPeopleInto, withFinerSkills, type SeatingReport } from "./punic-wars-rulers";
+export { CENSORS_300_TO_265, CONSULS_366_TO_270 } from "./punic-wars-fasti";
 
 export const CHRONICA_SYSTEM_USER_ID = "00000000-0000-4000-8000-000000000001";
 export const FIRST_PUNIC_WAR_SCENARIO_ID = "00000000-0000-4000-8000-000000000101";

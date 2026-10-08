@@ -5,6 +5,7 @@ import { POLITY_META, PUNIC_WARS_GRAPH_EDGES, PUNIC_WARS_GRAPH_POLITIES, PUNIC_W
 import { foundingPeople, knownRulerId, romanSenators, withFinerSkills } from "./punic-wars-rulers";
 import { WORLD_PRESSURES, withWorldPolitics } from "./punic-wars-politics";
 import { houseFamilies, rosterPeople } from "./punic-wars-rosters";
+import { seatGentes } from "./punic-wars-gentes";
 import { withRegionalTaxes } from "./punic-wars-taxes";
 import { PUNIC_CHARGES } from "./punic-wars-charges";
 
@@ -696,18 +697,23 @@ function withFoundingPeople<T extends {
   const rosters = rosterPeople(definition.government.offices, seatedSoFar);
   // And the great houses' wives, daughters and sons (play-test L10).
   const families = houseFamilies([...raw.characters, ...founding.characters, ...senate.characters, ...rosters.characters] as Record<string, unknown>[]);
-  return {
-    ...raw,
-    familyLinks: [...((raw as { familyLinks?: readonly unknown[] }).familyLinks ?? []), ...families.familyLinks],
-    characters: [...raw.characters, ...founding.characters, ...senate.characters, ...rosters.characters, ...families.characters]
+  const everybody = [...raw.characters, ...founding.characters, ...senate.characters, ...rosters.characters, ...families.characters]
       .map((character) => withFinerSkills(character as { id: string; name: string; skills: Record<string, unknown> }))
       // Every Roman is a patrician or a plebeian, by his gens.
       .map((character) => ((character as { polityId?: string }).polityId === "rome" && (character as { ordo?: string }).ordo === undefined
         ? { ...character, ordo: ordoOfRomanName((character as { name: string }).name) }
-        : character)),
+        : character));
+  const familyLinks = [...((raw as { familyLinks?: readonly unknown[] }).familyLinks ?? []), ...families.familyLinks];
+  // And the noble families (v56): every Roman is of a gens, the missing living members are added, the fasti are written into the gentes' honours.
+  const kin = seatGentes(everybody as Record<string, unknown>[], familyLinks as Record<string, unknown>[]);
+  return {
+    ...raw,
+    gentes: kin.gentes,
+    familyLinks: [...familyLinks, ...kin.familyLinks],
+    characters: kin.characters,
     material: {
       ...raw.material,
-      accounts: [...raw.material.accounts, ...founding.accounts, ...senate.accounts, ...rosters.accounts, ...families.accounts],
+      accounts: [...raw.material.accounts, ...founding.accounts, ...senate.accounts, ...rosters.accounts, ...families.accounts, ...kin.accounts],
       officeSeats: [...raw.material.officeSeats, ...founding.officeSeats, ...senate.officeSeats, ...rosters.officeSeats],
     },
   };
@@ -716,7 +722,7 @@ const WRITTEN_OUT: ReadonlySet<string> = new Set(["rome", "carthage", "syracuse"
 
 const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
   schemaVersion: 3,
-  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 55, libraryVersion: 1 },
+  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 56, libraryVersion: 1 },
   elapsedStep: 0,
   instant: { day: 0, minute: 0 },
   // How the powers tax their ground, where the age said so (v48). Every other
