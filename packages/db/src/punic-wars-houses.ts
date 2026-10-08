@@ -37,22 +37,22 @@ interface HouseSpec {
 
 const HOUSES: readonly HouseSpec[] = [
   { slug: "publicani-rome", name: "The publicani of the Aerarium", head: "Titus Sicinius Rufus", heir: "Gaius Sicinius Rufus", town: "Rome", kind: "publicani", culture: "roman", capital: 150_000, headAge: 52 },
-  { slug: "neapolis-bankers", name: "The bankers of Neapolis", head: "Nikomachos son of Philon", heir: "Philon son of Nikomachos", town: "Naples", kind: "banking", culture: "greek", capital: 110_000, headAge: 49 },
-  { slug: "bodashtart-carthage", name: "The house of Bodashtart", head: "Bodashtart son of Abdeshmun", heir: "Abdeshmun son of Bodashtart", town: "Carthage", kind: "maritime", culture: "carthaginian", capital: 380_000, headAge: 56 },
+  { slug: "neapolis-bankers", name: "The trapezitai of Neapolis", head: "Nikomachos son of Philon", heir: "Philon son of Nikomachos", town: "Naples", kind: "banking", culture: "greek", capital: 110_000, headAge: 49 },
+  { slug: "bodashtart-carthage", name: "The merchants of Bodashtart", head: "Bodashtart son of Abdeshmun", heir: "Abdeshmun son of Bodashtart", town: "Carthage", kind: "maritime", culture: "carthaginian", capital: 380_000, headAge: 56 },
   { slug: "himilco-carthage", name: "The shipowners of Himilco", head: "Himilco son of Arish", heir: "Arish son of Himilco", town: "Carthage", kind: "maritime", culture: "carthaginian", capital: 300_000, headAge: 47 },
-  { slug: "eshmunazar-utica", name: "The house of Eshmunazar of Utica", head: "Eshmunazar son of Baalyaton", heir: "Baalyaton son of Eshmunazar", town: "Utica", kind: "grain", culture: "carthaginian", capital: 160_000, headAge: 54 },
+  { slug: "eshmunazar-utica", name: "The grain-merchants of Eshmunazar of Utica", head: "Eshmunazar son of Baalyaton", heir: "Baalyaton son of Eshmunazar", town: "Utica", kind: "grain", culture: "carthaginian", capital: 160_000, headAge: 54 },
   { slug: "baalhanno-hadrumetum", name: "The oil-factors of Hadrumetum", head: "Baalhanno son of Gerashtart", heir: "Gerashtart son of Baalhanno", town: "Hadrumetum", kind: "grain", culture: "carthaginian", capital: 130_000, headAge: 45 },
   { slug: "abdmelqart-gades", name: "The silver-traders of Gades", head: "Abdmelqart son of Hanno", heir: "Hanno son of Abdmelqart", town: "Gades", kind: "silver", culture: "carthaginian", capital: 190_000, headAge: 58 },
   { slug: "adonibaal-lilybaeum", name: "The shipmen of Lilybaeum", head: "Adonibaal son of Mattan", heir: "Mattan son of Adonibaal", town: "Lilybaeum", kind: "maritime", culture: "carthaginian", capital: 95_000, headAge: 43 },
-  { slug: "philistion-syracuse", name: "The house of Philistion", head: "Philistion son of Nikias", heir: "Nikias son of Philistion", town: "Syracuse", kind: "maritime", culture: "greek", capital: 260_000, headAge: 55 },
-  { slug: "dion-syracuse", name: "The grain-shippers of Dion", head: "Dion son of Herakleides", heir: "Herakleides son of Dion", town: "Syracuse", kind: "grain", culture: "greek", capital: 160_000, headAge: 44 },
-  { slug: "euthymenes-massalia", name: "The house of Euthymenes", head: "Euthymenes son of Aristarchos", heir: "Aristarchos son of Euthymenes", town: "Massalia", kind: "maritime", culture: "greek", capital: 210_000, headAge: 51 },
-  { slug: "theodotos-rhodes", name: "The shipowners of Rhodes", head: "Theodotos son of Epicharmos", heir: "Epicharmos son of Theodotos", town: "Rhodes", kind: "maritime", culture: "greek", capital: 260_000, headAge: 53 },
-  { slug: "kallias-athens", name: "The house of Kallias", head: "Kallias son of Phaidros", heir: "Phaidros son of Kallias", town: "Athens", kind: "maritime", culture: "greek", capital: 170_000, headAge: 48 },
-  { slug: "apollonios-alexandria", name: "The bankers of Alexandria", head: "Apollonios son of Diotimos", heir: "Diotimos son of Apollonios", town: "Alexandria", kind: "banking", culture: "greek", capital: 320_000, headAge: 50 },
+  { slug: "philistion-syracuse", name: "The emporoi of Philistion", head: "Philistion son of Nikias", heir: "Nikias son of Philistion", town: "Syracuse", kind: "maritime", culture: "greek", capital: 260_000, headAge: 55 },
+  { slug: "dion-syracuse", name: "The sitonai of Dion", head: "Dion son of Herakleides", heir: "Herakleides son of Dion", town: "Syracuse", kind: "grain", culture: "greek", capital: 160_000, headAge: 44 },
+  { slug: "euthymenes-massalia", name: "The emporoi of Euthymenes", head: "Euthymenes son of Aristarchos", heir: "Aristarchos son of Euthymenes", town: "Massalia", kind: "maritime", culture: "greek", capital: 210_000, headAge: 51 },
+  { slug: "theodotos-rhodes", name: "The naukleroi of Rhodes", head: "Theodotos son of Epicharmos", heir: "Epicharmos son of Theodotos", town: "Rhodes", kind: "maritime", culture: "greek", capital: 260_000, headAge: 53 },
+  { slug: "kallias-athens", name: "The emporoi of Kallias", head: "Kallias son of Phaidros", heir: "Phaidros son of Kallias", town: "Athens", kind: "maritime", culture: "greek", capital: 170_000, headAge: 48 },
+  { slug: "apollonios-alexandria", name: "The trapezitai of Alexandria", head: "Apollonios son of Diotimos", heir: "Diotimos son of Apollonios", town: "Alexandria", kind: "banking", culture: "greek", capital: 320_000, headAge: 50 },
   { slug: "abdashtart-tyre", name: "The merchants of Tyre", head: "Abdashtart son of Eshmun", heir: "Eshmun son of Abdashtart", town: "Tyre", kind: "maritime", culture: "carthaginian", capital: 230_000, headAge: 57 },
-  { slug: "lysis-tarentum", name: "The house of Lysis", head: "Lysis son of Archytas", heir: "Archytas son of Lysis", town: "Tarentum", kind: "maritime", culture: "greek", capital: 120_000, headAge: 46 },
-  { slug: "hermias-ephesus", name: "The house of Hermias", head: "Hermias son of Menandros", heir: "Menandros son of Hermias", town: "Ephesus", kind: "maritime", culture: "greek", capital: 150_000, headAge: 52 },
+  { slug: "lysis-tarentum", name: "The naukleroi of Lysis", head: "Lysis son of Archytas", heir: "Archytas son of Lysis", town: "Tarentum", kind: "maritime", culture: "greek", capital: 120_000, headAge: 46 },
+  { slug: "hermias-ephesus", name: "The naukleroi of Hermias", head: "Hermias son of Menandros", heir: "Menandros son of Hermias", town: "Ephesus", kind: "maritime", culture: "greek", capital: 150_000, headAge: 52 },
 ];
 
 /** The names of the men at the books: the freedmen's Greek names that Rome's freedmen bore, and the factors' of the Greek and Punic firms. */

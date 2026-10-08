@@ -11,6 +11,8 @@ import {
   isOccupied,
   kmFromAny,
   marketGeography,
+  firmCultureOf,
+  firmTitle,
   ordoOfRomanName,
   stableHash,
   type Character,
@@ -139,11 +141,12 @@ function mayBeSeatedAt(world: WorldState, provinceId: string, cache?: Map<string
   return ok;
 }
 
-/** A house's name from the man's: "The house of Quintus Fulvius" at Rome, "The house of Nikon" elsewhere; told apart from those that trade. */
-function houseNameFor(world: WorldState, founder: Character, given: string | null): string {
+/** A firm's name from the man's and its kind, in its own people's word: "The negotiatores of Quintus Fulvius" at Rome, "The emporoi of Nikon" at a Greek port (`firmNameFor`); told apart from those that trade. */
+function houseNameFor(world: WorldState, founder: Character, given: string | null, kind: HouseKind = "maritime"): string {
   const taken = new Set(economyOf(world).houses.map((house) => house.name));
   const words = founder.name.split(" ");
-  const base = (given !== null && given.trim() !== "" ? given.trim() : null) ?? (isRoman(founder) && words.length >= 2 ? `The house of ${words.slice(0, 2).join(" ")}` : `The house of ${words[0]!}`);
+  const culture = firmCultureOf(founder.polityId, founder.cultureId);
+  const base = (given !== null && given.trim() !== "" ? given.trim() : null) ?? firmTitle(kind, culture, isRoman(founder) && words.length >= 2 ? words.slice(0, 2).join(" ") : words[0]!);
   for (const candidate of [base, `${base} and sons`, `${base} the younger`, `${base} of the quay`]) if (!taken.has(candidate) && candidate.length <= 120) return candidate;
   return `${base.slice(0, 100)} ${economyOf(world).houses.length + 1}`;
 }
@@ -163,7 +166,7 @@ function anAgentFor(world: WorldState, patron: Character, toDay: number, ids: Id
   const age = clamp(currentAgeYears(patron, toDay) - 8, 30, 46);
   const made = createCanonicalNpc(world, {
     characterId: ids.next("character"), name: name.slice(0, 120), locationProvinceId: patron.locationProvinceId, polityId: patron.polityId, createdAtStep: toDay,
-    creationReason: `${roman ? "A freedman" : "A factor"} of ${patron.name}, set to keep the books of a house of his.`.slice(0, 300),
+    creationReason: `${roman ? "A freedman" : "A factor"} of ${patron.name}, set to keep the books of a firm of his.`.slice(0, 300),
     ageYearsAtStart: age, cultureId: patron.cultureId, faithId: patron.faithId, prestigeBps: 1_200, startingMoney: 0,
     skills: { martial: 25, intrigue: 40, learning: 45, piety: 35, stewardship: 70, diplomacy: 50, body: 45, subSkills: {} },
   });
@@ -198,7 +201,7 @@ export function foundTheHouse(start: WorldState, plan: FoundingPlan, toDay: numb
   let world = start;
   let head = plan.head ?? founder;
   const houseId = ids.next("house");
-  const name = houseNameFor(world, founder, plan.name);
+  const name = houseNameFor(world, founder, plan.name, plan.kind);
   const patronised = head.id !== founder.id;
 
   // A house kept by an agent: made for it if the founder has none, and the capital moved into his purse.
@@ -353,11 +356,11 @@ export function foundHouseByOrder(
   resolve: (ref: string) => string | undefined,
   ids: IdFactory,
 ): FoundingOutcome {
-  if (actor.kind !== "character") return { refusal: "A power cannot found a house: it has no purse of its own that is not the state's. Its men may, out of theirs.", kind: "world" };
+  if (actor.kind !== "character") return { refusal: "A power cannot found a firm: it has no purse of its own that is not the state's. Its men may, out of theirs.", kind: "world" };
   const byId = (ref: string | null): Character | undefined => (ref === null ? undefined : world.characters.find((character) => character.id === (resolve(ref) ?? ref)));
   const founder = delta.founderRef === null ? world.characters.find((character) => character.id === actor.id) : byId(delta.founderRef);
   if (founder === undefined) return { refusal: `No man "${delta.founderRef ?? actor.id}" exists to found a house.`, kind: "reference" };
-  if (founder.id !== actor.id) return { refusal: `${founder.name}'s purse is his own: he must found the house himself.`, kind: "world" };
+  if (founder.id !== actor.id) return { refusal: `${founder.name}'s purse is his own: he must found the firm himself.`, kind: "world" };
   if (!founder.alive) return { refusal: `${founder.name} is dead.`, kind: "world" };
   if (founder.legalStatus === "enslaved") return { refusal: `${founder.name} is a slave: a slave's money is his master's.`, kind: "world" };
   if (tradingHouses(world) >= MAX_TRADING_HOUSES) return { refusal: "There are as many houses trading as the markets will bear.", kind: "world" };
@@ -368,7 +371,7 @@ export function foundHouseByOrder(
   if (delta.headRef !== null && head === undefined) return { refusal: `No man "${delta.headRef}" exists to keep the books.`, kind: "reference" };
   if (head !== undefined && head !== null) {
     if (!head.alive || head.legalStatus === "enslaved" || keepers.has(head.id)) return { refusal: `${head.name} cannot take the books of a new house.`, kind: "world" };
-    if (head.id !== founder.id && head.polityId !== founder.polityId) return { refusal: `${head.name} is of another power: the house would be his and not the founder's.`, kind: "world" };
+    if (head.id !== founder.id && head.polityId !== founder.polityId) return { refusal: `${head.name} is of another power: the firm would be his and not the founder's.`, kind: "world" };
   }
   const heir = delta.heirRef === null ? null : byId(delta.heirRef);
   if (delta.heirRef !== null && heir === undefined) return { refusal: `No man "${delta.heirRef}" exists to follow the house.`, kind: "reference" };
@@ -376,16 +379,16 @@ export function foundHouseByOrder(
 
   const homeId = delta.homeProvinceId === null ? founder.locationProvinceId : delta.homeProvinceId;
   const home = world.map.provinces.find((province) => province.id === homeId);
-  if (home === undefined) return { refusal: `No province "${homeId}" exists to seat a house in.`, kind: "reference" };
-  if (!mayBeSeatedAt(world, homeId)) return { refusal: `${home.name} has no market with a port within reach: a house is seated where goods are bought and shipped.`, kind: "world" };
+  if (home === undefined) return { refusal: `No province "${homeId}" exists to seat a firm in.`, kind: "reference" };
+  if (!mayBeSeatedAt(world, homeId)) return { refusal: `${home.name} has no market with a port within reach: a firm is seated where goods are bought and shipped.`, kind: "world" };
   if (homeId !== founder.locationProvinceId) {
     const near = kmFromAny(world, [founder.locationProvinceId], { budgetKm: 400 });
-    if (!near.has(homeId)) return { refusal: `${founder.name} lives too far from ${home.name} to keep a house there.`, kind: "world" };
+    if (!near.has(homeId)) return { refusal: `${founder.name} lives too far from ${home.name} to keep a firm there.`, kind: "world" };
   }
   const balance = purseOf(world, founder);
   const keepsBooks = head !== undefined && head !== null && head.id !== founder.id;
   const capital = Math.min(delta.capital, balance);
-  if (capital < MIN_ORDERED_CAPITAL) return { refusal: `${founder.name} has ${balance} in his purse: a house is not founded on less than ${MIN_ORDERED_CAPITAL}.`, kind: "world" };
+  if (capital < MIN_ORDERED_CAPITAL) return { refusal: `${founder.name} has ${balance} in his purse: a firm is not founded on less than ${MIN_ORDERED_CAPITAL}.`, kind: "world" };
   // A man who is his own head puts his whole purse behind it: the head's purse is the house's capital, and what he names is the least he will have in it.
   return foundTheHouse(world, { founder, head: keepsBooks ? head! : null, heirId: heir?.id ?? null, name: delta.name, kind: delta.kind, homeProvinceId: homeId, capital: keepsBooks ? capital : 0 }, world.elapsedStep, ids, false);
 }

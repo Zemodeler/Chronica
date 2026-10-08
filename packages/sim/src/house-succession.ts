@@ -345,7 +345,7 @@ function aNewMan(world: WorldState, house: MerchantHouse, head: Character, toDay
   const spread = (part: string, low: number, span: number): number => low + (stableHash([house.id, toDay, part]) % span);
   const made = createCanonicalNpc(world, {
     characterId: ids.next("character"), name: taken.has(name) ? `${name} the younger` : name.slice(0, 120), locationProvinceId: head.locationProvinceId, polityId: head.polityId,
-    createdAtStep: toDay, creationReason: `A young man of another branch of the house of ${head.name}, brought in to follow him.`.slice(0, 300),
+    createdAtStep: toDay, creationReason: `A young man of another branch of the firm of ${head.name}, brought in to follow him.`.slice(0, 300),
     ageYearsAtStart: spread("age", 19, 6), cultureId: head.cultureId, faithId: head.faithId, dynastyId: head.dynastyId, prestigeBps: 1_800, startingMoney: KINSMAN_PURSE,
     skills: { martial: spread("martial", 25, 15), intrigue: spread("intrigue", 30, 20), learning: spread("learning", 40, 20), piety: spread("piety", 35, 20), stewardship: spread("stewardship", 55, 20), diplomacy: spread("diplomacy", 45, 20), body: spread("body", 45, 20), subSkills: {} },
   });

@@ -399,9 +399,9 @@ const theSupply: Routine = (cx) => {
   const spent = allowance === null ? 0 : spendingAllowance(world, allowance.officeId, cx.offices)?.spent ?? 0;
   const matter: Matter = {
     kind: "supply", act: "spending", magnitude: takings <= 0 ? Number.POSITIVE_INFINITY : (spent + cost) / takings, concerns: ["spending", "levy"],
-    label: letting ? `the feeding of ${fed.name} be let to a house of ${polity.name}, ${cost} over ${CONTRACT_DAYS / 30} months out of the chest` : `the bread of ${fed.name} be paid for out of the chest of ${polity.name}`,
+    label: letting ? `the feeding of ${fed.name} be let to a firm of ${polity.name}, ${cost} over ${CONTRACT_DAYS / 30} months out of the chest` : `the bread of ${fed.name} be paid for out of the chest of ${polity.name}`,
     text: letting
-      ? `let the feeding of ${fed.name} to a house of ${polity.name} for ${CONTRACT_DAYS / 30} months, some ${cost} out of the chest at the market's price and a margin, for the men were going hungry`
+      ? `let the feeding of ${fed.name} to a firm of ${polity.name} for ${CONTRACT_DAYS / 30} months, some ${cost} out of the chest at the market's price and a margin, for the men were going hungry`
       : `bought ${days} days' bread for ${fed.name}, ${cost} out of the chest, for the men were going hungry`,
     why: `supply: bread for ${fed.name} [${fed.id}], ${cost} from the chest${letting ? ", by contract" : ""}`,
     deltas: [delta({ op: "force_provision", forceRef: fed.id, how: letting ? "contract" : "buy", days, fromProvinceId: null, payAccountRef: books.treasuryId, reason: `${man.name} feeds ${fed.name}: it has eaten what it carried.`.slice(0, 240) })],

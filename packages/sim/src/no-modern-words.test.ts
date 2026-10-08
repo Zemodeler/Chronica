@@ -57,6 +57,9 @@ const NEW_FILES = [
   "./army-victualling.ts",
   // The cast rule: a person is in the standing cast for an important plot near the player (v58).
   "./cast.ts",
+  // The firms' period names (v58).
+  "../../shared/src/world/firm-names.ts",
+  "./house-founding.ts",
   "./gens-loyalty.ts",
   // H2 and H3: the magistrates at their charges and the bodies that sit.
   "./magistrates.ts",

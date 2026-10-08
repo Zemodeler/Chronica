@@ -97,7 +97,7 @@ export function openVictualling(world: WorldState, force: Force, termDays: numbe
   if (isNavalForce(force, undefined)) return { refusal: `${force.name} is a fleet, victualled in port.` };
   if (fitStrengthOf(force) <= 0) return { refusal: `${force.name} has no men in it to feed.` };
   if (force.outlaw === true) return { refusal: `${force.name} is nobody's army, and no house of any power will feed it.` };
-  if (victuallerOf(world, force.id) !== undefined) return { refusal: `${force.name} is fed by a house already.` };
+  if (victuallerOf(world, force.id) !== undefined) return { refusal: `${force.name} is fed by a firm already.` };
   const houses = housesFor(world, force.polityId);
   const house = houses[stableHash([force.id, "victualler", Math.floor(atStep / 30)]) % Math.max(1, houses.length)];
   if (house === undefined) return { refusal: `No house of ${world.map.polities.find((polity) => polity.id === force.polityId)?.name ?? force.polityId} has the means to feed ${force.name}.` };
@@ -204,7 +204,7 @@ export function keepVictualling(world: WorldState, toDay: number, ids: IdFactory
       current = endContract(current, contract, "ended", toDay);
       facts.push({
         localId: `victualler_ended_${contract.id}`.slice(0, 60), kind: "army_victualling_ended",
-        summary: force === undefined || fitStrengthOf(force) <= 0 ? `The army that ${house?.name ?? "a house"} was feeding is no more, and the contract with it is at an end.` : `${house?.name ?? "The house"} that fed ${force.name} is no more, and the contract with it is at an end.`,
+        summary: force === undefined || fitStrengthOf(force) <= 0 ? `The army that ${house?.name ?? "a firm"} was feeding is no more, and the contract with it is at an end.` : `${house?.name ?? "The house"} that fed ${force.name} is no more, and the contract with it is at an end.`,
         affectedRefs: [{ kind: "force", id: victuals.forceId }], visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 28,
       });
       continue;
