@@ -45,7 +45,7 @@ describe("a fleet hired", () => {
       company: { categoryId: "warship", strength: 300 }, provinceId: army(opening()).locationId, reason: "The legion must cross.",
     }]);
     expect(hired.rejected).toEqual([]);
-    const contract = hired.world.material.contracts[0]!;
+    const contract = hired.world.material.contracts.at(-1)!; // (the houses' stewards, seated at v54 and v57, stand before it)
     const fleet = hired.world.material.forces.find((force) => force.id === contract.forceId)!;
     expect(fleet).toMatchObject({ polityId: "rome", commanderCharacterId: "quintus-ogulnius", controllerCharacterId: "gaius-genucius", payObligationId: contract.obligationId });
     expect(fleet.personnel).toEqual([expect.objectContaining({ categoryId: "warship", fit: 300 })]);

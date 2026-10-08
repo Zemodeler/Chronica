@@ -4,6 +4,7 @@ import { CUSTOMARY_TAX_BURDEN, ScenarioDefinitionSchema, WorldStateSchema, ensur
 import { createIdFactory } from "./ports";
 import { runDeterministicTick } from "./tick";
 import { withMiddlingManagers } from "./middling-managers";
+import { keepingSpent } from "./keeping-test-kit";
 
 /**
  * "Double the tributum." "Triple it."
@@ -31,9 +32,11 @@ function aYearOf(world: WorldState) {
       .reduce((sum, obligation) => sum + obligation.amount, 0);
     const ticked = runDeterministicTick({ world: current, toDay: month * 30, ids: createIdFactory(`tax-${month}`), warfare: definition.warfare });
     expect(WorldStateSchema.safeParse(ticked.world).success).toBe(true);
+    const was = current;
     current = ticked.world;
     const after = current.material.accounts.find((account) => account.id === "rome-treasury")!.balance;
-    monthly.push(after - before + expenses);
+    // (What the state paid the same month to keep itself, the upkeep and the costs of government, is not a tax lost: added back, 2026-10-08.)
+    monthly.push(after - before + expenses + keepingSpent(was, current, "rome"));
     facts.push(...ticked.factProposals.map((fact) => String(fact.kind)));
   }
   return { world: current, monthly, facts };
