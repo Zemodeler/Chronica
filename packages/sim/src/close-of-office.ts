@@ -350,7 +350,9 @@ export function theKingsJustice(input: AccountsInput): { world: WorldState; fact
 /** The tick's whole accountability pass, in the order it must run (before a commander's year-end reads the marks). */
 export function keepTheAccounts(input: AccountsInput): { world: WorldState; facts: FactProposalDraft[] } {
   const accounts = input.endedTerms.length === 0 ? { world: input.world, facts: [] as FactProposalDraft[] } : renderTheAccounts(input);
-  const monthly = input.toDay % MONTH === 0;
+  // Once a month, on the days the society is reviewed (`society.ts`: thirty days from the last review).
+  const last = input.world.society.lastReviewStep;
+  const monthly = last === null || input.toDay - last >= MONTH;
   const examined = monthly ? examineTheReturned({ ...input, world: accounts.world }) : { world: accounts.world, facts: [] as FactProposalDraft[] };
   const royal = monthly ? theKingsJustice({ ...input, world: examined.world }) : { world: examined.world, facts: [] as FactProposalDraft[] };
   return { world: royal.world, facts: [...accounts.facts, ...examined.facts, ...royal.facts] };

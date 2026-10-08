@@ -25,6 +25,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { newsReach, powersNearThePlayer } from "./far-powers";
+import { isNoted } from "./nota";
 import { remember } from "./grievances";
 import type { IdFactory } from "./ports";
 import { honourTheSitting } from "./standing-deeds";
@@ -595,7 +596,7 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
  * a career has somewhere to arrive, and a senator is made by the ladder rather
  * than by a model deciding he is one.
  */
-function enrolFormerMagistrates(
+export function enrolFormerMagistrates(
   world: WorldState,
   offices: readonly Office[],
   toDay: number,
@@ -608,6 +609,8 @@ function enrolFormerMagistrates(
     const seated = new Set(next.material.officeSeats.filter((seat) => seat.officeId === council.id && seat.status === "held").map((seat) => seat.holderCharacterId));
     for (const character of next.characters) {
       if (!character.alive || character.polityId !== council.polityId || seated.has(character.id)) continue;
+      // The censors struck him from the roll, and the roll stays shut to him until the next lectio (`the-lectio.ts`).
+      if (isNoted(next, character.id)) continue;
       if (!character.officesHeld.some((tenure) => magistracies.has(tenure.officeId))) continue;
       if (council.seatCount !== undefined && seated.size >= council.seatCount) break;
       const vacantSeatId = next.material.officeSeats.find((seat) => seat.officeId === council.id && seat.status === "vacant")?.id ?? null;

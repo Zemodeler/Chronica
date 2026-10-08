@@ -67,9 +67,10 @@ describe("the Hundred and Four examine a returning general", () => {
   });
 
   it("is monthly, and only for a power that examines", () => {
-    const early = keepTheAccounts({ world: atDay(marked(base, general, 2), 211), offices: government.offices, toDay: 211, ids: createIdFactory("k"), endedTerms: [] });
+    const reviewed = (world: WorldState) => ({ ...world, society: { ...world.society, lastReviewStep: 200 } });
+    const early = keepTheAccounts({ world: atDay(reviewed(marked(base, general, 2)), 211), offices: government.offices, toDay: 211, ids: createIdFactory("k"), endedTerms: [] });
     expect(early.facts).toEqual([]);
-    const monthEnd = keepTheAccounts({ world: atDay(marked(base, general, 2), 240), offices: government.offices, toDay: 240, ids: createIdFactory("k"), endedTerms: [] });
+    const monthEnd = keepTheAccounts({ world: atDay(reviewed(marked(base, general, 2)), 240), offices: government.offices, toDay: 240, ids: createIdFactory("k"), endedTerms: [] });
     expect(monthEnd.facts.map((f) => f.kind)).toEqual(["examination"]);
     const romans = asked({ ...base, answerable: [{ characterId: "gaius-genucius", polityId: "rome", kind: "defeat" as const, label: "beaten", atStep: 100, weight: 5 }] }, 240);
     expect(romans.facts).toEqual([]);
