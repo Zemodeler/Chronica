@@ -61,6 +61,8 @@ export const WarPlanSchema = z.object({
   /** When it was last looked at, and when its aims last changed: an aim is kept some months before it is changed. */
   reviewedAtStep: ElapsedStepSchema,
   aimsSetAtStep: ElapsedStepSchema,
+  /** When the set of aims last differed from what it was: an army whose orders are older than this is given them again. */
+  aimsChangedAtStep: ElapsedStepSchema,
   /** The man whose plan it is: the head of the state, or the chamber's man. */
   issuedByCharacterId: EntityIdSchema.nullable(),
 }).strict();

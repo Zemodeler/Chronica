@@ -5,6 +5,8 @@ import {
   WorldDeltaSchema,
   agreementsBetween,
   aptitude,
+  campaignLine,
+  campaignOf,
   computeOpinion,
   enemiesOf,
   fitStrengthOf,
@@ -16,6 +18,8 @@ import {
   readDepartments,
   stableHash,
   warStanding,
+  warPlanLine,
+  warPlanOf,
   warWeariness,
   warsOf,
   type Character,
@@ -25,6 +29,7 @@ import {
   type PoliticalProcedure,
   type QuestionConcern,
   type ScenarioHistoricalPressure,
+  type ScenarioClock,
   type ScenarioWarfareRules,
   type StatecraftAct,
   type StatecraftEntry,
@@ -43,6 +48,7 @@ import { consultTheFriends, decideCouncils } from "./bodies";
 import { decideMagistrates, type Skim } from "./magistrates";
 import { decideAudits } from "./close-of-office";
 import { perceivedRatio } from "./perceive";
+import { directTheWar } from "./war-direction";
 import { STEP_DAYS, letterVerdict } from "./letter-verdict";
 
 /**
@@ -130,6 +136,8 @@ export interface StatecraftInput {
   readonly appetiteAgainstPlayer?: number | undefined;
   /** The scenario's offices, so that what an officer may do (his competence, `mayAct`) is read for the offices the scenario wrote by hand. */
   readonly offices?: readonly Office[] | undefined;
+  /** The scenario clock, so that the season is known to the armies (`war-direction.ts`). */
+  readonly clock?: ScenarioClock | undefined;
 }
 
 export interface StatecraftDecision {
@@ -293,14 +301,12 @@ export function decideStatecraft(input: StatecraftInput): StatecraftDecision[] {
       const levy = raiseLevy(world, reading, ruler, [...enemies].map(nameOf).join(" and "));
       if (levy !== null) decisions.push(levy);
     }
-    for (const force of world.material.forces) {
-      // Fleets keep the sea by their own rules; this is the land war.
-      if (force.polityId !== reading.polityId || force.outlaw === true || fitStrengthOf(force) <= 0 || isNavalForce(force, input.warfare)) continue;
-      if (force.commanderCharacterId === input.playerCharacterId || input.playedByModel.has(force.commanderCharacterId) || input.playedByModel.has(force.controllerCharacterId ?? "")) continue;
-      if (marching.has(force.id) || fighting.has(force.id) || besieging.has(force.id) || force.hold === true) continue;
-      const order = conductOfWar(world, force, enemies, reading.polityId, nameOf, input.warfare);
-      if (order !== null) decisions.push(order);
-    }
+    // The war is directed by its plan (`war-direction.ts`): the head's plan, each army's orders, the fleets; the old rules lead what has no orders.
+    decisions.push(...directTheWar({
+      world, gameId: input.gameId, polityId: reading.polityId, ruler, enemies, warfare: input.warfare, clock: input.clock, playedByModel: input.playedByModel,
+      playerCharacterId: input.playerCharacterId, sets: { marching, fighting, besieging },
+      legacy: (force) => conductOfWar(world, force, enemies, reading.polityId, nameOf, input.warfare),
+    }));
   }
 
   // ── 4. The books ───────────────────────────────────────────────────────
@@ -932,8 +938,10 @@ export function rulerOptions(input: StatecraftInput, characterId: string, max = 
   const board = readBoard(world);
   const rulers = readDepartments(world);
   const polityId = world.characters.find((character) => character.id === characterId)?.polityId ?? null;
-  if (polityId === null || !rulers.rulers(polityId).some((ruler) => ruler.id === characterId)) return [];
   const nameOf = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
+  // A general who is not the ruler sees his orders, and the plan of the war they come from, in one line (`war-plan.ts`).
+  if (polityId !== null && !rulers.rulers(polityId).some((ruler) => ruler.id === characterId)) return generalsLine(world, characterId, nameOf);
+  if (polityId === null) return [];
   const rulerOf = (id: string): Character | undefined => rulers.rulers(id).find((ruler) => ruler.alive);
   const playerPolity = input.playerCharacterId === null ? null : world.characters.find((character) => character.id === input.playerCharacterId)?.polityId ?? null;
   const strength = (score: number, bar: number): string => (score >= bar + 15 ? "a strong case" : score >= bar ? "a fair case" : score >= bar - 15 ? "a thin case" : "a poor case");
@@ -950,7 +958,13 @@ export function rulerOptions(input: StatecraftInput, characterId: string, max = 
   }
   if (reading !== undefined && reading.wars.length > 0) {
     const enemies = new Set(enemiesOf(world.polityAgreements, polityId));
+    for (const enemy of reading.wars.slice(0, 1)) {
+      const plan = warPlanOf(world, polityId, enemy);
+      if (plan !== undefined) options.push(warPlanLine(plan, nameOf));
+    }
     for (const force of world.material.forces.filter((candidate) => candidate.polityId === polityId && fitStrengthOf(candidate) > 0 && !isNavalForce(candidate, input.warfare)).slice(0, 2)) {
+      const orders = campaignOf(world, force.id);
+      if (orders !== undefined) { options.push(`${force.name}: ${campaignLine(orders, (id) => world.map.provinces.find((province) => province.id === id)?.name ?? id, (id) => world.material.forces.find((other) => other.id === id)?.name ?? id)}`); continue; }
       const order = conductOfWar(world, force, enemies, polityId, nameOf, input.warfare);
       if (order !== null) options.push(`${force.name}: ${order.act === "march" ? "march" : order.act === "attack" ? "give battle" : order.act === "besiege" ? "lay siege" : "fall back"} -- ${order.why}`);
     }
@@ -975,4 +989,18 @@ export function commandersTemper(commander: Character | undefined): { readonly w
   const wants = (1 + (50 - skill) / 100) * (1 - (bold - 50) / 200);
   const flees = 1 + (bold - 50) / 100;
   return { wants: Math.max(0.6, Math.min(1.5, wants)), flees: Math.max(0.6, Math.min(1.5, flees)) };
+}
+
+/** What a general who is not a ruler is shown of the war: his own orders and the head's plan, in one line. */
+function generalsLine(world: WorldState, characterId: string, nameOf: (id: string) => string): string[] {
+  const force = world.material.forces.find((candidate) => (candidate.commanderCharacterId === characterId || candidate.controllerCharacterId === characterId) && fitStrengthOf(candidate) > 0);
+  if (force === undefined) return [];
+  const orders = campaignOf(world, force.id);
+  const plan = (world.warPlans ?? []).find((candidate) => candidate.polityId === force.polityId);
+  const province = (id: string): string => world.map.provinces.find((candidate) => candidate.id === id)?.name ?? id;
+  const mode = orders === undefined ? "" : campaignLine(orders, province, (id) => world.material.forces.find((other) => other.id === id)?.name ?? id);
+  const main = plan?.theatres.find((theatre) => theatre.mainEffort);
+  const stance = plan === undefined ? "" : ` The war: ${plan.posture === "decisive" ? "to fight it out" : plan.posture === "defend" ? "to stand" : "to wear them down"}${main === undefined ? "" : `, main effort at ${province(main.provinceIds[0] ?? "")}`}.`;
+  if (orders === undefined && plan === undefined) return [];
+  return [`${force.name}: ${mode || "no orders given"}${stance}`.slice(0, 300)];
 }

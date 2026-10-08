@@ -27,8 +27,8 @@ const idFor = createIdFactory("war-sanity");
 let world = ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
 const context = () => ({ now: world.instant, actorRef: { kind: "character" as const, id: actor }, actsForTheWorld: true, offices: definition.government.offices, warfare: definition.warfare, terrains: definition.terrains ?? definition.map.terrains, ids: idFor, gameId: "war-sanity" });
 
-interface Year { orders: number; flips: number; naval: number; battles: number; sieges: number; planShifts: number; wars: number; cpu: number; men: number; engagements: number }
-const blank = (): Year => ({ orders: 0, flips: 0, naval: 0, battles: 0, sieges: 0, planShifts: 0, wars: 0, cpu: 0, men: 0, engagements: 0 });
+interface Year { orders: number; flips: number; naval: number; battles: number; sieges: number; planShifts: number; retargets: number; wars: number; cpu: number; men: number; engagements: number }
+const blank = (): Year => ({ orders: 0, flips: 0, naval: 0, battles: 0, sieges: 0, planShifts: 0, retargets: 0, wars: 0, cpu: 0, men: 0, engagements: 0 });
 const perYear: Year[] = [];
 const lastOrder = new Map<string, string>();
 const seenProjects = new Set<string>();
@@ -40,6 +40,9 @@ const menOf = (w: WorldState): number => w.material.forces.reduce((sum, f) => su
 let total = emptyAudit();
 const worstMonth = { ms: 0, month: 0 };
 const flipLog: string[] = [];
+let pendingBefore = new Map<string, string>();
+const lastObjective = new Map<string, string>();
+const priorIssued = new Map<string, number>();
 for (let month = 0; month < years * 12; month += 1) {
   if (month === 6) {
     world = applyDeltas(world, [WorldDeltaSchema.parse({ op: "agreement_open", localId: "sanity-war", kind: "war", polityId: "carthage", otherPolityId: "rome", terms: "The war for Sicily.", forDays: null, sourceMessageRef: null, visibility: "public", reason: "War." })], context() as never).world;
@@ -60,7 +63,13 @@ for (let month = 0; month < years * 12; month += 1) {
   row.cpu += ms;
   if (ms > worstMonth.ms) { worstMonth.ms = ms; worstMonth.month = month + 1; }
   total = combineAudits(total, auditMoney(before, world));
-  // March orders: a new force_move project; a flip when the force's last order had not been carried out.
+  // March orders: a new force_move project. A flip is a new destination ordered for an army whose last march (as the month before ended) had not been finished.
+  const pendingNow = new Map<string, string>();
+  for (const project of world.projects) {
+    const outcome = project.completionOutcome;
+    if (outcome?.kind !== "force_move" || outcome.forceId == null || (project.status !== "funded" && project.status !== "in_progress")) continue;
+    pendingNow.set(outcome.forceId, String(outcome.provinceId));
+  }
   for (const project of world.projects) {
     const outcome = project.completionOutcome;
     if (outcome?.kind !== "force_move" || outcome.forceId == null || seenProjects.has(project.id)) continue;
@@ -70,11 +79,21 @@ for (let month = 0; month < years * 12; month += 1) {
     if (isNavalForce(force, definition.warfare)) { row.naval += 1; continue; }
     row.orders += 1;
     const last = lastOrder.get(force.id);
-    if (last !== undefined && last !== outcome.provinceId && before.material.forces.find((f) => f.id === force.id)?.locationId !== last) {
+    const earlier = pendingBefore.get(force.id);
+    if (last !== undefined && last !== outcome.provinceId && earlier !== undefined && earlier !== outcome.provinceId) {
       row.flips += 1;
-      flipLog.push(`month ${month + 1}: ${force.name} ordered to ${String(outcome.provinceId)} before reaching ${last}`);
+      flipLog.push(`month ${month + 1}: ${force.name} ordered to ${String(outcome.provinceId)} before reaching ${earlier}`);
     }
     lastOrder.set(force.id, String(outcome.provinceId));
+  }
+  pendingBefore = pendingNow;
+  // The objective an army is sent on, changed before it was reached or run out (new rules only).
+  for (const cp of (world as unknown as { campaigns?: { forceId: string; objective: { kind: string; provinceId?: string; forceId?: string }; mode: string; expiresStep: number; issuedStep: number }[] }).campaigns ?? []) {
+    const key = JSON.stringify([cp.objective, cp.mode]);
+    const prior = lastObjective.get(cp.forceId);
+    if (prior !== undefined && prior !== key && cp.issuedStep > (priorIssued.get(cp.forceId) ?? 0)) row.retargets += 1;
+    lastObjective.set(cp.forceId, key);
+    priorIssued.set(cp.forceId, cp.issuedStep);
   }
   for (const siege of world.sieges) if (!seenSieges.has(siege.id)) { seenSieges.add(siege.id); row.sieges += 1; }
   for (const engagement of world.engagements ?? []) if (!seenEngagements.has(engagement.id)) { seenEngagements.add(engagement.id); row.engagements += 1; }
@@ -91,8 +110,13 @@ for (let month = 0; month < years * 12; month += 1) {
   if ((month + 1) % 12 === 0) {
     const r = perYear[year]!;
     const army = world.material.forces.filter((f) => !isNavalForce(f, definition.warfare) && fitStrengthOf(f) > 0).length;
-    console.log(`${formatWorldDate(world.instant, definition.clock)}: wars ${r.wars}, battles (cum) ${r.battles}, engagements opened ${r.engagements}, sieges laid ${r.sieges}, march orders ${r.orders} (flips ${r.flips}), plan shifts ${r.planShifts}, naval moves ${r.naval}, men under arms ${r.men}, armies ${army}, cpu/month ${(r.cpu / 12).toFixed(0)} ms`);
+    console.log(`${formatWorldDate(world.instant, definition.clock)}: wars ${r.wars}, battles (cum) ${r.battles}, engagements opened ${r.engagements}, sieges laid ${r.sieges}, march orders ${r.orders} (flips ${r.flips}), plan shifts ${r.planShifts}, objective changes ${r.retargets}, modes ${modeCount()}, naval moves ${r.naval}, men under arms ${r.men}, armies ${army}, cpu/month ${(r.cpu / 12).toFixed(0)} ms`);
   }
+}
+function modeCount(): string {
+  const count = new Map<string, number>();
+  for (const cp of (world as unknown as { campaigns?: { mode: string; expiresStep: number }[] }).campaigns ?? []) if (cp.expiresStep > world.instant.day) count.set(cp.mode, (count.get(cp.mode) ?? 0) + 1);
+  return [...count].map(([k, v]) => `${k} ${v}`).join("/") || "none";
 }
 const sum = (f: (y: Year) => number): number => perYear.reduce((s, y) => s + f(y), 0);
 console.log(`TOTAL march orders ${sum((y) => y.orders)}, flips ${sum((y) => y.flips)}, plan shifts ${sum((y) => y.planShifts)}, naval ${sum((y) => y.naval)}; worst month ${worstMonth.ms.toFixed(0)} ms (month ${worstMonth.month})`);

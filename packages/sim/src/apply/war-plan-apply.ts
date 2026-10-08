@@ -1,5 +1,6 @@
 import {
   fitStrengthOf,
+  leaderOf,
   type CampaignPlan,
   type FactProposalDraft,
   type WarPlan,
@@ -58,13 +59,14 @@ export function applyWarPlanSet(world: WorldState, delta: WarPlanSet, handles: H
   }));
   if (theatres.filter((theatre) => theatre.mainEffort).length > 1) reject("A war has one main effort; the plan names several.");
   const before = (world.warPlans ?? []).find((plan) => plan.warId === war!.id && plan.polityId === polityId);
-  const aimsKey = (aims: readonly WarPlan["aims"][number][]): string => JSON.stringify(aims);
+  const aimsKey = (aims: readonly WarPlan["aims"][number][]): string => JSON.stringify(aims.map((aim) => `${aim.kind}:${aim.provinceId ?? ""}:${aim.polityId ?? ""}`).sort());
   const atStep = world.elapsedStep;
   const plan: WarPlan = {
     warId: war!.id, polityId, enemyPolityId: enemyId, aims: delta.aims, theatres, posture: delta.posture,
     ...(delta.navalPlan === undefined ? {} : { navalPlan: { ...delta.navalPlan, seaProvinceIds: delta.navalPlan.seaProvinceIds.filter((id) => known.has(id)) } }),
     reviewedAtStep: atStep,
-    aimsSetAtStep: before !== undefined && aimsKey(before.aims) === aimsKey(delta.aims) ? before.aimsSetAtStep : atStep,
+    aimsSetAtStep: atStep,
+    aimsChangedAtStep: before !== undefined && aimsKey(before.aims) === aimsKey(delta.aims) ? before.aimsChangedAtStep : atStep,
     issuedByCharacterId: handles.actorId,
   };
   const main = theatres.find((theatre) => theatre.mainEffort);
@@ -95,7 +97,8 @@ export function applyCampaignPlanSet(world: WorldState, delta: CampaignPlanSet, 
   if (delta.objectiveProvinceId !== null && !known.has(delta.objectiveProvinceId)) reject(`No province "${delta.objectiveProvinceId}" exists to be the object of the orders.`, "reference");
   if (targetForceId !== null && !world.material.forces.some((candidate) => candidate.id === targetForceId)) reject(`No army "${targetForceId}" exists to be the object of the orders.`, "reference");
   for (const place of [delta.baseProvinceId, delta.fallbackProvinceId]) if (place !== null && !known.has(place)) reject(`No province "${place}" exists to be a base or a fallback.`, "reference");
-  const warId = world.polityAgreements.find((agreement) => agreement.kind === "war" && agreement.status === "active" && (agreement.polityId === force.polityId || agreement.otherPolityId === force.polityId))?.id ?? "no-war";
+  const sides = [force.polityId, leaderOf(world.polityAgreements, force.polityId)].filter((id): id is string => id !== null);
+  const warId = world.polityAgreements.find((agreement) => agreement.kind === "war" && agreement.status === "active" && (sides.includes(agreement.polityId) || sides.includes(agreement.otherPolityId)))?.id ?? "no-war";
   const atStep = world.elapsedStep;
   const issuer = handles.actorId ?? force.controllerCharacterId ?? force.commanderCharacterId;
   const plan: CampaignPlan = {

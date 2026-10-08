@@ -462,7 +462,7 @@ const thePraetor: Routine = (cx) => {
     text: `set a day for the case of ${accused.name}, who took ${row.amount} from ${what}, before the ${court.name.replace(/^the\s+/iu, "")}`,
     why: `justice: the case of ${accused.name} for what he took from ${what} [${accused.id}]`.slice(0, 400),
     deltas: [delta({
-      op: "political_procedure_open", localId: `case_${accused.id}_${row.id}`.slice(0, 60), type: "denunciation", institutionRef: court.id, sponsorCharacterRef: man.id,
+      op: "political_procedure_open", localId: `case_${accused.id}_${row.id}`.toLowerCase().replace(/[^a-z0-9_-]/gu, "_").slice(0, 60), type: "denunciation", institutionRef: court.id, sponsorCharacterRef: man.id,
       subjectKind: "character", subjectRef: accused.id, label: `The case of ${accused.name} for what he took from ${what}`.slice(0, 200), resolutionMechanism: "vote", deadlineInDays: 30,
       visibility: "public", enacts: null, concerns: ["punishment"], reason: `An audit found ${row.amount} in ${accused.name}'s hands; ${man.name} brings the case.`.slice(0, 240),
     })],
