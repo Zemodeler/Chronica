@@ -252,19 +252,19 @@ const SENATORS: readonly {
     skills: { martial: 55, intrigue: 40, learning: 85, piety: 85, stewardship: 60, diplomacy: 65, body: 45 }, temperament: { boldness: 45, caution: 60, honesty: 80, sociability: 60, discipline: 70, cruelty: 20 },
     drives: { security: 50, status: 55, wealth: 25, family: 45, faith: 85, duty: 75, revenge: 10 }, traits: ["cautious", "dutiful"], values: ["pious"] },
   // Consul 293 and 272: took Tarentum's surrender two years ago; a patrician of the old school, and his father's son.
-  { id: "lucius-papirius", name: "Lucius Papirius Cursor", age: 52, prestige: 8_800, offices: ["roman-quaestor", "roman-praetor", "roman-consul"],
+  { id: "lucius-papirius", name: "Lucius Papirius Cursor", age: 66, prestige: 8_800, offices: ["roman-quaestor", "roman-praetor", "roman-consul"],
     skills: { martial: 78, intrigue: 45, learning: 45, piety: 55, stewardship: 55, diplomacy: 50, body: 65 }, temperament: { boldness: 75, caution: 40, honesty: 60, sociability: 40, discipline: 80, cruelty: 50 },
     drives: { security: 40, status: 75, wealth: 40, family: 60, faith: 50, duty: 70, revenge: 35 }, traits: ["bold", "ambitious"], values: ["glory"] },
   // Consul 293 and 272, Papirius's colleague at Tarentum; a plebeian who built a temple to Fors Fortuna from the Samnite spoils.
-  { id: "spurius-carvilius", name: "Spurius Carvilius Maximus", age: 56, prestige: 8_400, offices: ["roman-quaestor", "roman-praetor", "roman-consul"],
+  { id: "spurius-carvilius", name: "Spurius Carvilius Maximus", age: 66, prestige: 8_400, offices: ["roman-quaestor", "roman-praetor", "roman-consul"],
     skills: { martial: 72, intrigue: 45, learning: 40, piety: 60, stewardship: 60, diplomacy: 55, body: 55 }, temperament: { boldness: 60, caution: 50, honesty: 65, sociability: 60, discipline: 65, cruelty: 30 },
     drives: { security: 50, status: 60, wealth: 50, family: 50, faith: 60, duty: 65, revenge: 20 }, traits: ["sociable", "dutiful"], values: [] },
   // Consul 292 and 276: the Fabius who was nearly disgraced by the Samnites and saved by his father; patrician, and patient.
-  { id: "quintus-fabius", name: "Quintus Fabius Maximus Gurges", age: 50, prestige: 8_700, offices: ["roman-quaestor", "roman-praetor", "roman-consul"],
+  { id: "quintus-fabius", name: "Quintus Fabius Maximus Gurges", age: 66, prestige: 8_700, offices: ["roman-quaestor", "roman-praetor", "roman-consul"],
     skills: { martial: 62, intrigue: 55, learning: 50, piety: 60, stewardship: 60, diplomacy: 60, body: 50 }, temperament: { boldness: 45, caution: 65, honesty: 60, sociability: 55, discipline: 70, cruelty: 30 },
     drives: { security: 60, status: 70, wealth: 45, family: 80, faith: 55, duty: 70, revenge: 25 }, traits: ["cautious", "ambitious"], values: ["family"] },
   // Three times consul (305, 294, 291), fined for using his soldiers on his own estate; the proudest patrician in the house, and the most hated.
-  { id: "lucius-postumius", name: "Lucius Postumius Megellus", age: 64, prestige: 8_300, offices: ["roman-quaestor", "roman-praetor", "roman-consul"],
+  { id: "lucius-postumius", name: "Lucius Postumius Megellus", age: 78, prestige: 8_300, offices: ["roman-quaestor", "roman-praetor", "roman-consul"],
     skills: { martial: 70, intrigue: 60, learning: 40, piety: 40, stewardship: 50, diplomacy: 30, body: 45 }, temperament: { boldness: 80, caution: 30, honesty: 35, sociability: 25, discipline: 55, cruelty: 70 },
     drives: { security: 40, status: 90, wealth: 70, family: 55, faith: 35, duty: 40, revenge: 60 }, traits: ["ambitious", "cruel"], values: ["glory"] },
   // Consul 280, beaten by Pyrrhus at Heraclea; he has not been allowed to forget it.
@@ -272,7 +272,7 @@ const SENATORS: readonly {
     skills: { martial: 58, intrigue: 45, learning: 50, piety: 55, stewardship: 55, diplomacy: 55, body: 55 }, temperament: { boldness: 55, caution: 55, honesty: 65, sociability: 55, discipline: 60, cruelty: 30 },
     drives: { security: 50, status: 70, wealth: 45, family: 55, faith: 50, duty: 65, revenge: 45 }, traits: ["ambitious"], values: [] },
   // Consul 285 and 273; a Claudius, of the house that built the Appian Way and never let anybody forget it.
-  { id: "gaius-claudius", name: "Gaius Claudius Canina", age: 50, prestige: 8_000, offices: ["roman-quaestor", "roman-praetor", "roman-consul"],
+  { id: "gaius-claudius", name: "Gaius Claudius Canina", age: 58, prestige: 8_000, offices: ["roman-quaestor", "roman-praetor", "roman-consul"],
     skills: { martial: 60, intrigue: 60, learning: 55, piety: 50, stewardship: 60, diplomacy: 55, body: 50 }, temperament: { boldness: 60, caution: 50, honesty: 50, sociability: 45, discipline: 65, cruelty: 40 },
     drives: { security: 45, status: 80, wealth: 55, family: 75, faith: 45, duty: 55, revenge: 35 }, traits: ["ambitious", "disciplined"], values: ["family"] },
 ];

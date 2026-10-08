@@ -26,6 +26,22 @@ describe("the roster is historical", () => {
     expect(total).toBe(CONSULS_366_TO_270.reduce((sum, [, names]) => sum + names.length, 0));
   });
 
+  it("makes the old consuls old enough to have been consuls (v58)", () => {
+    // A man is at least about forty-two in the year of his first consulship (the custom of the age, which the lex Villia annalis of 180 only wrote down), so in 270 he is
+    // at least (the year of it, in years before Christ) + 42 - 270. The ages the scenario gave Gurges and the rest were ten to thirty-five years short of it.
+    const wanted: readonly (readonly [string, number])[] = [
+      ["Quintus Fabius Maximus Gurges", 292], ["Gaius Marcius Rutilus", 310], ["Lucius Postumius Megellus", 305], ["Publius Cornelius Arvina", 306],
+      ["Lucius Papirius Cursor", 293], ["Spurius Carvilius Maximus", 293], ["Gaius Claudius Canina", 285],
+    ];
+    for (const [name, firstConsulship] of wanted) {
+      expect(named(world, name).ageYearsAtStart ?? 0, name).toBeGreaterThanOrEqual(firstConsulship + 42 - 270);
+    }
+    // And the oldest of them is what the sources make him: Rutilus Censorinus, consul in 310 and censor in 265, is past eighty.
+    expect(named(world, "Gaius Marcius Rutilus").ageYearsAtStart).toBeGreaterThanOrEqual(82);
+    // Nobody of the opening's Romans is older than a man could be and still sit as censor (the oldest of them is Rutilus, in his late eighties in 265).
+    expect(Math.max(...world.characters.filter((character) => character.polityId === "rome").map((character) => character.ageYearsAtStart ?? 0))).toBeLessThanOrEqual(90);
+  });
+
   it("gets the counts of the great gentes right, as Broughton has them to 270", () => {
     const consuls = (id: string): number => gensById(world, id)!.honours.filter((honour) => honour.kind === "consul").length;
     expect(consuls("gens-fabius")).toBe(13);

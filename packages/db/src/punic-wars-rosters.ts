@@ -73,8 +73,9 @@ const ROME: PowerRoster = {
     "roman-censor": [{ name: "Quintus Aemilius Papus", age: 62, focus: "learning", prestige: 8_600, traits: ["dutiful"] }, "manius-curius"],
     "roman-pontifex-maximus": ["tiberius-coruncanius"],
     "roman-pontiff": [
-      { name: "Publius Cornelius Arvina", age: 58, focus: "piety", prestige: 7_000 },
-      { name: "Gaius Marcius Rutilus", age: 50, focus: "piety", prestige: 6_800 },
+      { name: "Publius Cornelius Arvina", age: 78, focus: "piety", prestige: 7_000 },
+      // C. Marcius Rutilus Censorinus (v58): consul in 310, censor in 294 and again in 265, so born by 352 and eighty-four in 270 (Livy 9.38 and 10.47; Valerius Maximus 4.1.3).
+      { name: "Gaius Marcius Rutilus", age: 84, focus: "piety", prestige: 6_800 },
       { name: "Lucius Aemilius Barbula", age: 53, focus: "learning", prestige: 6_700 },
       { name: "Quintus Marcius Philippus", age: 50, focus: "piety", prestige: 6_600 },
     ],
