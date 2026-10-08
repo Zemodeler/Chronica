@@ -172,6 +172,7 @@ import { endPolity } from "../polity-end";
 import { LOAN_TERM_PERIODS, loanInstalment } from "../debts";
 import { EMBARGO_BREACH_TRUST, endObligationsOfEndedAgreements, hasGrievance, shiftTrust } from "../treaties";
 import { safeLocalId } from "../safe-local-id";
+import { clipOverlong } from "../clip-overlong";
 
 /** The words added to the news of an embargo when it ended a trade pact that stood: the pact was broken, not closed. */
 const brokenPactNote = (world: WorldState, a: string, b: string): string =>
@@ -1321,7 +1322,12 @@ function applyUngroupedDeltas(world: WorldState, deltas: readonly WorldDelta[], 
   // One structural check at the end rather than per delta: the per-delta guard
   // above already catches the realistic failure, and re-parsing a whole world
   // once per delta is not worth the marginal safety.
-  const parsed = WorldStateSchema.safeParse(current);
+  let parsed = WorldStateSchema.safeParse(current);
+  // A string too long for its field is cut to fit, not allowed to cost the player's whole order.
+  if (!parsed.success) {
+    const mended = clipOverlong(current);
+    if (mended !== null) { current = mended.world; parsed = WorldStateSchema.safeParse(current); }
+  }
   // Only what this batch broke is this batch's fault. A world already invalid
   // when it came in -- a plan step slipped past its limit by the tick -- had
   // every batch after it refused as "would have left the world invalid", the

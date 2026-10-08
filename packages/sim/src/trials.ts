@@ -7,6 +7,10 @@ import {
   skillShare,
   vacateOfficesOf,
   boundedId,
+  GenericEntitySchema,
+  INFAMIA_DAYS,
+  INFAMIA_KIND,
+  NOTA_RECORD_KIND,
   type Character,
   type BattleResult,
   type FactProposalDraft,
@@ -16,6 +20,7 @@ import {
 } from "@chronica/shared";
 import { killCharacter } from "./mortality";
 import { hisMasters, kinOf, remember, teach, type Grievance } from "./grievances";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Trials (docs/plans/departments.md §6, §9).
@@ -97,7 +102,7 @@ export function summonToJudgment(world: WorldState, result: BattleResult, losers
     };
     next = { ...next, material: { ...next.material, politicalProcedures: [...next.material.politicalProcedures, procedure] } };
     facts.push({
-      localId: `trial_${commander.id}`.slice(0, 60),
+      localId: safeLocalId(`trial_${commander.id}`).slice(0, 60),
       kind: "trial_called",
       summary: `${commander.name} is summoned before ${court.name} to answer for the defeat at ${provinceName}${routed ? ", and it is his life they will vote on" : ""}.`.slice(0, 400),
       affectedRefs: [{ kind: "character", id: commander.id }, { kind: "polity", id: force.polityId }],
@@ -235,6 +240,7 @@ export function sentenceByOutcome(world: WorldState, procedure: PoliticalProcedu
   const purse = next.material.accounts.find((account) => account.id === convicted.personalAccountId)?.balance ?? 0;
   move(convicted.personalAccountId, treasuryOf(convicted.polityId), Math.floor(purse * FINE_SHARE));
   next = vacateOfficesOf(next, convicted.id, "removal", atStep);
+  next = branded(next, convicted, sentence === "exile" ? "life" : atStep + INFAMIA_DAYS, procedure.label, atStep);
   // Convicted is disgraced: a fine is a blot, exile all but the end of a name.
   next = shiftStanding(next, convicted.id, sentence === "exile" ? EXILE_STANDING_BPS : FINE_STANDING_BPS, "scandal");
   if (sentence === "exile") {
@@ -275,4 +281,25 @@ function acquitted(world: WorldState, procedure: PoliticalProcedure, atStep: num
     subjectCharacterId: accused.id, targetCharacterId: procedure.sponsorCharacterId, label: "He tried to ruin me in the courts, and failed.",
     score: -12, dimensions: { trust: -25, affection: -15 },
   }], atStep, `${procedure.id}:acquitted`), accused.id, "acquitted", atStep);
+}
+
+/**
+ * What a conviction leaves on a man's name, as Rome's custom had it: he is infamous (*infamia*) and the magistracies are shut to him for ten years, or for
+ * life if he was sent into exile; he is struck by the censors' mark, so he is neither a military tribune nor a senator until the next censors lift it
+ * (`the-lectio.ts`); and a magistracy he was chosen for and had not yet entered goes with the rest. Where he sat as consul, the chair is empty on the day.
+ */
+function branded(world: WorldState, convicted: Character, until: number | "life", label: string, atStep: number): WorldState {
+  const why = label.replace(/^the case of /i, "").slice(0, 120);
+  const officeSeats = world.material.officeSeats.map((seat) => (seat.designateCharacterId === convicted.id ? { ...seat, designateCharacterId: null } : seat));
+  const entities = [
+    GenericEntitySchema.parse({
+      id: `infamia-${convicted.id}-${atStep}`.slice(0, 100), kind: INFAMIA_KIND, label: `${convicted.name} stands condemned`.slice(0, 120), ownerRef: { kind: "polity", id: convicted.polityId },
+      attributes: { characterId: convicted.id, untilStep: until, why, atStep }, createdAtStep: atStep,
+    }),
+    ...(world.genericEntities.some((entity) => entity.kind === NOTA_RECORD_KIND && entity.attributes?.["characterId"] === convicted.id) ? [] : [GenericEntitySchema.parse({
+      id: `nota-${convicted.polityId}-${convicted.id}-${atStep}`.slice(0, 100), kind: NOTA_RECORD_KIND, label: `The censors' mark against ${convicted.name}`.slice(0, 120), ownerRef: { kind: "polity", id: convicted.polityId },
+      attributes: { characterId: convicted.id, atStep, why: "a court condemned him", by: "the court" }, createdAtStep: atStep,
+    })]),
+  ];
+  return { ...world, material: { ...world.material, officeSeats }, genericEntities: [...world.genericEntities.filter((entity) => !(entity.kind === INFAMIA_KIND && entity.attributes?.["characterId"] === convicted.id)), ...entities] };
 }

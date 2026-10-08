@@ -253,7 +253,7 @@ export function keepPromises(input: PromiseInput): { world: WorldState; facts: F
       };
       world = remember(world, [{
         subjectCharacterId: beneficiary, targetCharacterId: promisor,
-        label: `Held to his word: ${commitment.description}`, score: 4, dimensions: { trust: 6 },
+        label: `Held to his word: ${commitment.description}`.slice(0, 200), score: 4, dimensions: { trust: 6 },
       }], input.toDay, `promise-held-${commitment.id}`);
       continue;
     }
@@ -281,7 +281,7 @@ export function keepPromises(input: PromiseInput): { world: WorldState; facts: F
     }
     world = settled(world, breakCommitment(world, commitment.id, input.toDay, able ? "He let its day pass twice." : "He no longer holds what he promised."));
     const wronged: Grievance[] = [
-      { subjectCharacterId: beneficiary, targetCharacterId: promisor, label: `Broke his word: ${commitment.description}`, score: -14, dimensions: { trust: -20, reputation: -8 } },
+      { subjectCharacterId: beneficiary, targetCharacterId: promisor, label: `Broke his word: ${commitment.description}`.slice(0, 200), score: -14, dimensions: { trust: -20, reputation: -8 } },
       ...kinOf(world, beneficiary).filter((kin) => kin !== promisor).map((kin): Grievance => ({
         subjectCharacterId: kin, targetCharacterId: promisor, label: `Broke his word to ${nameOf(beneficiary)}`, score: -5, dimensions: { trust: -6 },
       })),

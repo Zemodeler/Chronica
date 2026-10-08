@@ -436,6 +436,7 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
         // engine's limit off as the world's quiet (R52, R80). What was left
         // stays on the order, and the next order takes it up.
         ...(result.stopReason === "budget_exhausted" || result.stopReason === "deadline" ? ["This report ends here for now; what is still open stays in hand for your next order."] : []),
+        ...(result.stopReason === "tick_failed" ? ["The days could not be carried forward: something in the world's books would not hold, and the turn has stopped where it was whole. Nothing past this day has happened; give the order again, or tell those who keep the game."] : []),
       ], result.orderFactIds, result.world.instant.day * 1440 + result.world.instant.minute);
     // What the turn changed, read from the two worlds: whatever the prose chose to tell (4.5).
     const changedEntry = whatChangedEntry({ before: view.world, after: result.world, polityId: actorPolityId, characterId: actorRef.kind === "character" ? actorRef.id : null }, result.world.instant.day * 1440 + result.world.instant.minute);

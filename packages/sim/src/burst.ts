@@ -144,12 +144,14 @@ import { ensureConstitutions } from "./constitutions";
 import { skimTheHand } from "./departments";
 import { decideStatecraft, ledgerEntry, rulerOptions, type StatecraftInput } from "./statecraft";
 import { castDossier, reviewCast } from "./cast";
+import { FAR_REST_DAYS, aFarManRests, aSeedIsWithinReach, anOwnerIsNear, circleOf, touchedByThePlayer } from "./far-cast-rests";
 import { reviewPushback } from "./pushback";
 import { decideVillainy, seizeThrones, usurpations } from "./villainy";
 import { newsRelations, powersDealtWith, powersNearThePlayer } from "./far-powers";
 import { groundOfForce } from "./force-ground";
 import { farBusinessFloor, keepFarNewsHome } from "./far-news";
 import { brokenBy, whyItWillNotLoad } from "./checkpoint";
+import { clipOverlong } from "./clip-overlong";
 import { theOrdersOwnParts } from "./order-parts";
 import { actsHeCanDo, dedupeStages, resolveHandles } from "./order-stages";
 import { stampOrderMoney } from "./order-money";
@@ -1102,6 +1104,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   const battleAccounts: BattleAccount[] = [];
   const breaches: AuthorityBreach[] = [];
   const parseFailures: string[] = [];
+  /** Set when a tick wrote a world that would not load: the burst stops at the last sound day, and says so. */
+  let tickFailure: string | null = null;
   const salvaged: string[] = [];
   const skipped: BurstSkip[] = [];
   /** Facts that lost a place no army of theirs stands at or is bound for (`FACT_PLACES_TOLD`). */
@@ -1159,8 +1163,15 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     const factsBefore = newFacts.length;
     step();
     if (world === before) return true;
-    const broken = brokenBy(before, world);
+    let broken = brokenBy(before, world);
     if (broken === null) return true;
+    const mended = clipOverlong(world);
+    if (mended !== null) {
+      skipped.push({ stage: "invariant", reason: `${stage} wrote words too long for their place, and they were cut: ${mended.clipped.slice(0, 3).join(", ")}` });
+      world = mended.world;
+      broken = brokenBy(before, world);
+      if (broken === null) return true;
+    }
     world = before;
     newFacts.splice(factsBefore);
     skipped.push({ stage: "invariant", reason: `${stage} wrote what would not load, and was set aside: ${broken}` });
@@ -2371,7 +2382,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       candidates.push({ entityId: madeId, delta: applied.delta, attempt, ofTheOrder: applied.ofTheOrder === true });
     }
     if (candidates.length > 0) {
-      const actText = actsForTheWorld && input.orderText !== null ? input.orderText : proposal.narrativeSummary || materialized.facts[0]?.summary || "";
+      // The order's words are "what was said" only for an arrangement the order set going, never for the world's own.
+      const actText = actsForTheWorld && input.orderText !== null && candidates.some((candidate) => candidate.ofTheOrder) ? input.orderText : proposal.narrativeSummary || materialized.facts[0]?.summary || "";
       await offerMechanics(candidates, actorRef, actText);
     }
     /** Where an act stood in the answer's own list, which is how the answer names it. */
@@ -2566,10 +2578,22 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // refused for a fault that was not theirs, and the bad world was saved
     // anyway. A hop whose bookkeeping will not hold is dropped instead; the
     // clock has already moved, and the next hop tries again from good state.
-    const holds = WorldStateSchema.safeParse(ticked.world);
+    let holds = WorldStateSchema.safeParse(ticked.world);
+    if (!holds.success) {
+      // A string too long for its field is cut to fit, and said so, rather than costing the world its day.
+      const mended = clipOverlong(ticked.world);
+      if (mended !== null) {
+        skipped.push({ stage: "invariant", reason: `the tick to day ${toDay} wrote words too long for their place, and they were cut: ${mended.clipped.slice(0, 3).join(", ")}` });
+        holds = WorldStateSchema.safeParse(mended.world);
+      }
+    }
     if (!holds.success) {
       const [issue] = holds.error.issues;
-      parseFailures.push(`the tick to day ${toDay} wrote a world that would not load and was set aside (${issue === undefined ? "unknown" : `${issue.path.join(".")}: ${issue.message}`})`);
+      const failure = `the tick to day ${toDay} wrote a world that would not load and was set aside (${issue === undefined ? "unknown" : `${issue.path.join(".")}: ${issue.message}`})`;
+      parseFailures.push(failure);
+      // Loud, and the clock is not carried past it (see the loop): a silent skip let months go by with nothing ticking.
+      tickFailure ??= failure;
+      console.error(`[chronica] ${failure}`);
       return;
     }
     // The tick writes without the applier's per-act checks, so what it left
@@ -2710,6 +2734,12 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         audit.push({ actorRef, op: candidate.delta.op, kind: "mechanic", ofTheOrder: candidate.ofTheOrder, attempt: candidate.attempt, reason: `${entity.id}: ${mechanicInWords(checked.draft, world)}.${dropped}`, delta: candidate.delta });
         return true;
       };
+      // Only what the player's own business touches is worth a call to write a rule for: a far people's census stands as the plain arrangement.
+      if (!candidate.ofTheOrder && playerId !== null
+        && !anOwnerIsNear(world, owner, playerId, playerInterests(world, playerId, input.offices), circleOf(world, playerId), powersNearThePlayer(world, playerId))) {
+        skipped.push({ stage: "mechanic", reason: `${entity.id}: the owner is far from the player's concerns; it stands without a rule written for it` });
+        continue;
+      }
       if (mechanicCalls >= budget.maxMechanicCalls) {
         skipped.push({ stage: "mechanic", reason: `${entity.id}: ${mechanicCalls} call(s) for rules already made this burst (of ${budget.maxMechanicCalls}); it stands without one` });
         continue;
@@ -3439,7 +3469,13 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         warfare: input.warfare,
         ...(input.historicalPressures === undefined ? {} : { pressures: input.historicalPressures }),
       });
-  const seeds = world.owed.length > 0 && input.narratorSeeds === undefined ? offered.slice(0, 1) : offered;
+  // What stirs far from the player is the world's own (the rules play it); the orchestrator is shown only the stirrings within his reach (`far-cast-rests.ts`).
+  const reachable = input.narratorSeeds !== undefined || playerId === null ? offered : (() => {
+    const interests = playerInterests(world, playerId, input.offices);
+    const circle = circleOf(world, playerId);
+    return offered.filter((seed) => aSeedIsWithinReach(seed, interests, circle, playerId));
+  })();
+  const seeds = world.owed.length > 0 && input.narratorSeeds === undefined ? reachable.slice(0, 1) : reachable;
   world = recordSeedsOffered(world, seeds, world.instant.day + Math.min(input.spanDays ?? budget.maxSimulatedDays, input.clock.maxSpanDays));
 
   // The stirrings that are arithmetic and a line of news are the engine's to
@@ -3520,7 +3556,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         prefetch.current = { ids: new Set(early.map((actor) => actor.characterId)), pending };
       }
     }
-    const orchestration = holdForArrival(input.continuation === true && input.orderText === null ? quietOrchestration() : approachFirst(givenItsDestination(templated !== null ? { output: templated.output, calls: 0, parseFailure: null, salvaged: [] as string[], repairedFrom: null } : await orchestrate(input.port, slice, kindsIn(world)), world), world));
+    // No order is no call: a stretch with nothing said is time passing, whether it is a continuation or a turn the player gave no word (`a-wait-needs-no-orchestrator.test.ts`).
+    const orchestration = holdForArrival((input.continuation === true || input.answeredDecision === undefined) && (input.orderText === null || input.orderText.trim() === "") ? quietOrchestration() : approachFirst(givenItsDestination(templated !== null ? { output: templated.output, calls: 0, parseFailure: null, salvaged: [] as string[], repairedFrom: null } : await orchestrate(input.port, slice, kindsIn(world)), world), world));
     modelCalls += orchestration.calls;
     iterations += 1;
     if (orchestration.parseFailure !== null) parseFailures.push(orchestration.parseFailure);
@@ -3849,6 +3886,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   if (playerDecision === null) await releaseHeldAnswers();
   while (playerDecision === null) {
     const elapsedDays = world.instant.day - startDay;
+    if (tickFailure !== null) {
+      stopReason = "tick_failed";
+      break;
+    }
     if (elapsedDays >= maxDays) {
       stopReason = "max_span";
       break;
@@ -3928,8 +3969,11 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // jumping a fortnight at a time to the next thing on the calendar -- is
     // one window and one look by the historian, not one per hop.
     if (windowIndex === 0 || askedSinceWindow) closeWindow();
+    const beforeTheHop = world;
     world = advanceWorldTo(world, addMinutes(world.instant, Math.max(0, targetKey - nowKey())));
     tickTo(world.instant.day);
+    // The hop's tick would not hold: the clock goes back to where it was, and the loop stops at its head.
+    if (tickFailure !== null) { world = beforeTheHop; continue; }
     fireDueEvents();
     report({ kind: "advanced", date: today() });
     await releaseHeldAnswers();
@@ -4108,7 +4152,17 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       return lastDay !== null && !actor.pressing && !orderPeople.has(actor.characterId) && !dueWhy.has(actor.characterId) && !owesAnAnswer.has(actor.characterId)
         && world.instant.day - lastDay < QUIET_COOLDOWN_DAYS;
     };
-    const fresh = playersPeopleFirst(novel.filter((actor) => !coolingOff(actor) && (playerId === null
+    // A far ruler of the wider world's seats is asked, then left to the rules for `FAR_REST_DAYS`, unless the player's own business touches him (`far-cast-rests.ts`).
+    const farCircle = circleOf(world, playerId);
+    const farTouched = touchedByThePlayer(world, playerId);
+    const castSeats = new Map(world.cast.members.map((member) => [member.characterId, member] as const));
+    const restingFar = (actor: (typeof novel)[number]): boolean => {
+      const member = castSeats.get(actor.characterId);
+      return member !== undefined && playerId !== null && aFarManRests(world, member, interests, farCircle, farTouched, cognitionMemory.lastAskedStep(actor.characterId));
+    };
+    const farRested = novel.filter(restingFar);
+    if (farRested.length > 0) skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: ${farRested.length} far man/men of the wider world rest ${FAR_REST_DAYS} days between asks and play on the rules` });
+    const fresh = playersPeopleFirst(novel.filter((actor) => !coolingOff(actor) && !restingFar(actor) && (playerId === null
       || cognitionPolicy.shouldAsk(actor, world, interests, significanceByFactId, authorOf, due))), orderPeople);
     if (novel.length < castNow.length) {
       skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: ${castNow.length - novel.length} with nothing new since they last answered left unasked` });
