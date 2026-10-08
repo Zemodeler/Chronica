@@ -598,7 +598,7 @@ The `wantDepartments` ambitions (hand work on, a treasurer, a watch, a keeper of
 Not done: the chambers do not vote a charge into being for a republic by rule (a Senate decree founding a department is still an order's); a charge made by rule is honorary, with no pay of its own; no officer is ever removed or replaced by rule except through the posts' existing
 turnover (`fillAppointments` fills what stands empty).
 
-### Not in H1
+### Not in H1 (done in H2 and H3 below, except accounts and the office view)
 
 The officers' routine for justice, rites, works and the census (H2), the Senate's gates on war and provinces, the Hundred and Four, the king's friends costing a ruler legitimacy (H3), accounts at the close of office (H4),
 the office view (H5). Subject Greek cities under Macedon's garrisons and Italian allies' other treaties (an ally's *foreign pacts* beyond war and peace) are not read as forbidden: `foedus` is the only agreement that does it.
@@ -608,3 +608,113 @@ the office view (H5). Subject Greek cities under Macedon's garrisons and Italian
 `the-quaestor-asks-the-senate`, `a-magistrate-lays-no-new-tax`, `the-charges-follow-the-constitution` (a dictator, a coup in Carthage, a throne with no heir, a league's reform, an ally that breaks with Rome),
 `every-power-has-a-head-who-can-act`, `the-charges-match-the-sources` (the data block above, line by line for Rome and Carthage), and the changed `a-treasurer-decides`, `two-consuls-do-not-both-tax`,
 `the-new-levers-bite` (Rome's seeded charges stripped for the baseline: `bare-of-charges.ts`), `a-quaestor-keeps-the-books`, `the-books-balance-with-houses` (the chambers sit each month) and `no-modern-words`; appointments by rule: `appointments-by-rule`, and the engine's hold on the orchestrator's routine acts: `the-orchestrator-keeps-out-of-other-states-books`.
+
+## Gaps found (the audit before H2 and H3)
+
+The plan (the approved one, `~/.claude/plans/floofy-popping-horizon.md`) set against what H0 and H1 built, bullet by bullet.
+
+| # | Plan item | What was built | Gap | Closed in |
+|---|---|---|---|---|
+| 1 | Gate the acts of the twelve (A, H0) | `tax_policy_set`, `coinage_debase`, `loan_open`, `money_transfer`, `service_contract_open`, the dole, `agreement_open`/`_close` | Bread for an army (`force_provision`), a work begun from the chest (`project_create`) and the levy (`force_create`) were not weighed at all; the consul's "levy: with a colleague" and Carthage's "levy: the Elders'" were readings only | H2: `competence-gate.ts` weighs all three (army bread and works as spending against the allowance; the levy as the act `levy`) |
+| 2 | `FiscalMark` (A, H0) | `ActMark` / `WorldState.actMarks` | A name only | docs: the mark is `ActMark` throughout |
+| 3 | A decider for each fiscal act in each power | `every-power-has-a-head-who-can-act` read the offices, not the seats | An office with every seat empty counted as a decider | H2: the test now wants a living man seated (tribal peoples have no standing tax or loans by their form: the research; a data wart is noted below) |
+| 4 | Officials act by rule per charge (C, H2) | Only the fiscal officers (rate, customs, credit, coin, pacts), the houses, the upkeep and the works | Grain and markets, the levy and the host, justice, the rites, the census, the mint, the foreign letters had no routine | H2: `magistrates.ts` |
+| 5 | Quality from the man: greed skims, the disloyal drag, the ambitious scheme, the willful refuse | Greed skimmed a department's collections only; sulking lowered a department's skill; refusals were for orders | A magistrate's own act took no skim and no refusal | H2: `skimTheHand`, `willing` (`defianceOf`), the ambitious aedile's games at his own cost |
+| 6 | Matters beyond competence go to the body | A one-off motion by the fiscal officers | No general laying of war, peace, alliances, the levy, bread or supply by the magistrates; a republic's war and peace were made by the ruler as the world's own business | H2/H3: `weigh` for each routine; `passage` in `statecraft.ts` for war, peace and alliances |
+| 7 | A body is a real vote of its franchise (D, H3) | `senate.ts`, `ballots.ts`, blocs, `supportPositions`, gens, tribunes, referral to the people, `overruleCost` | No agenda, no queue bound, no sitting; a tribune voted only if a person or the model spoke for him; the augur's stop was a reading | H3: `bodies.ts` |
+| 8 | Tribune's veto on fiscal acts and levies | The gate's `mayStop` and the intercession for a magistrate's own act | Nothing in session | H3: `tribunesTakeASide` |
+| 9 | Augurs' *obnuntiatio* | Reading only (`mayStop: appointment`) | Nothing stopped | H3: `theAuspices` (the people's business, once, a month) |
+| 10 | Carthage's Elders and the Hundred and Four | The Council holds the powers; `summonToJudgment` summons a defeated general | No test of the court from summons to sentence; no case from the praetor's side | H3: `the-104-judge-a-general`; H2: `thePraetor` sends cases to the court |
+| 11 | The king's friends counsel without binding; overruling costs legitimacy | `giveAdvice`/`settleAdvice`/`overruleCost` for questions that were put | No king ever put one by rule, and no king ever overruled by rule | H3: `consultTheFriends` (war), `decideCouncils` |
+| 12 | Tenures follow the constitution | Seats, terms, elections, succession | Nothing wrong; left alone | -- |
+| 13 | H4 accounts at the close of office, censors' audits, trials | Audits and trials | The accounts, the censors' routine audit | H4 |
+| 14 | H5 the office view | Nothing | All | H5 |
+| 15 | H6 provinces and promagistrates, the censors' *lectio*, factions, a government sanity script | `command-tenure.ts` has the prorogation | The *lectio* (the census is taken, nobody is struck off), command assignment by rule, the sanity script | H6 |
+
+Warts noticed and not mended: a tribal power has two chief offices (`boii-ruler`, an unseated template office with a tax charge, and `boii:ruler`, the seated head whose charge forbids it), so the earlier decider test passed
+on the phantom; `kept-by-the-officers` does not name the dole or the levy, so a model-played man writing them is not set aside (it is weighed by competence, which is what matters).
+
+## H2 as built
+
+Phase H2: the men who hold a charge act, once a month, by rule. `sim/src/magistrates.ts` is a small registry (a charge and its routine); each routine reads the state of its charge, and the man who holds it acts inside his
+competence through the ordinary deltas, so authority, the audits and the money audit apply. The fiscal officers (`fiscal-officers.ts`), the upkeep and the works (`keeping-the-state.ts`) and the houses
+(`merchant-houses.ts`) keep their own routines where they stand: they were built before the registry and share its helpers (`weigh`, `readTheBooks`, `grainStress`, the log as memory) instead of being moved into it.
+
+### The routines
+
+| Charge | The man | What he does | What is beyond him |
+|---|---|---|---|
+| The grain and the markets | Rome's aediles (the lever `grain`), else the head | In a dearth (famine price in a quarter of the hubs), bread out of the chest as a `public_benefaction` dole to the hungriest province, 0.3 to 1.2 months of takings by the man's worth, every 45 days; the games of the year on his allowance; an ambitious aedile (status 70 and over, not a thief) gives games at his own cost | More than a month of takings is a motion before the Senate; the same motion is not put twice |
+| The levy | The consul (with his colleague), a praetor or a general; the head for a king | The *dilectus* when at war and the host fields under 35 in a hundred of what the levy could raise, in the third month for a collegial magistrate, once in 300 days; the contingent an ally owes by its foedus (30 in a hundred of its levy, 300 men at the least) when its leader is at war | The dilectus is weighed as the act `levy` (Carthage's suffetes ask the Elders) |
+| The host's supply | The holder of `supply`, else a head | Bread bought (`force_provision`) for the two largest armies that have eaten what they carried, 30 days, from the chest | Against the year's allowance for spending; beyond it, the Senate's |
+| The courts | The praetor (`courts`) | A case (a `denunciation`, concerns punishment) against a man an audit found with his hand in the chest (within a year, never twice for a man, a month between cases), before the court that judges: the Hundred and Four in Carthage, the Senate in Rome | -- |
+| The rites | The pontiffs (`public_rites`) | The festival of the year out of the chest, 15 in a hundred of a month's takings | -- |
+| The census | The censors (`census`) | The lustrum every fifth year (the first from a month fixed by the power), recorded as an arrangement of kind `census`; a roll less than five years old counts the people a hundredth better, one past it up to four in a hundred worse (`rollFreshness`, `material/taxation.ts`) | -- |
+| The mint | A man whose coin is the chamber's (a consul) | In extremis (war, pay behind, a month from empty, the tribute at 18 in a hundred) the motion for lighter coin; never twice in a pass with the fiscal officer's own | The Senate's, always, for a republic |
+| The foreign letters | The holder of `foreign_letters`, else the head | A power losing a war (standing -20 or worse, the war 90 days old) sends a `peace_talks` letter every 150 days | -- |
+
+### The man
+
+His worth is the skill of his lever with his temper (`qualityOf`); a poor man acts late (`35 + 0.65 x worth` in a hundred a month, more in an emergency). One who thinks ill of the head of state or is too proud refuses or
+puts it off by the reckoning of an order refused (`defianceOf`). The disloyal drag the lever already (`SULK_*` in the department's skill). The greedy keep a share of what they hand out (`skimTheHand`: the same
+`diversionShare`, at most 12 in a hundred, a transfer from the chest to his purse or his patron's, a `Diversion` row an audit can find: the burst takes it after the act). A man the player is, a power the player rules and a
+man the model plays are left alone; a played ruler's books follow the played-ruler rule (`played-ruler-books.ts` now counts a magistrate's marks as the rules').
+
+### The gate (the gaps closed)
+
+`force_provision` (bought or sent), `project_create` (milestone costs paid from a power's chest) and `force_create` (not an outlaw band, not men taken from another army) are weighed in `competence-gate.ts`: the first two as
+spending against the year's allowance (a man with no office of the power is not weighed), the last as the levy.
+
+### News and the log
+
+At most one fact a power a month, only for a power with something live in it; the dole and the games tell their own. The decision's `why` begins with its routine's name (`grain:`, `dilectus:`, `muster:`,
+`supply:`, `justice:`, `festival:`, `census:`, `mint:`, `embassy:`, `games:`); the cooldowns are read off the log (`STATECRAFT_LOG_MAX` is 900 now), and a matter laid before a chamber is not logged as done (it begins `asked`).
+
+### A sample month (Rome at war with Carthage; Rome hungry in one market of two; Carthage's chest low; day 180)
+
+- Rome: Appius Claudius Russus (aedile) "grain: 414000 spent on bread (dear in 1 of 2 markets)"; Manius Curius Dentatus (censor) "census: the roll of Roman Republic taken, 1101300 counted"; Tiberius Coruncanius
+  (pontifex maximus) the festival of the year; Marcus Atilius Regulus (quaestor) asks the Senate that the tribute be laid anew as a tithe.
+- Carthage: Abdmelqart (officer of the accounts) raises the rate from 10 to 12; Hanno holds the levy, 3,368 men (the host fields 3,110 of 17,967).
+- Syracuse: Hiero's alliance against Carthage (a king: his own); with his friends against a war, a headstrong Hiero pays 400 basis points of legitimacy.
+
+### Cost
+
+A month over the whole Punic world (170 powers, 513 seats): the magistrates' pass 27 ms with the board and the books warm (about 40 ms more when the board is cold, which the world's own pass pays anyway); the bodies' pass
+16 ms with a hundred questions open; the whole statecraft pass with the fiscal officers and the magistrates 135 to 180 ms. A power's routine looks for its man only when its condition holds.
+
+### Not in H2
+
+The censors' *lectio* (the census is taken; nobody is struck off the roll), the pontiffs' effect beyond the festival (the augurs' is `bodies.ts`), a mint that strikes coin where the standard is kept (no routine creates money),
+the dilectus as reinforcement of an existing army, a magistrate's accounts at the close of his office (H4).
+
+## H3 as built
+
+Phase H3: the bodies sit. The voting is the old machinery (`senate.ts`, `ballots.ts`, blocs, `supportPositions`, the gens' pull, the tribunes' intercession, `refersFailuresTo`, `overruleCost`); `sim/src/bodies.ts` is what
+makes a body a body, and `statecraft.ts` is where a republic's war, peace and alliances become the chamber's.
+
+- **Sittings and agenda.** A chamber puts at most five questions to a sitting if it is a council, three if its count only counsels, two for an assembly of the people or a court (the Hundred and Four judge two a sitting);
+  what is due beyond it is put off a month, the oldest first; a chamber whose city is held by an enemy or besieged does not sit. A chamber holds at most ten questions open (`BACKLOG_MAX`): a magistrate who would lay an
+  eleventh waits (`weigh` asks `bodyHasRoom`). Quorum and majority are each chamber's own, by `countVote`.
+- **The tribunes.** On the day a question comes up, a tribune who has said nothing and whom nobody plays takes a side by what he is (`mindLean` of the question's concerns), whom he serves and whom he thinks ill of, and
+  what the question asks of the plebs (taxes, the levy, war, debts, the coin, spending): `opposition` of 40 and over, and a roll, and he opposes; `holdVotes` then forbids it and tells it. In the tick, before the count.
+- **The augurs.** A question for an assembly of the people (not a council) may be put off a month by an augur who sees bad omens (4 in a hundred, more against a man he thinks ill of and for his party), once for a question
+  (`theAuspices`; the office's `mayStop` is `appointment`, the people's business).
+- **War, peace and treaties.** For a republic whose ruler's competence is "by the body" (Rome's consul, Carthage's suffete), `passage` lays the war (or the peace, or an alliance) before the chamber that holds it as a motion
+  ("that war be made on Carthage") and makes it the month after it carries (`weigh`'s decree); a failed motion rests 120 days; a power with no offices to read it from, a king and a dictator act as they did. A war the
+  Senate carried is read to the assembly that holds the power of war and ratified: `RATIFICATION_BPS` (150) of legitimacy once (`ratifyTheWar`). The user's accepted simplification stands: war is the Senate's in the
+  engine, the people's ratification a bonus.
+- **The king's friends.** A king about to make war asks his friends in his mind (`consultTheFriends`: the council's count taken now): against, a heeding king (by `stubbornness`, 5 to 85 in a hundred from boldness,
+  caution, the drive to rise and duty) lets it wait; a headstrong one goes on and pays 400 basis points of legitimacy (half where the overruling has become a custom). Counsel a council has given on a question already put is
+  taken, bowed to or overruled by the ruler by rule (`decideCouncils`: a `political_procedure_resolve`; the ordinary `overruleCost` charges the overruling).
+- **Carthage.** The Elders hold taxes, war, the coin, the purse, the treaties and the levy and send a rejected magistrate's question to the people; the Hundred and Four judge generals and, from H2, the cases the praetor brings.
+
+### Not in H3
+
+Command assignment and prorogation by rule (`command-tenure.ts` has the prorogation; the Senate does not assign provinces by rule), a real quorum of members away at war (the count's quorum is the blocs', and every bloc
+sits), the people's own vote on war (ratification only).
+
+### Tests
+
+H2: `an-aedile-watches-the-grain`, `a-consul-musters-the-levy`, `a-praetor-hears-the-case`, `a-censor-takes-the-roll`, `an-embassy-is-received`, `a-magistrate-exceeds-his-charge`, `a-government-month` (cost, determinism);
+H3: `the-senate-sits-and-votes`, `a-tribune-vetoes-a-levy-in-session`, `an-augur-stops-the-business`, `a-war-needs-the-senate`, `the-king-overrules-his-friends`, `the-104-judge-a-general`; the kit is
+`government-test-kit.ts`; `no-modern-words` now scans `magistrates.ts`, `bodies.ts` and `taxation.ts` too.

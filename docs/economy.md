@@ -538,6 +538,8 @@ What it changes in the acts above (in `apply-deltas.ts`, through `apply/competen
 | `loan_open` (the state borrows) | a head 3 months of what the power takes in, a treasurer 1 | the chamber's |
 | `public_benefaction` dole | an aedile or a head, 1 to 2 months | the chamber's |
 | `agreement_open` / `_close` (pact, embargo, war, peace) | a king; the head of a power no chamber holds it in | laid before the chamber, as a war always was |
+| `force_provision` bought or sent, `project_create` paid from the chest (H2) | the same allowance: a consul feeds his army and begins a work within his two months; a man with no office of the power is not weighed | the Senate's decree, laid for the player's order |
+| `force_create` (the levy, H2) | a consul with his colleague, a praetor, a general; Syracuse's king | the chamber: Carthage's suffetes ask the Elders |
 | `money_transfer` from the chest, or a hiring paid from it | `spend_without_vote` is an allowance of 2 months a year for a head, 1 for an officer, for each office | the Senate's decree; a department the Senate gates (the Treasury of Saturn) has none |
 
 One decider to a season (the rate 90 days, the customs and the coin 60, a loan, bread or a pact 30): when one man has settled an act, another of equal or lower office may not settle it again until the season is out,
@@ -564,6 +566,18 @@ The table above is the common run; the research's charges (`docs/plans/governmen
 - **The men at the books** (`fiscal-officers.ts`) do only what their charge lets them: what is the chamber's they lay before it as a motion (a consul puts it), carry out what it carries and leave what is none of theirs.
   A quaestor of Rome cannot strike the coin lighter; a rate past custom is asked of the Senate, and the Senate may refuse it. Tests: `the-quaestor-asks-the-senate`, `a-magistrate-lays-no-new-tax`,
   `the-charges-follow-the-constitution`, `every-power-has-a-head-who-can-act`, `the-charges-match-the-sources`.
+
+### The magistrates and the bodies (H2, H3)
+
+The charges above are no longer only read when somebody writes an order: the men who hold them act, once a month, by rule (`sim/src/magistrates.ts`; docs/plans/government.md, "H2 as built"), through the ordinary deltas
+and inside `mayAct`: the aediles' bread and games, the consul's *dilectus*, the allies' contingents and the bread bought for a hungry army, the praetor's case against a man an audit found out, the pontiffs' festival, the
+censors' lustrum (a fresh roll counts the people a hundredth better, a stale one up to four in a hundred worse: `material/taxation.ts`), the consul's motion for lighter coin, the envoys a losing power sends. What is beyond a man's
+charge is laid before the chamber (the same motion the quaestor moves); a greedy hand keeps a share (`skimTheHand`, found by audits); one who thinks ill of the head or is proud may refuse or delay (`defianceOf`).
+The bodies sit (`sim/src/bodies.ts`, "H3 as built"): a chamber puts so many questions to a sitting and no more, does not sit with its city shut, holds at most ten open; the tribunes take sides by rule and a veto
+stops the question; an augur's ill omens put off the people's business a month; war, peace and alliances of a republic are laid before the Senate (or the Elders) by its consul or suffete and made the month after they carry, the people
+ratifying the war; a king's friends counsel, and he takes it or overrules it, paying in legitimacy when he goes against them. Tests: `an-aedile-watches-the-grain`, `a-consul-musters-the-levy`, `a-praetor-hears-the-case`,
+`a-censor-takes-the-roll`, `an-embassy-is-received`, `a-magistrate-exceeds-his-charge`, `the-senate-sits-and-votes`, `a-tribune-vetoes-a-levy-in-session`, `an-augur-stops-the-business`, `a-war-needs-the-senate`,
+`the-king-overrules-his-friends`, `the-104-judge-a-general`, `a-government-month`.
 
 ## What the model is left to
 
