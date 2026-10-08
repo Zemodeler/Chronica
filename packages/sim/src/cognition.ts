@@ -50,6 +50,7 @@ import { describePlans } from "./plans";
 import { describeDiplomaticBusiness } from "./negotiation-business";
 import { describeNeighbourhood } from "./board";
 import { KEPT_BY_THE_OFFICERS, ROUTINE_OPS, stateCrisisLine } from "./kept-by-the-officers";
+import { intentionsToTell, worriesToTell } from "./management-talk";
 
 /**
  * NPC cognition (VISION §28).
@@ -825,7 +826,7 @@ export function renderCharacterPortrait(
     lines.push(...describeCharge(character, world, options.routineIsKept === true));
     // What they want, with the plan for it where they have one. Its own
     // block because a plan needs the calendar, and a mind does not.
-    lines.push(...describePlans(character, world, clock, ACTOR_CAPS.ambitions));
+    lines.push(...describePlans(character, world, clock, ACTOR_CAPS.ambitions, options.routineIsKept === true));
     lines.push(...describeMeans(character, world));
     lines.push(...describeWars(character, world));
     lines.push(...describeGround(character, world));
@@ -849,8 +850,8 @@ export function renderCharacterPortrait(
     if (outlook !== undefined) {
       lines.push(
         `What their government is trying to do: ${outlook.primaryObjective} (it will risk ${outlook.riskTolerance}/100).`,
-        ...outlook.concerns.map((concern) => `  - worried about ${concern.label}: ${concern.level}`),
-        ...outlook.intentions.map((intention) => `  - it means to ${intention}`),
+        ...(options.routineIsKept === true ? worriesToTell(world, characterId, outlook.concerns) : outlook.concerns).map((concern) => `  - worried about ${concern.label}: ${concern.level}`),
+        ...(options.routineIsKept === true ? intentionsToTell(world, characterId, outlook.intentions) : outlook.intentions).map((intention) => `  - it means to ${intention}`),
       );
     }
     // A ruler sees his neighbourhood: who is across his borders, how strong,

@@ -13,7 +13,7 @@ import {
  *
  * The routine government of a state is kept by its officers, by rule: the rate of the tax and of the customs, the silver in the
  * coin, bread for the markets, the merchant houses, loans between states, the trade pacts of powers nobody plays, the works that
- * keep a city standing. (Appointments by rule are still to come, and the ambitions that ask for them stand until then.) A person the model plays is asked for what the rules cannot do -- ambition,
+ * keep a city standing, and the charges that keep them (`appointed-by-rule.ts`). A person the model plays is asked for what the rules cannot do -- ambition,
  * rivalry, plots, marriages, patronage, factions, oaths, treachery, war counsels, letters, rhetoric, love and grudges -- and his
  * calls are spent there. He is not shown the menu of the routine acts; if he writes one anyway it is set aside, quietly, and counted.
  *

@@ -11,6 +11,7 @@ import { findPolityGaps } from "./population";
 import { distancesFrom, placeIndex, provinceIdsIn, provincesNamedIn } from "./place-index";
 import type { NarratorSeed } from "./narrator";
 import { renderCharacterPortrait } from "./cognition";
+import { isManagementWorry } from "./management-talk";
 import { isOpenIntent, mostPressingFirst } from "./intents";
 import { ruleInWords } from "./mechanics/mechanic-words";
 import { forecastInWords, isChamberQuestion, voteDayOf } from "./senate";
@@ -1614,8 +1615,8 @@ export function renderWorldSlice(slice: WorldSlice): string {
     "STANDING AIMS",
     slice.outlooks.flatMap((outlook) => [
       `${outlook.name} [${outlook.polityId}]${outlook.own ? " (ours)" : ""} — ${outlook.objective}. Will risk ${outlook.riskTolerance}/100.`,
-      ...outlook.concerns.map((concern) => `  worried about ${concern}`),
-      ...outlook.intentions.map((intention) => `  means to ${intention}`),
+      ...(outlook.own ? outlook.concerns : outlook.concerns.filter((concern) => !isManagementWorry(concern))).map((concern) => `  worried about ${concern}`),
+      ...(outlook.own ? outlook.intentions : outlook.intentions.filter((intention) => !isManagementWorry(intention))).map((intention) => `  means to ${intention}`),
     ]),
   );
   section("OPEN THREADS", slice.threads.map((thread) => {

@@ -503,34 +503,6 @@ What it changes in the acts above (in `apply-deltas.ts`, through `apply/competen
 | `loan_open` (the state borrows) | a head 3 months of what the power takes in, a treasurer 1 | the chamber's |
 | `public_benefaction` dole | an aedile or a head, 1 to 2 months | the chamber's |
 | `agreement_open` / `_close` (pact, embargo, war, peace) | a king; the head of a power no chamber holds it in | laid before the chamber, as a war always was |
-| `money_transfer` from the chest | `spend_without_vote` is an allowance of 2 months a year for a head, 1 for an officer, for each office | the Senate's decree; a department the Senate gates (the Treasury of Saturn) has none |
-
-One decider to a season (the rate 90 days, the customs and the coin 60, a loan, bread or a pact 30): when one man has settled an act, another of equal or lower office may not settle it again until the season is out,
-and what the chamber decreed no magistrate alters. A colleague who has interceded, or who thinks ill of him, stops a collegial act; a tribune stops the levy, the purse, the tribute, the coin and bread. What a vote has
-carried, and the fiscal officers' own decisions, are not weighed again (they are recorded, so the next man's act finds the season taken). `mayAct(world, characterId, act)` is the helper for any pass that must act inside
-a man's competence.
-
-**Five charges**, levers a department may be given (`customs`, `mint`, `markets`, `credit`, `census`), each a multiplier near one by the skill of the men who keep it, and exactly one where nobody has been given it:
-the share of the duty that reaches the chest (up to a fifth either way: `customs.ts`); the gain from a coin struck lighter, and how much of its bad name sticks to its premium (`apply-deltas.ts`, `coinage.ts`); how far a
-hub's prices stray, and the hoards a famine price brings out (`markets.ts`); the interest the state is asked (`loan_open`); and what the tax roll and the muster count of the people (`material/taxation.ts`). Tests: `the-new-levers-bite`.
-
-## Who may do what (H0)
-
-An act of the economy -- the rate of the tribute, the customs, the silver in the coin, a loan, bread for the people, a pact, an embargo, the levy, war, peace, an appointment, a draw on the chest -- is
-no longer anybody's whose office looks fiscal. Whether a man may do it is read from his power's constitution (`competenceOf`, `packages/shared/src/authority/competence.ts`): **alone**, **with a colleague**
-(either may act, the other may stop it), **by the body** (laid before the chamber that holds that power) or **forbidden**, from the chambers' powers (now with `coinage`, `treaties`, `finance` and `levy`), the offices'
-kind, seats and vetoes, the levers of the department he staffs and his treasury reach. The details, the per-power readings and what is not yet built are in `docs/plans/government.md`, "H0 as built".
-
-What it changes in the acts above (in `apply-deltas.ts`, through `apply/competence-gate.ts`):
-
-| Act | Within his charge | Beyond it |
-|---|---|---|
-| `tax_policy_set`, rate | a treasurer or a head, with his colleagues, up to 12 in a hundred (`CUSTOMARY_TAX_RATE_BPS`) | laid before the chamber that holds the taxes (the Senate; Carthage's council); a king holds it alone |
-| `tax_policy_set`, customs | a head up to 15 in a hundred, a treasurer up to 10 | the chamber's |
-| `coinage_debase` | a king; no republic's magistrate | the chamber that holds the coin (the old bundle of taxes) |
-| `loan_open` (the state borrows) | a head 3 months of what the power takes in, a treasurer 1 | the chamber's |
-| `public_benefaction` dole | an aedile or a head, 1 to 2 months | the chamber's |
-| `agreement_open` / `_close` (pact, embargo, war, peace) | a king; the head of a power no chamber holds it in | laid before the chamber, as a war always was |
 | `money_transfer` from the chest, or a hiring paid from it | `spend_without_vote` is an allowance of 2 months a year for a head, 1 for an officer, for each office | the Senate's decree; a department the Senate gates (the Treasury of Saturn) has none |
 
 One decider to a season (the rate 90 days, the customs and the coin 60, a loan, bread or a pact 30): when one man has settled an act, another of equal or lower office may not settle it again until the season is out,
@@ -574,15 +546,33 @@ allowed to settle it (`packages/sim/src/kept-by-the-officers.ts`):
   `public_benefaction` (a dole given to win a city is patronage), war, peace, alliance, letters, plots, beliefs, marriages, offices, the levy and armies.
 - **Never the player's.** The player's own order is read with the full schema and prompt, and a man he has put an order to (an attempt issued, received, accepted or delayed) keeps
   the whole menu while he serves it. Only the cognition pass is filtered (`ProposalPass.byModel`): the rules' own acts (the statecraft pass, the fiscal officers' `sanctioned` acts) are not. The orchestrator's `worldDeltas`
-  are told in the prompt that another state's routine government is not theirs (not filtered by the engine).
+  are held to it by the engine too (`the-orchestrator-keeps-out.ts`, called where `burst.ts` applies them): the tax, the coin, a state's loan, a pact or embargo between powers, estates, ventures and the works of upkeep are set aside,
+  logged under `officers` ("... not the world's to settle for another state"), unless the books are the player's: his own power's, a power he rules, or a man he has put an order to. The player's order (`deltas`) is untouched, and so are war, peace, letters, threads and bribes.
 - **Not told the charges.** A model-played person's portrait does not list "In charge of: the tax roll ..." (`describeCharge`, `routineIsKept`); his own purse, debts, estates and
-  pressures stay, as motives of ambition.
+  pressures stay, as motives of ambition. Nor of the books' worries: in a played man's section the government's "worried about" lines and its "means to" lines that are about money, bread, tax, tribute, customs, the coin or the works
+  are left out unless the state is in a crisis (below); the political ones (rivals, plots, legitimacy, war, faith, factions) stay (`management-talk.ts`). The orchestrator's STANDING AIMS lose the same lines for every power but the player's.
 - **A crisis, when it is one.** The chest and the granary are told to a ruler, and to a captain of the power's armies, only when they have become a quarrel
   (`stateCrisisLine`): the soldiers' pay a month or more behind (`CRISIS_ARREARS_MONTHS`), bread at a famine price in a third of its markets, the coin holding under 85 in a hundred
   of its silver. Said once, in words of the age, with no figures but the arrears.
 
-Appointments by rule are still to come: the ambitions `wantDepartments` lays on a ruler (to hand part of the government on, to seat a treasurer, a watch, a keeper of grain) stand
-in his portrait until the officers do it. Test: `the-model-is-left-to-its-plots`.
+### Appointments by rule
+
+The ambitions `wantDepartments` lays on a ruler (to hand part of the government on, to seat a treasurer, a watch, a keeper of grain) are no longer shown to a man the model plays (`describePlans`, `routineIsKept`); the player's own
+section, when he rules the power, still has them as thoughts. The officers see to the charge themselves (`packages/sim/src/appointed-by-rule.ts`, called from `tick.ts` in the month's review, before `fillAppointments`):
+
+- **Who.** Every organised power (cohesion past `LOOSE_COHESION_BPS`, three provinces or more) whose ruler is not the player, whether or not the model plays him: it is the officers' work, and the model is no longer told of it.
+- **Why.** In this order: the chest in debt with nobody over the tax roll (a treasurer: `tax_roll`, `credit`); hunger with unrest and nobody over the grain (a keeper of the grain); a plot against the state's men found out or carried off and nobody
+  keeping watch; a ruler whose workload is -9 or worse (he gives away first the purse, then the grain, the host, the harbour dues, the watch, the courts, whichever nobody keeps); and, for a king only and a year apart, the charges a kingdom has (the finance officer, the
+  harbour dues where it has ports, the host).
+- **How.** A king names his officers himself, so the ruler founds the department (`carryOutDepartment`, the same path an order takes, origin `pressure`, forming in 30 days, 60 for more than two levers or in a war) with one new office, in a Greek court's words
+  (Dioiketes, Sitophylax, Epistates of the Harbours, Strategos of the Host, Archiphylakites, Epistates of the Courts) or a plain court's (Treasurer of the Realm, Keeper of the Granaries, Warden of the Harbours, Marshal of the Host, Master of the Watch, Chief Judge);
+  `fillAppointments` then names the ablest man of the power to it the same day, by the lever aptitude of the work and his temper (never the ruler, the player or a man already sitting in a magistracy; none left, nothing is founded). The ruler's ambition for it is marked done.
+  A power with a chamber that elects or assigns its magistrates invents no office: where its ruler's appointments are the chamber's (`mayAct`: Rome's consuls, Carthage's suffetes, grade "by the body") nothing is done, and where the head may name (a league's strategos, a republic's
+  head with a colleague) the work is given to a post the power already has and has not placed in a department, if its name says one.
+- **Rate and news.** At most one charge a power in 90 days and five in all, four across the world in a review (the powers shuffled by month, so the cap does not favour a few); one fact to the power ("X set up The Revenues to take charge of ... because ..."), and the
+  department's own formed-fact when it takes its work. Pay is honorary, as an order's department is unless it says otherwise.
+
+Tests: `the-model-is-left-to-its-plots`, `appointments-by-rule`, `the-orchestrator-keeps-out-of-other-states-books`.
 
 ## Where the money goes
 
@@ -668,4 +658,4 @@ All under `packages/sim/src` unless noted: `the-books-balance`, `a-market-sets-a
 `the-office-and-the-roll`, `a-tariff-bites`, `a-trade-pact-lowers-tariffs`, `an-embargo-cuts-trade`,
 `war-suspends-a-pact`, `a-power-hears-of-its-trade`, `a-coin-is-debased`, `a-foreign-payment-is-changed`,
 `the-treasury-reads-the-land` and `a-thousand-provinces` (the cost budget). v54: `a-quaestor-keeps-the-books`, `a-house-follows-the-gap`,
-`the-market-has-merchants`, `the-houses-stay-out-of-the-room`, `the-books-balance-with-houses` and `the-books-are-kept-in-good-time`. the model's own work: `the-model-is-left-to-its-plots`. H0: `a-treasurer-decides`, `a-consul-cannot-draw-the-treasury-alone`, `two-consuls-do-not-both-tax`, `a-tribune-stops-a-levy`, `the-senate-decrees-the-tribute`, `a-reform-changes-who-may-act`, `the-new-levers-bite` and `no-modern-words`. H0: `a-treasurer-decides`, `a-consul-cannot-draw-the-treasury-alone`, `two-consuls-do-not-both-tax`, `a-tribune-stops-a-levy`, `the-senate-decrees-the-tribute`, `a-reform-changes-who-may-act`, `the-new-levers-bite` and `no-modern-words`. Where the money goes: `a-state-keeps-its-roads`, `a-censor-lets-a-contract`, `the-state-has-its-costs`, `a-played-ruler-keeps-his-books` and the 36-month case of `the-books-balance`.
+`the-market-has-merchants`, `the-houses-stay-out-of-the-room`, `the-books-balance-with-houses` and `the-books-are-kept-in-good-time`. the model's own work: `the-model-is-left-to-its-plots`, `appointments-by-rule`, `the-orchestrator-keeps-out-of-other-states-books`. H0: `a-treasurer-decides`, `a-consul-cannot-draw-the-treasury-alone`, `two-consuls-do-not-both-tax`, `a-tribune-stops-a-levy`, `the-senate-decrees-the-tribute`, `a-reform-changes-who-may-act`, `the-new-levers-bite` and `no-modern-words`. H0: `a-treasurer-decides`, `a-consul-cannot-draw-the-treasury-alone`, `two-consuls-do-not-both-tax`, `a-tribune-stops-a-levy`, `the-senate-decrees-the-tribute`, `a-reform-changes-who-may-act`, `the-new-levers-bite` and `no-modern-words`. Where the money goes: `a-state-keeps-its-roads`, `a-censor-lets-a-contract`, `the-state-has-its-costs`, `a-played-ruler-keeps-his-books` and the 36-month case of `the-books-balance`.
