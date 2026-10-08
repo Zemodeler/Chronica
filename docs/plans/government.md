@@ -582,6 +582,22 @@ the department whose every office it abolished (its work goes back to whoever go
 What the chamber votes it votes (`holdVotes`: its blocs, its referral, the assembly's advice), so an AI's tribute can fail in the Council and go to the people, which is the research's reading of Carthage; a rejected motion
 rests. The burst applies the officer's motions as the power's standing business (`sanctioned`); `StatecraftInput` gains an optional `offices` (the scenario's offices) so `mayAct` reads the offices written by hand.
 
+### Appointments by rule
+
+A ruler who is overloaded, whose chest is in debt, whose people are hungry or who has been struck at no longer waits for an order or for the model to think of it: in the month's review (`appointed-by-rule.ts`, before `fillAppointments`) he makes the charge his state lacks.
+The `wantDepartments` ambitions (hand work on, a treasurer, a watch, a keeper of the grain) are still laid, as the record of the pressure, and are marked fulfilled when the charge is made; a man the model plays is not shown them (`management-talk.ts`).
+
+- **Kings** make the charges a kingdom had, by culture: for a Greek court the dioiketes (`tax_roll`, `credit`), the sitophylax (grain), the epistates of the harbours (customs), the strategos of the host (`levy`, `supply`), the archiphylakites (watch), the epistates of the
+  courts; for another court a treasurer of the realm, a keeper of the granaries, a warden of the harbours, a marshal of the host, a master of the watch, a chief judge. What presses comes first (debt, hunger, a plot struck, the workload of -9), then, a year apart and only for a king,
+  the finance officer, the harbours (a kingdom with ports) and the host. The office is new, with one seat; the department forms in 30 days (60 for more than two levers or in a war); the ablest man of the power for its levers is named the day the post stands empty.
+- **Republics, leagues and the rest** invent no magistrate: the Roman magistracies are elected and the Senate assigns the commands, and Carthage's suffetes carry an appointment to the Elders (`mayAct` on `appointment` reads "by the body" for both), so for them
+  the rule makes no charge. Where the head may name alone or with a colleague, and the power already has an appointed post that sits in no department and whose name says a charge (an admiral, a treasurer), the work is given to that post.
+- **Never the player's.** A power whose ruler is the player is left to him, and the engine never seats him. The model is not asked: the ambitions are hidden from its prompts and the acts are the officers'.
+- **Bounds.** One charge a power in 90 days, five in all, four in a review across the world (the powers shuffled by month); one fact a charge. Deterministic (`stableHash` only), no model call.
+
+Not done: the chambers do not vote a charge into being for a republic by rule (a Senate decree founding a department is still an order's); a charge made by rule is honorary, with no pay of its own; no officer is ever removed or replaced by rule except through the posts' existing
+turnover (`fillAppointments` fills what stands empty).
+
 ### Not in H1
 
 The officers' routine for justice, rites, works and the census (H2), the Senate's gates on war and provinces, the Hundred and Four, the king's friends costing a ruler legitimacy (H3), accounts at the close of office (H4),
@@ -591,4 +607,4 @@ the office view (H5). Subject Greek cities under Macedon's garrisons and Italian
 
 `the-quaestor-asks-the-senate`, `a-magistrate-lays-no-new-tax`, `the-charges-follow-the-constitution` (a dictator, a coup in Carthage, a throne with no heir, a league's reform, an ally that breaks with Rome),
 `every-power-has-a-head-who-can-act`, `the-charges-match-the-sources` (the data block above, line by line for Rome and Carthage), and the changed `a-treasurer-decides`, `two-consuls-do-not-both-tax`,
-`the-new-levers-bite` (Rome's seeded charges stripped for the baseline: `bare-of-charges.ts`), `a-quaestor-keeps-the-books`, `the-books-balance-with-houses` (the chambers sit each month) and `no-modern-words`.
+`the-new-levers-bite` (Rome's seeded charges stripped for the baseline: `bare-of-charges.ts`), `a-quaestor-keeps-the-books`, `the-books-balance-with-houses` (the chambers sit each month) and `no-modern-words`; appointments by rule: `appointments-by-rule`, and the engine's hold on the orchestrator's routine acts: `the-orchestrator-keeps-out-of-other-states-books`.

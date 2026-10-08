@@ -4,7 +4,6 @@ import { GOODS, MAX_MARKET_HUBS, MarketHubSchema, goodSpec, marketPriceBps, open
 import { CoinageSchema, MAX_COINAGES, priceLevelBpsOf } from "./coinage";
 import { provinceOf } from "./movement";
 import { MAX_HOUSES, MerchantHouseSchema } from "./houses";
-import { MAX_KEEPING_ROWS, MAX_WORK_CONTRACTS, PublicWorkContractSchema, StateKeepingSchema } from "./keeping";
 import type { WorldState } from "./world-state";
 
 /**
@@ -135,9 +134,6 @@ export const EconomyMemorySchema = z
     coinages: z.array(CoinageSchema).max(MAX_COINAGES).default([]),
     /** The merchant houses (`world/houses.ts`, `sim/merchant-houses.ts`): a handful of families whose cargoes and loans the markets feel. */
     houses: z.array(MerchantHouseSchema).max(MAX_HOUSES).default([]),
-    /** What each power spends to go on being one, and the public works let to contractors (`world/keeping.ts`, `sim/keeping-the-state.ts`). */
-    keeping: z.array(StateKeepingSchema).max(MAX_KEEPING_ROWS).default([]),
-    works: z.array(PublicWorkContractSchema).max(MAX_WORK_CONTRACTS).default([]),
   })
   .strict();
 export type EconomyMemory = z.infer<typeof EconomyMemorySchema>;
@@ -164,8 +160,6 @@ export const EMPTY_ECONOMY_MEMORY: EconomyMemory = {
   tradeNews: [],
   coinages: [],
   houses: [],
-  keeping: [],
-  works: [],
 };
 
 export const economyOf = (world: Pick<WorldState, "economy">): EconomyMemory => world.economy ?? EMPTY_ECONOMY_MEMORY;

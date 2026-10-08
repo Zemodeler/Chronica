@@ -195,44 +195,6 @@ ${auditInWords(monthly)}`).toEqual([]);
     expect(totalMoney(world) - totalMoney(base)).toBe(through);
   });
 
-  it("explains what a state spends to go on being one: three years of upkeep, the costs of government and public works let to houses, nothing unexplained", () => {
-    let world = opening();
-    let audit = emptyAudit();
-    const spent = { upkeep: 0, costs: 0, works: 0 };
-    for (let month = 1; month <= 36; month += 1) {
-      const toDay = month * 30;
-      const before: WorldState = { ...world, elapsedStep: toDay };
-      const ticked = runDeterministicTick({
-        world: before, toDay, ids: createIdFactory(`books-keeping-${month}`), warfare: definition.warfare, clock: definition.clock, life: definition.life,
-      });
-      const monthly = auditMoney(before, ticked.world);
-      expect(monthly.unexplained, `month ${month}:
-${auditInWords(monthly)}`).toEqual([]);
-      audit = combineAudits(audit, monthly);
-      const known = new Set(before.material.transactions.map((line) => line.id));
-      for (const line of ticked.world.material.transactions) {
-        if (known.has(line.id)) continue;
-        if (line.cause.id.startsWith("keeping_")) spent[line.cause.explanation.startsWith("The costs") ? "costs" : "upkeep"] += line.amount;
-        else if (line.cause.id.startsWith("works:")) spent.works += line.external === "the_unnamed" ? line.amount : 0;
-      }
-      world = ticked.world;
-    }
-    expect(unexplainedTotal(audit), auditInWords(audit)).toBe(0);
-    // The sinks were used: the upkeep and the costs of every power with a chest, and works let to the houses of Rome and Carthage, some of them done.
-    expect(spent.upkeep).toBeGreaterThan(1_000_000);
-    expect(spent.costs).toBeGreaterThan(100_000);
-    expect(spent.works).toBeGreaterThan(500_000);
-    const keeping = world.economy!.keeping;
-    expect(keeping.length).toBeGreaterThan(3);
-    expect(keeping.every((row) => row.behindMonths === 0)).toBe(true);
-    expect(world.structures.filter((structure) => structure.provenanceProjectId?.startsWith("works:")).length).toBeGreaterThan(2);
-    // The contractors were paid by an ordinary transfer: it moved between accounts, and the door stayed shut.
-    expect(audit.internal).toBeGreaterThan(0);
-    // The sum of the world's money moved only by what went through a door.
-    const through = Object.values(audit.doors).reduce((sum, door) => sum + door.in - door.out, 0);
-    expect(totalMoney(world) - totalMoney(opening())).toBe(through);
-  }, 300_000);
-
   it("finds money made from nowhere", () => {
     const before = opening();
     const rich = { ...before, material: { ...before.material, accounts: before.material.accounts.map((account) => (account.id === "rome-treasury" ? { ...account, balance: account.balance + 1_000 } : account)) } };

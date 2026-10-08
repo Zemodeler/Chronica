@@ -9,7 +9,6 @@ import {
   convertIn,
   effectWorth,
   faithNamed,
-  neglectShiftBps,
   treasuryOf,
   type FactProposalDraft,
   type ProvinceTargets,
@@ -138,21 +137,6 @@ export function provinceTargetsFrom(world: WorldState): Map<string, ProvinceTarg
       if (shift === 0) continue;
       const sum = sums.get(province.id) ?? { stability: 0, food: 0, productive: 0, manpower: 0, development: 0 };
       sums.set(province.id, { ...sum, manpower: sum.manpower + shift });
-    }
-  }
-  // The decay of neglect: a power that has let the upkeep of what it holds lapse for more than half a year sees the ceiling of its
-  // provinces' development sink (`neglectShiftBps`, docs/economy.md "Where the money goes"). Nothing is read where nobody is behind.
-  const behind = new Map<string, number>();
-  for (const row of world.economy?.keeping ?? []) {
-    const shift = neglectShiftBps(row.behindMonths);
-    if (shift !== 0) behind.set(row.polityId, shift);
-  }
-  if (behind.size > 0) {
-    for (const province of world.map.provinces) {
-      const shift = province.controllerPolityId === null ? undefined : behind.get(province.controllerPolityId);
-      if (shift === undefined) continue;
-      const sum = sums.get(province.id) ?? { stability: 0, food: 0, productive: 0, manpower: 0, development: 0 };
-      sums.set(province.id, { ...sum, development: sum.development + shift });
     }
   }
   const clamp = (value: number, max: number) => Math.max(-max, Math.min(max, value));
