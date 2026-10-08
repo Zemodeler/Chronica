@@ -206,3 +206,15 @@ Carthage and the kings (all `Gens` with the same structure; no order):
 * The player's view: "Your gens" on the standing sheet (`GensSheet`, from `readYourGens`): the name and branch, noble, of a noble
   gens or a new man, its weight, the images, the first man, the rites and tomb, the kin, the friends by marriage, the feuds and the latest
   honours.
+
+### What is not built, and what wants deciding
+
+* **The act of adopting** (a player's or a model's): the engine function and the rule are there (`adoptIntoGens`); the letter kind or delta that
+  would let a player ask for it is a model-facing schema change and the prompt ceilings are over, so it waits for a decision on where the
+  words go. The merchant firms' own adoption keeps its private helper and naming; the two write the same links and could be joined.
+* **Priestly offices of the old rites** (the rex sacrorum, the flamines, the Salii) are barred to plebeians by `priestlyBar`, but the scenario has
+  no such offices yet; they are a scenario addition (with their ordo and their sacra) and not an engine one.
+* **Letters**: a gens's feud and alliance are in votes, marriage and the player's sheet; a letter's tone does not yet change by them.
+* **The Hannonid, Gisgonid and Magonid houses** are reconstructions (confidence L to M); the plan lists them so they can be replaced.
+* **Ages**: the scenario's existing ages are kept (Gurges at fifty, Marcius Rutilus at fifty), though the sources put several of them ten to
+  forty years older; the nobilitas counts follow the fasti, not the ages.
