@@ -109,6 +109,8 @@ export interface ApplyContext {
    * captivity -- and never another man's decision alone.
    */
   readonly playerCharacterId?: string | null | undefined;
+  /** The player's own order said he would take credit ("on credit", "take the credit"); a purchase that needs it is otherwise told to him and refused (`payOrBorrow`). */
+  readonly creditAccepted?: boolean | undefined;
   /**
    * Local ids already assigned by an earlier pass over the same proposal.
    *

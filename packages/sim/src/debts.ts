@@ -1,5 +1,6 @@
 import type { FactProposalDraft, Loan, MoneyObligation, WorldState } from "@chronica/shared";
 import { safeLocalId } from "./safe-local-id";
+import { priceOfDefault } from "./lending";
 
 /**
  * Debts that end (VISION §7, §20).
@@ -95,6 +96,10 @@ export function settleDebts(input: DebtsInput): { world: WorldState; facts: Fact
     world = seized.world;
     facts.push(seized.fact);
   }
+  // ── The price of it: the lender's loss, the debtor's name and credit (`lending.ts`) ──
+  const priced = priceOfDefault(world, input.world.elapsedStep);
+  world = priced.world;
+  facts.push(...priced.facts);
   return { world, facts };
 }
 

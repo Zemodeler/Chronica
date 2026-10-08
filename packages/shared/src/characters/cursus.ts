@@ -61,7 +61,8 @@ export function bestRungHeld(world: Pick<WorldState, "material" | "elapsedStep">
     if (seat.holderCharacterId === character.id && seat.status === "held") best = Math.max(best, rungOf(seat.officeId) ?? 0);
     if (seat.designateCharacterId === character.id) best = Math.max(best, rungOf(seat.officeId) ?? 0);
   }
-  if (character.officesHeld.length === 0 && best === 0) {
+  // A man with no magistracy on record (a seat in the Senate is none) is taken, in the first years of a world, to have had the career his age implies.
+  if (best === 0) {
     const age = currentAgeYears(character, toDay);
     return toDay <= 6 * DAY ? (age >= 44 ? 2 : age >= 38 ? 1 : 0) : 0;
   }

@@ -252,10 +252,10 @@ describe("civil war", () => {
 describe("rising while in office", () => {
   it("lets a man who holds another office stand, and he lays it down when he wins", () => {
     let state = world();
-    // Quintus is made a quaestor, has made a name, and the consulship falls vacant.
-    state = act("gaius-genucius", [{ op: "office_seat_set", officeId: "roman-quaestor", officeLabel: "Quaestor", holderCharacterRef: "quintus-ogulnius", reason: "Named quaestor." }], state).world;
+    // Quintus is made a praetor (a quaestor does not leap to the consulship: the cursus keeps its order), has made a name, and the consulship falls vacant.
+    state = act("gaius-genucius", [{ op: "office_seat_set", officeId: "roman-praetor", officeLabel: "Praetor", holderCharacterRef: "quintus-ogulnius", reason: "Named praetor." }], state).world;
     // His seat in the Senate is not the office he rises from.
-    const quaestorship = state.material.officeSeats.find((seat) => seat.holderCharacterId === "quintus-ogulnius" && seat.officeId.includes("quaestor"))!.officeId;
+    const quaestorship = state.material.officeSeats.find((seat) => seat.holderCharacterId === "quintus-ogulnius" && seat.officeId.includes("praetor"))!.officeId;
     state = {
       ...state,
       characters: state.characters.map((character) => (character.id === "quintus-ogulnius" ? { ...character, prestigeBps: 9_000 } : character.id === "manius-curius" ? { ...character, prestigeBps: 6_000 } : character)),

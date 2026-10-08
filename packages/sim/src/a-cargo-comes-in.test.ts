@@ -50,7 +50,7 @@ const answer = (deltas: readonly unknown[]) => JSON.stringify({
 });
 const burst = (port: SimModelPort, world: WorldState, spanDays = 1): BurstInput => ({
   world, clock: definition.clock, offices: definition.government.offices, warfare: definition.warfare, terrains: definition.map.terrains,
-  burstId: "cargo", gameId: "game-1", actorRef: LEPTINES, actorPolityId: "syracuse", orderText: "I buy a cargo of oil and ship it to Messana.", knownFacts: [], queue: [],
+  burstId: "cargo", gameId: "game-1", actorRef: LEPTINES, actorPolityId: "syracuse", orderText: "I buy a cargo of oil on credit and ship it to Messana.", knownFacts: [], queue: [],
   port, spanDays, narratorSeeds: [], budget: { ...DEFAULT_BUDGET, maxMechanicCalls: 0 },
 });
 

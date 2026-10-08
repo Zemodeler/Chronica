@@ -349,7 +349,9 @@ describe("E16, L3: a man learns why he was or was not elected", { timeout: 120_0
     expect(candidaciesOf(mine)[0]!.outcome).toBeNull();
     // A man of more standing stands against him.
     const praetorship = offices.find((office) => office.id === "roman-praetor")!;
-    const rival = electableFor(mine, praetorship, new Map(offices.map((office) => [office.id, office])), 365, PLAYER)[0]!;
+    // A man the election of the day will not hand to another office as well: nobody holds two (`cursus.ts`).
+    const busy = new Set(mine.material.officeSeats.filter((seat) => seat.officeId !== "roman-senator" && (seat.status === "held" || seat.designateCharacterId != null)).flatMap((seat) => [seat.holderCharacterId, seat.designateCharacterId]));
+    const rival = electableFor(mine, praetorship, new Map(offices.map((office) => [office.id, office])), 365, PLAYER).find((man) => !busy.has(man.id) && man.prestigeBps > 5_100)!;
     expect(rival.prestigeBps).toBeGreaterThan(5_100);
     const opened = act(mine, rival.id, {
       op: "political_procedure_open", localId: "rival", type: "nomination", institutionRef: null, sponsorCharacterRef: rival.id,
