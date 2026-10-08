@@ -26,6 +26,7 @@ import { forceLever, polityLever, type WarfareContext } from "@chronica/shared";
 const contextOf = (world: WorldState): WarfareContext => ({ establishments: world.establishments, doctrines: world.doctrines, today: world.elapsedStep });
 import { chambersOf, polityPhrase, rulerOf, rulerOfficeOf, templateFor, type GovernmentRules } from "./constitutions";
 import { grumbleAtOfficers } from "./grumbling";
+import { keepTheCourtRivalries } from "./court-rivalry";
 import { aimsFromState } from "./outlooks";
 import { sueForPeace } from "./sue-for-peace";
 import type { IdFactory } from "./ports";
@@ -886,6 +887,8 @@ export function reviewSociety(input: ReviewSocietyInput): { world: WorldState; f
   if (!opening) world = wantDepartments(world);
   // And an officer who runs his work badly is a mark for those who dislike him.
   if (!opening) world = grumbleAtOfficers(world, input.toDay);
+  // And at a king's court the friends who envy the favourite come to want him put out of the king's favour (`court-rivalry.ts`).
+  if (!opening) world = keepTheCourtRivalries(world);
   // What each power is trying to do, read again off the state it is in.
   if (!opening) world = { ...world, polityOutlooks: aimsFromState(world, input.toDay) };
   // And a power tired of its war asks for an end to it.

@@ -40,6 +40,12 @@ const NEW_FILES = [
   "./fiscal-officers.ts",
   // H4: the accounts at the close of office, the censors' audits, the Hundred and Four's examination, the king's audit.
   "./close-of-office.ts",
+  // H6: the lectio and the censors' mark, the Senate's provinces, the quorum of a chamber, the friends of a king and their envy.
+  "./the-lectio.ts",
+  "./nota.ts",
+  "./the-provinces.ts",
+  "./quorum.ts",
+  "./court-rivalry.ts",
   // What a state spends to go on being one: the upkeep, the costs of government, the works it lets, and the books of a played ruler.
   "../../shared/src/world/keeping.ts",
   "./the-upkeep-of-a-state.ts",
