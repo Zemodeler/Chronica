@@ -5,6 +5,7 @@ import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
 import { createIdFactory } from "./ports";
 import { FOREIGNER, DESERTER, grantCitizenship, isForeigner } from "./defection";
+import { rankOf } from "./reception";
 import { refugeClause } from "./trade-templates";
 
 /**
@@ -21,7 +22,8 @@ const goOver = (world: WorldState, who: string, to: string) => applyDeltas(world
 
 describe("a defector is a guest, not a citizen", () => {
   const world = world0();
-  const man = world.characters.find((character) => character.polityId === "carthage" && character.alive && character.id !== "hanno-carthage")!;
+  // A humble man: one of rank is a suppliant until the Senate votes (`the-senate-decrees-a-refuge.test.ts`).
+  const man = world.characters.find((character) => character.polityId === "carthage" && character.alive && character.id !== "hanno-carthage" && rankOf(world, character) === null)!;
 
   it("is received under a consul's protection, as his client, marked a foreigner and a deserter", () => {
     const result = goOver(world, man.id, "rome");

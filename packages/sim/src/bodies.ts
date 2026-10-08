@@ -27,6 +27,7 @@ import { blocLeanings, countVote, electiveOfficesOf, isAdvisoryFor, isBindingCha
 import type { StatecraftDecision } from "./statecraft";
 import { safeLocalId } from "./safe-local-id";
 import { theAppealGoesToThePeople } from "./the-appeal-goes-to-the-people";
+import { settleReceptions } from "./reception";
 
 /**
  * The bodies of a state: the Senate and the assemblies, the Council of Elders, the Hundred and Four, the king's friends (docs/plans/government.md, "H3 as built").
@@ -345,13 +346,16 @@ export function ratifyTheWar(input: BodiesInput): { world: WorldState; facts: Fa
 
 /** Before the chambers count what is due: the war ratified, the omens read, the tribunes' sides taken, the agenda set. */
 export function keepTheBodies(input: BodiesInput): { world: WorldState; facts: FactProposalDraft[] } {
+  // A man of rank who came over and asked refuge is received, or not, by what the house decided (`reception.ts`).
+  const received = settleReceptions(input);
+  input = { ...input, world: received.world };
   // A war the Senate refused on an appeal goes to the people first (`the-appeal-goes-to-the-people.ts`); what they carry is not voted a second time as a ratification.
   const appealed = theAppealGoesToThePeople(input);
   const ratified = ratifyTheWar({ ...input, world: appealed.world });
   const omens = theAuspices({ ...input, world: ratified.world });
   const sides = tribunesTakeASide({ ...input, world: omens.world });
   const sat = sitTheBodies({ ...input, world: sides.world });
-  return { world: sat.world, facts: [...appealed.facts, ...ratified.facts, ...omens.facts, ...sides.facts, ...sat.facts] };
+  return { world: sat.world, facts: [...received.facts, ...appealed.facts, ...ratified.facts, ...omens.facts, ...sides.facts, ...sat.facts] };
 }
 
 // ── The king's friends ──────────────────────────────────────────────────────

@@ -9,6 +9,9 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { courtForTheft } from "./magistrates";
+import { bringTheCase } from "./close-of-office";
+import { settleHisBargains } from "./defection-consequences";
+import { SUPPLIANT, layReception } from "./reception";
 import { safeLocalId } from "./safe-local-id";
 
 /**
@@ -37,6 +40,8 @@ export interface Defection {
   readonly facts: readonly FactProposalDraft[];
   /** Statuses to put on the man. */
   readonly statuses: readonly string[];
+  /** Statuses a return lifts: he is home, and no guest. */
+  readonly lifted?: readonly string[];
 }
 
 /** Whether a man is a guest of another power and no citizen. */
@@ -76,7 +81,7 @@ export function receiverOf(world: WorldState, polityId: string, notHim: string |
   return world.characters.filter((character) => character.alive && character.polityId === polityId && character.id !== notHim && chairs.includes(character.id)).sort((a, b) => b.prestigeBps - a.prestigeBps || a.id.localeCompare(b.id))[0];
 }
 
-export function receiveDefector(world: WorldState, man: Character, hostPolityId: string, atStep: number): Defection {
+export function receiveDefector(world: WorldState, man: Character, hostPolityId: string, atStep: number, rank: string | null = null): Defection {
   const homeId = man.polityId;
   const host = world.map.polities.find((polity) => polity.id === hostPolityId);
   if (homeId === null || host === undefined || homeId === hostPolityId) return { world, facts: [], statuses: [] };
@@ -99,8 +104,14 @@ export function receiveDefector(world: WorldState, man: Character, hostPolityId:
     });
   };
 
+  // A man who comes back to the power he left is judged by it, by its own custom, and is no guest of anyone (`returningDeserter`).
+  if (hasDeserted(next, man, hostPolityId)) return comesBack(next, man, host.name, hostPolityId, atStep);
+
+  // A man of rank is a suppliant until the house has voted (`reception.ts`); a humble man is taken in by the consul's own word.
+  const laid = rank !== null && receiver !== undefined ? layReception(next, man, hostPolityId, homeId, receiver, rank, atStep) : null;
+  if (laid !== null) next = laid.world;
   // The guest of a patron: the ruler who received him, or if there is none, nobody's.
-  if (receiver !== undefined && !next.socialLinks.some((link) => link.kind === "patron" && link.subjectCharacterId === man.id && link.targetCharacterId === receiver.id)) {
+  if (laid === null && receiver !== undefined && !next.socialLinks.some((link) => link.kind === "patron" && link.subjectCharacterId === man.id && link.targetCharacterId === receiver.id)) {
     next = {
       ...next,
       socialLinks: [...next.socialLinks, {
@@ -110,7 +121,9 @@ export function receiveDefector(world: WorldState, man: Character, hostPolityId:
     };
   }
   fact(`refuge_${man.id}_${hostPolityId}`,
-    receiver === undefined
+    laid !== null
+      ? `${man.name}, ${rank}, has come over from ${homeName} to ${host.name} and asks refuge: ${receiver!.name} has laid it before the house, as the custom is for a man of weight (${laid.label}). Until it has voted he is a suppliant, a guest of no one.`
+      : receiver === undefined
       ? `${man.name} has come over from ${homeName} to ${host.name}, a guest and no citizen.`
       : `${receiver.name} received ${man.name}, who came over from ${homeName}, under his protection: ${man.name} is the guest of ${host.name} and no citizen, with no tribe, no vote and no magistracy, and he may serve as an officer of the allies.`,
     [{ kind: "character", id: man.id }, ...(receiver === undefined ? [] : [{ kind: "character" as const, id: receiver.id }]), { kind: "polity", id: hostPolityId }, { kind: "polity", id: homeId }], 60);
@@ -133,6 +146,10 @@ export function receiveDefector(world: WorldState, man: Character, hostPolityId:
       },
     };
   }
+  // His bargains with the power he leaves are broken, and the bands he led follow him or fall back (`defection-consequences.ts`).
+  const bargains = settleHisBargains(next, man, homeId, hostPolityId, atStep);
+  next = bargains.world;
+  for (const told of bargains.facts) facts.push(told);
   next = shiftStanding(next, man.id, -2_500, "scandal");
   const hostages = homeId === "carthage" || court !== null ? kinOf(next, man) : [];
   if (hostages.length > 0) {
@@ -152,5 +169,33 @@ export function receiveDefector(world: WorldState, man: Character, hostPolityId:
       ? `${homeName} tried ${man.name} in his absence for going over to ${host.name}: he is condemned and a stranger to the city, and ${named.length === 0 ? "nothing of his is left to take" : named.join(", and ")}.`
       : `${homeName} has lost ${man.name} to ${host.name}: he is struck from its offices and its roll${named.length === 0 ? "" : `, and ${named.join(", and ")}`}.`,
     [{ kind: "character", id: man.id }, { kind: "polity", id: homeId }, { kind: "polity", id: hostPolityId }], 70);
-  return { world: next, facts, statuses: [FOREIGNER, DESERTER] };
+  return { world: next, facts, statuses: laid === null ? [FOREIGNER, DESERTER] : [FOREIGNER, DESERTER, SUPPLIANT] };
+}
+
+/** Whether the man went over from this power: the mark of it that the power keeps for life. */
+export function hasDeserted(world: WorldState, man: Pick<Character, "id">, polityId: string): boolean {
+  return world.genericEntities.some((entity) => entity.kind === INFAMIA_KIND && entity.ownerRef?.kind === "polity" && entity.ownerRef.id === polityId
+    && entity.attributes?.["characterId"] === man.id && /^he went over to /u.test(String(entity.attributes?.["why"] ?? "")));
+}
+
+/**
+ * A deserter who comes home. Carthage's Hundred and Four try him for his life (the case is laid before the court, a capital one, by the ruler or whoever of its men is
+ * to hand), and he is held until it is heard; where no court sits (a king, a chief), the ruler has him put in chains. He is nobody's guest: the foreigner's mark is lifted
+ * and the deserter's stays.
+ */
+function comesBack(world: WorldState, man: Character, homeName: string, homeId: string, atStep: number): Defection {
+  const facts: FactProposalDraft[] = [];
+  const court = courtForTheft(world, homeId);
+  const receiver = receiverOf(world, homeId, man.id);
+  const brought = court === null ? null : bringTheCase(world, { accusedId: man.id, polityId: homeId, label: `The trial of ${man.name}, who went over to the enemy and has come back`, day: atStep, sentence: "death", sponsor: receiver });
+  const next = brought?.world ?? world;
+  const trial = brought?.procedure != null;
+  facts.push({
+    localId: safeLocalId(`returned_${man.id}`).slice(0, 60), kind: "defection", visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 70,
+    summary: (trial
+      ? `${man.name}, who went over to the enemy, has come back to ${homeName}: he is seized, and the court has the case against him, for his life.`
+      : `${man.name}, who went over, has come back to ${homeName}, and ${receiver === undefined ? "the city" : receiver.name} has him put in chains: there is no court to try him, and the ruler's word is the sentence.`).slice(0, 600),
+    affectedRefs: [{ kind: "character", id: man.id }, { kind: "polity", id: homeId }],
+  });
+  return { world: next, facts, statuses: ["captured"], lifted: [FOREIGNER, "suppliant", "unprotected"] };
 }
