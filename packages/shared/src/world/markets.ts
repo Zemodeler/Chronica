@@ -120,7 +120,7 @@ export const GOODS: readonly GoodSpec[] = [
   {
     id: "slaves", name: "slaves", unit: "head", basePrice: 200, priceExponent: 0.8, floorBps: 5_000, ceilingBps: 30_000,
     perCapitaMonthly: 0.0012, wealthExponent: 1.5, demandElasticity: 0.5, supplyElasticity: 0.3, targetMonths: 1,
-    supplyByTerrain: {}, supplyOtherwise: 0, portSupply: 0, frontierSupply: 0.0008, homeSupply: 0.75,
+    supplyByTerrain: {}, supplyOtherwise: 0, portSupply: 0, frontierSupply: 0.0008, homeSupply: 0.9,
   },
 ];
 

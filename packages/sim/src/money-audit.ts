@@ -120,7 +120,9 @@ export function auditMoney(before: WorldState, after: WorldState): MoneyAudit {
     if (gap !== 0) unexplained.push({ kind: "unrecorded", accountId: account.id, amount: gap, note: gap > 0 ? "balance rose with no line to say why" : "balance fell with no line to say why" });
   }
   for (const [id, was] of earlier) {
-    if (!seen.has(id) && was !== 0) unexplained.push({ kind: "unrecorded", accountId: id, amount: -was, note: "an account holding money was removed" });
+    // An account struck off must have been emptied by lines (a disbanded chest handed to a treasury): what its lines do not account for is unexplained.
+    const left = was + (expected.get(id) ?? 0);
+    if (!seen.has(id) && left !== 0) unexplained.push({ kind: "unrecorded", accountId: id, amount: -left, note: "an account holding money was removed" });
   }
   return { internal, doors, unexplained };
 }

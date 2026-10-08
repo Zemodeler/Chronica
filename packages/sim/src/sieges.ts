@@ -196,6 +196,8 @@ export function pressSieges(given: WorldState, toDay: number, options: PressSieg
   const sacked: { provinceId: string; place: string; takerPolityId: string; loserPolityId: string; forceName: string; commanderId: string; commanderName: string }[] = [];
 
   const yielded: string[] = [];
+  /** Whose treasury a yielded garrison's war chest goes to: the power that took the place. */
+  const yieldedTo = new Map<string, string>();
   // What the men who took a city, or held one, are owed in standing (`standing-deeds.ts`).
   const deeds: SiegeDeed[] = [];
   const sieges = world.sieges.map((siege): Siege => {
@@ -363,6 +365,7 @@ export function pressSieges(given: WorldState, toDay: number, options: PressSieg
       // A garrison that marched out on terms is not taken with the city.
       const stillInside = garrison.filter((force) => forces.some((candidate) => candidate.id === force.id && candidate.locationId === siege.provinceId));
       yielded.push(...stillInside.map((force) => force.id));
+      for (const force of stillInside) yieldedTo.set(force.id, siege.besiegerPolityId);
       // Carried by assault (`assaultSiege` brings it here at full pressure), not given up on terms or by a traitor.
       deeds.push({ kind: "taken", siegeId: siege.id, place, provinceId: siege.provinceId, polityId: siege.besiegerPolityId, stormed: siege.pressureBps >= 10_000 && !betrayed && !told.includes("terms_accepted") });
       forces = forces.filter((force) => !yielded.includes(force.id));
@@ -393,12 +396,35 @@ export function pressSieges(given: WorldState, toDay: number, options: PressSieg
   // A garrison that laid down its arms is disbanded properly: its chest and
   // what it paid go with it (`disbandForces`).
   const pressed: WorldState = { ...world, sieges, map: { ...world.map, provinces }, material: { ...world.material, forces: [...forces, ...world.material.forces.filter((force) => yielded.includes(force.id))] } };
-  const after = sackCities(reconcileCapitals(disbandForces(pressed, new Set(yielded), null)), sacked, toDay);
+  const after = sackCities(reconcileCapitals(disbandForces(handChestsToTheTakers(pressed, yieldedTo, toDay), new Set(yielded), null)), sacked, toDay);
   const sold = sellTheTaken(after.world, deeds, new Set(sacked.map((sack) => sack.provinceId)));
   const honoured = honourSieges(sold, deeds, toDay, options.playerCharacterId ?? null);
   // The power that lost a city, and the man who sacked one, learn from it (`state-lessons.ts`).
   const learned = lessonsOfSieges(honoured.world, toDay, new Set(sacked.map((sack) => sack.provinceId)));
   return { world: learned, facts: [...facts, ...after.facts, ...honoured.facts], battles };
+}
+
+/**
+ * A garrison that yields gives up its war chest with its arms: to the treasury of the power that took the place, as a transfer between two accounts, so that what
+ * the chest held is in the books when the chest is struck off (the money audit found a squadron's fifteen thousand vanish in the fifth year of a quiet world).
+ */
+export function handChestsToTheTakers(world: WorldState, to: ReadonlyMap<string, string>, toDay: number): WorldState {
+  if (to.size === 0) return world;
+  let accounts = world.material.accounts;
+  const lines: WorldState["material"]["transactions"] = [];
+  for (const [forceId, polityId] of to) {
+    const chest = accounts.find((account) => account.owner.kind === "force" && account.owner.id === forceId);
+    const treasury = accounts.find((account) => account.owner.kind === "polity" && account.owner.id === polityId && account.status === "active");
+    if (chest === undefined || treasury === undefined || chest.balance <= 0) continue;
+    const amount = chest.balance;
+    accounts = accounts.map((account) => (account.id === chest.id ? { ...account, balance: 0 } : account.id === treasury.id ? { ...account, balance: account.balance + amount } : account));
+    lines.push({
+      id: boundedId("txn", "chest-yielded", forceId, String(toDay)), atStep: toDay, kind: "transfer", amount, sourceAccountId: chest.id, destinationAccountId: treasury.id,
+      cause: { kind: "battle_result", id: `yielded_${forceId}`.slice(0, 120), explanation: "A garrison laid down its arms, and its chest with them." }, visibility: "polity",
+    });
+  }
+  if (lines.length === 0) return world;
+  return { ...world, material: { ...world.material, accounts, transactions: [...world.material.transactions, ...lines] } };
 }
 
 /**
