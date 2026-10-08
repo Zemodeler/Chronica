@@ -65,6 +65,19 @@ function spreadLine(label: string, state: WorldState): void {
   console.log(`  development of all ${values.length} provinces, ${label}: p10 ${at(0.1)} / median ${at(0.5)} / p90 ${at(0.9)}, p90-p10 ${at(0.9) - at(0.1)}, sd ${Math.round(sd)}, mean ${Math.round(mean)}, at the floor ${values.filter((value) => value <= 500).length}, at 10,000 ${values.filter((value) => value >= 10_000).length}`);
 }
 
+/** Hubs sitting at a price bound, by good (v58: the slave market floats): the count at the floor and at the ceiling of each good, over every hub of the map. */
+function boundsLine(state: WorldState): void {
+  const hubs = state.economy?.markets ?? [];
+  const parts = GOODS.map((spec) => {
+    const prices = hubs.map((hub) => hub.goods.find((entry) => entry.good === spec.id)?.priceBps ?? 10_000);
+    const low = prices.filter((price) => price <= spec.floorBps + 5).length;
+    const high = prices.filter((price) => price >= spec.ceilingBps - 5).length;
+    const sorted = [...prices].sort((a, b) => a - b);
+    return `${spec.id} ${low} floor/${high} ceiling (median ${sorted[Math.floor(sorted.length / 2)]})`;
+  });
+  console.log(`  hubs at a bound of ${hubs.length}: ${parts.join("; ")}`);
+}
+
 const idFor = createIdFactory("sanity");
 let world = ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
 // `--v50`: the opening as scenario v50 had it (no authored regimes beyond Syracuse's tithe), for a before and after.
@@ -139,6 +152,7 @@ for (let month = 0; month < monthsToRun; month += 1) {
     for (const id of chosen) { income.set(id, income.get(id)! * perYear); customs.set(id, customs.get(id)! * perYear); }
     line(`${formatWorldDate(world.instant, definition.clock)} (month ${month + 1}, ${((Date.now() - started) / 1000).toFixed(0)}s)`, snapshot());
     spreadLine(`year ${(month + 1) / 12}`, world);
+    if (args.includes("--bounds")) boundsLine(world);
     if (target !== null) {
       const row = world.material.provinceMaterial.find((r) => r.provinceId === target!.id)!;
       const hub = marketGeography(world).hubOf.get(target.id)!;

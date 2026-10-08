@@ -85,6 +85,8 @@ export const CROSSING_CAPACITY_SHARE: Readonly<Record<CrossingType, number>> = {
 export const RELIEF_PRICE_BPS = 14_000;
 /** The most a hub sends out of any one good in a month, over all its roads, as a share of what its own country uses in a month. */
 export const EXPORT_SHARE_OF_USE = 0.5;
+/** The share of a hub's stock of slaves its dealers can drive out in a month, whatever the hub uses (`EXPORT_SHARE_OF_USE` of it, in the end). */
+export const SLAVE_DEALERS_SHARE_OF_STOCK = 0.3;
 /** Of what the selling hub means to hold, the share it will not sell below, for every good but grain. */
 export const RESERVE_SHARE = 0.7;
 /** The months of grain a hub keeps for itself beyond what its people need to reach the next harvest, however high the price abroad. */
@@ -303,7 +305,9 @@ function routeMonth(_book: Book, input: FlowInput, result: FlowResult, route: Ro
     const room = Math.max(0, MAX_STOCK_MONTHS * Math.max(1, demand) - buyerBook.stock[index]!);
     // Carriers take more of what is small for its worth (the root of how much dearer grain is to haul).
     // And a hub's merchants have only so many hulls and carts to send out in a month, whoever asks.
-    const sendable = Math.max(0, EXPORT_SHARE_OF_USE * lift * sellerBook.demand[index]! - sellerBook.outflow[index]!);
+    // Slaves are the exception: dealers drive what a war has glutted a market with, a share of the stock and not only of the use.
+    const sendBase = spec.id === "slaves" ? Math.max(sellerBook.demand[index]!, SLAVE_DEALERS_SHARE_OF_STOCK * sellerBook.stock[index]!) : sellerBook.demand[index]!;
+    const sendable = Math.max(0, EXPORT_SHARE_OF_USE * lift * sendBase - sellerBook.outflow[index]!);
     const most = Math.min(spare, room, sendable, demand * carry * Math.sqrt(LAND_HAUL_BPS_PER_100_KM.grain / LAND_HAUL_BPS_PER_100_KM[spec.id]));
     const duty = dutyOn(buyer, spec.id);
     const moved = worthMoving(spec, sellerBook.stock[index]!, sellerBook.target[index]!, buyerBook.stock[index]!, buyerBook.target[index]!, duty, haul, most);

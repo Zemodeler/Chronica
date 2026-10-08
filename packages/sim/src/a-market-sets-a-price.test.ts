@@ -138,7 +138,7 @@ describe("what moves a price", () => {
     const captive = takeCaptives(world, LATIUM, 40_000);
     expect(stockIn(captive, LATIUM, "slaves")).toBeGreaterThan(stockIn(world, LATIUM, "slaves"));
     expect(marketPriceBps(captive, LATIUM, "slaves")).toBeLessThan(before);
-    // The frontier trickles slaves to the market too, but not enough for a country of cities: slaves are the good a war supplies.
+    // A country supplies some of its own slaves and the frontier trickles more (v58), so a market floats; emptied of what it holds it is dearer, and a war puts more on it (`captives-fill-the-slave-market.test.ts`).
     expect(marketPriceBps(drawStock(world, LATIUM, "slaves", 1e12).world, LATIUM, "slaves")).toBeGreaterThan(before);
   });
 });

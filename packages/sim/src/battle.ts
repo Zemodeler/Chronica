@@ -14,6 +14,8 @@ import {
   findPosition,
   resolveBattle,
   sackTheProvince,
+  sellCaptives,
+  BATTLE_CAPTIVE_SHARE,
   takeTheChest,
   summarizeBattleResult,
   terrainDefenseBps,
@@ -489,6 +491,20 @@ function applyResult(world: WorldState, result: BattleResult, atStep: number, me
     next = captured.world;
     if (captured.taken > 0) {
       spoils.push({ kind: "chest", ofId: loserId, byForceId: victorId, byPolityId: victorPolityId, amount: captured.taken });
+    }
+  }
+
+  // And the beaten side's prisoners: a share of what it lost is taken alive and sold, at the winner's nearest market, from where the
+  // field was. The price of slaves falls where armies win (Polybius 1.20; Livy 10.17, 10.46).
+  const winnerPolity = victors.length === 0 ? null : polityOf(victors[0]!);
+  if (winnerPolity !== null) {
+    for (const loserId of beaten) {
+      if (polityOf(loserId) === winnerPolity) continue;
+      let lost = 0;
+      for (const loss of lossesByForce.get(loserId)?.values() ?? []) lost += loss.dead + loss.deserted + loss.wounded;
+      const field = world.material.forces.find((force) => force.id === loserId)?.locationId;
+      if (lost <= 0 || field === undefined || field === null) continue;
+      next = sellCaptives(next, winnerPolity, field, Math.round(lost * BATTLE_CAPTIVE_SHARE)).world;
     }
   }
 

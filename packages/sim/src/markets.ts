@@ -22,6 +22,7 @@ import {
   type ScenarioClock,
   type WorldState,
   addFlows,
+  slaveWorkDemand,
   chargeSkill,
   readDepartments,
   skillShare,
@@ -186,13 +187,14 @@ export function marketMonth(book: Book, input: MonthInput): void {
     supplyOf.set(hub, new Array<number>(GOOD_COUNT).fill(0));
   }
   // Every province adds its use and output to its hub's totals, once.
+  const workHeads = slaveWorkDemand(input.world);
   for (const id of input.ids) {
     const hub = geography.hubOf.get(id);
     const row = input.rows.get(id);
     const province = provinceById.get(id);
     const ground = grounds.get(id);
     if (hub === undefined || row === undefined || province === undefined || ground === undefined) continue;
-    addFlows(row, province, ground, demandOf.get(hub)!, supplyOf.get(hub)!);
+    addFlows(row, province, ground, demandOf.get(hub)!, supplyOf.get(hub)!, workHeads.get(id) ?? 0);
   }
   const toHarvest = monthsToHarvest(input.day, input.clock, input.harvestMonth);
   const calendar = input.clock !== undefined;

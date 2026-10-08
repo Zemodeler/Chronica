@@ -199,7 +199,7 @@ export function sackTheProvince(world: WorldState, input: SackInput): Seizure {
   // And the market it belonged to: a share of its stock plundered, and some of the people put to the sword or sold, sold.
   const sacked: WorldState = { ...withMoney, material: { ...withMoney.material, capturableValues, provinceMaterial } };
   return {
-    world: sackTheMarket(sacked, input.provinceId, material.population - damaged.population, Math.min(1, sackShare)),
+    world: sackTheMarket(sacked, input.provinceId, material.population - damaged.population, Math.min(1, sackShare), input.takerPolityId),
     taken,
     intoAccountId: destination,
   };

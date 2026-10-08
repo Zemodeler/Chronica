@@ -2,6 +2,9 @@ import { lessonsOfSieges } from "./state-lessons";
 import {
   takenBy,
   sackTheMarket,
+  sellCaptives,
+  STORMED_CAPTIVE_SHARE,
+  SURRENDERED_CAPTIVE_SHARE,
   SIEGE_BASE_DAYS,
   reconcileCapitals,
   SIEGE_WORKS,
@@ -391,10 +394,34 @@ export function pressSieges(given: WorldState, toDay: number, options: PressSieg
   // what it paid go with it (`disbandForces`).
   const pressed: WorldState = { ...world, sieges, map: { ...world.map, provinces }, material: { ...world.material, forces: [...forces, ...world.material.forces.filter((force) => yielded.includes(force.id))] } };
   const after = sackCities(reconcileCapitals(disbandForces(pressed, new Set(yielded), null)), sacked, toDay);
-  const honoured = honourSieges(after.world, deeds, toDay, options.playerCharacterId ?? null);
+  const sold = sellTheTaken(after.world, deeds, new Set(sacked.map((sack) => sack.provinceId)));
+  const honoured = honourSieges(sold, deeds, toDay, options.playerCharacterId ?? null);
   // The power that lost a city, and the man who sacked one, learn from it (`state-lessons.ts`).
   const learned = lessonsOfSieges(honoured.world, toDay, new Set(sacked.map((sack) => sack.provinceId)));
   return { world: learned, facts: [...facts, ...after.facts, ...honoured.facts], battles };
+}
+
+/**
+ * A city taken and not sacked still sells some of its people: by storm the garrison and the poor of the walls (a thirtieth), on terms
+ * the few who could not buy themselves off. Polybius (1.20) has Agrigentum's people sold when it fell, and the Romans sold what Livy
+ * calls the booty of Samnite towns by the thousand. The captives go to the taker's nearest market (`sellCaptives`); the people sold
+ * leave the province's rolls.
+ */
+function sellTheTaken(world: WorldState, deeds: readonly SiegeDeed[], sacked: ReadonlySet<string>): WorldState {
+  let next = world;
+  for (const deed of deeds) {
+    if (deed.kind !== "taken" || sacked.has(deed.provinceId)) continue;
+    const row = next.material.provinceMaterial.find((candidate) => candidate.provinceId === deed.provinceId);
+    if (row === undefined || row.population <= 0) continue;
+    const people = Math.round(row.population * (deed.stormed ? STORMED_CAPTIVE_SHARE : SURRENDERED_CAPTIVE_SHARE));
+    const sale = sellCaptives(next, deed.polityId, deed.provinceId, people);
+    if (sale.heads <= 0) continue;
+    next = {
+      ...sale.world,
+      material: { ...sale.world.material, provinceMaterial: sale.world.material.provinceMaterial.map((candidate) => (candidate.provinceId === deed.provinceId ? { ...candidate, population: Math.max(0, candidate.population - people) } : candidate)) },
+    };
+  }
+  return next;
 }
 
 /** Of a sacked city's people, this share killed or sold. */
@@ -462,7 +489,7 @@ function sackCities(world: WorldState, sacked: readonly { provinceId: string; pl
       },
     };
     // The market it was the hub of, or belonged to, is stripped, and those who were sold are sold.
-    next = sackTheMarket(next, sack.provinceId, lost);
+    next = sackTheMarket(next, sack.provinceId, lost, 1, sack.takerPolityId);
     facts.push({
       localId: `sacked_${sack.provinceId}_${toDay}`.slice(0, 60),
       kind: "city_sacked",

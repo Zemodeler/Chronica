@@ -71,6 +71,12 @@ export interface GoodSpec {
   readonly portSupply: number;
   /** Heads a head's worth of frontier trickles to the market a month at nil development (slaves): fades as a province develops. */
   readonly frontierSupply: number;
+  /**
+   * What a settled country supplies of its own, as a share of what its people use (slaves: those born in the household, the exposed
+   * and the sold for debt, the freedmen's purchases of their kin). It follows the country's wealth, so a rich hub is not left
+   * with nothing to buy from but the frontier.
+   */
+  readonly homeSupply: number;
 }
 
 /**
@@ -89,32 +95,32 @@ export const GOODS: readonly GoodSpec[] = [
   {
     id: "grain", name: "grain", unit: "modius", basePrice: 1, priceExponent: 0.9, floorBps: 4_000, ceilingBps: 40_000,
     perCapitaMonthly: 4, wealthExponent: 0, demandElasticity: 0.25, supplyElasticity: 0, targetMonths: 0,
-    supplyByTerrain: { "coastal-plain": 1.06, hills: 1.05, "hills-uplands": 1.04, "desert-steppe": 1.03 }, supplyOtherwise: 1.04, portSupply: 0, frontierSupply: 0,
+    supplyByTerrain: { "coastal-plain": 1.06, hills: 1.05, "hills-uplands": 1.04, "desert-steppe": 1.03 }, supplyOtherwise: 1.04, portSupply: 0, frontierSupply: 0, homeSupply: 0,
   },
   {
     id: "oil_wine", name: "oil and wine", unit: "measure", basePrice: 8, priceExponent: 0.6, floorBps: 4_000, ceilingBps: 40_000,
     perCapitaMonthly: 0.3, wealthExponent: 0.5, demandElasticity: 0.5, supplyElasticity: 0.5, targetMonths: 3,
-    supplyByTerrain: { "coastal-plain": 1.1, hills: 0.9, "hills-uplands": 0.4, "desert-steppe": 0.15 }, supplyOtherwise: 0.7, portSupply: 0.05, frontierSupply: 0,
+    supplyByTerrain: { "coastal-plain": 1.1, hills: 0.9, "hills-uplands": 0.4, "desert-steppe": 0.15 }, supplyOtherwise: 0.7, portSupply: 0.05, frontierSupply: 0, homeSupply: 0,
   },
   {
     id: "metals", name: "metals", unit: "bar", basePrice: 30, priceExponent: 0.5, floorBps: 4_000, ceilingBps: 40_000,
     perCapitaMonthly: 0.02, wealthExponent: 0.5, demandElasticity: 0.4, supplyElasticity: 0.5, targetMonths: 4,
-    supplyByTerrain: { "coastal-plain": 0.55, hills: 2, "hills-uplands": 2.8, "desert-steppe": 0.5 }, supplyOtherwise: 1.5, portSupply: 0, frontierSupply: 0,
+    supplyByTerrain: { "coastal-plain": 0.55, hills: 2, "hills-uplands": 2.8, "desert-steppe": 0.5 }, supplyOtherwise: 1.5, portSupply: 0, frontierSupply: 0, homeSupply: 0,
   },
   {
     id: "timber", name: "timber and naval stores", unit: "load", basePrice: 4, priceExponent: 0.5, floorBps: 4_000, ceilingBps: 40_000,
     perCapitaMonthly: 0.3, wealthExponent: 0.3, demandElasticity: 0.4, supplyElasticity: 0.5, targetMonths: 3,
-    supplyByTerrain: { "coastal-plain": 0.75, hills: 1.6, "hills-uplands": 2, "desert-steppe": 0.15 }, supplyOtherwise: 1.3, portSupply: 0, frontierSupply: 0,
+    supplyByTerrain: { "coastal-plain": 0.75, hills: 1.6, "hills-uplands": 2, "desert-steppe": 0.15 }, supplyOtherwise: 1.3, portSupply: 0, frontierSupply: 0, homeSupply: 0,
   },
   {
     id: "textiles", name: "textiles and luxuries", unit: "length", basePrice: 25, priceExponent: 0.6, floorBps: 4_000, ceilingBps: 40_000,
     perCapitaMonthly: 0.04, wealthExponent: 1, demandElasticity: 0.6, supplyElasticity: 0.5, targetMonths: 2,
-    supplyByTerrain: { "coastal-plain": 0.8, hills: 0.7, "hills-uplands": 0.55, "desert-steppe": 0.45 }, supplyOtherwise: 0.6, portSupply: 0.6, frontierSupply: 0,
+    supplyByTerrain: { "coastal-plain": 0.8, hills: 0.7, "hills-uplands": 0.55, "desert-steppe": 0.45 }, supplyOtherwise: 0.6, portSupply: 0.6, frontierSupply: 0, homeSupply: 0,
   },
   {
     id: "slaves", name: "slaves", unit: "head", basePrice: 200, priceExponent: 0.8, floorBps: 5_000, ceilingBps: 30_000,
     perCapitaMonthly: 0.0012, wealthExponent: 1.5, demandElasticity: 0.5, supplyElasticity: 0.3, targetMonths: 1,
-    supplyByTerrain: {}, supplyOtherwise: 0, portSupply: 0, frontierSupply: 0.005,
+    supplyByTerrain: {}, supplyOtherwise: 0, portSupply: 0, frontierSupply: 0.0008, homeSupply: 0.75,
   },
 ];
 
@@ -125,6 +131,16 @@ export const goodSpec = (good: GoodId): GoodSpec => SPEC_BY_ID.get(good)!;
 const NEUTRAL_DEVELOPMENT = 5_000;
 /** Development at and above which a province has no frontier to trickle slaves from. */
 const FRONTIER_ENDS_AT_DEVELOPMENT = 6_000;
+const METALS = 2;
+/** Heads a month a head of a mining province's people puts to work in the pits, for each point its ground is richer in metal than the common (the mines of Spain and Laurion were worked by slaves: Strabo 3.2.10, Diodorus 5.36-38). */
+/** Ground this rich in metal or richer (the ratio `metals` supplies by terrain: hills 2, uplands 2.8) has its pits. */
+export const MINING_GROUND_FROM = 1.5;
+export const MINING_SLAVES_PER_CAPITA = 0.00012;
+/** The frontier sends no more than this share of what the country uses: dealers buy what a market can take. */
+export const FRONTIER_CEILING_OF_USE = 0.7;
+/** Heads a month one great estate absorbs, and one public work in the building (Cato's farm wanted a gang of slaves; the censors' contracts were worked by them with free hands). */
+export const SLAVES_PER_ESTATE = 1.2;
+export const SLAVES_PER_WORK = 4;
 
 /** The months of grain a hub keeps in hand beyond what it needs to reach the next harvest: what the price is measured against. */
 export const GRAIN_RESERVE_MONTHS = 6;
@@ -360,6 +376,23 @@ export const HARVEST_BANDS = [
 ] as const;
 export type HarvestKind = (typeof HARVEST_BANDS)[number]["kind"];
 
+/**
+ * What the great estates and the state's works in each province absorb of slaves in a month. An estate (a holding on the land) is a
+ * gang on the farm; a work let and not yet built is a gang on the road, the aqueduct or the quays. Read from the world, not stored.
+ */
+export function slaveWorkDemand(world: Pick<WorldState, "material" | "economy">): Map<string, number> {
+  const heads = new Map<string, number>();
+  for (const holding of world.material.holdings) {
+    if (holding.territoryId === undefined || holding.territoryId === null) continue;
+    heads.set(holding.territoryId, (heads.get(holding.territoryId) ?? 0) + SLAVES_PER_ESTATE);
+  }
+  for (const work of world.economy?.works ?? []) {
+    if (work.built) continue;
+    heads.set(work.provinceId, (heads.get(work.provinceId) ?? 0) + SLAVES_PER_WORK);
+  }
+  return heads;
+}
+
 const cache0: number[] = new Array<number>(GOOD_COUNT).fill(0);
 
 /**
@@ -398,6 +431,8 @@ export function addFlows(
   ground: Pick<ProvinceGround, "startingDevelopmentBps" | "port">,
   demand: number[],
   supply: number[],
+  /** Heads a month the province's great estates and the state's works in it absorb (`slaveWorkDemand`). */
+  workHeads = 0,
 ): void {
   const people = row.population;
   if (people <= 0) return;
@@ -413,7 +448,17 @@ export function addFlows(
       const ratio = spec.supplyByTerrain[province.terrainId] ?? spec.supplyOtherwise;
       supply[index]! += use * ratio * capacity * grainSkill(development, ground.startingDevelopmentBps);
     } else if (spec.frontierSupply > 0) {
-      supply[index]! += people * spec.frontierSupply * Math.max(0, 1 - development / FRONTIER_ENDS_AT_DEVELOPMENT) * capacity;
+      // Slaves (v58). Demand is the country's own use, thinned where war has emptied the market and its buyers, and thickened by what
+      // the mines, the great estates and the state's works absorb. Supply is the country's own (a share of what it uses), the
+      // frontier's trickle (fading as a province develops, never more than the country could take), and, in a month of war,
+      // the captives (sellCaptives, put straight into a hub's stock).
+      const buyers = (1 - 0.6 * (row.warDamageBps / 10_000)) * (1 - 0.3 * ((row.scarBps ?? 0) / 10_000));
+      const own = spec.wealthExponent === 0 ? use : use * Math.pow(wealth, spec.wealthExponent);
+      const base = own * buyers;
+      const mining = Math.max(0, (GOODS[METALS]!.supplyByTerrain[province.terrainId] ?? GOODS[METALS]!.supplyOtherwise) - MINING_GROUND_FROM) * MINING_SLAVES_PER_CAPITA * people * REVIEW_SHARE_OF_MONTH;
+      demand[index]! += base - own + mining + workHeads;
+      supply[index]! += base * spec.homeSupply
+        + Math.min(base * FRONTIER_CEILING_OF_USE, people * spec.frontierSupply * Math.max(0, 1 - development / FRONTIER_ENDS_AT_DEVELOPMENT) * capacity);
     } else {
       const ratio = (spec.supplyByTerrain[province.terrainId] ?? spec.supplyOtherwise) + (ground.port ? spec.portSupply : 0);
       supply[index]! += use * ratio * capacity * skill;
@@ -560,6 +605,64 @@ export function takeCaptives(world: WorldState, provinceId: string, people: numb
 }
 
 /**
+ * Of the beaten side's casualties in a field battle (the dead, the wounded left on the field, the deserters caught), the share taken
+ * alive and sold. Polybius (1.20) has the Romans selling 25,000 of Agrigentum's people in 262; Livy tells of the Samnite and Etruscan
+ * prisoners sold at the end of a campaign (10.17, 10.31 and again at 10.46: "the booty was sold").
+ */
+export const BATTLE_CAPTIVE_SHARE = 0.25;
+/** Of a city's people, the share sold when it is taken by storm, and when it is taken on terms (the garrison and the poor who could not buy themselves off). */
+export const STORMED_CAPTIVE_SHARE = 0.03;
+export const SURRENDERED_CAPTIVE_SHARE = 0.004;
+
+/**
+ * The hub of the winner's, nearest by the roads to where the fighting was, that a conqueror's dealers bring their captives to: the
+ * first hub, walking out from the place over the map's edges, that the winner holds (or whose country he holds); failing that, any
+ * hub he holds, the first by id. Null where he holds none.
+ */
+export function nearestHubOf(world: Pick<WorldState, "map">, polityId: string, fromProvinceId: string): string | null {
+  const geography = marketGeography(world);
+  const holder = new Map(world.map.provinces.map((province) => [province.id, province.controllerPolityId]));
+  const adjacent = new Map<string, string[]>();
+  for (const edge of world.map.edges) {
+    (adjacent.get(edge.from) ?? adjacent.set(edge.from, []).get(edge.from)!).push(edge.to);
+    (adjacent.get(edge.to) ?? adjacent.set(edge.to, []).get(edge.to)!).push(edge.from);
+  }
+  const seen = new Set<string>([fromProvinceId]);
+  let frontier = [fromProvinceId];
+  while (frontier.length > 0) {
+    for (const id of [...frontier].sort()) {
+      const hub = geography.hubOf.get(id);
+      if (hub !== undefined && holder.get(hub) === polityId) return hub;
+    }
+    const next: string[] = [];
+    for (const id of frontier) {
+      for (const other of adjacent.get(id) ?? []) {
+        if (seen.has(other)) continue;
+        seen.add(other);
+        next.push(other);
+      }
+    }
+    frontier = next;
+  }
+  return geography.hubs.find((hub) => holder.get(hub) === polityId) ?? null;
+}
+
+/**
+ * Prisoners sold by a winner: put on the market of the winner's nearest hub, so the price of slaves falls where armies win and not
+ * in the market of the city that was taken (its buyers are ruined and its dealers fled). Returns the world and the heads that stood
+ * in that hub's warehouses (a hub holds no more than `MAX_STOCK_MONTHS` of what it uses; the rest are carried on or lost on the road).
+ */
+export function sellCaptives(world: WorldState, winnerPolityId: string, nearProvinceId: string, people: number): { readonly world: WorldState; readonly heads: number; readonly hubId: string | null } {
+  const heads = Math.max(0, Math.round(people));
+  if (heads <= 0) return { world, heads: 0, hubId: null };
+  const hubId = nearestHubOf(world, winnerPolityId, nearProvinceId);
+  if (hubId === null) return { world, heads: 0, hubId: null };
+  const before = stockIn(world, hubId, "slaves");
+  const next = addStock(world, hubId, "slaves", heads);
+  return { world: next, heads: stockIn(next, hubId, "slaves") - before, hubId };
+}
+
+/**
  * Part of a province's market destroyed, plundered or carried off by whoever
  * took the place: the given share of every good a hub holds, and of the grain
  * most of all. Used by a sack of the hub itself.
@@ -587,11 +690,14 @@ export const SACK_PLUNDER_OF_COUNTRY = 0.05;
  * scales it for a place only partly sacked (a city stormed in a province of
  * several).
  */
-export function sackTheMarket(world: WorldState, provinceId: string, people: number, share = 1): WorldState {
+export function sackTheMarket(world: WorldState, provinceId: string, people: number, share = 1, takerPolityId: string | null = null): WorldState {
   const hub = hubOf(world, provinceId);
   if (hub === null) return world;
   const plundered = plunderMarket(world, provinceId, (hub === provinceId ? SACK_PLUNDER_OF_HUB : SACK_PLUNDER_OF_COUNTRY) * Math.max(0, Math.min(1, share)));
-  return takeCaptives(plundered, provinceId, Math.max(0, people));
+  // The captives are the taker's, and go to his nearest market; with no taker named (a sack with no owner) they come to the sacked market.
+  if (takerPolityId === null) return takeCaptives(plundered, provinceId, Math.max(0, people));
+  const sold = sellCaptives(plundered, takerPolityId, provinceId, Math.round(Math.max(0, people) * CAPTIVE_SHARE));
+  return sold.hubId === null ? takeCaptives(plundered, provinceId, Math.max(0, people)) : sold.world;
 }
 
 /**
@@ -622,13 +728,14 @@ export function hubFlows(world: Pick<WorldState, "map" | "material">): Map<strin
   const grounds = provinceGrounds(world);
   const provinces = new Map(world.map.provinces.map((province) => [province.id, province]));
   const flows = new Map<string, { demand: number[]; supply: number[] }>(geography.hubs.map((hub) => [hub, { demand: [...cache0], supply: [...cache0] }]));
+  const workHeads = slaveWorkDemand(world);
   for (const row of world.material.provinceMaterial) {
     const hub = geography.hubOf.get(row.provinceId);
     const province = provinces.get(row.provinceId);
     const ground = grounds.get(row.provinceId);
     if (hub === undefined || province === undefined || ground === undefined) continue;
     const into = flows.get(hub)!;
-    addFlows(row, province, ground, into.demand, into.supply);
+    addFlows(row, province, ground, into.demand, into.supply, workHeads.get(row.provinceId) ?? 0);
   }
   return flows;
 }
