@@ -48,4 +48,6 @@ export * from "./peers";
 export * from "./candidates";
 export * from "./staffing";
 export * from "./ordo";
+export * from "./roman-names";
+export * from "./gens-standing";
 export * from "./vices";

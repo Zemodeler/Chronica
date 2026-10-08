@@ -5,6 +5,7 @@ import { standingInWords } from "./skills-in-words";
 import { clampStandingShift, formatStanding, type StandingCause } from "./standing-causes";
 import type { EligibilityRequirement } from "../material-state";
 import type { WorldState } from "../world/world-state";
+import { gensPhrase } from "../world/gentes";
 
 /**
  * A man's standing, as the engine moves it and as he is shown it.
@@ -103,6 +104,7 @@ export function standingLine(world: WorldState, scenarioOffices: readonly Office
   const words = gatesInWords(standingGates(world, scenarioOffices, character), character.prestigeBps);
   const parts = [
     `${standingFigure(character.prestigeBps)} (${standingInWords(character.prestigeBps)})`,
+    gensPhrase(world, character),
     words.passed === null ? null : `enough for ${words.passed}`,
     words.next.length === 0 ? null : `next: ${words.next.join("; ")}`,
   ].filter((part): part is string => part !== null);

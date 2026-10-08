@@ -20,6 +20,7 @@ import { loanOfferLines } from "./money";
 
 import {
   standingLine,
+  gensPhrase,
   ORDER_PART_STATUS_LABEL,
   isOrderPartOpen,
   orderPartStatus,
@@ -782,6 +783,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       faith: character.faithId === null ? null : world.faiths.find((faith) => faith.id === character.faithId)?.name ?? null,
       standing: [
         character.gender === "female" ? "a woman" : null,
+        gensPhrase(world, character),
         character.legalStatus === "enslaved" ? `slave of ${world.characters.find((owner) => owner.id === character.ownerCharacterId)?.name ?? "a master"}` : null,
         character.legalStatus === "freed" ? `freedman of ${world.characters.find((owner) => owner.id === character.ownerCharacterId)?.name ?? "a patron"}` : null,
       ].filter((part): part is string => part !== null).join(", ") || null,

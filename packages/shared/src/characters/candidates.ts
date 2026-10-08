@@ -5,6 +5,7 @@ import { resolveEligibility } from "./political-authority";
 import { campaignsOf } from "../warfare/service";
 import type { PoliticalProcedure } from "../material-state";
 import type { WorldState } from "../world/world-state";
+import { nobilitasBps, nobilitasWeightBps, priestlyBar, type GentesView } from "../world/gentes";
 
 /**
  * Who could hold an office: the rules an election uses to find its men, kept
@@ -91,6 +92,9 @@ export function admissionRefusal(world: WorldState, office: Office, requirementI
   const sitting = world.material.officeSeats.some((seat) => seat.officeId === office.id && seat.status === "held" && seat.holderCharacterId === character.id);
   if (sitting) return `${character.name} already holds it.`;
   if (!character.alive) return `${character.name} is dead.`;
+  // The old rites went to patricians by birth, whatever else the office asks.
+  const barred = priestlyBar(office, character);
+  if (barred !== null) return barred;
   const result = resolveEligibility({ ...world, elapsedStep: toDay }, character.id, requirementIds, office.id);
   return result.eligible ? null : result.failedReasons.join(" ");
 }
@@ -101,11 +105,14 @@ export function admissionRefusal(world: WorldState, office: Office, requirementI
  * is: the tribunes were picked from the young men of the tribes who had
  * already been under the standards.
  */
-export function candidateScore(office: Office, character: Character, toDay: number): number {
-  if (!isJuniorCollege(office)) return character.prestigeBps;
+export function candidateScore(office: Office, character: Character, toDay: number, gentes?: GentesView): number {
+  // A name weighs with the electors: a consul's descendant stood for the curule chairs on his forefathers' images,
+  // and a new man on his own deeds (`world/gentes.ts`). Only where the world keeps gentes.
+  const name = gentes === undefined ? 0 : Math.round((nobilitasBps(gentes, character) * nobilitasWeightBps(office)) / 10_000);
+  if (!isJuniorCollege(office)) return character.prestigeBps + name;
   const served = Math.min(SERVICE_CAMPAIGNS_COUNTED, campaignsOf(character)) * SERVICE_BPS_PER_CAMPAIGN;
   const youth = Math.max(0, YOUTH_AGE - currentAgeYears(character, toDay)) * YOUTH_BPS_PER_YEAR;
-  return character.prestigeBps + served + youth;
+  return character.prestigeBps + served + youth + name;
 }
 
 /** Who the electors would think of unprompted: eligible, of standing, not above it, likeliest first. */
@@ -119,7 +126,7 @@ export function electableFor(
   const { requirementIds, minStanding } = officeRequirements(world, office);
   return world.characters
     .filter((character) => character.id !== excludeId && character.prestigeBps >= minStanding && !isBeneath(world, office, officesById, character) && isEligibleFor(world, office, requirementIds, character, toDay))
-    .sort((a, b) => candidateScore(office, b, toDay) - candidateScore(office, a, toDay) || a.id.localeCompare(b.id));
+    .sort((a, b) => candidateScore(office, b, toDay, world) - candidateScore(office, a, toDay, world) || a.id.localeCompare(b.id));
 }
 
 /** The man a candidacy puts forward: the person it names, or -- for "Gaius stands for consul", written about the office -- whoever moved it. */

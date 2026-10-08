@@ -43,6 +43,7 @@ import { SuccessionRuleSchema } from "../characters/character";
 import { AuditSchema, DepartmentSchema, DiversionSchema } from "./departments";
 import { BlockadeSchema, ConvoySchema, EngagementSchema } from "./engagement";
 import { EconomyMemorySchema } from "./economy";
+import { GensSchema, MAX_GENTES } from "./gentes";
 import { ActMarkSchema, MAX_ACT_MARKS } from "./act-marks";
 
 /**
@@ -179,6 +180,8 @@ export const WorldStateSchema = z
      * reviews the world.
      */
     constitutions: z.array(ConstitutionSchema).default([]),
+    /** The noble families -- Rome's gentes, Carthage's great houses, the kings' houses (`world/gentes.ts`, `sim/gentes.ts`). */
+    gentes: z.array(GensSchema).max(MAX_GENTES).default([]),
     /**
      * Who is in charge of what, beneath the ruler: a power's departments and
      * a household's stewards (`world/departments.ts`). A lever no department

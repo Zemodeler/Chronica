@@ -29,6 +29,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { ballotsOfBloc, seatsOf, votesBySeat, type Ballot } from "./ballots";
+import { clientsFromName, kinOf } from "./gens-loyalty";
 import { carryOutEnactment } from "./enact";
 import type { IdFactory } from "./ports";
 import { concernsOf } from "./questions";
@@ -342,7 +343,7 @@ export function blocLeanings(world: WorldState, procedure: PoliticalProcedure, i
     // And what is said of him: a man everybody speaks well of is heard, one
     // nobody trusts is heard less, by up to a quarter either way.
     const name = 1 + deriveReputation(world, character.id) / 400;
-    const sway = Math.max(1, Math.round((character.prestigeBps / SWAY_PER_STANDING_BPS) * voice * name)) + clientsOf(character.id);
+    const sway = Math.max(1, Math.round((character.prestigeBps / SWAY_PER_STANDING_BPS) * voice * name)) + clientsOf(character.id) + clientsFromName(world, character);
     return [{ name: character.name, signed: signOf(position.position) * sway, position: position.position }];
   });
   // Ordinary declarations represent a chamber's opinion, not an unlimited
@@ -389,7 +390,7 @@ export function blocLeanings(world: WorldState, procedure: PoliticalProcedure, i
     if (againstIt.length > 0) reasons.push(`${againstIt.join(", ")} spoke against it`);
     const score = clampScore(lean);
     // A council votes seat by seat: the bloc is the faction's pull, and each member answers it as himself.
-    const ballots = seatMap === null ? undefined : ballotsOfBloc(seatMap.get(bloc.id) ?? [], bloc, score, procedure, concerns, ownWords);
+    const ballots = seatMap === null ? undefined : ballotsOfBloc(seatMap.get(bloc.id) ?? [], bloc, score, procedure, concerns, ownWords, kinOf(world, procedure));
     const split = ballots === undefined ? splitOfBloc(bloc, score) : {
       yes: ballots.filter((ballot) => ballot.choice === "yes").length,
       no: ballots.filter((ballot) => ballot.choice === "no").length,

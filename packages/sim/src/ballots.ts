@@ -9,6 +9,7 @@ import {
   type VotingBloc,
   type WorldState,
 } from "@chronica/shared";
+import { leanAsAGens, type Kin } from "./gens-loyalty";
 
 /**
  * A chamber of men, not a chamber of blocs.
@@ -95,6 +96,9 @@ export interface Seat {
   /** The character, where the seat is a named one. */
   readonly characterId: string | null;
   readonly mind: CharacterMind;
+  /** The gens a named man is of, and whether he is its first man (`gens-loyalty.ts`). */
+  readonly gensId?: string | null;
+  readonly leader?: boolean;
 }
 
 export interface Ballot {
@@ -146,7 +150,10 @@ export function seatsOf(world: WorldState, institution: GovernmentInstitution, s
     const men = (named.get(bloc.id) ?? [])
       .sort((a, b) => Number(speakers.has(b.id)) - Number(speakers.has(a.id)) || b.prestigeBps - a.prestigeBps || a.id.localeCompare(b.id))
       .slice(0, bloc.weight);
-    const seats: Seat[] = men.map((man) => ({ id: man.id, name: man.name, characterId: man.id, mind: man.mind }));
+    const seats: Seat[] = men.map((man) => ({
+      id: man.id, name: man.name, characterId: man.id, mind: man.mind,
+      ...(man.dynastyId === null ? {} : { gensId: man.dynastyId, leader: world.gentes.some((gens) => gens.id === man.dynastyId && gens.princepsId === man.id) }),
+    }));
     for (let n = seats.length; n < bloc.weight; n += 1) {
       const id = `${institution.id}:${bloc.id}:seat-${n}`;
       seats.push({ id, name: `a member of ${bloc.name.toLowerCase()}`, characterId: null, mind: deriveDefaultMind({ id, officeId: null, skills: FLAT_SKILLS, ageYears: 45, cultureId: "unnamed" }) });
@@ -172,15 +179,24 @@ export function ballotsOfBloc(
   procedure: PoliticalProcedure,
   concerns: readonly QuestionConcern[],
   ownWords: ReadonlyMap<string, "support" | "oppose">,
+  kin?: Kin,
 ): Ballot[] {
-  return seats.map((seat) => {
+  // What each seat leans before the gens has its say; then the gentes draw their men together and their feuds turn them.
+  const own = seats.map((seat) => {
+    const { temperament } = seat.mind;
+    const followsFaction = 0.7 + (bloc.groupId == null ? 0 : 0.15) + (temperament.sociability - 50) / 220 - (temperament.discipline - 50) / 400;
+    const mood = ((stableHash([seat.id, procedure.id, "mood"]) % 2_001) / 1_000 - 1) * (4 + 12 * (1.2 - temperament.discipline / 100));
+    return blocLean * Math.max(0.25, Math.min(1, followsFaction)) + mindLean(seat.mind, concerns) + mood;
+  });
+  const together = leanAsAGens(seats, own, kin);
+  return seats.map((seat, index) => {
     const { temperament } = seat.mind;
     // A man who thinks for himself is less carried by his faction; a sociable one more.
     // A faction holds its members closer than a house holds its estates: they go where their leader goes.
     const followsFaction = 0.7 + (bloc.groupId == null ? 0 : 0.15) + (temperament.sociability - 50) / 220 - (temperament.discipline - 50) / 400;
     // The day's mood: each seat's own, on each question, larger in the impulsive.
     const mood = ((stableHash([seat.id, procedure.id, "mood"]) % 2_001) / 1_000 - 1) * (4 + 12 * (1.2 - temperament.discipline / 100));
-    let lean = blocLean * Math.max(0.25, Math.min(1, followsFaction)) + mindLean(seat.mind, concerns) + mood;
+    let lean = together[index]!;
     const said = seat.characterId === null ? undefined : ownWords.get(seat.characterId);
     if (said === "support") lean = Math.max(lean, bloc.yesThreshold + 5) + 10;
     else if (said === "oppose") lean = Math.min(lean, bloc.noThreshold - 5) - 10;

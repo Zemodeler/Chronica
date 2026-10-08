@@ -241,7 +241,7 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
     const electable = (): Character[] =>
       world.characters
         .filter((character) => character.id !== player && character.prestigeBps >= minStanding && !beneath(character) && eligible(character))
-        .sort((a, b) => candidateScore(office, b, input.toDay) - candidateScore(office, a, input.toDay) || a.id.localeCompare(b.id));
+        .sort((a, b) => candidateScore(office, b, input.toDay, world) - candidateScore(office, a, input.toDay, world) || a.id.localeCompare(b.id));
 
     /**
      * Custom, where it was not law: the voters preferred a man who had served
@@ -328,7 +328,7 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
           return;
         }
         refused.delete(characterId);
-        standing.set(characterId, Math.max(standing.get(characterId) ?? Number.NEGATIVE_INFINITY, candidateScore(office, character, input.toDay) + served(character) + net));
+        standing.set(characterId, Math.max(standing.get(characterId) ?? Number.NEGATIVE_INFINITY, candidateScore(office, character, input.toDay, world) + served(character) + net));
       };
       // Whoever called it stands -- unless it is beneath him, when he was only
       // presiding: a former consul calling the quaestors' election is not a
@@ -338,7 +338,7 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
       for (const candidacy of candidacies) { const candidate = candidateOf(candidacy); if (candidate !== null) stand(candidate, netSupport(world, candidacy.id), true); }
       for (const character of electable()) {
         if (standing.size >= places.length) break;
-        if (!standing.has(character.id)) standing.set(character.id, candidateScore(office, character, input.toDay) + served(character));
+        if (!standing.has(character.id)) standing.set(character.id, candidateScore(office, character, input.toDay, world) + served(character));
       }
       const nameOf = (id: string): string => world.characters.find((character) => character.id === id)?.name ?? id;
       for (const [id, refusal] of refused) {

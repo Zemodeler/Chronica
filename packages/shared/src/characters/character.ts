@@ -245,6 +245,13 @@ export const CharacterSchema = z
     cultureId: EntityIdSchema,
     faithId: EntityIdSchema.nullable(),
     dynastyId: EntityIdSchema.nullable(),
+    /**
+     * The parts of a Roman's name, where he has them (`characters/roman-names.ts`): the given name, the gens, the branch.
+     * Read first for his order and his gens; a name written as one string is parsed when these are not there.
+     */
+    praenomen: z.string().trim().min(1).max(40).optional(),
+    nomen: z.string().trim().min(1).max(60).optional(),
+    cognomen: z.string().trim().min(1).max(80).optional(),
     locationProvinceId: EntityIdSchema,
     polityId: EntityIdSchema.nullable(),
 

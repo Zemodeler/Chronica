@@ -13,18 +13,27 @@
  * the Marcelli), and those are told apart by cognomen.
  */
 
+import { parseRomanName } from "./roman-names";
+
 const PATRICIAN_GENTES = new Set([
   "aemilius", "claudius", "cornelius", "fabius", "furius", "julius", "manlius", "nautius", "papirius", "postumius",
   "quinctius", "quinctilius", "sergius", "servilius", "sulpicius", "valerius", "veturius", "verginius", "folius", "pinarius",
+  "horatius", "menenius", "lucretius", "cloelius", "geganius", "larcius",
 ]);
 
-/** Cognomina that mark the plebeian branch of a gens otherwise patrician. */
-const PLEBEIAN_BRANCHES = new Set(["marcellus", "marcelli", "canina", "asina"]);
+/**
+ * Cognomina that mark the plebeian branch of a gens otherwise patrician: the Claudii Marcelli. (The
+ * Claudii Caninae and the Cornelii Scipiones Asinae were patricians, and this list once said they were not.)
+ */
+const PLEBEIAN_BRANCHES = new Set(["marcellus", "marcelli"]);
 
 /** The order a Roman's name places him in, read from the gens: "Gnaeus Cornelius Blasio" is a patrician. */
 export function ordoOfRomanName(name: string): "patrician" | "plebeian" {
   const words = name.toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter((word) => word.length > 0);
   if (words.some((word) => PLEBEIAN_BRANCHES.has(word))) return "plebeian";
+  // A woman's name is her nomen in the feminine ("Sulpicia", "Aemilia the Vestal"): read the gens, not a list of words.
+  const { nomen } = parseRomanName(name);
+  if (nomen !== null) return PATRICIAN_GENTES.has(nomen.toLowerCase()) ? "patrician" : "plebeian";
   return words.slice(1).some((word) => PATRICIAN_GENTES.has(word)) ? "patrician" : "plebeian";
 }
 

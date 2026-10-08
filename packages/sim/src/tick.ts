@@ -89,6 +89,7 @@ import { settleUnionOffers } from "./submission";
 import { betweenHarvests, reviewTheLand } from "./economy";
 import { payCustoms } from "./customs";
 import { keepMerchantHouses } from "./merchant-houses";
+import { keepGentes } from "./gentes";
 import { routeOpenBps } from "./trade-flows";
 import { EMBARGO_BREACH_TRUST, endObligationsOfEndedAgreements, keepTreaties, shiftTrust } from "./treaties";
 import { keepPromises } from "./promises";
@@ -1715,6 +1716,10 @@ export function runDeterministicTick(given: TickInput): TickResult {
   const housed = keepMerchantHouses(payCustoms(reckoned.world, input.toDay, input.ids), input.toDay, input.ids);
   const land = { ...reckoned, world: housed.world };
   facts.push(...land.facts, ...housed.facts);
+  // And the noble families keep their heads, honours, rites, grudges and marriages, a month at a time (`gentes.ts`).
+  const kinned = keepGentes(land.world, input.toDay);
+  land.world = kinned.world;
+  facts.push(...kinned.facts);
   const playerPolityId = input.playerCharacterId == null ? null : land.world.characters.find((character) => character.id === input.playerCharacterId)?.polityId ?? null;
   const treaties = keepTreaties({ world: land.world, toDay: input.toDay, ids: input.ids, playerPolityId });
   facts.push(...treaties.facts);
