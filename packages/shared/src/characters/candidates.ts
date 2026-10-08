@@ -2,6 +2,7 @@ import { currentAgeYears } from "./age";
 import { isMagistracy, type Character, type Office } from "./character";
 import { officeNamedIn } from "./player-materialization";
 import { resolveEligibility } from "./political-authority";
+import { cursusRefusal } from "./cursus";
 import { campaignsOf } from "../warfare/service";
 import type { PoliticalProcedure } from "../material-state";
 import type { WorldState } from "../world/world-state";
@@ -95,6 +96,9 @@ export function admissionRefusal(world: WorldState, office: Office, requirementI
   // The old rites went to patricians by birth, whatever else the office asks.
   const barred = priestlyBar(office, character) ?? priestlyTaboo(world, office, character);
   if (barred !== null) return barred;
+  // The custom of the ladder, and a conviction's bar (`cursus.ts`).
+  const custom = cursusRefusal(world, office, character, toDay, requirementIds);
+  if (custom !== null) return custom;
   const result = resolveEligibility({ ...world, elapsedStep: toDay }, character.id, requirementIds, office.id);
   return result.eligible ? null : result.failedReasons.join(" ");
 }

@@ -550,6 +550,21 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
         // A date set is not news; the count, when it comes, is.
         significance: 15,
       });
+      // The man the player is hears it is open to him, by name, with the day and the words that put his name forward.
+      const you = player === null ? undefined : world.characters.find((character) => character.id === player && character.alive && character.polityId === office.polityId);
+      if (you !== undefined && !beneath(you) && admissionRefusal(world, office, requirementIds, you, input.toDay) === null) {
+        facts.push({
+          localId: nextLocalId(),
+          kind: "election_open_to_you",
+          summary: `An election is called for ${college ? `${places.length === 1 ? "one place" : `${places.length} places`} as ${office.label}` : `${places.length > 1 ? `${places.length} ${office.label}s` : `a ${office.label}`}`}, and you may stand: say "I put my name forward for ${office.label}" before day ${procedure.deadlineStep ?? input.toDay + ELECTION_POLLING_DAYS}, and ask your friends for their voices.`.slice(0, 600),
+          affectedRefs: [{ kind: "character", id: you.id }, { kind: "polity", id: office.polityId }],
+          knownToRefs: [{ kind: "character", id: you.id }],
+          visibility: "public",
+          discoveryState: "public",
+          knowableInDays: 0,
+          significance: 40,
+        });
+      }
       continue;
     }
 
