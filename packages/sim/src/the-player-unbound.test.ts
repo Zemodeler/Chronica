@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { withTheConsularArmyOnceDrawn } from "./the-opening-as-it-was";
 import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import {
   ScenarioDefinitionSchema,
@@ -215,7 +216,8 @@ describe("the side attacked has a plan too", () => {
       op: "force_modify", forceRef: "roman-field-army",
       battlePlan: { factor: "cohesion", magnitude: "meaningful", rationale: "Hold the line behind the stakes.", restsOn: ["numbers", "second_force"] },
       reason: "The consul sets the order of battle.",
-    }], facing());
+    // The case was struck on the consul's army of one legion and one ala (`the-opening-as-it-was.ts`).
+    }], withTheConsularArmyOnceDrawn(facing()));
     expect(planned.world.material.forces.find((force) => force.id === "roman-field-army")!.battlePlan?.factor).toBe("cohesion");
 
     const attacked = act("hanno-carthage", [{
@@ -258,7 +260,7 @@ describe("rising while in office", () => {
     const quaestorship = state.material.officeSeats.find((seat) => seat.holderCharacterId === "quintus-ogulnius" && seat.officeId.includes("praetor"))!.officeId;
     state = {
       ...state,
-      characters: state.characters.map((character) => (character.id === "quintus-ogulnius" ? { ...character, prestigeBps: 9_000 } : character.id === "manius-curius" ? { ...character, prestigeBps: 6_000 } : character)),
+      characters: state.characters.map((character) => (character.id === "quintus-ogulnius" ? { ...character, prestigeBps: 9_000, ageYearsAtStart: 45 } : character.id === "manius-curius" ? { ...character, prestigeBps: 6_000 } : character)),
       material: {
         ...state.material,
         officeSeats: state.material.officeSeats.map((seat) => (seat.id === "roman-consul:seat:1" ? { ...seat, holderCharacterId: null, status: "vacant" as const, vacancyCause: "term_expired" as const, termExpiresAtStep: 0 } : seat)),
