@@ -92,6 +92,13 @@ export const CampaignPlanSchema = z.object({
   issuedByCharacterId: EntityIdSchema,
   issuedStep: ElapsedStepSchema,
   expiresStep: ElapsedStepSchema,
+  /**
+   * Written by the rules in the head's name, not by a man the model plays: the rules keep carrying it out, and look at it again when the man
+   * who commands the army changes or the season or the road does (a played man's own order stands until it runs out; docs/plans/war-plans.md).
+   */
+  byRule: z.boolean().optional(),
+  /** Who commanded the army when the rules sent it: a new commander is a new order. */
+  forCommanderId: EntityIdSchema.nullable().optional(),
 }).strict();
 export type CampaignPlan = z.infer<typeof CampaignPlanSchema>;
 

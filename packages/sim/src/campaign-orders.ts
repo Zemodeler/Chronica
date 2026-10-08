@@ -133,6 +133,10 @@ export function campaignStillGood(ctx: StrategyContext, force: Force, cp: Campai
     const target = ctx.world.material.forces.find((candidate) => candidate.id === (cp.objective as { forceId: string }).forceId);
     if (target === undefined || fitStrengthOf(target) <= 0 || !ctx.enemies.has(target.polityId)) return false;
   }
+  // An order the army cannot carry out -- no road to it, no ships for the water -- is cancelled, and a feasible one is given in its place.
+  if (objectiveProvince !== here && !reach.has(objectiveProvince) && passagePlanFor(ctx.world, force, objectiveProvince, ctx.warfare, monthOf(ctx, day)) === null) return false;
+  // The rules' own order stands for the man it was given to: a new commander (a new consul, a recalled strategos) is a new order.
+  if (cp.byRule === true && cp.forCommanderId !== undefined && cp.forCommanderId !== force.commanderCharacterId) return false;
   const province = ctx.provinces.get(objectiveProvince);
   const held = province?.controllerPolityId ?? null;
   if (cp.mode === "siege" || cp.mode === "raid") {
@@ -141,8 +145,8 @@ export function campaignStillGood(ctx: StrategyContext, force: Force, cp: Campai
   }
   if (cp.mode === "seek_battle" && cp.objective.kind === "province" && here === objectiveProvince) return false;
   if ((cp.mode === "garrison" || cp.mode === "refuse" || cp.mode === "winter") && held !== ctx.polityId) return false;
-  // What a model-played head ordered stands until it runs out or its object is gone.
-  if (playedByModel.has(cp.issuedByCharacterId)) return true;
+  // What a model-played head ordered himself stands until it runs out or its object is gone; the rules' order in his name does not, or the army sat the winter out in May.
+  if (playedByModel.has(cp.issuedByCharacterId) && cp.byRule !== true) return true;
   const month = monthOf(ctx, day);
   const winter = month !== null && isWinterMonth(month);
   if (cp.mode === "winter" && month !== null && !winter) return false;
@@ -180,10 +184,16 @@ export function issueCampaign(ctx: StrategyContext, force: Force, plan: WarPlan,
   const fallback = quarters ?? base;
   const nearEnemy = superiorNear(ctx, force, reach);
   const enemies = enemyArmies(ctx);
-  const make = (mode: CampaignMode, objective: CampaignPlan["objective"], days: number, why: string): Issued => {
+  // The old order's object, if the army can no longer get to it: said in the new order's reason, so that nobody is left believing it is carried out.
+  const oldObject = existing === undefined ? null : existing.objective.kind === "province" ? existing.objective.provinceId
+    : world.material.forces.find((candidate) => candidate.id === (existing.objective as { forceId: string }).forceId)?.locationId ?? null;
+  const cannot = oldObject !== null && oldObject !== force.locationId && !canGet(oldObject) ? oldObject : null;
+  const make = (mode: CampaignMode, objective: CampaignPlan["objective"], days: number, reason: string): Issued => {
+    const why = cannot === null ? reason : `the order for ${placeName(ctx, cannot)} could not be carried out, there being no road and no ships to it; ${reason}`;
     const campaign: CampaignPlan = {
       forceId: force.id, polityId, warId: plan.warId, theatreId: theatre?.id ?? null, objective, baseProvinceId: base, fallbackProvinceId: fallback,
       mode, issuedByCharacterId: issuer, issuedStep: day, expiresStep: day + Math.min(CAMPAIGN_MAX_DAYS, days),
+      byRule: true, forCommanderId: force.commanderCharacterId,
     };
     const changed = existing === undefined || existing.mode !== mode || JSON.stringify(existing.objective) !== JSON.stringify(objective);
     return { campaign, changed, why: why.slice(0, 300) };
@@ -250,6 +260,8 @@ export function issueCampaign(ctx: StrategyContext, force: Force, plan: WarPlan,
     const place = holds.sort((a, b) => kmTo(a.provinceId!) - kmTo(b.provinceId!))[0]!.provinceId!;
     return make("garrison", { kind: "province", provinceId: place }, ORDER_DAYS, `${placeName(ctx, place)} is to be held`);
   }
+  // Nothing to do that can be done, and the old order cannot be: he keeps the quarters he has (staging port, town of his own), and waits for the plan.
+  if (cannot !== null && fallback !== null) return make("garrison", { kind: "province", provinceId: fallback }, ORDER_DAYS, `he keeps to ${placeName(ctx, fallback)} until a road or ships are found`);
   return null;
 }
 

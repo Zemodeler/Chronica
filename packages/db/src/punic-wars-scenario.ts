@@ -7,6 +7,7 @@ import { WORLD_PRESSURES, withWorldPolitics } from "./punic-wars-politics";
 import { houseFamilies, rosterPeople } from "./punic-wars-rosters";
 import { seatGentes } from "./punic-wars-gentes";
 import { withRegionalTaxes } from "./punic-wars-taxes";
+import { withCarthageInSicily } from "./punic-wars-sicily";
 import { PUNIC_CHARGES } from "./punic-wars-charges";
 
 /**
@@ -1469,7 +1470,7 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
  */
 const initialWorld: WorldState = WorldStateSchema.parse(withRegionalTaxes(formArmies(
   // v43: the wider world's grudges, peaces, claims and aims (punic-wars-politics.ts).
-  withWorldPolitics({ ...unformedWorld, establishments: [...PUNIC_ESTABLISHMENTS], doctrines: [...PUNIC_DOCTRINES] }),
+  withCarthageInSicily(withWorldPolitics({ ...unformedWorld, establishments: [...PUNIC_ESTABLISHMENTS], doctrines: [...PUNIC_DOCTRINES] })),
   0,
   { seasoned: (force) => SEASONED_ARMIES[force.id] },
 )));

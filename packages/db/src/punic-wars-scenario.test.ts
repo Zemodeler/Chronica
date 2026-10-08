@@ -23,7 +23,7 @@ describe("Punic Wars built-in scenario", () => {
     // consul's army is half allies, as a consular army was, drawn up as a
     // legion and an ala.
     const forces = punicWarsScenario.initialWorld.material.forces;
-    expect(forces.filter((force) => force.personnel.every((category) => category.categoryId === "infantry")).map((force) => force.id).sort()).toEqual(["campanian-legion", "mamertine-garrison"]);
+    expect(forces.filter((force) => force.personnel.every((category) => category.categoryId === "infantry")).map((force) => force.id).sort()).toEqual(["campanian-legion", "carthaginian-garrison-agrigentum", "carthaginian-garrison-panormus", "mamertine-garrison"]);
     expect(forces.find((force) => force.id === "roman-field-army")!.personnel.map((category) => category.label)).toEqual([
       "Hastati of Legio I", "Principes of Legio I", "Triarii of Legio I", "Velites of Legio I", "Equites of Legio I",
       "Allied cohorts of the first Ala of the allies", "Extraordinarii of the first Ala of the allies", "Allied horse of the first Ala of the allies",

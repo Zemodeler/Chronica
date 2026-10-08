@@ -96,7 +96,8 @@ export function directTheWar(input: DirectInput): StatecraftDecision[] {
     for (const theatre of plan.theatres) for (const id of theatre.forceIds) claimed.add(id);
     plans.push(plan);
     const navalChanged = JSON.stringify(existing?.navalPlan ?? null) !== JSON.stringify(plan.navalPlan ?? null);
-    const allotment = (entry: WarPlan | undefined): string => JSON.stringify((entry?.theatres ?? []).map((theatre) => [theatre.id, [...theatre.forceIds].sort()]));
+    // The man who leads each theatre is part of the allotment: a new consul or a recalled strategos is a plan to be written again.
+    const allotment = (entry: WarPlan | undefined): string => JSON.stringify((entry?.theatres ?? []).map((theatre) => [theatre.id, [...theatre.forceIds].sort(), theatre.commanderId ?? null]));
     if (!modelMade && (planned.changed || planned.rebuilt || navalChanged || allotment(existing) !== allotment(plan) || existing === undefined)) {
       decisions.push({
         polityId, actorCharacterId: ruler.id, act: "war_plan", targetPolityId: enemy, why: (planned.why || "the plan is looked at again").slice(0, 400), facts: [],
@@ -138,8 +139,9 @@ export function directTheWar(input: DirectInput): StatecraftDecision[] {
       cp = renewed;
       decisions.push(campaignDecision(input, existing.issuedByCharacterId, force, renewed, "the orders stand", enemyOf(plan, renewed)));
     }
-    // Whether the army acts this month, and by which rules.
-    if (isModels(input, force) || input.sets.marching.has(force.id) || input.sets.fighting.has(force.id)) continue;
+    // Whether the army acts this month, and by which rules. A man the model plays leads his own army, except where the orders on it are the rules' own
+    // (written in his name): then he has taken nothing in hand, and the army does not sit while the model answers that he does nothing.
+    if ((isModels(input, force) && cp?.byRule !== true) || input.sets.marching.has(force.id) || input.sets.fighting.has(force.id)) continue;
     if (input.sets.besieging.has(force.id)) {
       const order = besiegerOrder(wctx, force);
       if (order !== null) decisions.push(order);
@@ -179,7 +181,7 @@ function campaignDecision(input: DirectInput, issuer: string, force: WorldState[
   return {
     polityId: input.polityId, actorCharacterId: issuer, act: "war_plan", targetPolityId: enemy, why: why.slice(0, 400), facts: [],
     deltas: [wd({
-      op: "campaign_plan_set", forceRef: force.id, mode: cp.mode, ...objective, baseProvinceId: cp.baseProvinceId, fallbackProvinceId: cp.fallbackProvinceId,
+      op: "campaign_plan_set", forceRef: force.id, mode: cp.mode, ...objective, byRule: cp.byRule === true, baseProvinceId: cp.baseProvinceId, fallbackProvinceId: cp.fallbackProvinceId,
       days: Math.max(10, Math.min(240, cp.expiresStep - input.world.instant.day)), theatreId: cp.theatreId, reason: why.slice(0, 280),
     })],
   };

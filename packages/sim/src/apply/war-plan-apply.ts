@@ -107,6 +107,7 @@ export function applyCampaignPlanSet(world: WorldState, delta: CampaignPlanSet, 
     objective: delta.objectiveProvinceId !== null ? { kind: "province", provinceId: delta.objectiveProvinceId } : { kind: "army", forceId: targetForceId! },
     baseProvinceId: delta.baseProvinceId, fallbackProvinceId: delta.fallbackProvinceId, mode: delta.mode,
     issuedByCharacterId: issuer, issuedStep: atStep, expiresStep: atStep + delta.days,
+    ...(delta.byRule === true ? { byRule: true, forCommanderId: force.commanderCharacterId } : {}),
   };
   const before = (world.campaigns ?? []).find((candidate) => candidate.forceId === forceId);
   const same = before !== undefined && JSON.stringify(before.objective) === JSON.stringify(plan.objective) && before.mode === plan.mode;

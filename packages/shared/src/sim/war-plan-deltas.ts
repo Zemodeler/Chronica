@@ -36,6 +36,8 @@ export const CampaignPlanSetSchema = z.object({
   fallbackProvinceId: MaybeId,
   days: z.number().int().min(10).max(CAMPAIGN_MAX_DAYS).default(90),
   theatreId: z.string().trim().min(1).max(60).nullable().default(null),
+  /** Written by the rules for the head of the state (never shown to a person: `shownWarPlanVariant`). */
+  byRule: z.boolean().optional(),
   reason: Reason,
 }).strict();
 

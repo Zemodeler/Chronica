@@ -51,6 +51,7 @@ import { perceivedRatio } from "./perceive";
 import { directTheWar } from "./war-direction";
 import { STEP_DAYS, letterVerdict } from "./letter-verdict";
 import { safeLocalId } from "./safe-local-id";
+import { decideCallsForHelp, decideTheAppealWar, theAppealBehind } from "./the-appeal-goes-to-the-people";
 
 /**
  * The world AI: every power's big moves, by rule (docs/plans/a-living-world.md §2).
@@ -275,6 +276,17 @@ export function decideStatecraft(input: StatecraftInput): StatecraftDecision[] {
   // Wars that have done what they were for, or exhausted both sides, end.
   decisions.push(...peacesByRule(world, input, rulerOf, moved, motionsOf));
 
+  // A people hard pressed in its war writes to the strong powers near it for help (`the-appeal-goes-to-the-people.ts`).
+  decisions.push(...decideCallsForHelp(world, input.excludedPolityIds, input.playedByModel, rulerOf, day));
+
+  // A war the people voted on an appeal, when the Senate would not, is made by the consul (`the-appeal-goes-to-the-people.ts`).
+  for (const war of decideTheAppealWar(world, input.excludedPolityIds, rulerOf, day)) {
+    if (moved.has(war.polityId) || (war.targetPolityId !== null && moved.has(war.targetPolityId))) continue;
+    decisions.push(war);
+    moved.add(war.polityId);
+    if (war.targetPolityId !== null) moved.add(war.targetPolityId);
+  }
+
   // Alliances against a common threat, for powers that did not just go to war.
   decisions.push(...allianceAgainstThreats(world, board, input, rulerOf, moved, motionsOf));
 
@@ -389,6 +401,9 @@ export function bigMoveCandidates(
       // A claim is a matter of right to the honourable and of opportunity to the greedy; ground taken from us is a debt of honour and of grudge.
       if (neighbour.claimed.length > 0) { casus = { matter: `the ground ${plainName(neighbour.name)} holds that is ours by right`, ask: "that you restore it" }; score += Math.round(20 * (0.4 + d.honour * 0.6 + d.greed * 0.5)); why.push(`${neighbour.name} holds ground it claims`); }
       if (neighbour.grievances.some((grievance) => grievance.includes("taken from us"))) { casus = { matter: `the ground ${plainName(neighbour.name)} holds that was taken from us`, ask: "that you give the ground back" }; score += Math.round(25 * (0.4 + d.honour * 0.5 + d.grudge * 0.6)); why.push(`${neighbour.name} holds ground taken from it`); }
+      // A people that has asked for help against him, or an ally of ours at war with him, is a cause that does not wait on the odds (`the-appeal-goes-to-the-people.ts`).
+      const appeal = theAppealBehind(world, reading.polityId, neighbour.polityId);
+      if (appeal !== null) { casus = { matter: `the appeal of ${plainName(appeal.name)} against ${plainName(neighbour.name)}`, ask: "that you leave them be" }; score += Math.round(18 + 22 * d.honour); why.push(`${appeal.name} has asked for help against ${neighbour.name}`); }
       // A neighbour with its hands full is a chance to the greedy and a risk to the fearful.
       score += Math.min(30, Math.round(10 * neighbour.distractions.length * (0.4 + d.greed * 1.1 - d.fear * 0.2)));
       if (neighbour.distractions.length > 0) why.push(`${neighbour.name}: ${neighbour.distractions.join("; ")}`);
