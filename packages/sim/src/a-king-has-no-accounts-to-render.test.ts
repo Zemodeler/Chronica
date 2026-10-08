@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { type WorldState } from "@chronica/shared";
 import { accountStyleOf, decideAudits, renderTheAccounts, theKingsJustice } from "./close-of-office";
-import { atDay, government, holderOf, input, opening, ending, withTheft } from "./accounts-test-kit";
+import { atDay, holderOf, opening, ending, withTheft } from "./accounts-test-kit";
 import { applyDecision } from "./fiscal-test-kit";
 import { opening as fiscalOpening, input as fiscalInput } from "./fiscal-test-kit";
 
@@ -64,7 +64,6 @@ describe("a king has no accounts to render", () => {
     const theft = withTheft(world, roman.id, "rome", 1);
     const marked = { ...theft, diversions: theft.diversions.map((row) => ({ ...row, foundAtStep: 360 })) };
     expect(theKingsJustice({ ...ending(marked, "roman-quaestor", roman), endedTerms: [] }).facts).toEqual([]);
-    void input; void government;
   });
 
   it("is the same on every run", () => {

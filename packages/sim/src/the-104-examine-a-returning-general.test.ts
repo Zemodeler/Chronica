@@ -16,8 +16,8 @@ import { atDay, government, opening } from "./accounts-test-kit";
 const home = (world: WorldState, manId: string): WorldState => {
   const capital = world.map.polities.find((p) => p.id === "carthage")!.capitalSettlementId;
   const province = world.map.provinces.find((p) => p.settlements.some((s) => s.id === capital))!;
-  // He has laid down his army: the forces he led have another commander, or none.
-  const forces = world.material.forces.map((f) => (f.commanderCharacterId === manId || f.controllerCharacterId === manId ? { ...f, commanderCharacterId: null, controllerCharacterId: null } : f));
+  // He has laid down his army: the forces he led are gone from his hand.
+  const forces = world.material.forces.filter((f) => f.commanderCharacterId !== manId && f.controllerCharacterId !== manId);
   return { ...world, material: { ...world.material, forces }, characters: world.characters.map((c) => (c.id === manId ? { ...c, prestigeBps: 5_000, locationProvinceId: province.id } : c)) };
 };
 const marked = (world: WorldState, manId: string, weight: number): WorldState => ({

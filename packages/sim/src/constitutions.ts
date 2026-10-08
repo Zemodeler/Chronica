@@ -689,9 +689,27 @@ export function ensureConstitutions(input: EnsureConstitutionsInput): WorldState
     }
     const form = polity.governmentForm ?? formFromOffices(world, polity.id, input.government) ?? inferredGovernmentForm(polity);
     const installed = install(world, polity, form, input.government, input.toDay, "generated", null, NEW_CHAMBER_LEGITIMACY_BPS.lawful + 2_000);
-    world = MAJOR_NATIONS.has(polity.id) ? staffed(installed.world, polity.id, installed.built.offices, input.toDay) : installed.world;
+    world = retireTheTemplate(installed.world, polity, installed.built.offices, input.government, input.toDay);
+    world = MAJOR_NATIONS.has(polity.id) ? staffed(world, polity.id, installed.built.offices, input.toDay) : world;
   }
   return world;
+}
+
+/**
+ * The scenario's stand-in offices of a template power ("boii-ruler", "boii-councillor", "boii-priest") are reformed into the offices its constitution builds
+ * ("boii:ruler" ...), as the doc above says, rather than left beside them: a power has one chief office. A stand-in nobody holds is abolished (kept on
+ * record, empty of every power); one somebody holds is left alone, since the seat is the scenario's own.
+ */
+function retireTheTemplate(world: WorldState, polity: Polity, built: readonly Office[], government: GovernmentRules, atStep: number): WorldState {
+  let next = world;
+  const keys = new Set(built.map((office) => office.id.slice(polity.id.length + 1)));
+  for (const office of allOffices(world, government.offices)) {
+    const key = office.id.startsWith(`${polity.id}-`) ? office.id.slice(polity.id.length + 1) : null;
+    if (office.polityId !== polity.id || key === null || !["ruler", "councillor", "priest"].includes(key) || !keys.has(key) || office.successionRuleId === "abolished") continue;
+    if (next.material.officeSeats.some((seat) => seat.officeId === office.id && seat.status === "held")) continue;
+    next = abolishOffice(next, office, "abolished", atStep).world;
+  }
+  return next;
 }
 
 /**

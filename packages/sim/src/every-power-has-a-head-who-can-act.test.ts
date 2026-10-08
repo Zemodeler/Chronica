@@ -57,6 +57,8 @@ describe("every power has a head who can act", () => {
       const readings = offices.map((office) => competenceOf(world, office.id, government.offices)).filter((reading): reading is NonNullable<typeof reading> => reading !== null);
       return FISCAL_ACTS.filter((act) => {
         if (act === "spending" && !hasChest(world, record.polityId)) return false;
+        // A tribal people has no standing tax and no loans by its form (the research); the stand-in "ruler" the scenario wrote beside its chief used to hide that, and is reformed away.
+        if (record.form === "tribal_confederation" && (act === "tax_rate" || act === "loans")) return false;
         const owns = readings.some((reading) => isOwnToDo(reading.acts[act].grade));
         const moves = readings.some((reading) => reading.acts[act].grade === "by_the_body" && reading.acts[act].body !== null);
         return !owns && !moves;
