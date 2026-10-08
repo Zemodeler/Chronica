@@ -116,12 +116,28 @@ const VOICES: Readonly<Record<Tone, readonly [string, string]>> = {
   evasive: ["To my lord, on a small matter.", "No doubt it will resolve itself."],
 };
 
+/**
+ * Whether the army reports to him: he holds the command above its commander (he is its controller), or he heads its power. A legionary, a trader, a quaestor in
+ * the camp is not the man the commander "reports to", and a report written to him was read by a man with no right to it.
+ */
+function reportsTo(world: WorldState, playerId: string, polityId: string, force: Force): boolean {
+  if (force.controllerCharacterId === playerId) return true;
+  return readDepartments(world).rulers(polityId).some((ruler) => ruler.id === playerId);
+}
+
+/** A number of men as a man would say it to his master: to the nearest hundred, to the nearest ten where there are fewer, and never "0" of an army that is there. */
+export function menInWords(men: number): string {
+  if (men >= 150) return String(Math.round(men / 100) * 100);
+  if (men >= 15) return String(Math.round(men / 10) * 10);
+  return men <= 0 ? "none" : "a handful";
+}
+
 function concernsOf(world: WorldState, playerId: string, playerPolityId: string): Concern[] {
   const day = world.instant.day;
   const found: Concern[] = [];
   const provinceName = (id: string): string => world.map.provinces.find((province) => province.id === id)?.name ?? id;
   const enemies = new Set(enemiesOf(world.polityAgreements, playerPolityId));
-  const forces = world.material.forces.filter((force) => force.polityId === playerPolityId && force.outlaw !== true && fitStrengthOf(force) > 0 && force.commanderCharacterId !== playerId);
+  const forces = world.material.forces.filter((force) => force.polityId === playerPolityId && force.outlaw !== true && fitStrengthOf(force) > 0 && force.commanderCharacterId !== playerId && reportsTo(world, playerId, playerPolityId, force));
   const commanderOf = (force: Force): Character | undefined => world.characters.find((character) => character.id === force.commanderCharacterId && character.alive);
   for (const force of forces) {
     const sender = commanderOf(force);
@@ -139,7 +155,7 @@ function concernsOf(world: WorldState, playerId: string, playerPolityId: string)
     // An enemy close by, with more men than we have here.
     const near = world.material.forces.find((other) => enemies.has(other.polityId) && other.outlaw !== true && other.locationId === force.locationId && fitStrengthOf(other) > fitStrengthOf(force) * 1.4);
     if (near !== undefined) {
-      found.push({ matter: "outnumbered", key: `outnumbered:${force.id}`, sender, urgency: 85, place, what: `perhaps ${Math.round(fitStrengthOf(near) / 100) * 100} of theirs to our ${Math.round(fitStrengthOf(force) / 100) * 100}`, body: "" });
+      found.push({ matter: "outnumbered", key: `outnumbered:${force.id}`, sender, urgency: 85, place, what: `perhaps ${menInWords(fitStrengthOf(near))} of theirs to ${fitStrengthOf(force) <= 0 ? "none of ours" : `our ${menInWords(fitStrengthOf(force))}`}`, body: "" });
     }
   }
   // The man who keeps the accounts, when they are in the red.
@@ -147,7 +163,11 @@ function concernsOf(world: WorldState, playerId: string, playerPolityId: string)
   const held = readDepartments(world).holding({ kind: "polity", id: playerPolityId }, "tax_roll");
   const head = held.head ?? held.people.find((person) => person.id !== playerId) ?? null;
   const chest = world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === playerPolityId && account.status === "active");
-  if (head !== null && head.id !== playerId && chest !== undefined && chest.balance < 0) {
+  // The books are reported to the head of the state, or to a magistrate over them: not to a man who keeps them himself, nor to one with no office.
+  const ruler = readDepartments(world).rulers(playerPolityId).some((candidate) => candidate.id === playerId);
+  const keepsThem = held.head?.id === playerId || held.people.some((person) => person.id === playerId);
+  const magistrate = world.material.officeSeats.some((seat) => seat.status === "held" && seat.holderCharacterId === playerId);
+  if (head !== null && head.id !== playerId && chest !== undefined && chest.balance < 0 && (ruler || (magistrate && !keepsThem))) {
     found.push({ matter: "treasury", key: `treasury:${playerPolityId}`, sender: head, urgency: 70, place: "the treasury", what: `${Math.abs(chest.balance)} owed beyond what is held`, body: "" });
   }
   return found;

@@ -10,6 +10,7 @@ import { spreadSubSkills } from "./aptitude";
 import { faithNamed } from "../world/faith";
 import { declaredOrdo } from "./ordo";
 import { difficultyRules } from "../world/pushback";
+import { ageWhereNoneWasSaid, nameNotTaken, withDeclaredKin } from "./declared-kin";
 
 // Placing a declared player character into the world.
 //
@@ -522,7 +523,8 @@ function materializeAsDeclared(
   // What he believes and how old he is, as he declared them. Both used to be
   // thrown away -- every player was thirty-five and believed in nothing.
   const believes = knowledgebase.faith === null ? null : faithNamed(world, knowledgebase.faith, world.elapsedStep);
-  const ageYears = Math.max(14, Math.min(80, knowledgebase.ageYearsAtOpening ?? 35));
+  // (Where he did not say, a soldier of the line is a young man, not thirty-five: `ageWhereNoneWasSaid`.)
+  const ageYears = Math.max(14, Math.min(80, knowledgebase.ageYearsAtOpening ?? ageWhereNoneWasSaid(knowledgebase.role, actorCharacterId)));
   const officeId = matched?.office.id ?? null;
   // Who he is, from what was said of him. He was a blank: no traits, a mind
   // derived from his skills alone, the standing of nobody in particular, and
@@ -532,7 +534,8 @@ function materializeAsDeclared(
   const mind = mindShapedBy(deriveDefaultMind({ id: actorCharacterId, officeId, skills, ageYears, cultureId }), traits);
   const playerCharacter: WorldState["characters"][number] = {
     id: actorCharacterId,
-    name: knowledgebase.canonicalName,
+    // A second man of the same name is told from the first (a namesake in the roster once made a stray party round him).
+    name: nameNotTaken(world, knowledgebase.canonicalName, actorCharacterId),
     cultureId,
     faithId: believes?.faithId ?? null,
     dynastyId: null,
@@ -662,12 +665,14 @@ function materializeAsDeclared(
         }],
     },
   };
-  if (enlistedIn === undefined) return made;
+  // The wife, the son, the patron and the friend he declared, made where he is made.
+  const kinned = withDeclaredKin(made, actorCharacterId, knowledgebase);
+  if (enlistedIn === undefined) return kinned;
   // A man in the ranks stands somewhere in them (`warfare/service.ts`): a
   // formation, a unit, a rank, a named officer over him and named men beside
   // him -- where his power keeps an establishment to say what those are. A
   // man of thirty at Rome had campaigns behind him before the world began.
-  return serveInArmy(made, {
+  return serveInArmy(kinned, {
     characterId: actorCharacterId,
     forceId: enlistedIn,
     role: knowledgebase.role,

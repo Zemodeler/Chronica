@@ -510,6 +510,11 @@ export function capabilityHints(said: string): string[] {
 /** Reasons that say the world cannot do it, not that the answer would not: a river, a horse, a thing that is not. */
 const IMPOSSIBLE = /(impossible|cannot be done|not possible|no (consul|man|one|mortal|power|ruler) can|a horse|reverse (the )?(tiber|river)|against nature|does not exist in this world)/i;
 
+/** An order to stay as he is: there is no act in it to carry out. */
+const NOTHING_TO_DO = /^(?:i\s+|we\s+)?(?:will\s+|shall\s+)?(?:keep\s+(?:to\s+)?(?:my|our)\s+(?:place|post|station|seat|office|rank|counsel)|keep\s+(?:quiet|still|silent)|wait\b|bide\b|stay\s+(?:put|where|as|here|in)|remain\b|do\s+nothing|let\s+(?:it|things|the\s+days?)\s+(?:be|pass|lie)|carry\s+on\b|go\s+on\s+as\s+(?:before|i\s+was))/i;
+/** A reason the answer gave for a part, at this length or more, is a reason, not a shrug. */
+const CLEAR_REASON_CHARS = 24;
+
 /** The parts of an order the answer did not carry out, though they were possible. */
 export function partsNotCarriedOut(output: OrchestratorOutput): { readonly index: number; readonly said: string; readonly why: string | null }[] {
   const flagged: { index: number; said: string; why: string | null }[] = [];
@@ -519,8 +524,11 @@ export function partsNotCarriedOut(output: OrchestratorOutput): { readonly index
     const waiting = part.afterParts !== undefined;
     const handedOn = output.delegations.some((delegation) => delegation.part === index);
     if (handedOn) return;
+    // "Keep my place", "wait", "stay where I am": nothing to write an act for, and asking again only wrote the same fact twice.
+    if (NOTHING_TO_DO.test(part.said.trim())) return;
     if (noAct && !waiting && part.whyNot === null && part.factLocalIds.length === 0 && !/\?\s*$/.test(part.said)) flagged.push({ index, said: part.said, why: null });
-    else if (noAct && part.whyNot !== null && !IMPOSSIBLE.test(part.whyNot) && !/\?\s*$/.test(part.said)) flagged.push({ index, said: part.said, why: part.whyNot });
+    // A part the answer refused with a reason of its own is answered: the player is told the reason, and it is not asked for again (a second call that wrote nothing new).
+    else if (noAct && part.whyNot !== null && part.whyNot.trim().length < CLEAR_REASON_CHARS && !IMPOSSIBLE.test(part.whyNot) && !/\?\s*$/.test(part.said)) flagged.push({ index, said: part.said, why: part.whyNot });
     else if (own.length > 0 && verifyPart({ said: part.said, ops: own.map((delta) => delta.op), handedOn }) !== null) flagged.push({ index, said: part.said, why: "what was written for it was not the kind of act it asks for" });
   });
   return flagged;
@@ -537,13 +545,20 @@ export function replacingPart(original: OrchestratorOutput, index: number, retry
   const shared = (said: string): number => [...words(said)].filter((word) => wanted.has(word)).length;
   const first = [...answer.intent.parts].sort((x, y) => shared(y.said) - shared(x.said))[0];
   if (first === undefined || shared(first.said) === 0) return original;
-  const deltaBase = original.deltas.length;
+  // What the part's first answer wrote for it is taken out, not left beside what replaces it: a retried part once did its act twice, held its delegation twice and told its fact twice.
+  const usedByOthers = new Set(original.intent.parts.flatMap((part, at) => at === index ? [] : part.acts));
+  const stale = new Set(was.acts.filter((act) => !usedByOthers.has(act)));
+  const place = new Map<number, number>();
+  const survivors = original.deltas.filter((_, at) => !stale.has(at));
+  original.deltas.forEach((_, at) => { if (!stale.has(at)) place.set(at, place.size); });
+  const staleFacts = new Set(was.factLocalIds.filter((id) => !original.intent.parts.some((part, at) => at !== index && part.factLocalIds.includes(id))));
+  const deltaBase = survivors.length;
   const kept = trimToCaps({
-    deltas: [...original.deltas, ...answer.deltas], facts: [...original.facts, ...answer.facts], discoveries: [...original.discoveries, ...answer.discoveries],
-    delegations: [...original.delegations, ...answer.delegations.map((delegation) => ({ ...delegation, part: index }))], schedule: [...original.schedule, ...answer.schedule],
+    deltas: [...survivors, ...answer.deltas], facts: [...original.facts.filter((fact) => !staleFacts.has(fact.localId)), ...answer.facts], discoveries: [...original.discoveries, ...answer.discoveries],
+    delegations: [...original.delegations.filter((delegation) => delegation.part !== index), ...answer.delegations.map((delegation) => ({ ...delegation, part: index }))], schedule: [...original.schedule, ...answer.schedule],
     worldDeltas: [...original.worldDeltas, ...answer.worldDeltas],
   }) as Pick<OrchestratorOutput, "deltas" | "facts" | "discoveries" | "delegations" | "schedule" | "worldDeltas">;
-  const parts = original.intent.parts.map((part, at) => at !== index ? part : {
+  const parts = original.intent.parts.map((part, at) => at !== index ? { ...part, acts: part.acts.flatMap((act) => place.has(act) ? [place.get(act)!] : []) } : {
     ...first, said: was.said, ...(was.afterParts === undefined ? {} : { afterParts: was.afterParts }),
     acts: first.acts.map((act) => act + deltaBase).filter((act) => act < kept.deltas.length),
   });

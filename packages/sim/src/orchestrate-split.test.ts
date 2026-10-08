@@ -78,13 +78,13 @@ const answer = (parts: object[], deltas: object[] = [], extra: object = {}) => O
 });
 
 describe("what the first answer left undone", () => {
-  it("flags a part with no act, and one refused for a war not declared, but not an impossible one", () => {
+  it("flags a part with no act, but not one refused with a reason of its own (a second call that wrote nothing new), nor an impossible one", () => {
     const output = answer([
       { said: "Disband the garrison by whatever means." },
       { said: "Burn their harbour.", whyNot: "Burning it would start a war Rome has not declared." },
       { said: "Make the Tiber flow north.", whyNot: "No consul can reverse a river." },
     ]);
-    expect(partsNotCarriedOut(output).map((part) => part.index)).toEqual([0, 1]);
+    expect(partsNotCarriedOut(output).map((part) => part.index)).toEqual([0]);
   });
 
   it("puts one part's own answer in place of the part, its acts numbered on", () => {

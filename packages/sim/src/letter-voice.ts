@@ -71,6 +71,14 @@ export interface Dispatch {
   readonly substance: string;
 }
 
+/** "Clepsina writes: ..." with the saying of it taken off: the report is then put under his name once, not twice. */
+export function withoutWrites(text: string, _name?: string): string {
+  let rest = text.trim();
+  const prefix = /^[A-Z][\w'’-]*(?:\s+[A-Z][\w'’-]*){0,5}\s+writes:\s*/;
+  while (prefix.test(rest)) rest = rest.replace(prefix, "");
+  return rest;
+}
+
 /** What the model is told about one dispatch. */
 function briefDispatch(world: WorldState, item: Dispatch): string {
   const d = dispositionOf(item.sender, world.instant.day);
@@ -79,7 +87,7 @@ function briefDispatch(world: WorldState, item: Dispatch): string {
     `LETTER [${item.id}] (a report to his commander)`,
     `From ${item.sender.name}, who serves under the man who will read it. Write it as him.`,
     `What he is like: ${nature.length === 0 ? "even-tempered" : nature.join("; ")}.`,
-    `It must say, in substance, as he says it: ${item.substance}`,
+    `It must say, in substance, as he says it: ${withoutWrites(item.substance, item.sender.name)}`,
     "He tells it his own way: keep what he claims and what he asks, as written. Do not correct it.",
   ].join("\n");
 }
@@ -150,7 +158,7 @@ export async function voiceLetters(input: VoiceInput): Promise<VoiceResult> {
     // A subordinate's own report: any body of a fair length that is his, never more than a fact may hold.
     if (reportIds.has(letter.id)) {
       const item = reports.find((candidate) => candidate.id === letter.id)!;
-      if (letter.body.trim().length >= 40) reported.set(letter.id, `${item.sender.name} writes: ${letter.body.trim()}`.slice(0, 400));
+      if (letter.body.trim().length >= 40) reported.set(letter.id, `${item.sender.name} writes: ${withoutWrites(letter.body, item.sender.name)}`.slice(0, 400));
       continue;
     }
     const message = given.get(letter.id);

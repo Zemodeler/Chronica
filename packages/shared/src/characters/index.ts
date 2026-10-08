@@ -4,6 +4,7 @@ export * from "./authority-projection";
 export * from "./beliefs";
 export * from "./character";
 export * from "./canonical-npc";
+export * from "./declared-kin";
 export * from "./character-profile";
 export * from "./commitments";
 export * from "./family";

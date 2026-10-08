@@ -2,6 +2,7 @@ import { formatWorldDate, letterTally, letterTallyInWords, spentForOrderPart, ty
 import { goalEvidence, orderPartLabel, orderPartStatus, procedureReasonOf, type OrderPart, type WorldState } from "@chronica/shared";
 import type { ChronicleEntry } from "./chronicle";
 import { refOfPart, whyNothingSetAside } from "./order-money";
+import { refusalInPeriodWords } from "./order-lines";
 
 /**
  * What came of each part of an order, in the engine's words, set under the
@@ -21,8 +22,19 @@ export function orderOutcomeLines(world: WorldState, orderRecordId: string, cloc
   const told = order.parts.map((part) => lineOf(world, part, order.actorCharacterId, clock));
   // A one-part order carried out is answered by its passage, and a line
   // saying "done" under it says nothing the passage did not.
-  if (order.parts.length === 1 && orderPartStatus(world, order.parts[0]!) === "achieved" && order.parts[0]!.note === null) return [];
+  // (A motion put to a body is always told: how it came out, with the count, is not in the passage.)
+  if (order.parts.length === 1 && orderPartStatus(world, order.parts[0]!) === "achieved" && order.parts[0]!.note === null && motionOf(world, order.parts[0]!) === undefined) return [];
   return told;
+}
+
+/** The motion a part put to a body that has been decided, passed, failed or lapsed (a candidacy is read as its own). */
+export function motionOf(world: WorldState, part: OrderPart): WorldState["material"]["politicalProcedures"][number] | undefined {
+  for (const ref of part.workRefs) {
+    if (ref.kind !== "procedure") continue;
+    const procedure = world.material.politicalProcedures.find((candidate) => candidate.id === ref.id);
+    if (procedure !== undefined && procedure.outcome !== null && procedure.type !== "nomination" && procedure.type !== "appointment") return procedure;
+  }
+  return undefined;
 }
 
 /** One part's line: what it came to, in the engine's words. */
@@ -50,8 +62,12 @@ export function lineOf(world: WorldState, part: OrderPart, actorId: string, cloc
   const settledAt = part.refusedAtStep ?? part.stages.reduce<number | null>((latest, stage) => stage.failedAtStep === null ? latest : Math.max(latest ?? 0, stage.failedAtStep), null);
   const on = clock === undefined || settledAt === null || (status !== "refused" && status !== "failed" && status !== "partly_done") ? "" : ` on ${formatWorldDate({ day: settledAt, minute: 0 }, clock)}`;
   // A vote that has been counted says why it failed; the refusal written before it was put ("authorization is pending") is stale by then.
-  const why = (status === "refused" ? procedureReasonOf(world, part) : null) ?? part.refusal ?? part.whyNot ?? procedureReasonOf(world, part);
+  const why = refusalInPeriodWords(world, part, actorId, (status === "refused" ? procedureReasonOf(world, part) : null) ?? part.refusal ?? part.whyNot ?? procedureReasonOf(world, part));
   const reason = why === null || status === "achieved" || status === "under_way" ? "" : `: ${sentencesWithin(withoutRecordIds(why.replace(/\s+/g, " ")), 320)}`;
+  // A motion is said as what it came to, with the count the body gave: carried, failed or lapsed.
+  const motion = motionOf(world, part);
+  const motionWords = motion === undefined || motion.outcome !== "passed" || motion.outcomeReason === null ? "" : `: carried, ${sentencesWithin(withoutRecordIds(motion.outcomeReason.replace(/\s+/g, " ")), 260)}`;
+  const lapsed = motion !== undefined && (motion.outcome === "withdrawn" || motion.outcome === "blocked");
   // Secret work says what it cost and whose money it was, to the man who paid.
   const plotRef = part.workRefs.find((ref) => ref.kind === "plot");
   const plot = plotRef === undefined ? undefined : world.covertPlots.find((candidate) => candidate.id === plotRef.id);
@@ -81,7 +97,7 @@ export function lineOf(world: WorldState, part: OrderPart, actorId: string, cloc
   const shownNote = part.note === null || /^Check:/.test(part.note) ? null
     : part.note.replace(/(?:Not all of it: )?It could not be carried out as written\.?/, "Part of it could not be done as asked.").replace(/;\s*Part of it could not be done as asked\./, "; part of it could not be done as asked.");
   const note = `${paid}${envelope}${shownNote === null ? "" : ` (${shownNote})`}`;
-  return `"${part.said}" -- ${orderPartLabel(status, part, world)}${evidence}${on}${how}${letters}${reason}${note}.`.replace(/\.\.$/, ".");
+  return `"${part.said}" -- ${lapsed ? "lapsed" : orderPartLabel(status, part, world)}${evidence}${on}${how}${letters}${motionWords}${reason}${note}.`.replace(/\.\.$/, ".");
 }
 
 /** The model names the engine's records by id in its reasons ("under active project project-cdc6..."); the player has no use for them. */
@@ -114,7 +130,8 @@ export function appointmentMade(world: WorldState, said: string): { readonly nam
 
 /** The army a part asked to be raised under a name ("called Legio II", "named the Second Field Army"), when one by that name exists. */
 export function namedForceRaised(world: WorldState, said: string): { readonly name: string; readonly locationId: string } | undefined {
-  if (!/\b(raise|levy|muster|form|create|recruit)\b/i.test(said)) return undefined;
+  // Said as an order to raise it ("Raise a second army called Legio II"), not a speech or a petition that happens to use the word.
+  if (!/^(?:and\s+|then\s+|also\s+|please\s+)?(?:raise|levy|muster|form|create|recruit)\b/i.test(said.trim())) return undefined;
   const wanted = /\b(?:called|named|to be called|to be named)\s+(?:the\s+)?([A-Z][\w'’-]*(?:\s+[A-Z0-9][\w'’-]*){0,3})/.exec(said)?.[1]?.trim();
   if (wanted === undefined) return undefined;
   const key = wanted.toLowerCase();

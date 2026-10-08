@@ -154,7 +154,7 @@ export function seatByOutcome(world: WorldState, procedure: PoliticalProcedure, 
 export const voteDayOf = (procedure: PoliticalProcedure): number => procedure.deadlineStep ?? procedure.openedAtStep + MOTION_VOTING_DAYS;
 
 /** Told with a carried question that does nothing by being carried. */
-const BEGINS_NOTHING = "It gives leave and begins nothing by itself: what it allows waits on somebody's order.";
+const BEGINS_NOTHING = "It is a resolution of the Senate and begins nothing by itself: no one is charged with it, and what it allows waits on somebody's order.";
 
 /** The kinds of question that move a man -- seat him, unseat him, try him -- by being carried. */
 const MOVES_A_MAN = new Set<PoliticalProcedure["type"]>(["appointment", "command_assignment", "nomination", "removal", "denunciation"]);

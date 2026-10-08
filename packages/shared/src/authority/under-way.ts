@@ -4,7 +4,7 @@ import type { Office } from "../characters/character";
 import type { WorldState } from "../world/world-state";
 import type { Project } from "../world/project";
 import { formatWorldDate, type ScenarioClock } from "../world/clock";
-import { isOrderPartStale, letterTally, letterTallyInWords, orderPartLabel, orderPartStatus, waitingUntil } from "../world/orders";
+import { isOrderPartStale, letterTally, letterTallyInWords, orderPartLabel, orderPartStatus, procedureReasonOf, waitingUntil } from "../world/orders";
 
 /**
  * What the player's orders are doing, as they could know it.
@@ -134,7 +134,7 @@ export function ordersUnderWay(
       // a season's dead orders stood beside the live ones (E6).
       if (part.closedAtStep !== null || isOrderPartStale(world, order, part)) continue;
       const status = orderPartStatus(world, part);
-      const finished = status === "achieved" || status === "partly_done" || status === "failed" || status === "refused" || status === "unanswered";
+      const finished = status === "achieved" || status === "partly_done" || status === "failed" || status === "refused" || status === "unanswered" || status === "carried_unverified" || status === "already_so";
       if (finished && order !== latest) continue;
       if (status === "achieved" && part.note === null) continue;
       // Shown already, as its own work: a project above, or an audit, a plot or
@@ -147,7 +147,7 @@ export function ordersUnderWay(
         || (ref.kind === "procedure" && world.material.politicalProcedures.some((procedure) => procedure.id === ref.id && procedure.outcome === "passed"));
       if (status !== "blocked" && status !== "failed" && status !== "authorized" && status !== "acknowledged" && part.note === null && part.workRefs.length > 0
         && part.workRefs.every((ref) => (ref.kind === "project" && shown.has(ref.id)) || listedBelow(ref) || ref.kind === "force" || ref.kind === "entity")) continue;
-      const why = part.refusal ?? part.whyNot;
+      const why = (status === "refused" ? procedureReasonOf(world, part) : null) ?? part.refusal ?? part.whyNot ?? procedureReasonOf(world, part);
       // What a held act waits on, said as the ledger says it (`waitingUntil`).
       const until = waitingUntil(world, part);
       const stateLabel = until !== null ? `Waiting until ${until}` : upperFirst(orderPartLabel(status, part, world));

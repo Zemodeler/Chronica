@@ -135,6 +135,11 @@ export const OrderPartSchema = z
      * only by being said is one the answer wrote no act for.
      */
     actsCarried: z.number().int().nonnegative().max(99).default(0),
+    /**
+     * How many of the carried acts were done by being done: a purse debited, a holding made, a loan opened (`DONE_ON_APPLICATION_OPS`). Where every carried
+     * act is of that kind the part is done, and the world shows it; "ordered; no sign of it yet" is for acts whose effect is still to come.
+     */
+    actsDone: z.number().int().nonnegative().max(99).optional(),
     actsRefused: z.number().int().nonnegative().max(99).default(0),
     /**
      * What the player should know about how it was done, when it was done in a
@@ -273,6 +278,16 @@ const FINISHED: ReadonlySet<OrderPartStatus> = new Set(["achieved", "partly_done
 
 /** Statuses with something still moving in the world: a march, a vote, a letter on the road, an act held for its moment. */
 const MOVING: ReadonlySet<OrderPartStatus> = new Set(["under_way", "awaiting_authority", "awaiting_reply", "awaiting_condition"]);
+
+/**
+ * Acts that are their own evidence: when the world has applied them the thing is so (the purse is debited, the holding is made, the loan is open, the house is
+ * founded, the men are raised). An act that sets a process going (a march, a letter, a vote, a plot, a work) is not here: it is read from the work it made.
+ */
+export const DONE_ON_APPLICATION_OPS: ReadonlySet<string> = new Set([
+  "money_transfer", "income_source_upsert", "obligation_upsert", "force_create", "force_reinforce", "holding_create", "holding_improve", "holding_transfer",
+  "trade_venture_open", "trade_venture_close", "house_found", "loan_open", "loan_settle", "public_benefaction", "tax_policy_set", "coinage_debase",
+  "force_post_set", "force_membership_set", "office_seat_set", "family_tie_set", "adopt", "service_contract_open", "service_contract_close", "legal_status_set",
+]);
 
 /** Where one piece of work stands, or null when it has no life of its own to read (a made army, an arrangement) or no longer exists. */
 export function workStatus(world: WorldState, ref: OrderWorkRef): OrderPartStatus | null {
@@ -460,7 +475,11 @@ export function orderPartStatus(world: WorldState, part: OrderPart, options: { r
     // answer, not proof that the requested change happened.
     // Nothing in the world was named to check it against: it was ordered,
     // and "done" would be a claim nobody can see the evidence for.
-    if (part.actsCarried > 0) return part.actsRefused > 0 ? "partly_done" : "carried_unverified";
+    if (part.actsCarried > 0) {
+      if (part.actsRefused > 0) return "partly_done";
+      // Every act it wrote was done by being done: the world shows it.
+      return (part.actsDone ?? 0) >= part.actsCarried ? "achieved" : "carried_unverified";
+    }
     return "unanswered";
   }
   const worst = statuses.reduce((least, status) => (RANK[status] < RANK[least] ? status : least));
@@ -513,6 +532,8 @@ export function isOrderPartStale(world: WorldState, order: Pick<OrderRecord, "gi
   if (part.closedAtStep !== null || world.elapsedStep - order.givenAtStep < ORDER_PART_LAPSES_DAYS) return false;
   if (part.stages.some((stage) => stage.status === "waiting")) return false;
   const status = orderPartStatus(world, part);
+  // Ordered, with nothing to see for it two months on, is a part nobody will ever see done: it lapses as any other.
+  if (status === "carried_unverified") return true;
   return !FINISHED.has(status) && !MOVING.has(status);
 }
 

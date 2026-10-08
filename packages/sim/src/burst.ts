@@ -70,6 +70,7 @@ import {
   completeOrderAttempt,
   abandonOrderAttempt,
   isOrderPartStale,
+  DONE_ON_APPLICATION_OPS,
   OrderRecordSchema,
   OrderPartSchema,
   STAGE_REVIEW_DAYS,
@@ -147,11 +148,13 @@ import { castDossier, reviewCast } from "./cast";
 import { FAR_REST_DAYS, aFarManRests, aSeedIsWithinReach, anOwnerIsNear, circleOf, touchedByThePlayer } from "./far-cast-rests";
 import { reviewPushback } from "./pushback";
 import { decideVillainy, seizeThrones, usurpations } from "./villainy";
+import { CREDIT_WORDS } from "./lending";
 import { newsRelations, powersDealtWith, powersNearThePlayer } from "./far-powers";
 import { groundOfForce } from "./force-ground";
 import { farBusinessFloor, keepFarNewsHome } from "./far-news";
 import { brokenBy, whyItWillNotLoad } from "./checkpoint";
 import { clipOverlong } from "./clip-overlong";
+import { carriedOutLine } from "./order-lines";
 import { theOrdersOwnParts } from "./order-parts";
 import { actsHeCanDo, dedupeStages, resolveHandles } from "./order-stages";
 import { stampOrderMoney } from "./order-money";
@@ -219,6 +222,9 @@ export interface SimulationBudget {
   readonly newChainAfterDays: number;
   /** The standing cast's size (docs/plans/a-living-world.md §4): a budget setting, not a difficulty. */
   readonly castSize?: number | undefined;
+  /** How many days a far man of the cast's wider-world seats rests between asks, and a near one: unset are `FAR_REST_DAYS` and `NEAR_WORLD_REST_DAYS` (`far-cast-rests.ts`). */
+  readonly farRestDays?: number | undefined;
+  readonly nearWorldRestDays?: number | undefined;
   /** Deal a large cast onto this many cognition calls instead of the measured default (plan §1 F). */
   readonly cognitionShards?: number | undefined;
   /**
@@ -250,9 +256,9 @@ export const DEFAULT_BUDGET: SimulationBudget = {
   // calls and at most one repair and one reconciliation, so eight calls and
   // one for every three days -- eighteen for a month, forty at most for a
   // season -- walks the whole span.
-  maxModelCalls: 40,
-  baseModelCalls: 14,
-  modelCallDays: 3,
+  maxModelCalls: 12,
+  baseModelCalls: 4,
+  modelCallDays: 12,
   maxSimulatedDays: 90,
   maxCausalDepth: 3,
   // Ten people to a round rather than six. A month in which four people in the
@@ -722,6 +728,8 @@ function pursuitOf(world: WorldState, actorRef: OrderPartyRef, summary: string, 
  * thinks of a power, and a thread moved on in words. An answer made only of
  * these, or of facts alone, changed nothing in the world.
  */
+/** The acts of the twelve, which a man who does them without the body's leave usurps; the usurpation is his answer, and a breach beside it is the same deed counted twice. */
+const ALSO_USURPED: ReadonlySet<string> = new Set(["tax_policy_set", "coinage_debase", "public_benefaction", "project_create", "force_provision", "loan_open", "money_transfer", "agreement_open", "agreement_close", "force_create"]);
 const CHANGES_NOTHING: ReadonlySet<string> = new Set(["character_intent_set", "belief_set", "polity_stance_shift", "storyline_advance"]);
 
 /**
@@ -910,7 +918,7 @@ const ORDER_RESERVE_CALLS = 3;
 /** The fewest days between two looks at the calendar once the order's first round is answered (`SimulationBudget.minHopDays`). */
 const MIN_HOP_DAYS = 4;
 /** The most people asked in one round (`SimulationBudget.maxAskedPerRound`). */
-const MAX_ASKED_PER_ROUND = 6;
+const MAX_ASKED_PER_ROUND = 3;
 /** How many of the world's own people are asked while the order is still being read. */
 const EARLY_ASKED = 3;
 /** Days a person with nothing pressing is left alone after answering. */
@@ -1310,7 +1318,9 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         parts: order.parts.map((part) => !isOrderPartStale(world, order, part) ? part : {
           ...part,
           closedAtStep: world.elapsedStep,
-          note: `Lapsed: nothing more was done for it in ${world.elapsedStep - order.givenAtStep} days${part.note === null ? "" : `; ${part.note}`}`.slice(0, 400),
+          note: ((orderPartStatus(world, part) === "carried_unverified"
+            ? `Lapsed: it was ordered, and in ${world.elapsedStep - order.givenAtStep} days nothing came to show what it came to`
+            : `Lapsed: nothing more was done for it in ${world.elapsedStep - order.givenAtStep} days`) + (part.note === null ? "" : `; ${part.note}`)).slice(0, 400),
         }),
       }),
     };
@@ -1428,7 +1438,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
           const resolve = refResolver(world, tried.assignedIds);
           const goals = mergeGoals([...next.goals, ...acts.flatMap((act) => goalsOfAct(before, act, made, resolve))], []).goals;
           next = {
-            ...next, refusal: null, refusedAtStep: null, goals, actsCarried: Math.min(99, next.actsCarried + tried.applied.length),
+            ...next, refusal: null, refusedAtStep: null, goals, actsCarried: Math.min(99, next.actsCarried + tried.applied.length), actsDone: Math.min(99, (next.actsDone ?? 0) + tried.applied.filter((entry) => DONE_ON_APPLICATION_OPS.has(entry.delta.op)).length),
             workRefs: [...next.workRefs, ...made.filter((work) => !next.workRefs.some((known) => known.id === work.id))].slice(0, 12),
           };
           const materialized = materializeFacts({
@@ -1748,6 +1758,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       actsForTheWorld,
       atomicGroups: intentParts.filter((part) => part.acts.some((at) => proposal.deltas[at]?.op === "service_contract_open")).map((part) => part.acts.map((at) => proposal.deltas[at]).filter((delta): delta is WorldDelta => delta !== undefined)),
       playerCharacterId: input.actorRef.kind === "character" ? input.actorRef.id : null,
+      creditAccepted: input.orderText !== null && CREDIT_WORDS.test(input.orderText),
       ...(order === undefined ? {} : { orderDeltas: order }),
       ...(declaredDeltas === undefined || declaredDeltas.size === 0 ? {} : { declaredDeltas }),
       ...(assignedIds === undefined ? {} : { assignedIds }),
@@ -2111,8 +2122,11 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     const actorName = world.characters.find((character) => character.id === actorRef.id)?.name ?? actorRef.id;
     // And what he will answer for when his office no longer covers him (`command-tenure.ts`).
     const actorPolity = world.characters.find((character) => character.id === actorRef.id)?.polityId ?? null;
-    if (actorRef.kind === "character" && actorPolity !== null && result.breaches.length > 0) {
-      world = { ...world, answerable: [...world.answerable, ...result.breaches.map((breach) => ({
+    // An act that was a usurpation is answered for as one (`usurpation.ts`) and not twice over as a breach as well.
+    const usurpedToday = world.answerable.some((entry) => entry.characterId === actorRef.id && entry.kind === "usurpation" && entry.atStep === world.elapsedStep);
+    const answeredFor = usurpedToday ? result.breaches.filter((breach) => !ALSO_USURPED.has(breach.delta.op)) : result.breaches;
+    if (actorRef.kind === "character" && actorPolity !== null && answeredFor.length > 0) {
+      world = { ...world, answerable: [...world.answerable, ...answeredFor.map((breach) => ({
         characterId: actorRef.id, polityId: actorPolity, kind: "breach" as const,
         label: describeBreach(breach.delta, world, actorName).slice(0, 240), atStep: world.elapsedStep,
         // A war made without the state's leave is the gravest thing a commander answers for (Manlius Vulso's, against the Galatians, was
@@ -3020,7 +3034,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       ? "Word of it went out, and nothing came back that anyone could make sense of."
       : obstacles.length > 0
         ? `It could not be done as given: ${obstacles.slice(0, 3).join(" ")}`
-        : allRefused ? "It could not be done as written." : "Nothing came of it that anyone could see.";
+        : allRefused ? "It could not be done as written."
+          // Carried out, with nothing public to show for it (a purse debited, an estate bought, a venture closed): said as done, never as nothing.
+          : acts.carriedOut > 0 ? carriedOutLine(acts.ownActs ?? [])
+            : "Nothing came of it that anyone could see.";
     const answered = materializeFacts({
       proposals: [{
         localId: "order_answered",
@@ -3291,6 +3308,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         attribution: mine.some((act) => act.guessed) || handedOn.some((attempt) => partOfAttempt(attempt).guessed) ? "guessed" as const : "tagged" as const,
         closedAtStep: null,
         actsCarried: Math.min(99, carried.filter((act) => act.delta === undefined || !CHANGES_NOTHING.has(act.delta.op)).length),
+        actsDone: Math.min(99, carried.filter((act) => act.delta !== undefined && DONE_ON_APPLICATION_OPS.has(act.delta.op)).length),
         // Refused for good: what is held for later is not refused yet.
         actsRefused: Math.min(99, mine.filter((act) => !act.carried && !heldActs.has(act)).length),
       };
@@ -4158,12 +4176,13 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     const castSeats = new Map(world.cast.members.map((member) => [member.characterId, member] as const));
     const restingFar = (actor: (typeof novel)[number]): boolean => {
       const member = castSeats.get(actor.characterId);
-      return member !== undefined && playerId !== null && aFarManRests(world, member, interests, farCircle, farTouched, cognitionMemory.lastAskedStep(actor.characterId));
+      return member !== undefined && playerId !== null && aFarManRests(world, member, interests, farCircle, farTouched, cognitionMemory.lastAskedStep(actor.characterId), { far: budget.farRestDays, near: budget.nearWorldRestDays });
     };
     const farRested = novel.filter(restingFar);
     if (farRested.length > 0) skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: ${farRested.length} far man/men of the wider world rest ${FAR_REST_DAYS} days between asks and play on the rules` });
-    const fresh = playersPeopleFirst(novel.filter((actor) => !coolingOff(actor) && !restingFar(actor) && (playerId === null
-      || cognitionPolicy.shouldAsk(actor, world, interests, significanceByFactId, authorOf, due))), orderPeople);
+    // The player's people first, then whoever is owed a turn or has a step falling due (three to a round leaves no room for the rotation to crowd them out).
+    const fresh = playersPeopleFirst(playersPeopleFirst(novel.filter((actor) => !coolingOff(actor) && !restingFar(actor) && (playerId === null
+      || cognitionPolicy.shouldAsk(actor, world, interests, significanceByFactId, authorOf, due))), new Set(dueWhy.keys())), orderPeople);
     if (novel.length < castNow.length) {
       skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: ${castNow.length - novel.length} with nothing new since they last answered left unasked` });
     }
@@ -4527,6 +4546,12 @@ export function recordDelegations(
   const resolveParty = (ref: Proposal["delegations"][number]["issuerRef"]) =>
     ref.id.startsWith("local:") ? { ...ref, id: assignedIds.get(ref.id.slice("local:".length)) ?? ref.id } : ref;
 
+  // The same order given to the same man twice (an answer asked again, a part retried) is one order: it is not handed on a second time.
+  const handed = new Set<string>();
+  const keyOf = (issuerId: string, recipientId: string, instruction: string): string => `${issuerId}>${recipientId}:${instruction.trim().toLowerCase().replace(/\s+/g, " ")}`;
+  for (const attempt of world.orderAttempts) {
+    if (attempt.status === "issued" || attempt.status === "received" || attempt.status === "delayed" || attempt.status === "accepted") handed.add(keyOf(attempt.issuerRef.id, attempt.recipientRef.id, attempt.instruction));
+  }
   const attempts = delegations
     // An order to someone who does not exist is not an order. This happens when
     // the model names a person it only planned to create.
@@ -4552,6 +4577,12 @@ export function recordDelegations(
       // constant, so a merchant's request and a consul's command were the same
       // record, and the instruction itself was smuggled through a field
       // documented as a snapshot of the authority check.
+      const handedKey = keyOf(issuerRef.id, recipientRef.id, delegation.instruction.slice(0, 400));
+      if (handed.has(handedKey)) {
+        skipped?.push({ stage: "delegation", reason: `"${delegation.instruction.slice(0, 80)}" was already in his hands, and was not handed on twice.` });
+        return [];
+      }
+      handed.add(handedKey);
       const verdict = assessOrderStanding({ world, offices, issuerRef, recipientRef });
       // An order a man hands on for an order he holds serves what that one
       // serves: the legate who tells a shipmaster to find hulls is still
