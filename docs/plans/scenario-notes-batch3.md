@@ -21,4 +21,6 @@ What else the version carries, though it is engine and not data (a pinned scenar
 a venture seventeen; a cargo's margin is four to eighteen in the hundred a voyage; and a firm needs 8,500 to sail. The hub count is unchanged (Rome's province was a hub
 already; `rome-has-ostia.test.ts` pins forty to eighty).
 
+The web draws Ostia on the map where the generated GeoJSON (`public/maps/punic-wars-provinces.geojson`, made by `scripts/map-gen`) has none: `apps/web/lib/punic-wars-map.ts` adds the point (41.755 N, 12.289 E) until the map is next generated with it.
+
 A game saved before the bump has no Ostia in Rome's province and keeps its old wealth bands: the engine's rules above apply to it all the same.
