@@ -2023,11 +2023,11 @@ const SiegeLaySchema = z.object({
 const ForceProvisionSchema = z.object({
   op: z.literal("force_provision"),
   forceRef: RefSchema,
-  how: z.enum(["buy", "requisition", "convoy"]),
-  days: z.number().int().min(1).max(120),
+  how: z.enum(["buy", "requisition", "convoy", "contract"]),
+  days: z.number().int().min(1).max(360),
   /** Convoy: where it is sent from. */
   fromProvinceId: MaybeIdSchema.default(null),
-  /** Buy or convoy: who pays. */
+  /** Buy or convoy: who pays. Contract: a house of the power feeds the army for "days" (a term of months) at the market price and a margin, the treasury paying for what reaches it. */
   payAccountRef: MaybeRefSchema.default(null),
   reason: ReasonSchema,
 }).strict();

@@ -23,6 +23,23 @@ import type { WorldState } from "./world-state";
 /** No power lays more than this on a good entering its markets: past it nothing would come. */
 export const MAX_CUSTOMS_RATE_BPS = 5_000;
 
+/** What a treasury bought for a hungry hub: bought in one hub's market, paid for the day it sailed, landing in the other when the road says. */
+export const MAX_GRAIN_SHIPMENTS = 80;
+export const GrainShipmentSchema = z
+  .object({
+    id: EntityIdSchema,
+    polityId: EntityIdSchema,
+    fromHubId: EntityIdSchema,
+    toHubId: EntityIdSchema,
+    units: z.number().int().positive(),
+    paid: z.number().int().nonnegative(),
+    sentAtStep: ElapsedStepSchema,
+    arrivesAtStep: ElapsedStepSchema,
+    status: z.enum(["on_the_way", "landed", "lost"]),
+  })
+  .strict();
+export type GrainShipment = z.infer<typeof GrainShipmentSchema>;
+
 export const EconomyMemorySchema = z
   .object({
     /** The last day the land was reckoned: its people, its taxes, its migrants. */
@@ -140,6 +157,8 @@ export const EconomyMemorySchema = z
     /** What each power spends to go on being one, and the public works let to contractors (`world/keeping.ts`, `sim/keeping-the-state.ts`). */
     keeping: z.array(StateKeepingSchema).max(MAX_KEEPING_ROWS).default([]),
     works: z.array(PublicWorkContractSchema).max(MAX_WORK_CONTRACTS).default([]),
+    /** Grain a power's treasury bought in a dearth and has on the way to a hungry hub (`sim/grain-purchases.ts`). */
+    shipments: z.array(GrainShipmentSchema).max(MAX_GRAIN_SHIPMENTS).default([]),
   })
   .strict();
 export type EconomyMemory = z.infer<typeof EconomyMemorySchema>;
@@ -168,6 +187,7 @@ export const EMPTY_ECONOMY_MEMORY: EconomyMemory = {
   houses: [],
   keeping: [],
   works: [],
+  shipments: [],
 };
 
 export const economyOf = (world: Pick<WorldState, "economy">): EconomyMemory => world.economy ?? EMPTY_ECONOMY_MEMORY;

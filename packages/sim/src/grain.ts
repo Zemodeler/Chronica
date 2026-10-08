@@ -14,6 +14,8 @@ import {
   sameConfederation,
   stableHash,
   warfareWith,
+  warsOf,
+  economyOf,
   type Convoy,
   type FactProposalDraft,
   type ProvinceMaterial,
@@ -22,6 +24,7 @@ import {
   type WorldState,
   applyForagingScar,
 } from "@chronica/shared";
+import { voyageLossBps } from "./house-voyages";
 import type { IdFactory } from "./ports";
 
 /**
@@ -259,13 +262,26 @@ export function deliverConvoys(world: WorldState, toDay: number, warfare: Scenar
   const facts: FactProposalDraft[] = [];
   let forces = world.material.forces;
   const name = (id: string): string => world.map.provinces.find((province) => province.id === id)?.name ?? id;
+  // What a house's convoys came to: counted to their contracts below, for the next reckoning of the pay.
+  const counted: { readonly convoy: Convoy; readonly fed: boolean }[] = [];
   const convoys = world.convoys.map((convoy): Convoy => {
     if (convoy.status !== "on_the_road" || convoy.arrivesAtStep > toDay) return convoy;
     const army = forces.find((force) => force.id === convoy.forceId && fitOf(force) > 0);
     // Gone, or moved on: the bread goes where the army was, and is lost.
     if (army === undefined || army.locationId !== convoy.toProvinceId) {
       facts.push(said(convoy, "convoy_lost", `The convoy sent to ${army?.name ?? "an army"} reached ${name(convoy.toProvinceId)} and found nobody to feed.`, 30));
+      counted.push({ convoy, fed: false });
       return { ...convoy, status: "lost" };
+    }
+    // A house's ship is out on the sea for the days it takes, in worse water where its power is at war: the same chance of loss as any cargo of a house (`house-voyages.ts`).
+    if (convoy.contractId != null) {
+      const open = warsOf(world.polityAgreements, convoy.polityId).length > 0 ? 3_500 : 10_000;
+      const lossBps = voyageLossBps(true, convoy.arrivesAtStep - convoy.sentAtStep, open, open);
+      if (stableHash([convoy.id, "at-sea"]) % 10_000 < lossBps) {
+        facts.push(said(convoy, "convoy_lost", `The ship bringing bread to ${army.name} at ${name(convoy.toProvinceId)} was lost at sea.`, 38));
+        counted.push({ convoy, fed: false });
+        return { ...convoy, status: "lost" };
+      }
     }
     const enemies = forces.filter((force) => force.locationId === convoy.toProvinceId && fitOf(force) > 0 && !isNavalForce(force, rules)
       && force.polityId !== convoy.polityId && atWar(world.polityAgreements, force.polityId, convoy.polityId));
@@ -278,6 +294,7 @@ export function deliverConvoys(world: WorldState, toDay: number, warfare: Scenar
       const fed = Math.max(1, Math.floor((convoy.days * convoy.men) / Math.max(1, fitOf(taker))));
       forces = forces.map((force) => (force.id === taker.id ? { ...force, provisionedThroughStep: Math.max(force.provisionedThroughStep, toDay) + fed, provisionStatus: "provisioned" as const } : force));
       facts.push(said(convoy, "convoy_taken", `${taker.name} fell on the convoy bringing bread to ${army.name} at ${name(convoy.toProvinceId)}, and ate it themselves.`, 55, [taker.id, army.id]));
+      counted.push({ convoy, fed: false });
       return { ...convoy, status: "taken" };
     }
     // The bread feeds as many days as it was sent for the men it was sent for.
@@ -286,9 +303,36 @@ export function deliverConvoys(world: WorldState, toDay: number, warfare: Scenar
     facts.push(said(convoy, "convoy_arrived", penned
       ? `A convoy got through the enemy's lines at ${name(convoy.toProvinceId)} with ${fed} days' bread for ${army.name}.`
       : `A convoy reached ${army.name} at ${name(convoy.toProvinceId)} with ${fed} days' bread.`, penned ? 45 : 25, [army.id]));
+    counted.push({ convoy, fed: true });
     return { ...convoy, status: "delivered" };
   });
-  return { world: { ...world, convoys, material: { ...world.material, forces } }, facts };
+  const delivered: WorldState = { ...world, convoys, material: { ...world.material, forces } };
+  return { world: counted.reduce((next, entry) => countDelivered(next, entry.convoy, entry.fed), delivered), facts };
+}
+
+/**
+ * A house's convoy comes to its end: the bread is counted to the contract it was sent under, so that the next reckoning pays for what reached the army and
+ * for no more; what was taken, drowned or found nobody to feed is the house's loss, and the house's record of losses rises by it (`army-victualling.ts`).
+ */
+export function countDelivered(world: WorldState, convoy: Pick<Convoy, "contractId" | "days" | "men">, fed: boolean): WorldState {
+  if (convoy.contractId == null) return world;
+  const contract = world.material.contracts.find((candidate) => candidate.id === convoy.contractId);
+  if (contract?.victuals == null) return world;
+  const memory = economyOf(world);
+  return {
+    ...world,
+    economy: fed ? world.economy : { ...memory, houses: memory.houses.map((house) => (house.id === contract.victuals!.houseId ? { ...house, losses: house.losses + 1 } : house)) },
+    material: {
+      ...world.material,
+      contracts: world.material.contracts.map((candidate) => (candidate.id !== contract.id || candidate.victuals == null ? candidate : {
+        ...candidate,
+        victuals: fed
+          ? { ...candidate.victuals, deliveredManDays: candidate.victuals.deliveredManDays + convoy.days * convoy.men }
+          : { ...candidate.victuals, lostManDays: candidate.victuals.lostManDays + convoy.days * convoy.men },
+      }),
+      ),
+    },
+  };
 }
 
 function said(convoy: Convoy, kind: string, summary: string, significance: number, forceIds: readonly string[] = [convoy.forceId]): FactProposalDraft {

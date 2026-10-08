@@ -78,6 +78,8 @@ import { keepTheRanks } from "./ranks";
 import { pressSieges } from "./sieges";
 import { fightEngagements, noteWhoFaces } from "./engagements";
 import { deliverConvoys } from "./grain";
+import { landShipments } from "./grain-purchases";
+import { keepVictualling } from "./army-victualling";
 import { keepBlockades } from "./blockades";
 
 import { keepTheField } from "./campaign";
@@ -1706,7 +1708,10 @@ export function runDeterministicTick(given: TickInput): TickResult {
   // Bread on the road arrives, or is taken; fleets off ports are kept as blockades.
   const delivered = deliverConvoys(faced.world, input.toDay, input.warfare);
   facts.push(...delivered.facts);
-  const blockading = keepBlockades(delivered.world, input.toDay, input.warfare, input.ids);
+  // Grain the treasuries bought for their hungry hubs lands, or is lost where the hub has been shut since (`grain-purchases.ts`).
+  const shipped = landShipments(delivered.world, input.toDay);
+  facts.push(...shipped.facts);
+  const blockading = keepBlockades(shipped.world, input.toDay, input.warfare, input.ids);
   facts.push(...blockading.facts);
   const met = { world: blockading.world, battles: fought.battles };
   // The land reckoned for the month and the year; what treaties and debts
@@ -1717,6 +1722,10 @@ export function runDeterministicTick(given: TickInput): TickResult {
   // What the month's trade earned each power in customs is paid into its treasury the day it is reckoned.
   // And the merchant houses look to their cargoes once the markets have moved and the customs are in (`merchant-houses.ts`).
   const housed = keepMerchantHouses(payCustoms(reckoned.world, input.toDay, input.ids), input.toDay, input.ids, input.playerCharacterId ?? null);
+  // And the houses that feed an army by contract reckon what reached it and send the next month's bread (`army-victualling.ts`).
+  const victualled = keepVictualling(housed.world, input.toDay, input.ids);
+  housed.world = victualled.world;
+  housed.facts.push(...victualled.facts);
   // And each power keeps its state: the upkeep of what it holds, the costs of its government, the works it lets (`keeping-the-state.ts`).
   const theState = keepTheState({ world: housed.world, toDay: input.toDay, ids: input.ids, offices: input.government?.offices, playerCharacterId: input.playerCharacterId ?? null });
   const land = { ...reckoned, world: theState.world };

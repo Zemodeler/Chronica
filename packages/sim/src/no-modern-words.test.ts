@@ -52,6 +52,9 @@ const NEW_FILES = [
   "./gentes.ts",
   "./adoption.ts",
   "./feuds-in-letters.ts",
+  // Grain bought with the state's silver, and armies fed by contract (v58).
+  "./grain-purchases.ts",
+  "./army-victualling.ts",
   "./gens-loyalty.ts",
   // H2 and H3: the magistrates at their charges and the bodies that sit.
   "./magistrates.ts",

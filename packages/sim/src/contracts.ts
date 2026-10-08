@@ -1,4 +1,4 @@
-import { employerPolityOf, mercenaryGracePeriods, silverDeficitBps, type FactProposalDraft, type ServiceContract, type WorldState } from "@chronica/shared";
+import { economyOf, employerPolityOf, mercenaryGracePeriods, silverDeficitBps, type FactProposalDraft, type ServiceContract, type WorldState } from "@chronica/shared";
 
 /**
  * Service contracts over time (roles plan phase 5): a term that runs out, and
@@ -39,7 +39,7 @@ export function keepContracts(world: WorldState, toDay: number): { world: WorldS
     const pay = world.material.obligations.find((obligation) => obligation.id === contract.obligationId);
     const died = employee === undefined || !employee.alive;
     // A hired company waits a period or two for a late wage in sound coin, and none for one in debased (`mercenary-pay.ts`); anyone else lapses at the first miss.
-    const grace = contract.role === "mercenary" ? mercenaryGracePeriods(world, contract) : 0;
+    const grace = contract.role === "mercenary" || contract.role === "victualler" ? mercenaryGracePeriods(world, contract) : 0;
     const unpaid = pay !== undefined && pay.missedPeriods > grace;
     const over = contract.endsAtStep !== null && contract.endsAtStep <= toDay;
     if (!died && !unpaid && !over) {
@@ -52,6 +52,11 @@ export function keepContracts(world: WorldState, toDay: number): { world: WorldS
       continue;
     }
     next = endContract(next, contract, unpaid ? "lapsed" : "ended", toDay);
+    // A house that was not paid for the bread it sent is out of what it laid out, and it is written against it.
+    if (unpaid && contract.role === "victualler" && contract.victuals != null) {
+      const memory = economyOf(next);
+      next = { ...next, economy: { ...memory, houses: memory.houses.map((house) => (house.id === contract.victuals!.houseId ? { ...house, losses: house.losses + 1 } : house)) } };
+    }
     const who = name(contract.employeeCharacterId);
     facts.push({
       localId: `contract_${contract.id}`.slice(0, 60),
@@ -61,6 +66,8 @@ export function keepContracts(world: WorldState, toDay: number): { world: WorldS
         : unpaid
           ? contract.role === "tax_farmer"
             ? `${who} missed the rent on his tax farm, and the farm was taken back: ${contract.label}.`
+            : contract.role === "victualler"
+              ? `${who}'s house went ${pay!.missedPeriods} period(s) without being paid for the bread it sent, and stopped sending it: ${contract.label}. It is out of what it laid out, and the army must be fed some other way.`
             : contract.role === "mercenary"
               ? `${who}'s company went ${pay!.missedPeriods} period(s) without its pay${silverDeficitBps(world, employerPolityOf(world, contract)) > 0 ? `, and what pay it had was in coin worth ${Math.round((10_000 - silverDeficitBps(world, employerPolityOf(world, contract))) / 100)} in a hundred of its silver` : ""}, and walked out of the contract: ${contract.label}. It owes nobody anything now.`
               : `${who} was not paid, and his contract lapsed: ${contract.label}. He owes nobody anything now.`

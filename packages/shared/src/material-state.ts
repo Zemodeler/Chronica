@@ -1300,7 +1300,7 @@ export type TradeVenture = z.infer<typeof TradeVentureSchema>;
 export const ServiceContractSchema = z
   .object({
     id: EntityIdSchema,
-    role: z.enum(["mercenary", "assassin", "envoy", "engineer", "physician", "tax_farmer", "gladiator", "retainer", "steward", "agent"]),
+    role: z.enum(["mercenary", "assassin", "envoy", "engineer", "physician", "tax_farmer", "gladiator", "retainer", "steward", "agent", "victualler"]),
     label: z.string().trim().min(1).max(160),
     employerAccountId: EntityIdSchema,
     employeeCharacterId: EntityIdSchema,
@@ -1321,6 +1321,20 @@ export const ServiceContractSchema = z
     forceWas: z.object({ polityId: EntityIdSchema, controllerCharacterId: EntityIdSchema }).strict().nullable().default(null),
     provinceId: EntityIdSchema.nullable().default(null),
     counterpartPolityId: EntityIdSchema.nullable().default(null),
+    /**
+     * A victualler's bread (`sim/army-victualling.ts`): the army he feeds, the price he is paid for every thousand man-days of bread that reaches it, and what has
+     * reached it since he was last paid. The monthly pay is that price on those man-days, so a convoy taken or lost on the road is not paid for.
+     */
+    victuals: z.object({
+      forceId: EntityIdSchema,
+      houseId: EntityIdSchema,
+      pricePerThousand: z.number().int().positive(),
+      deliveredManDays: z.number().int().nonnegative().default(0),
+      sentManDays: z.number().int().nonnegative().default(0),
+      lostManDays: z.number().int().nonnegative().default(0),
+      /** The day the bread was last sent and the pay last reckoned: the house acts once a month. */
+      passedAtStep: ElapsedStepSchema.default(0),
+    }).strict().nullable().optional(),
     status: z.enum(["active", "ended", "lapsed", "broken"]),
   })
   .strict();

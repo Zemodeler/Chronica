@@ -33,6 +33,7 @@ import { readBoard, type PowerReading } from "./board";
 import { defianceOf } from "./insubordination";
 import { readTheBooks, grainStress, motionsByPower, qualityOf, weigh, type Asked, type Books, type Matter } from "./fiscal-officers";
 import { grainPrice } from "./grain";
+import { housesFor, monthlyBill, victuallerOf } from "./army-victualling";
 import type { StatecraftDecision, StatecraftInput } from "./statecraft";
 
 /**
@@ -84,6 +85,11 @@ export const MUSTER_FLOOR = 300;
 export const THIN_HOST_SHARE = 0.35;
 /** How many armies a power's supply feeds in a month. */
 export const ARMIES_FED_A_MONTH = 2;
+/** An army of this many men or more is fed by a house under contract where the power has one (six months: the term the contractors of the Republic took), the smaller by the chest's purchase. */
+export const CONTRACT_FROM_MEN = 1_500;
+export const CONTRACT_DAYS = 180;
+/** Days past what an army has been provisioned for before its contractor's bread is called late and the chest buys. */
+export const SUPPLY_LATE_DAYS = 21;
 /** Every fifth year, the lustrum. */
 /** The year in which a roll counted five years ago is still held truly. */
 export const MAX_CASES_A_MONTH = 1;
@@ -373,7 +379,9 @@ const theSupply: Routine = (cx) => {
   if (reading === undefined || reading.wars.length === 0 || books.balance <= books.owed) return null;
   const hungry = world.material.forces
     .filter((force) => force.polityId === polity.id && force.outlaw !== true && fitStrengthOf(force) > 0 && !isNavalForce(force, undefined)
-      && force.provisionStatus !== "provisioned" && since(cx, "supply", force.id) >= REST_DAYS.supply)
+      && force.provisionStatus !== "provisioned" && since(cx, "supply", force.id) >= REST_DAYS.supply
+      // An army a house is feeding is left to it, unless the bread has been three weeks late.
+      && (victuallerOf(world, force.id) === undefined || force.provisionedThroughStep + SUPPLY_LATE_DAYS < cx.day))
     .sort((a, b) => fitStrengthOf(b) - fitStrengthOf(a) || a.id.localeCompare(b.id))
     .slice(0, ARMIES_FED_A_MONTH);
   if (hungry.length === 0) return null;
@@ -382,17 +390,21 @@ const theSupply: Routine = (cx) => {
   const { man } = found;
   const takings = monthlyTakings(world, polity.id);
   const fed = hungry[0]!;
-  const days = 30;
+  // A power with a house that has the means lets the army's feeding to it for half a year, the price and the margin its bread; else the chest buys the month's.
+  const letting = victuallerOf(world, fed.id) === undefined && fitStrengthOf(fed) >= CONTRACT_FROM_MEN && housesFor(world, polity.id).length > 0;
+  const days = letting ? CONTRACT_DAYS : 30;
   const price = grainPrice(world, polity.id, fed.locationId);
-  const cost = Math.max(1, Math.round((fitStrengthOf(fed) * days / 1_000) * price));
+  const cost = letting ? monthlyBill(world, fed) * (CONTRACT_DAYS / 30) : Math.max(1, Math.round((fitStrengthOf(fed) * days / 1_000) * price));
   const allowance = mayAct(world, man.id, "spending", { offices: cx.offices });
   const spent = allowance === null ? 0 : spendingAllowance(world, allowance.officeId, cx.offices)?.spent ?? 0;
   const matter: Matter = {
     kind: "supply", act: "spending", magnitude: takings <= 0 ? Number.POSITIVE_INFINITY : (spent + cost) / takings, concerns: ["spending", "levy"],
-    label: `the bread of ${fed.name} be paid for out of the chest of ${polity.name}`,
-    text: `bought ${days} days' bread for ${fed.name}, ${cost} out of the chest, for the men were going hungry`,
-    why: `supply: bread for ${fed.name} [${fed.id}], ${cost} from the chest`,
-    deltas: [delta({ op: "force_provision", forceRef: fed.id, how: "buy", days, fromProvinceId: null, payAccountRef: books.treasuryId, reason: `${man.name} feeds ${fed.name}: it has eaten what it carried.`.slice(0, 240) })],
+    label: letting ? `the feeding of ${fed.name} be let to a house of ${polity.name}, ${cost} over ${CONTRACT_DAYS / 30} months out of the chest` : `the bread of ${fed.name} be paid for out of the chest of ${polity.name}`,
+    text: letting
+      ? `let the feeding of ${fed.name} to a house of ${polity.name} for ${CONTRACT_DAYS / 30} months, some ${cost} out of the chest at the market's price and a margin, for the men were going hungry`
+      : `bought ${days} days' bread for ${fed.name}, ${cost} out of the chest, for the men were going hungry`,
+    why: `supply: bread for ${fed.name} [${fed.id}], ${cost} from the chest${letting ? ", by contract" : ""}`,
+    deltas: [delta({ op: "force_provision", forceRef: fed.id, how: letting ? "contract" : "buy", days, fromProvinceId: null, payAccountRef: books.treasuryId, reason: `${man.name} feeds ${fed.name}: it has eaten what it carried.`.slice(0, 240) })],
   };
   const weighed = ask(cx, man, matter, "supply");
   if (weighed === "own") return { man, kind: "supply", key: fed.id, text: matter.text, why: matter.why, deltas: matter.deltas, speaks: true, significance: 35 };

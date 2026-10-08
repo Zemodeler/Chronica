@@ -163,6 +163,7 @@ import { resolveEngagement, type BattleAccount } from "../battle";
 import { assaultSiege } from "../siege-decisions";
 import { fightRound, openEngagement } from "../engagements";
 import { GrainRefused, breadWhereItStands, sendConvoy } from "../grain";
+import { openVictualling } from "../army-victualling";
 import { handOverForcesOf, killCharacter, mattersEnough } from "../mortality";
 import { carryOutEnactment } from "../enact";
 import { commandChanges } from "../command-changes";
@@ -6149,6 +6150,19 @@ function applyOne(
       const force = world.material.forces.find((candidate) => candidate.id === forceId);
       if (force === undefined) reject(`No force "${forceId}" exists to feed.${nearestTo(forceId)}`, "reference");
       if (isNavalForce(force, warfareWith(world, context.warfare))) reject(`${force.name} is a fleet, victualled in port, not an army to be fed in the field.`);
+      // A house of the power feeds the army for a term, at the market's price and a margin, and is paid for what reaches it (`army-victualling.ts`).
+      if (delta.how === "contract") {
+        const named = delta.payAccountRef === null ? null : required(delta.payAccountRef, "Who pays for the bread");
+        const chest = world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === force.polityId && account.status === "active");
+        const payerId = named ?? chest?.id ?? null;
+        const payer = payerId === null ? undefined : world.material.accounts.find((account) => account.id === payerId);
+        if (payer === undefined) reject("Nobody is named to pay a house for the bread of the army.", "reference");
+        if (payer.owner.kind !== "polity" || payer.owner.id !== force.polityId) reject(`A house is paid for the bread of ${force.name} out of the chest of its power, and ${payer.id} is not that.`);
+        const opened = openVictualling(world, force, delta.days, payer.id, atStep, context.ids);
+        if ("refusal" in opened) reject(opened.refusal);
+        for (const fact of opened.facts) emitFact(fact);
+        return opened.world;
+      }
       let got: ReturnType<typeof breadWhereItStands>;
       try {
         if (delta.how === "convoy") {
