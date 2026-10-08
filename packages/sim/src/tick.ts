@@ -1853,7 +1853,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
 
   // Departments that have finished forming take their work, and the rest
   // learn a day's worth of it.
-  const kept = keepDepartments(opened, input.toDay, input.world);
+  const kept = keepDepartments(opened, input.toDay, input.world, new Set(input.playerCharacterId == null ? [] : [input.playerCharacterId]));
   // Every open work has a man over it; a new one, or one whose man is gone, gets one.
   // Posts made and left empty are filled; then every open work gets a man over it.
   // The ruler of a power nobody plays makes the charge his state lacks, in the month's review, and the post is filled just below (`appointed-by-rule.ts`).

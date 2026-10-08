@@ -49,8 +49,13 @@ export interface KeepDepartmentsResult {
   readonly facts: readonly FactProposalDraft[];
 }
 
-export function keepDepartments(world: WorldState, toDay: number, before?: WorldState): KeepDepartmentsResult {
-  const money = before === undefined ? { world, facts: [] as FactProposalDraft[] } : settleMoney(world, toDay, before);
+/**
+ * `exempt` are the men the engine never robs the state for: the player, and any man a model plays. Their hands are their own to move: a man the
+ * player is does not find a month's graft in his purse that he never ordered (and is not condemned for it). He may take from the chest only by an
+ * order he writes, and an audit finds that like any other.
+ */
+export function keepDepartments(world: WorldState, toDay: number, before?: WorldState, exempt: ReadonlySet<string> = new Set()): KeepDepartmentsResult {
+  const money = before === undefined ? { world, facts: [] as FactProposalDraft[] } : settleMoney(world, toDay, before, exempt);
   const audited = resolveAudits(money.world, toDay);
   const settled = { world: audited.world, facts: [...money.facts, ...audited.facts] };
   world = settled.world;
@@ -353,7 +358,7 @@ function remotenessFrom(world: WorldState, person: Character, polityId: string |
  * and what was taken is written down where an audit can find it -- the
  * treasury is short by exactly what somebody's purse is long.
  */
-function settleMoney(world: WorldState, toDay: number, before: WorldState): { world: WorldState; facts: FactProposalDraft[] } {
+function settleMoney(world: WorldState, toDay: number, before: WorldState, exempt: ReadonlySet<string>): { world: WorldState; facts: FactProposalDraft[] } {
   const earlier = new Set(before.material.transactions.map((transaction) => transaction.id));
   const fresh = world.material.transactions.filter((transaction) => !earlier.has(transaction.id));
   const facts: FactProposalDraft[] = [];
@@ -417,6 +422,7 @@ function settleMoney(world: WorldState, toDay: number, before: WorldState): { wo
     if (collected > 0 && working.length > 0) {
       const honest = working.filter((post) => greedOf(post.person) < 25).length / working.length;
       for (const post of working) {
+        if (exempt.has(post.person.id)) continue;
         const share = diversionShare(greedOf(post.person), paidShare.get(post.person.id) ?? 0, remotenessFrom(world, post.person, polityId));
         const take = Math.floor((collected / working.length) * share * (1 - honest / 2));
         if (take <= 0) continue;
@@ -449,7 +455,7 @@ function settleMoney(world: WorldState, toDay: number, before: WorldState): { wo
     if (contract.status !== "active" || (contract.role !== "steward" && contract.role !== "agent")) continue;
     const hand = world.characters.find((character) => character.id === contract.employeeCharacterId && character.alive);
     const ownerId = world.material.accounts.find((account) => account.id === contract.employerAccountId)?.owner;
-    if (hand === undefined || ownerId?.kind !== "character") continue;
+    if (hand === undefined || ownerId?.kind !== "character" || exempt.has(hand.id)) continue;
     const runs = (kind: string | undefined): boolean => kind === "venture" || (contract.role === "steward" && kind === "holding");
     const income = fresh.filter((transaction) => transaction.destinationAccountId === contract.employerAccountId && transaction.cause.kind === "scheduled_income" && runs(sourceKind.get(transaction.cause.id)));
     const collected = income.reduce((sum, transaction) => sum + transaction.amount, 0);
