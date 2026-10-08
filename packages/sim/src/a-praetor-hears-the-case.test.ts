@@ -23,7 +23,7 @@ const cases = (world: WorldState, day: number, polityId: string) => decideTheMon
 const firstCase = (world: WorldState, polityId: string, from = 150) => { for (let day = from; day <= from + 270; day += 30) { const [found] = cases(world, day, polityId); if (found !== undefined) return { day, found }; } return undefined; };
 
 describe("a praetor hears the case", () => {
-  it("brings the case of a man an audit found out, before the court that judges: Rome's Senate", () => {
+  it("brings the case of a man an audit found out, before the people (the Senate keeps the special inquiry)", () => {
     const { world, thief } = withTheft(opening(), "rome", 100);
     expect(courtOf(world, "rome")).toMatchObject({ id: "roman-senate" });
     const opened = firstCase(world, "rome");
@@ -34,7 +34,8 @@ describe("a praetor hears the case", () => {
     expect(found.deltas[0]).toMatchObject({ op: "political_procedure_open", type: "denunciation", subjectRef: thief, concerns: ["punishment"] });
     const done = carryOut(atDay(world, opened!.day), found);
     expect(done.rejected).toEqual([]);
-    expect(done.world.material.politicalProcedures.at(-1)).toMatchObject({ type: "denunciation", subjectId: thief, institutionId: "roman-senate" });
+    // A theft of the public money was tried by the people (a fine, in the tribal assembly), a hundred years before any standing court.
+    expect(done.world.material.politicalProcedures.at(-1)).toMatchObject({ type: "denunciation", subjectId: thief, institutionId: "roman-comitia-tributa" });
     // Not twice for the same man.
     expect(cases(done.world, opened!.day + 30, "rome")).toEqual([]);
   });

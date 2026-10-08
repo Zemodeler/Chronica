@@ -425,6 +425,19 @@ export function courtOf(world: WorldState, polityId: string): { readonly id: str
   return found === undefined ? null : { id: found.id, name: found.name };
 }
 
+/** The chamber that tries a man for what he took from the chest: Carthage's Hundred and Four, else (for a people that holds assemblies) the people, which judged fines; else the chamber that judges. */
+export function courtForTheft(world: WorldState, polityId: string): { readonly id: string; readonly name: string } | null {
+  const named = courtOf(world, polityId);
+  const examines = world.departments.some((department) => department.abolishedAtStep === null && department.scope.kind === "polity" && department.scope.id === polityId
+    && department.gates.some((gate) => gate.act === "judge_commander"));
+  if (examines && named !== null) return named;
+  const people = world.material.institutions.filter((institution) => institution.polityId === polityId && institution.advisory !== true && institution.franchise === "citizens"
+    && institution.powers?.includes("judgment") === true);
+  const chosen = people.find((institution) => /tribal|tribut/iu.test(`${institution.id} ${institution.name}`)) ?? people[0];
+  if (chosen !== undefined && named !== null && named.id !== chosen.id && /senate|council/iu.test(named.name)) return { id: chosen.id, name: chosen.name };
+  return named;
+}
+
 /** The case a man's graft makes: one a month at most, for a man an audit found with his hand in the chest, a year after at the latest, and not before. */
 const thePraetor: Routine = (cx) => {
   const { world, polity } = cx;
@@ -435,7 +448,7 @@ const thePraetor: Routine = (cx) => {
   const tried = new Set(world.material.politicalProcedures.filter((procedure) => procedure.type === "denunciation" && procedure.subjectKind === "character").map((procedure) => procedure.subjectId));
   const row = evidence.find((candidate) => !tried.has(candidate.byCharacterId) && world.characters.some((character) => character.id === candidate.byCharacterId && character.alive && character.polityId === polity.id));
   if (row === undefined) return null;
-  const court = courtOf(world, polity.id);
+  const court = courtForTheft(world, polity.id);
   if (court === null) return null;
   const found = manAt(cx, "courts", "justice");
   if (found === null || found.refusal !== null) return null;

@@ -144,6 +144,14 @@ export function tenureLean(world: WorldState, procedure: PoliticalProcedure): { 
     lean += war;
     reasons.push(war > 0 ? "the war is not yet won, and a new man would have to learn it (+6)" : "there is no war to keep him for (-10)");
   }
+  // A man whose accounts did not square, or who is under a charge of breach, is not given the year (`close-of-office.ts`).
+  const gap = world.diversions.some((row) => row.byCharacterId === man.id && row.foundAtStep !== null && procedure.openedAtStep - row.foundAtStep <= 400);
+  const breach = world.answerable.filter((entry) => entry.characterId === man.id && entry.kind === "breach").reduce((sum, entry) => sum + entry.weight, 0);
+  if (isProrogation(procedure) && (gap || breach > 0)) {
+    const against = gap ? 14 : Math.min(10, 4 * breach);
+    lean -= against;
+    reasons.push(`his accounts do not square (-${against})`);
+  }
   if (isTriumphVote(procedure) && record.won + record.taken === 0) {
     lean -= 20;
     reasons.push("he won no victory worth a triumph (-20)");

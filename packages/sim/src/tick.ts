@@ -115,6 +115,7 @@ import { raiseOpenings } from "./openings";
 import { keepContracts } from "./contracts";
 import { newsReach, powersNearThePlayer } from "./far-powers";
 import { keepCommandTenure } from "./command-tenure";
+import { keepTheAccounts } from "./close-of-office";
 import { keepDepartments } from "./departments";
 import { assignOverseers, polityOfWork } from "./overseers";
 import { fillAppointments } from "./appointments";
@@ -1822,11 +1823,16 @@ export function runDeterministicTick(given: TickInput): TickResult {
 
   // What a year's end does to a commander's army: prorogued, kept until his
   // successor arrives, handed over -- and what he answers for, out of office.
-  const tenure = input.government === undefined
+  // The accounts of the men whose terms ran out today are read first (`close-of-office.ts`), so that what they find is among the marks the year's end reads.
+  const endedTerms = expiredSeats.flatMap((seat) => (seat.holderCharacterId === null || seat.termExpiresAtStep === null ? [] : [{ characterId: seat.holderCharacterId, officeId: seat.officeId, seatId: seat.id, endedAtStep: seat.termExpiresAtStep }]));
+  const accounted = input.government === undefined
     ? { world: votes.world, facts: [] as readonly FactProposalDraft[] }
+    : keepTheAccounts({ world: votes.world, offices: input.government.offices, toDay: input.toDay, ids: input.ids, playerCharacterId: input.playerCharacterId ?? null, endedTerms });
+  const tenure = input.government === undefined
+    ? { world: accounted.world, facts: [] as readonly FactProposalDraft[] }
     : keepCommandTenure({
-      world: votes.world, government: input.government, toDay: input.toDay, ids: input.ids,
-      endedTerms: expiredSeats.flatMap((seat) => (seat.holderCharacterId === null || seat.termExpiresAtStep === null ? [] : [{ characterId: seat.holderCharacterId, officeId: seat.officeId, seatId: seat.id, endedAtStep: seat.termExpiresAtStep }])),
+      world: accounted.world, government: input.government, toDay: input.toDay, ids: input.ids,
+      endedTerms,
       playerCharacterId: input.playerCharacterId ?? null,
     });
 
@@ -1861,7 +1867,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
   const occupied = occupyOpenCountry(aged, input.toDay);
   return {
     world: forgetSettledPressures(reconcileCapitals(occupied.world), input.toDay),
-    factProposals: [...facts, ...plans.facts, ...plots.facts, ...lives.facts, ...contracts.facts, ...thrones.facts, ...elections.facts, ...votes.facts, ...tenure.facts, ...society.facts, ...kept.facts, ...byRule.facts, ...appointed.facts, ...occupied.facts],
+    factProposals: [...facts, ...plans.facts, ...plots.facts, ...lives.facts, ...contracts.facts, ...thrones.facts, ...elections.facts, ...votes.facts, ...accounted.facts, ...tenure.facts, ...society.facts, ...kept.facts, ...byRule.facts, ...appointed.facts, ...occupied.facts],
     notes,
     died: [...plots.died, ...lives.died],
     sprungContingencies: plans.sprung,

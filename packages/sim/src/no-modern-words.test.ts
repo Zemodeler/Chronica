@@ -38,6 +38,8 @@ const NEW_FILES = [
   // H1: the charges written down for the powers we know, and the officers who lay what is not theirs before the chamber.
   "../../db/src/punic-wars-charges.ts",
   "./fiscal-officers.ts",
+  // H4: the accounts at the close of office, the censors' audits, the Hundred and Four's examination, the king's audit.
+  "./close-of-office.ts",
   // What a state spends to go on being one: the upkeep, the costs of government, the works it lets, and the books of a played ruler.
   "../../shared/src/world/keeping.ts",
   "./the-upkeep-of-a-state.ts",

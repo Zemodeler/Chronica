@@ -41,6 +41,7 @@ import { favouredNeighbour } from "./quirks";
 import { decideFiscal, motionsByPower, weigh, type Asked } from "./fiscal-officers";
 import { consultTheFriends, decideCouncils } from "./bodies";
 import { decideMagistrates, type Skim } from "./magistrates";
+import { decideAudits } from "./close-of-office";
 import { perceivedRatio } from "./perceive";
 import { STEP_DAYS, letterVerdict } from "./letter-verdict";
 
@@ -308,6 +309,8 @@ export function decideStatecraft(input: StatecraftInput): StatecraftDecision[] {
   decisions.push(...fiscal);
   // And the magistrates at their charges: the bread, the levy, the cases, the rites, the census, the mint, the envoys (`magistrates.ts`).
   decisions.push(...decideMagistrates(input, fiscal));
+  // And the audits: the censors at the lustrum, a king's dioiketes in the year, anybody's on suspicion (`close-of-office.ts`).
+  decisions.push(...decideAudits(input));
   // And the king takes the advice of his friends, or overrules it (`bodies.ts`).
   const reader = readDepartments(world);
   decisions.push(...decideCouncils({ world, gameId: input.gameId, excludedPolityIds: input.excludedPolityIds, playedByModel: input.playedByModel, playerCharacterId: input.playerCharacterId, rulers: (polityId) => reader.rulers(polityId) }));
