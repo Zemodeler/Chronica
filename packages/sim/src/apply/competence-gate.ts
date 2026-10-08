@@ -14,6 +14,7 @@ import {
   fitStrengthOf,
   mayAct,
   monthlyTakings,
+  readDepartments,
   spendingAllowance,
   withActMark,
   type ActKind,
@@ -254,6 +255,11 @@ export function competenceGate(input: GateInput): Gate | null {
   const spend = gated.act === "spending";
   const offices = context.offices;
   const may = standingFor(world, actor.id, gated, offices);
+  // A work begun at the state's cost by a man with no charge in it (no seat of any office, and not its head) is not his to begin: a soldier's word does not open the chest.
+  if (may === null && delta.op === "project_create" && !world.material.officeSeats.some((seat) => seat.status === "held" && seat.holderCharacterId === actor.id)
+    && !readDepartments(world).rulers(gated.polityId).some((ruler) => ruler.id === actor.id)) {
+    return { kind: "refuse", reason: `${actor.name} holds no charge in ${nameOf(world, gated.polityId)}: the public chest is opened on a magistrate's word, not a private man's, and works are not raised at the state's cost on his.` };
+  }
   if (may === null) return null;
   const deed = ACT_WORDS[gated.act];
   // The chamber that was not asked votes him nothing: what he draws on the public chest after doing a great act without its leave is refused (`usurpation.ts`).

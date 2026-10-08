@@ -1,8 +1,10 @@
 import {
   OrchestratorOutputSchema,
   WorldDeltaSchema,
+  allOffices,
   fitStrengthOf,
   isNavalForce,
+  mayAct,
   monthlyTakings,
   readDepartments,
   type Force,
@@ -75,13 +77,16 @@ function daysAsked(text: string): number {
 }
 
 /** The land armies under the player: those he commands or controls, or, where he heads a power, all of its own. */
-export function forcesUnder(world: WorldState, playerId: string, warfare?: ScenarioWarfareRules): Force[] {
+export function forcesUnder(world: WorldState, playerId: string, warfare?: ScenarioWarfareRules, options: { readonly forSupply?: boolean } = {}): Force[] {
   const player = world.characters.find((character) => character.id === playerId);
   if (player === undefined) return [];
   const heads = player.polityId !== null && readDepartments(world).rulers(player.polityId).some((ruler) => ruler.id === playerId);
+  // The bread of the power's armies is the charge of its quaestor, its paymaster and whoever holds the supply: for that one matter (and no other: he does not hold or
+  // march an army he does not command) all the armies of his own power are his to feed.
+  const feeds = options.forSupply === true && player.polityId !== null && isSupplyHand(world, player.id, player.polityId);
   return world.material.forces
     .filter((force) => force.outlaw !== true && !isNavalForce(force, warfare) && fitStrengthOf(force) > 0
-      && (force.commanderCharacterId === playerId || force.controllerCharacterId === playerId || force.memberCharacterIds.includes(playerId) || (heads && force.polityId === player.polityId)))
+      && (force.commanderCharacterId === playerId || force.controllerCharacterId === playerId || force.memberCharacterIds.includes(playerId) || ((heads || feeds) && force.polityId === player.polityId)))
     .sort((a, b) => fitStrengthOf(b) - fitStrengthOf(a) || a.id.localeCompare(b.id));
 }
 
@@ -89,8 +94,8 @@ const GENERIC = new Set(["army", "legion", "legio", "field", "force", "host", "t
 const wordsOf = (text: string): string[] => text.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 0);
 
 /** The army the clause names, the only one he has, or null where it cannot be told (none, or several and none named). */
-export function armyNamed(world: WorldState, playerId: string, text: string, warfare?: ScenarioWarfareRules): { readonly force: Force | null; readonly ambiguous: boolean } {
-  const mine = forcesUnder(world, playerId, warfare);
+export function armyNamed(world: WorldState, playerId: string, text: string, warfare?: ScenarioWarfareRules, options: { readonly forSupply?: boolean } = {}): { readonly force: Force | null; readonly ambiguous: boolean } {
+  const mine = forcesUnder(world, playerId, warfare, options);
   if (mine.length === 0) return { force: null, ambiguous: false };
   const lower = text.toLowerCase();
   const named = mine.filter((force) => lower.includes(force.name.toLowerCase())
@@ -119,6 +124,21 @@ function provinceNamed(world: WorldState, text: string): string | null {
 }
 
 const QUAESTOR = /quaest|praefect\w*\s+fabr|praefectus\s+fabrum|supply|commissar|paymaster|sitarch|stratopedarch|logisti/i;
+
+/**
+ * Whether a man's charge is the army's bread: he holds an office that is a quaestor's, a paymaster's or a keeper of supply, or sits in the department that keeps the
+ * supply, or may open the chest (the spending of his office is not forbidden him). A man with no office is none of these.
+ */
+export function isSupplyHand(world: WorldState, personId: string, polityId: string): boolean {
+  const held = world.material.officeSeats.filter((seat) => seat.status === "held" && seat.holderCharacterId === personId);
+  if (held.length === 0) return false;
+  const holding = readDepartments(world).holding({ kind: "polity", id: polityId }, "supply");
+  if (holding.department !== null && [holding.head, ...holding.people].some((candidate) => candidate?.id === personId)) return true;
+  const offices = allOffices(world, []);
+  if (held.some((seat) => QUAESTOR.test(`${offices.find((candidate) => candidate.id === seat.officeId)?.label ?? ""} ${seat.officeId}`))) return true;
+  const may = mayAct(world, personId, "spending");
+  return may !== null && may.grade !== "forbidden";
+}
 
 /**
  * The man who feeds an army, found by rule and never asked for: a post in the army that is the quaestor's or the prefect of works', else the head of the power's supply
@@ -154,13 +174,15 @@ const NOT_AN_ARMY_SUPPLY = /\b(?:city|town|people|plebs|poor|citizens|market|mar
 
 function supplyClause(world: WorldState, playerId: string, text: string, warfare?: ScenarioWarfareRules): Clause | null {
   if (!SUPPLY.test(text) || NOT_AN_ARMY_SUPPLY.test(text.replace(/\brome\b/gi, "")) && !ARMY_NOUN.test(text)) return null;
-  if (!ARMY_NOUN.test(text) && armyNamed(world, playerId, text, warfare).force === null) return null;
+  if (!ARMY_NOUN.test(text) && armyNamed(world, playerId, text, warfare, { forSupply: true }).force === null) return null;
   // "supply" the noun (a supply of grain) without an army to feed is not this.
-  const { force, ambiguous } = armyNamed(world, playerId, text, warfare);
+  const { force, ambiguous } = armyNamed(world, playerId, text, warfare, { forSupply: true });
   if (force === null || ambiguous) return null;
   const days = daysAsked(text);
   const stays = /\b(stay|stays|staying|winter|wintering|remain|quarters|siege|camp(?:s|ed)?\s+(?:at|in|before)|garrison)\b/i.test(text);
-  const delegate = supplyDelegateOf(world, force, playerId);
+  // An army that is his only through the bread (he is its quaestor, or the power's paymaster) is fed by himself: he is the man who feeds it.
+  const ownArmy = forcesUnder(world, playerId, warfare).some((candidate) => candidate.id === force.id);
+  const delegate = ownArmy ? supplyDelegateOf(world, force, playerId) : null;
   const instruction = `Find bread for ${force.name}, for ${days} days${stays ? ", and a depot where it stays" : ""}.`;
   if (delegate === null) {
     // The player is the army's commander and nobody feeds it for him: he does it himself, by the same plan (`supply-plan.ts`), which is the only way bread is found for it.
@@ -215,6 +237,12 @@ const WORKS: readonly { readonly word: RegExp; readonly name: string; readonly s
   { word: /\bmarket(?:-?place)?\b/i, name: "market", structure: "market", effects: [{ quantity: "income", band: "slight" }], cost: 5_000, days: 60 },
 ];
 
+/** Whether a man holds an office of his power, or heads it: he has a charge, and the keys that go with it are his to be weighed. */
+function hasACharge(world: WorldState, personId: string, polityId: string): boolean {
+  if (world.material.officeSeats.some((seat) => seat.status === "held" && seat.holderCharacterId === personId)) return true;
+  return readDepartments(world).rulers(polityId).some((ruler) => ruler.id === personId);
+}
+
 function buildClause(world: WorldState, playerId: string, text: string): Clause | null {
   if (!/^(?:please\s+)?(?:build|construct|raise|repair|found|lay\s+down|erect|begin)\b/i.test(text.trim())) return null;
   const work = WORKS.find((candidate) => candidate.word.test(text));
@@ -228,6 +256,15 @@ function buildClause(world: WorldState, playerId: string, text: string): Clause 
   if (province.controllerPolityId !== player.polityId) return null;
   const chest = chestOfPower(world, player.polityId);
   if (chest === null) return null;
+  // A work is paid out of the public chest, and the chest is a magistrate's to open: a man with no charge in the state (a soldier of the line, a trader)
+  // cannot raise works in its name or at its cost, whatever the ground.
+  if (!hasACharge(world, player.id, player.polityId)) {
+    return {
+      part: { said: text.trim().slice(0, 200), whyNot: `${player.name} holds no charge in ${world.map.polities.find((candidate) => candidate.id === player.polityId)?.name ?? "the state"}: the public chest is opened on a magistrate's word, not a private man's, and works are not raised at the state's cost on his.` },
+      deltas: [], delegations: [], template: "build", domain: "public works",
+      note: `${player.name} has no charge in the state; nobody raises a ${work.name} on his word.`,
+    };
+  }
   const scale = Math.max(0.05, Math.min(3, monthlyTakings(world, player.polityId) / 300_000));
   const named = /\b(?:for|costing|at\s+a\s+cost\s+of)\s+(\d[\d,]*)\b/i.exec(text);
   const cost = named === null ? Math.max(500, Math.round(work.cost * scale)) : Math.max(100, Number(named[1]!.replace(/,/g, "")));

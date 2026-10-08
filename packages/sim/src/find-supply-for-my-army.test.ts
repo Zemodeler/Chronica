@@ -4,7 +4,7 @@ import { DEFAULT_BUDGET, runSimulationBurst } from "./burst";
 import { definition, government, withWar } from "./fiscal-test-kit";
 import { stockedWorld } from "./grain-test-kit";
 import { decideMagistrates } from "./magistrates";
-import { forcesUnder, supplyDelegateOf } from "./order-templates";
+import { forcesUnder, matchOrderTemplates, supplyDelegateOf } from "./order-templates";
 import type { SimModelPort, SimOperation } from "./ports";
 import { CONTRACT_FROM_MEN, chestOfPower, planSupply } from "./supply-plan";
 
@@ -221,5 +221,29 @@ describe("the officers go on feeding the army that was handed to one", () => {
     expect(fed[0]!.deltas[0]).toMatchObject({ op: "force_provision", forceRef: ARMY });
     // A year on, the charge has lapsed.
     expect(decideMagistrates(input({ ...handed, elapsedStep: handed.elapsedStep + 400, instant: { day: handed.instant.day + 400, minute: 0 } })).filter((decision) => decision.polityId === "rome")).toEqual([]);
+  });
+});
+
+describe("a quaestor, or any man of the supply, may say it of the consul's army", () => {
+  const quaestor = (world: WorldState): string => world.material.officeSeats.find((seat) => seat.status === "held" && /quaestor/.test(seat.officeId))!.holderCharacterId!;
+  const privateMan = (world: WorldState): string => world.characters.find((c) => c.alive && c.polityId === "rome" && !world.material.officeSeats.some((s) => s.holderCharacterId === c.id && s.status === "held") && !world.material.forces.some((f) => f.commanderCharacterId === c.id))!.id;
+
+  it("finds the army of his own power, named or the main field army, though he commands none", () => {
+    const world = atWar();
+    const q = quaestor(world);
+    expect(forcesUnder(world, q, warfare)).toEqual([]);
+    expect(forcesUnder(world, q, warfare, { forSupply: true }).map((force) => force.id)).toContain(ARMY);
+    for (const said of ["Find supply for the army of the consul for two months.", "Find supply for the Roman field army."]) {
+      const match = matchOrderTemplates(world, q, said, warfare);
+      expect(match, said).not.toBeNull();
+      expect(match!.templates).toEqual(["supply"]);
+      expect(match!.output.deltas.some((delta) => delta.op === "force_provision")).toBe(true);
+    }
+  });
+
+  it("is no help to a private man, who holds no charge of the bread", () => {
+    const world = atWar();
+    expect(forcesUnder(world, privateMan(world), warfare, { forSupply: true })).toEqual([]);
+    expect(matchOrderTemplates(world, privateMan(world), "Find supply for the army of the consul.", warfare)).toBeNull();
   });
 });
