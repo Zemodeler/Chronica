@@ -76,8 +76,8 @@ function withTheVenture(): WorldState {
   return result.world;
 }
 
-/** Leptines' purse gained this month, less what his estate paid him. */
-const tradeReturn = (before: WorldState, after: WorldState): number => balance(after, "leptines-purse") - balance(before, "leptines-purse") - 2_700;
+/** Leptines' purse gained this month, less what his estate paid him (270 a month since v59, 2026-10-08: a tenth of the first drafts). */
+const tradeReturn = (before: WorldState, after: WorldState): number => balance(after, "leptines-purse") - balance(before, "leptines-purse") - 270;
 /** What his cargoes brought in, less the next cargoes bought, since `before`: his purse's trade rows. */
 const cargoReturn = (before: WorldState, after: WorldState): number => after.material.transactions.slice(before.material.transactions.length)
   .filter((row) => (row.destinationAccountId === "leptines-purse" && row.kind === "income" && row.cause.kind === "scheduled_income" && row.cause.explanation.startsWith("Sale of the cargo"))

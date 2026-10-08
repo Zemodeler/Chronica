@@ -1,7 +1,7 @@
 import {
   boundedId,
   computeOpinion,
-  ESTATE_PRICE_MONTHS,
+  ESTATE_LAND_PRICE_MONTHS,
   LEGIONARY_PAY_GROSS,
   PAY_STOPPAGES_SHARE,
   stableHash,
@@ -177,7 +177,7 @@ export function loanOffersFor(world: WorldState, characterId: string): readonly 
   // What he could pledge: his estates at what an estate sells for, and what he has in his ventures.
   const estates = world.material.holdings
     .filter((holding) => holding.legalHolderCharacterId === characterId)
-    .map((holding) => ({ holding, value: (world.material.incomeSources.find((source) => source.id === holding.incomeSourceId)?.amount ?? 0) * ESTATE_PRICE_MONTHS }))
+    .map((holding) => ({ holding, value: (world.material.incomeSources.find((source) => source.id === holding.incomeSourceId)?.amount ?? 0) * ESTATE_LAND_PRICE_MONTHS }))
     .sort((a, b) => b.value - a.value || a.holding.id.localeCompare(b.holding.id));
   const ventures = world.material.ventures
     .filter((venture) => venture.ownerCharacterId === characterId && venture.status === "running")

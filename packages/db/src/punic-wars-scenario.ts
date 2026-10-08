@@ -1,7 +1,9 @@
 import { GovernmentFormSchema, ScenarioDefinitionSchema, WorldStateSchema, formArmies, ordoOfRomanName, type GovernmentForm, type ScenarioDefinition, type WorldState } from "@chronica/shared";
 import { PUNIC_IDS } from "./punic-ids";
 import { PUNIC_DOCTRINES, PUNIC_ESTABLISHMENTS, SEASONED_ARMIES } from "./punic-wars-establishments";
+import { MAMERTINE_DATES } from "./punic-wars-mamertines";
 import { OSTIA_SETTLEMENTS } from "./punic-wars-ostia";
+import { seatChamberField } from "./punic-wars-seats";
 import { EQUESTRIAN_FLOOR, SENATORIAL_FLOOR } from "./punic-wars-merchant-start";
 import { POLITY_META, PUNIC_WARS_GRAPH_EDGES, PUNIC_WARS_GRAPH_POLITIES, PUNIC_WARS_GRAPH_PROVINCES, PUNIC_WARS_GRAPH_SETTLEMENTS } from "./punic-wars-map-graph";
 import { foundingPeople, knownRulerId, romanSenators, withFinerSkills } from "./punic-wars-rulers";
@@ -9,6 +11,7 @@ import { WORLD_PRESSURES, withWorldPolitics } from "./punic-wars-politics";
 import { houseFamilies, rosterPeople } from "./punic-wars-rosters";
 import { seatGentes } from "./punic-wars-gentes";
 import { withRegionalTaxes } from "./punic-wars-taxes";
+import { withHiredHosts } from "./punic-wars-hired-hosts";
 import { withCarthageInSicily } from "./punic-wars-sicily";
 import { PUNIC_CHARGES } from "./punic-wars-charges";
 
@@ -135,7 +138,7 @@ const RULER = [...IMPERIUM, "capital_set"];
 // Free-born and male, the Vestals apart: what the law asks of anybody who holds anything.
 const romanReqs = ["req-alive", "req-roman-polity", "req-not-disqualified", "req-free-born", "req-male"];
 const office = (fields: Record<string, unknown>) => ({
-  sponsorableCategories: [], treasuryAccountId: null, treasuryPermissions: [], incomeSourceId: null, expectedBlocId: null, ...fields,
+  sponsorableCategories: [], treasuryAccountId: null, treasuryPermissions: [], incomeSourceId: null, expectedBlocId: null, ...seatChamberField(fields["id"]), ...fields,
 });
 
 const ladderRequirements = [
@@ -516,6 +519,7 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
     },
     // The age away from Italy (v43).
     ...WORLD_PRESSURES,
+    ...MAMERTINE_DATES,
   ],
   warfare: {
     troopCategories: [
@@ -735,7 +739,7 @@ const WRITTEN_OUT: ReadonlySet<string> = new Set(["rome", "carthage", "syracuse"
 
 const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
   schemaVersion: 3,
-  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 58, libraryVersion: 1 },
+  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 59, libraryVersion: 1 },
   elapsedStep: 0,
   instant: { day: 0, minute: 0 },
   // How the powers tax their ground, where the age said so (v48). Every other
@@ -1340,15 +1344,15 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
       { id: "carthage-harbour-dues", kind: "trade", label: "Harbour dues at Carthage", beneficiaryAccountId: "carthage-treasury", originKind: "polity", originId: "carthage", amount: 930_000, cadenceSteps: 30, nextDueStep: 30, active: true },
       { id: "carthage-african-tribute", kind: "tribute", label: "Tribute of the African subjects", beneficiaryAccountId: "carthage-treasury", originKind: "polity", originId: "carthage", amount: 620_000, cadenceSteps: 30, nextDueStep: 30, collectionRateBps: 8_500, active: true },
       { id: "syracuse-tax", kind: "tax", label: "The Syracusan tithe", beneficiaryAccountId: "syracuse-treasury", originKind: "polity", originId: "syracuse", amount: 192_000, cadenceSteps: 30, nextDueStep: 30, active: true },
-      // What the estates above pay their owners, month by month.
+      // What the estates above pay their owners, month by month: six in the hundred a year of what each would cost to buy (a tenth of the first drafts, 2026-10-08, when land was priced at 200 months of its yield: shared/material/estates.ts).
       ...([
-        ["curius-sabine-farm", "The Sabine farm", "curius-purse", 1_200],
-        ["genucian-estates", "The Genucian estates", "gaius-purse", 3_000],
-        ["cornelian-estates", "The Cornelian estates", "blasio-purse", 3_300],
-        ["ogulnian-estates", "The Ogulnian lands in Campania", "ogulnius-purse", 3_750],
-        ["hanno-estates", "Hanno's estates in the African hinterland", "hanno-purse", 7_200],
-        ["gisco-estates", "The Gisconid farms", "gisco-purse", 3_000],
-        ["leptines-estates", "The house of Leptines' estates", "leptines-purse", 2_700],
+        ["curius-sabine-farm", "The Sabine farm", "curius-purse", 120],
+        ["genucian-estates", "The Genucian estates", "gaius-purse", 300],
+        ["cornelian-estates", "The Cornelian estates", "blasio-purse", 330],
+        ["ogulnian-estates", "The Ogulnian lands in Campania", "ogulnius-purse", 375],
+        ["hanno-estates", "Hanno's estates in the African hinterland", "hanno-purse", 720],
+        ["gisco-estates", "The Gisconid farms", "gisco-purse", 300],
+        ["leptines-estates", "The house of Leptines' estates", "leptines-purse", 270],
       ] as const).map(([holdingId, title, purse, amount]) => ({
         id: `${holdingId}-yield`, kind: "land" as const, label: `Yield of ${title}`, beneficiaryAccountId: purse,
         originKind: "holding" as const, originId: holdingId, amount, cadenceSteps: 30, nextDueStep: 30, active: true,
@@ -1470,12 +1474,12 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
  * with the drill and experience the armies standing on the first morning
  * already have (`SEASONED_ARMIES`). Everyone else's armies stay flat.
  */
-const initialWorld: WorldState = WorldStateSchema.parse(withRegionalTaxes(formArmies(
+const initialWorld: WorldState = WorldStateSchema.parse(withHiredHosts(withRegionalTaxes(formArmies(
   // v43: the wider world's grudges, peaces, claims and aims (punic-wars-politics.ts).
   withCarthageInSicily(withWorldPolitics({ ...unformedWorld, establishments: [...PUNIC_ESTABLISHMENTS], doctrines: [...PUNIC_DOCTRINES] })),
   0,
   { seasoned: (force) => SEASONED_ARMIES[force.id] },
-)));
+))));
 
 export const punicWarsScenario = { definition, initialWorld } as const;
 

@@ -55,24 +55,24 @@ describe("a man and his land", () => {
     expect(world.material.holdings.find((holding) => holding.id === "curius-sabine-farm")?.legalHolderCharacterId).toBe("manius-curius");
     const before = balance(world, "curius-purse");
     const month = runDeterministicTick({ world, toDay: 30, ids: createIdFactory("land-tick"), warfare: definition.warfare }).world;
-    // 1 200 of rent, and 36 more from how the Treasury's officers are: the men who gather the rents have tempers of their own.
-    expect(balance(month, "curius-purse")).toBe(before + 1_236);
+    // 120 of rent (a tenth of the first drafts, v59, 2026-10-08), and 4 more from how the Treasury's officers are: the men who gather the rents have tempers of their own.
+    expect(balance(month, "curius-purse")).toBe(before + 124);
     // An estate authored in the scenario is the same kind of thing as one bought in play.
     // (The scenario writes its estates in round figures; Latium's own capacity, now that it is
     // reckoned from the province's development, makes the same estate a fiftieth less.)
     // Since batch 3 an estate bought in play pays what land paid, six in the hundred a year, a tenth of what the scenario's old round figures pay its leading men
     // (flagged for the version bump: `docs/plans/playtest-fixes.md`); the price is as it was.
-    expect(Math.abs((estateTerms(world, LATIUM, "slight")?.monthlyYield ?? 0) * 10 - 1_200)).toBeLessThanOrEqual(240);
+    expect(Math.abs((estateTerms(world, LATIUM, "slight")?.monthlyYield ?? 0) - 120)).toBeLessThanOrEqual(24);
   });
 
   it("lets a private citizen improve his own estate from his own purse, lawfully", () => {
     const world = opening();
-    const terms = improvementTerms(world, LATIUM, 1_200, "slight")!;
+    const terms = improvementTerms(world, LATIUM, 120, "slight")!;
     const result = applyDeltas(world, [IMPROVE_THE_FARM], as("manius-curius"));
     expect(result.rejected).toEqual([]);
     expect(result.breaches).toEqual([]);
     expect(balance(result.world, "curius-purse")).toBe(balance(world, "curius-purse") - terms.cost);
-    expect(yieldOf(result.world, "curius-sabine-farm")).toBe(1_200 + terms.added);
+    expect(yieldOf(result.world, "curius-sabine-farm")).toBe(120 + terms.added);
   });
 
   it("refuses works nobody can pay for, as the world refusing", () => {
@@ -151,7 +151,7 @@ describe("a man and his land", () => {
       // estate, an office, a payment -- rather than a rule of the world.
       expect(result.rejected[0]!.kind).toBe("reference");
     }
-    expect(yieldOf(world, "curius-sabine-farm")).toBe(1_200);
+    expect(yieldOf(world, "curius-sabine-farm")).toBe(120);
 
     // A government still levies what it levies; the tick bounds what the land bears.
     const raised: WorldDelta = { ...redirected, beneficiaryAccountRef: "rome-treasury", amount: 150_000, reason: "The Senate raises the tributum." };

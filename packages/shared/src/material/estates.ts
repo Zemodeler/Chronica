@@ -37,7 +37,7 @@ export const ESTATE_PRICE_MONTHS = 20;
  * Months of its yield an estate costs to buy, as land fetched: two hundred, so it pays six in a hundred a year of what it cost (Columella, writing later, gives
  * four to six; the Roman rate on money was one in a hundred a month, which land, being safe, paid well under). The shares above are a tenth of what they were
  * when land was priced at twenty months and paid sixty in a hundred a year, a better business than any venture; what an estate costs has not changed, only what
- * it pays. `ESTATE_PRICE_MONTHS` stays what the pledge of an estate already in the world is reckoned at (`money.ts`).
+ * it pays. The pledge of an estate (`money.ts`) is reckoned at this price too, as the authored estates were rescaled to it (2026-10-08); `ESTATE_PRICE_MONTHS` is the old reckoning, kept for old saves' readers.
  */
 export const ESTATE_LAND_PRICE_MONTHS = 200;
 /** Of the province's monthly tax capacity: what one improvement of each size adds to the yield. */

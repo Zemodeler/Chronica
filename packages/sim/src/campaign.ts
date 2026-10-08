@@ -22,6 +22,7 @@ import {
   drawStock,
 } from "@chronica/shared";
 import { safeLocalId } from "./safe-local-id";
+import { shadowedForceIds } from "./a-shadowed-army-goes-hungry";
 
 /**
  * An army in the field, fed, sickening and resting, day by day.
@@ -124,6 +125,8 @@ export function takeMen(force: Force, lost: number, kind: "attrition_death" | "d
     return { ...group, fit: group.fit - share };
   });
   const gone = taken - left;
+  // The rounding may leave the last group too small to take its share: no men gone is no loss written (a count of 0 is a world that would not load, 2026-10-08).
+  if (gone <= 0) return force;
   return {
     ...force,
     personnel,
@@ -157,6 +160,8 @@ export function keepTheField(input: KeepTheFieldInput): { world: WorldState; fac
   // fight not yet decided (`engagements.ts`). His foragers are cut up, so the
   // country does not feed him; the enemy, who holds it, forages as he likes.
   const penned = new Set(world.engagements.filter((engagement) => engagement.status === "open").flatMap((engagement) => engagement.defenderForceIds));
+  // An army shadowed by another keeps its camp but not the country about it, nor the convoys from afar (a-shadowed-army-goes-hungry.ts).
+  const shadowed = shadowedForceIds(world, toDay);
   const provinceName = (id: string): string => world.map.provinces.find((province) => province.id === id)?.name ?? id;
   let provinceMaterial = world.material.provinceMaterial;
   const materialOf = (id: string): ProvinceMaterial | undefined => provinceMaterial.find((row) => row.provinceId === id);
@@ -202,16 +207,17 @@ export function keepTheField(input: KeepTheFieldInput): { world: WorldState; fac
     if (province === undefined || material === undefined) return undefined;
     const holder = province.controllerPolityId;
     const keptIn = penned.has(force.id);
+    const cutOff = keptIn || shadowed.has(force.id);
     // Penned, only what is inside his lines feeds him: a walled town of his
     // own side here, whose granaries he can reach, or a depot on the spot.
     const granary = province.settlements.some((settlement) => settlement.fortificationLevel >= 2 && friendly(force, settlement.controllerPolityId));
     if (friendly(force, holder) && material.foodSecurityBps >= FAMINE_BPS && (!keptIn || granary)) return "home";
     const depot = world.structures.some((structure) => structure.ownerPolityId === force.polityId && structure.supplyRadius > 0
-      && (structure.provinceId === force.locationId || (!keptIn && (kmBetween(world, structure.provinceId, force.locationId, structure.supplyRadius * REFERENCE_PROVINCE_KM) ?? Infinity) <= structure.supplyRadius * REFERENCE_PROVINCE_KM)));
+      && (structure.provinceId === force.locationId || (!cutOff && (kmBetween(world, structure.provinceId, force.locationId, structure.supplyRadius * REFERENCE_PROVINCE_KM) ?? Infinity) <= structure.supplyRadius * REFERENCE_PROVINCE_KM)));
     if (depot) return "depot";
     const ships = world.material.forces.filter((other) => other.locationId === force.locationId && other.id !== force.id && isNavalForce(other, input.warfare));
     if (ships.some((fleet) => fleet.polityId === force.polityId) && !ships.some((fleet) => hostile(force, fleet.polityId))) return "sea";
-    if (keptIn) return null;
+    if (cutOff) return null;
     if (material.population <= 0) return undefined;
     const feeds = material.population * FORAGE_MEN_PER_HEAD * (material.foodSecurityBps / 10_000) * (winter ? 0.5 : 1);
     return men <= feeds ? "forage" : null;

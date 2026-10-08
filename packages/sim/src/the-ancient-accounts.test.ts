@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import {
   DRACHMAE_PER_TALENT,
+  ESTATE_LAND_PRICE_MONTHS,
   LEGIONARY_PAY_GROSS,
   SOLDIER_PAY_PER_THOUSAND,
   WorldStateSchema,
@@ -140,7 +141,7 @@ describe("the powers open at the scale of the ancient accounts", () => {
   it("makes a senator worth about a hundred thousand, as the census had him, and a legionary's year 120", () => {
     const world = opening();
     const estate = world.material.incomeSources.find((source) => source.id === "genucian-estates-yield")!.amount;
-    const worth = balance(world, "gaius-purse") + estate * 20;
+    const worth = balance(world, "gaius-purse") + estate * ESTATE_LAND_PRICE_MONTHS;
     expect(worth).toBeGreaterThan(80_000);
     expect(worth).toBeLessThan(140_000);
     expect(LEGIONARY_PAY_GROSS * 12).toBe(120);
