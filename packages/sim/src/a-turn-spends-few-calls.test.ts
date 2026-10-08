@@ -67,6 +67,8 @@ describe("a turn spends few calls", { timeout: 300_000 }, () => {
         expect(port.asked.filter((id) => id === member.characterId).length, `${member.characterId} asked in turn ${turn}`).toBeLessThanOrEqual(2);
       }
       expect(by("simulate_orchestrate")).toBe(0);
+      // The consul, with letters and orders about him, is asked when something of his changes, not in every round: three times in a season at the most.
+      expect(port.asked.filter((id) => id === "gnaeus-cornelius").length, `the consul in turn ${turn}`).toBeLessThanOrEqual(3);
       // The world's own censuses of the Boii and the Britons are candidates; none of them is written up by the model.
       const far = result.audit.filter((row) => row.kind === "mechanic_candidate" && /^(boii|britain|cretan|gaul|hejaz|iberia|thrace|pergamon|illyria|pannonii|garamantes|colchis|galatians|ireland|kush|pontus|rhodes|caucasian|pisidia)/.test(row.actorRef.id));
       for (const row of far) expect(result.skipped.some((skip) => skip.stage === "mechanic" && skip.reason.startsWith(row.reason.split(":")[0]!))).toBe(true);
