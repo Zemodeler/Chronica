@@ -128,7 +128,8 @@ export function decideAFleet(input: Pick<StatecraftInput, "world" | "excludedPol
   for (const polity of world.map.polities) {
     if (decisions.length >= 2 || input.excludedPolityIds.has(polity.id)) continue;
     const ruler = rulerOf(polity.id);
-    if (ruler === undefined || input.playedByModel.has(ruler.id)) continue;
+    // A fleet is the state's decree, not the man's play: it is moved for a power whose consul the model plays as well (he is in the cast, and the rules stand back from him in everything else), unless the player is the ruler (`excludedPolityIds`).
+    if (ruler === undefined) continue;
     const enemies = navalEnemiesOf(world, polity.id);
     if (enemies.length === 0) continue;
     const war = world.polityAgreements.find((agreement) => agreement.kind === "war" && agreement.status === "active" && enemies.some((enemy) => [agreement.polityId, agreement.otherPolityId].includes(enemy)) && [agreement.polityId, agreement.otherPolityId].includes(polity.id));

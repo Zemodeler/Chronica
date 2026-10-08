@@ -32,6 +32,14 @@ describe("Rome builds a fleet by decree", () => {
     expect(romanShips(world)).toEqual([]);
   });
 
+  it("is moved for a power whose consul the model plays as well: the decree is the state's", () => {
+    const world = base();
+    const rome = decideAFleet({ ...romeWith(world), playedByModel: new Set(["gaius-genucius", "gnaeus-cornelius"]) }, rulerOf(world)).find((decision) => decision.polityId === "rome");
+    expect(rome).toBeDefined();
+    // Not where the player is the consul: the fleet is his to move.
+    expect(decideAFleet({ ...romeWith(world), excludedPolityIds: new Set(["rome"]) }, rulerOf(world)).some((decision) => decision.polityId === "rome")).toBe(false);
+  });
+
   it("moves the building of a fleet before the Senate, and only once", () => {
     const world = base();
     const decisions = decideAFleet(romeWith(world), rulerOf(world));
