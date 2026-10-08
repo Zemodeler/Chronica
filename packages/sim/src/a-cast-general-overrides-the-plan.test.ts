@@ -36,8 +36,10 @@ describe("a general the model plays overrides the plan", () => {
     expect(nowhere.world.campaigns.some((entry) => entry.forceId === "second-legion")).toBe(false);
   });
 
-  it("is let alone by the rules: they lead nothing he commands, and keep to what he ordered his followers", () => {
-    const month = aMonth(written.world, { playedByModel: played });
+  it("is let alone by the rules where he has taken his army in hand, and the rules keep to what he ordered his followers", () => {
+    // He has written his own orders for his own army: the rules lead nothing he commands then (playtest fix batch 2: the rules' own orders in his name are carried out for him, `a-consular-army-marches-within-a-month`).
+    const own = { forceId: "roman-field-army", polityId: "rome", warId: written.world.campaigns[0]?.warId ?? "x", theatreId: null, objective: { kind: "province" as const, provinceId: target.id }, baseProvinceId: null, fallbackProvinceId: null, mode: "siege" as const, issuedByCharacterId: "gaius-genucius", issuedStep: world.elapsedStep, expiresStep: world.elapsedStep + 120 };
+    const month = aMonth({ ...written.world, campaigns: [...written.world.campaigns.filter((entry) => entry.forceId !== "roman-field-army"), own] }, { playedByModel: played });
     expect(month.decisions.some((decision) => decision.polityId === "rome" && decision.actorCharacterId === "gaius-genucius" && ["march", "attack", "besiege", "fall_back", "hold"].includes(decision.act))).toBe(false);
     const kept = month.world.campaigns.find((entry) => entry.forceId === "second-legion")!;
     expect(kept.issuedByCharacterId).toBe("gaius-genucius");

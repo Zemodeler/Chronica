@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { withTheConsularArmyOnceDrawn } from "./the-opening-as-it-was";
 import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, drawStock, ensureMarkets, ensureProvinceMaterial, type Force, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
@@ -16,7 +17,7 @@ import { grainPrice } from "./grain";
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 const LATIUM = PUNIC_IDS.rome;
 const MESSANA = PUNIC_IDS.messana;
-const opening = (): WorldState => ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
+const opening = (): WorldState => withTheConsularArmyOnceDrawn(ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0));
 const as = (written: readonly unknown[], state: WorldState, actor = "gaius-genucius") => {
   const deltas = written.map((raw) => WorldDeltaSchema.parse(raw));
   const context: ApplyContext = {

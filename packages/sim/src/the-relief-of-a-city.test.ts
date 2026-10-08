@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { withTheConsularArmyOnceDrawn } from "./the-opening-as-it-was";
 import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import {
   ScenarioDefinitionSchema,
@@ -45,7 +46,7 @@ const WAR: WorldDelta = {
 const LAY: WorldDelta = { op: "siege_lay", localId: "messana", forceRef: "roman-field-army", settlementId: "settlement-messana", reason: "Invest the city." };
 
 function besieged(): WorldState {
-  const opening = ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
+  const opening = withTheConsularArmyOnceDrawn(ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0));
   const before = { ...opening, material: { ...opening.material, forces: opening.material.forces.map((force) => (force.id === "roman-field-army" ? { ...force, locationId: MESSANA } : force)) } };
   return applyDeltas(before, [WAR, LAY], context).world;
 }

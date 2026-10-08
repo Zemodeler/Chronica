@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { withTheConsularArmyOnceDrawn } from "./the-opening-as-it-was";
 import { besiegerOrder } from "./campaign-orders";
 import { aSiegeLaid, atWar, forceOf, ledBy, neighboursOf, romeAndCarthageAlone, strategyCtx, withMen } from "./war-plan-kit";
 
@@ -10,7 +11,7 @@ import { aSiegeLaid, atWar, forceOf, ledBy, neighboursOf, romeAndCarthageAlone, 
  * assault, or to raise the siege rather than be caught between the walls and an army come to the relief.
  */
 describe("a besieger starves the city, or storms it, or goes away", () => {
-  const laid = aSiegeLaid(romeAndCarthageAlone(atWar(120)));
+  const laid = aSiegeLaid(withTheConsularArmyOnceDrawn(romeAndCarthageAlone(atWar(120))));
   const siege = laid.sieges.find((entry) => entry.status === "active")!;
   const withPressure = (world: typeof laid, pressureBps: number) => ({ ...world, sieges: world.sieges.map((entry) => (entry.id === siege.id ? { ...entry, pressureBps } : entry)) });
   const order = (world: typeof laid) => besiegerOrder(strategyCtx(world, "rome", ["carthage"]), forceOf(world, "roman-field-army"));

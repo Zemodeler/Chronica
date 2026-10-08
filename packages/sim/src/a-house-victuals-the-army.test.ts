@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { withTheConsularArmyOnceDrawn } from "./the-opening-as-it-was";
 import {
   WorldDeltaSchema,
   economyOf,
@@ -35,7 +36,7 @@ const ARMY = "roman-field-army";
 const army = (world: WorldState): Force => world.material.forces.find((force) => force.id === ARMY)!;
 const treasuryOf = (world: WorldState): string => world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === "rome")!.id;
 
-const atWarWorld = (): WorldState => withWar(stockedWorld(150, 2.2, [], 3_000_000), "rome", "carthage");
+const atWarWorld = (): WorldState => withTheConsularArmyOnceDrawn(withWar(stockedWorld(150, 2.2, [], 3_000_000), "rome", "carthage"));
 
 function letTheContract(world: WorldState, days = 180) {
   const consul = world.material.officeSeats.find((seat) => /consul/.test(seat.officeId) && seat.holderCharacterId !== null)!.holderCharacterId!;
@@ -192,7 +193,7 @@ describe("a house victuals the army", () => {
       expect(delta.days).toBe(180);
     }
     // A small army is fed by the chest's purchase: no contract.
-    const small: WorldState = { ...world, material: { ...world.material, forces: world.material.forces.map((force) => (force.id === ARMY ? { ...force, personnel: force.personnel.map((group) => ({ ...group, fit: Math.min(group.fit, 100) })) } : force)) } };
+    const small: WorldState = { ...world, material: { ...world.material, forces: world.material.forces.map((force) => (force.id === ARMY ? { ...force, personnel: force.personnel.map((group) => ({ ...group, fit: Math.min(group.fit, 50) })) } : force)) } };
     const smallOne = [150, 180, 210].flatMap((day) => decideTheMonth(small, day)).find((decision) => /^supply:/.test(decision.why));
     if (smallOne !== undefined) expect(smallOne.deltas.every((candidate) => candidate.op !== "force_provision" || candidate.how !== "contract")).toBe(true);
     expect(monthlyBill(world, army(world))).toBeGreaterThan(0);

@@ -18,6 +18,7 @@ import { grainPrice } from "./grain";
 import { meansOf, INDEMNITY_MEANS_FLOOR } from "./peace";
 import { termPrice } from "./peace-table";
 import { soldierPayShares } from "./money";
+import { withTheConsularArmyOnceDrawn } from "./the-opening-as-it-was";
 
 /**
  * "What does a legion cost?"
@@ -31,7 +32,7 @@ import { soldierPayShares } from "./money";
  * talent.
  */
 
-const opening = (): WorldState => ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
+const opening = (): WorldState => withTheConsularArmyOnceDrawn(ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0));
 const monthly = (world: WorldState, accountId: string, kinds: readonly string[] = ["tax", "land", "tribute", "trade"]): number =>
   world.material.incomeSources
     .filter((source) => source.active && source.beneficiaryAccountId === accountId && kinds.includes(source.kind))

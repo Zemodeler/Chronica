@@ -27,7 +27,8 @@ function facing(options: { readonly hieronCaution?: number; readonly syracusans?
       : character)),
     material: {
       ...opening.material,
-      forces: opening.material.forces.map((force) => (force.id !== "syracusan-army" ? force : {
+      // The cases below were struck on the consul's army of 8,860 (one legion, one ala); the opening has two of each now (`punic-wars-sicily.ts`), so the rows are halved.
+      forces: opening.material.forces.map((force) => (force.id === "roman-field-army" ? { ...force, authorizedStrength: force.authorizedStrength / 2, personnel: force.personnel.map((group) => ({ ...group, fit: group.fit / 2 })) } : force)).map((force) => (force.id !== "syracusan-army" ? force : {
         ...force,
         locationId: LATIUM,
         ...(options.syracusans === undefined ? {} : { personnel: [{ ...force.personnel[0]!, fit: options.syracusans }], authorizedStrength: options.syracusans }),

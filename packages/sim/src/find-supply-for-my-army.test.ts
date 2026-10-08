@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { withTheConsularArmyOnceDrawn } from "./the-opening-as-it-was";
 import { economyOf, fitStrengthOf, type Force, type WorldState } from "@chronica/shared";
 import { DEFAULT_BUDGET, runSimulationBurst } from "./burst";
 import { definition, government, withWar } from "./fiscal-test-kit";
@@ -19,7 +20,7 @@ import { CONTRACT_FROM_MEN, chestOfPower, planSupply } from "./supply-plan";
 const PLAYER = "gaius-genucius";
 const ARMY = "roman-field-army";
 const peace = (): WorldState => stockedWorld(150, 2.2, [], 3_000_000);
-const atWar = (): WorldState => withWar(peace(), "rome", "carthage");
+const atWar = (): WorldState => withTheConsularArmyOnceDrawn(withWar(peace(), "rome", "carthage"));
 const armyOf = (world: WorldState): Force => world.material.forces.find((force) => force.id === ARMY)!;
 const warfare = definition.warfare;
 const noHouses = (world: WorldState): WorldState => ({ ...world, economy: { ...economyOf(world), houses: economyOf(world).houses.map((house) => ({ ...house, status: "wound_up" as never })) } });
