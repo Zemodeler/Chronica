@@ -38,6 +38,7 @@ import { rulerOf } from "./constitutions";
 import { tenureLean } from "./command-tenure";
 import { intercessionsAgainst, settleSecessions, type SecessionHooks } from "./tribunes";
 import { creditTheSpeech } from "./standing-deeds";
+import { absenceFrom, seatIsEmpty } from "./quorum";
 
 /**
  * A chamber's questions, debated by its people and decided by the count.
@@ -354,6 +355,7 @@ export function blocLeanings(world: WorldState, procedure: PoliticalProcedure, i
     if (position.supporterKind === "character" && signOf(position.position) !== 0) ownWords.set(position.supporterId, position.position === "support" ? "support" : "oppose");
   }
   const seatMap = votesBySeat(institution) ? seatsOf(world, institution, new Set(ownWords.keys())) : null;
+  const absence = absenceFrom(world, institution);
   const houseShift = speakers.length === 0 ? 0 : Math.round(speakers.reduce((sum, speaker) => sum + speaker.signed, 0) / speakers.length * Math.min(MAX_SPEAKERS, speakers.length));
   // A trial leans as its court is run (`trials.ts`); a command kept or a
   // triumph asked, as the man's war went (`command-tenure.ts`).
@@ -390,13 +392,17 @@ export function blocLeanings(world: WorldState, procedure: PoliticalProcedure, i
     if (againstIt.length > 0) reasons.push(`${againstIt.join(", ")} spoke against it`);
     const score = clampScore(lean);
     // A council votes seat by seat: the bloc is the faction's pull, and each member answers it as himself.
-    const ballots = seatMap === null ? undefined : ballotsOfBloc(seatMap.get(bloc.id) ?? [], bloc, score, procedure, concerns, ownWords, kinOf(world, procedure));
+    // The men away at the wars do not sit: their seats give no vote today, and the quorum is counted without them (`quorum.ts`).
+    const sitting = seatMap === null ? undefined : (seatMap.get(bloc.id) ?? []).filter((seat) => !seatIsEmpty(absence, seat, procedure.id));
+    const away = seatMap === null ? 0 : (seatMap.get(bloc.id) ?? []).length - (sitting?.length ?? 0);
+    const ballots = seatMap === null ? undefined : ballotsOfBloc(sitting ?? [], bloc, score, procedure, concerns, ownWords, kinOf(world, procedure));
     const split = ballots === undefined ? splitOfBloc(bloc, score) : {
       yes: ballots.filter((ballot) => ballot.choice === "yes").length,
       no: ballots.filter((ballot) => ballot.choice === "no").length,
       abstain: ballots.filter((ballot) => ballot.choice === "abstain").length,
     };
     if (ballots !== undefined) reasons.push("each member voted as himself: by what he said, what he is, and what the question asks of him");
+    if (away > 0) reasons.push(`${away} of its seats were empty: the men were away`);
     return { bloc, lean: score, choice: choiceOf(split), split, ...(ballots === undefined ? {} : { ballots }), reasons: reasons.map((reason) => reason.slice(0, 200)) };
   });
 }
