@@ -904,7 +904,7 @@ function neighboursOf(
     if (seatRows.length === 0 && !own) continue;
     const people = [...new Set(seatRows.map((seat) => seat.holderCharacterId!))].filter((id) => living.has(id));
     if (people.length === 0) continue;
-    const holders: NeighbourHolder[] = people.slice(0, 5).map((id) => {
+    const holders: NeighbourHolder[] = people.slice(0, 4).map((id) => {
       const them = living.get(id)!;
       const done = last.get(id);
       return {

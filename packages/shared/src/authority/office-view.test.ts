@@ -115,6 +115,33 @@ describe("a consul's charge", () => {
     expect(him.toYou).toBe("hostile");
   });
 
+  it("lists the questions open before the Senate, with the count for those who sit in it, and how it lately settled others", () => {
+    const procedure = (id: string, label: string, stage: string, over: Record<string, unknown> = {}) => ({
+      id, type: "council_deliberation", institutionId: "roman-senate", sponsorCharacterId: CONSUL, subjectKind: "polity", subjectId: "rome", label, eligibilityRequirementIds: [], eligibleParticipantIds: [],
+      stage, resolutionMechanism: "vote", openedAtStep: 150, deadlineStep: 215, resolvedAtStep: null, visibility: "public", voteRecordId: null, outcome: null, outcomeReason: null, sourceEventIds: [], resultingEventIds: [], ...over,
+    });
+    const laid = {
+      ...world,
+      material: {
+        ...world.material,
+        politicalProcedures: [
+          ...world.material.politicalProcedures,
+          procedure("open-1", "that the tribute of Rome be laid anew as a tithe", "gathering_support", { concerns: ["taxes"] }),
+          procedure("done-1", "that war be made on Carthage", "resolved", { outcome: "passed", resolvedAtStep: 120, outcomeReason: "The Senate carried it." }),
+          procedure("done-2", "that the coin of Rome be struck lighter", "resolved", { outcome: "failed", resolvedAtStep: 130 }),
+        ],
+      },
+    } as unknown as WorldState;
+    const senate = read(CONSUL, laid).bodies.find((body) => body.id === "roman-senate")!;
+    expect(senate.openCount).toBe(1);
+    expect(senate.open[0]).toMatchObject({ label: "that the tribute of Rome be laid anew as a tithe", yours: true, concerns: ["taxes"] });
+    expect(senate.open[0]!.tally).toBe("Nobody has declared yet.");
+    expect(senate.lately.map((item) => [item.outcome, item.label])).toEqual([["refused", "that the coin of Rome be struck lighter"], ["carried", "that war be made on Carthage"]]);
+    // A man who sits nowhere near it does not read the count.
+    const quaestor = read(QUAESTOR, laid).bodies.find((body) => body.id === "roman-senate")!;
+    expect(quaestor.open[0]!.tally).toBeNull();
+  });
+
   it("drafts each act as an order for the desk, and lays what is past his figure before the Senate", () => {
     const rate = view.drafts.find((draft) => draft.key === "tax_rate")!;
     expect(rate.grade).toBe("with_colleague");

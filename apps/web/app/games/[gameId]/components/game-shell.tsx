@@ -868,6 +868,7 @@ export function GameShell({
           constitution={room?.sheets?.constitution ?? null}
           laws={room?.sheets?.laws ?? null}
           gens={room?.sheets?.gens ?? null}
+          office={room?.sheets?.office ?? null}
           peace={room?.sheets?.peace ?? null}
           gameId={gameId}
           onChanged={() => setRoomRevision((n) => n + 1)}
@@ -877,6 +878,8 @@ export function GameShell({
           onWriteTo={orderingCharacterId ? writeTo : undefined}
           onProposeTrade={orderingCharacterId ? proposeTrade : undefined}
           onOpenLetters={playerCharacterId ? () => openSurface("people") : undefined}
+          onDraft={orderingCharacterId ? (text) => { setDeskDraft(text); openSurface("council"); } : undefined}
+          onOpenBooks={(tab, key) => { openSurface("books"); setArrival({ surface: "books", tab, key, nonce: Date.now() }); }}
         />
       )}
       {surface === null && referenceKeys.length > 0 && <Sheet label="linked reference" title="Reference" width="narrow" side="right" reference={false} onClose={() => setReferenceKeys([])}>

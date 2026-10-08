@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import type { ConstitutionReading, GensReading, LawsReading, StateOffice, StateReading, TradeProposalKind } from "@chronica/shared";
+import type { ConstitutionReading, GensReading, LawsReading, OfficeView, StateOffice, StateReading, TradeProposalKind } from "@chronica/shared";
 import { Sheet, type SheetSide } from "../../../components/ui/sheet";
 import { Tabs, type TabSection } from "../../../components/ui/tabs";
 import { Era } from "../../../components/ui/era";
@@ -14,6 +14,7 @@ import { PermissionRequirements, LeavingOffice, useOfficeInsights } from "./offi
 import { ConstitutionSheet } from "./constitution-sheet";
 import { LawsSheet } from "./laws-sheet";
 import { GensSheet } from "./gens-sheet";
+import { OfficeSheet } from "./office-sheet";
 
 /**
  * What a person holds: the offices, the powers, and the land -- and the state
@@ -82,7 +83,7 @@ function sentencesByHolding(powers: readonly PowerReading[]): { over: string; sa
   });
 }
 
-export function StandingPanel({ standing, state, constitution, laws, gens, peace, gameId, onChanged, focus, onClose, side, onWriteTo, onProposeTrade, onOpenLetters }: {
+export function StandingPanel({ standing, state, constitution, laws, gens, office, peace, gameId, onChanged, focus, onClose, side, onWriteTo, onProposeTrade, onOpenLetters, onDraft, onOpenBooks }: {
   readonly standing: Standing | null;
   /** The peace tables his power sits at (`readPeaceTables`). */
   readonly peace?: PeaceTablesView | null | undefined;
@@ -94,6 +95,8 @@ export function StandingPanel({ standing, state, constitution, laws, gens, peace
   readonly laws: LawsReading | null;
   /** His own gens, where he has one (`readYourGens`). */
   readonly gens?: GensReading | null | undefined;
+  /** The office he holds, as he reads it (`readOffice`): shown to any player, a private man with a short page. */
+  readonly office?: OfficeView | null | undefined;
   /** Where the player was sent from elsewhere: a tab, and a measure to open on it. */
   readonly focus?: { readonly tab: string; readonly key?: string | undefined } | undefined;
   readonly onClose: () => void;
@@ -102,6 +105,10 @@ export function StandingPanel({ standing, state, constitution, laws, gens, peace
   /** Put trade to a power in a letter: the tray opens on the one who decides it. */
   readonly onProposeTrade?: ((polityLabel: string, kind?: TradeProposalKind) => void) | undefined;
   readonly onOpenLetters?: (() => void) | undefined;
+  /** Put an order on the desk, written for him: the acts open to his charge. */
+  readonly onDraft?: ((text: string) => void) | undefined;
+  /** Open a tab of the ledger stand: the accounts of his charge. */
+  readonly onOpenBooks?: ((tab: string, key?: string) => void) | undefined;
 }) {
   // A link inside one page can turn to another: a change to the constitution
   // back to the measure that made it.
@@ -114,6 +121,9 @@ export function StandingPanel({ standing, state, constitution, laws, gens, peace
   // A citizen who holds nothing has no "You" page, only the state they live under.
   const sections: TabSection[] = standing === null ? [] : [
     ...(standing.nothing === null ? [{ id: "you", title: "You", content: <You standing={standing} /> }] : []),
+    ...(office != null && office.polityId !== null
+      ? [{ id: "charge", title: office.charges.length > 0 || office.seats.length > 0 ? "Your charge" : "Your place", content: <OfficeSheet office={office} powers={state?.abroad.powers.map((power) => power.label) ?? []} onDraft={onDraft} onOpenBooks={onOpenBooks} /> }]
+      : []),
     ...(gens != null ? [{ id: "gens", title: "Your gens", content: <GensSheet gens={gens} /> }] : []),
     ...(theState && state !== null
       ? [{ id: "state", title: "The state", marked: state.legitimacy?.shaky === true, content: <TheState state={state} showGovernment={!history} /> }]

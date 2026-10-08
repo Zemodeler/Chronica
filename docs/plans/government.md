@@ -718,3 +718,47 @@ sits), the people's own vote on war (ratification only).
 H2: `an-aedile-watches-the-grain`, `a-consul-musters-the-levy`, `a-praetor-hears-the-case`, `a-censor-takes-the-roll`, `an-embassy-is-received`, `a-magistrate-exceeds-his-charge`, `a-government-month` (cost, determinism);
 H3: `the-senate-sits-and-votes`, `a-tribune-vetoes-a-levy-in-session`, `an-augur-stops-the-business`, `a-war-needs-the-senate`, `the-king-overrules-his-friends`, `the-104-judge-a-general`; the kit is
 `government-test-kit.ts`; `no-modern-words` now scans `magistrates.ts`, `bodies.ts` and `taxation.ts` too.
+
+## H5 as built
+
+Phase H5: the office as the player sees it, for whichever office he holds (user decision: any office, one view). `readOffice(world, characterId, offices, clock, successionRules, { books, administration })`
+(`packages/shared/src/authority/office-view.ts`) is pure and derived: it stores nothing and decides nothing. It reads `competenceOf`, the departments, the seats, the chambers' questions, the
+constitution and the statecraft log, so a reform, a coup or a vacated seat changes it at once. The sheet is `office-sheet.tsx`; it is the **Your charge** ribbon of the seal case (the standing
+panel), beside "You", for any player: a man with no office gets "Your place", a short page. There is no advice in it: it says what is his, what is another's and what the others have lately done.
+
+### What it shows
+
+| Part | Reads | Shows |
+|---|---|---|
+| The charge | `competenceOf` per act, `spendingAllowance`, the departments' levers, `readDepartments` skill | Each of the twelve acts sorted into *yours alone*, *with your colleague*, *laid before the Senate* and *not yours*, with the figure within custom ("to 12 in a hundred", "now 10 in a hundred"), what lies beyond it, who may stop it (the colleague, the tribunes); how he holds the office (the succession rule's words, the term, the days left, the man chosen to follow); the year's allowance used and left (`ActMark`); what the charge keeps and how able its men are (in words), and what the man who holds it does by rule, which nobody does in a charge the player holds; the charge in the law's own sentences, folded |
+| The bodies | chambers, `convenedByOfficeIds`, succession rules, the questions open (`politicalProcedures`) and settled | For each chamber he sits in (`sits`), may put questions to (`convenes`), is chosen by (`elects you`), answers to (`answers to`: the court that tries magistrates, else the sovereign chamber), is counselled by (`counsels you`: a king's friends) or lays matters before (`lays before`: the chamber that holds an act of his charge); its powers; what he must lay before it and past what figure; the questions open (up to six, oldest first, the count of the rest), with the tally for those who sit or convene; the last three settled and how. The tribunes' and augurs' reach over him: who they are and what each may stop of his |
+| Beside and beneath | the offices of the power, ranks, departments, `world.statecraft.log`, `computeOpinion` | Colleagues, the higher, the beside, the lower (a tribune stands beside every magistrate, the head of the state has none above him), a king's friends; how each thinks of him and he of them (`opinionLabel`), what each charge keeps by rule and what its holder last did (the log's last `fiscal`, `magistrate` or `raise_levy` entry) |
+| The accounts | `readTheBooks(..., "kept")`, `readAdministration` | The chests of his power, what comes in and goes out a month, the departments he keeps with their issue, spending and works, and buttons that open the ledger stand on the accounts, the regions, the markets or the administration |
+| The acts open | the best footing any of his offices gives for each act | An order for the desk for each act that is his or the chamber's: the rate (the same words as the regions sheet), the customs, the coin, a loan, bread, a pact of trade or an alliance, an embargo, the levy, war, peace; the draw and the naming of men end in an open phrase to finish at the desk. A figure past his own (`ActLine.within`) turns the order into "Lay before the Senate that ...", as the gate does (`draftText`); an act that is only the chamber's is that order alone; a tribune's word that stops is an order too ("I forbid the levy of ..., and step between the magistrate and the act") |
+| A private man | `privateOf` | What binds him, in two lines, and which chambers a patron could move and through whom (the magistrate who convenes each); the assemblies he is of |
+
+Per culture (`OfficeStyle`, the headings only; the content is read from the parts): a *college* (a republic with two at its head: Rome, Carthage) reads "Your colleague and the magistrates"; a *king*
+"Your friends and your officers" and "The royal chest", with the friends a counsel whose overruling costs him standing; a *league* the strategoi and the assembly; a *tribal* chief his standing among the chiefs.
+The words are the age's (`modernWordsIn` scans every view in the tests; the sheet is scanned as rendered).
+
+### Where it is reached
+
+The seal case ("See what your office lets you do"), ribbon **Your charge**. The order buttons put the draft at the desk (the same `setDeskDraft` the regions sheet uses), and the account buttons open the
+ledger stand at the tab. The room's contents carry it as `sheets.office` (`room-service.ts`), built once with the books and the administration already read for the room.
+
+### How a membership is read
+
+An office of kind `membership` is a voice in a chamber, and the records do not say which. `chamberOfSeat` matches the words of the office to the words of the chamber ("Carthaginian elder" to "Council of Elders",
+"Roman senator" to "Senate"), and failing that gives a king's friends to his advisory council and any other seat to the council that decides. It is a reading, not a record; a scenario that names the chamber on the office
+would make it exact (open decision).
+
+### Not in H5
+
+An order form of its own (the desk takes the drafts), a record of how each member voted (the blocs' lean is not kept per question: *lately* says how a question ended, and the tally says how the declared
+stand), the censors' and a governor's pages (H6), accounts at the close of office (H4).
+
+### Tests
+
+`office-view.test.ts` (shared: a consul, a quaestor, a tribune, a dictator, a suffete, an elder, a king, a private man and a man outside the world; the allowance used after a draw; the questions open and lately settled;
+the colleague's last act and opinion; the draft and its lay-before past the figure; a reform of the tribute, a recast as a monarchy and a vacated seat; the banned words) and `office-sheet.test.tsx` (web: the page
+for a consul, a king, a suffete, an elder, a private man and a man of no power, and the banned-words scan over the rendered text).

@@ -39,6 +39,7 @@ import {
   readConstitutionHistory,
   readLaws,
   readYourGens,
+  readOffice,
   readStandingOrders,
   readAdministration,
   buildAgenda,
@@ -46,6 +47,7 @@ import {
   type Administration,
   type ConstitutionReading,
   type GensReading,
+  type OfficeView,
   type LawsReading,
   type StandingOrders,
   type OfficeInsights,
@@ -118,6 +120,8 @@ export interface RoomSheets {
   readonly laws: LawsReading;
   /** His own gens, if he is of one (`readYourGens`): its name, weight, honours, rites, kin, feuds and marriages. */
   readonly gens: GensReading | null;
+  /** The office he holds, or the lack of one, as he reads it (`readOffice`): the charge, the bodies, the men beside him, the accounts and the acts open to him. */
+  readonly office: OfficeView;
   /** His conditional orders (`readStandingOrders`), for the writing desk. */
   readonly standingOrders: StandingOrders;
   /** The departments of the state he keeps books for (`readAdministration`), for the ledger stand. */
@@ -214,6 +218,7 @@ export async function getRoomContents(gameId: string): Promise<RoomContents | nu
     const gens = readYourGens(world, characterId);
     const standingOrders = readStandingOrders(world, characterId, offices, clock);
     const administration = readAdministration(world, characterId, offices, clock);
+    const officeView = readOffice(world, characterId, offices, clock, view.scenarioGovernment?.successionRules ?? [], { books: kept, administration });
     const matters = mattersInHand(world, characterId, offices, clock);
     const agenda = buildAgenda({ calendar: whatComesNext(world, characterId, offices, clock, 60), matters, laws, orders: standingOrders, administration });
     // A citizen with no office still has a state: how it is governed and its
@@ -241,7 +246,7 @@ export async function getRoomContents(gameId: string): Promise<RoomContents | nu
           parts: order.parts.map((part) => ({ label: part.said, status: orderPartLabel(orderPartStatus(world, part), part, world), detail: part.refusal ?? part.whyNot ?? part.note })),
         })),
         insights: readOfficeInsights({ world, characterId, offices, clock, warfare: view.scenarioWarfare, facts, ownBooks: own, keptBooks: kept, muster: forces }),
-        own, kept, forces, service, standing, state, constitution, laws, gens, standingOrders, administration, agenda, self, story,
+        own, kept, forces, service, standing, state, constitution, laws, gens, office: officeView, standingOrders, administration, agenda, self, story,
         calendar: whatComesNext(world, characterId, offices, clock),
         underWay: ordersUnderWay(world, characterId, offices, clock),
         promises: promisesOf(world, characterId, clock),

@@ -528,6 +528,8 @@ no longer anybody's whose office looks fiscal. Whether a man may do it is read f
 (either may act, the other may stop it), **by the body** (laid before the chamber that holds that power) or **forbidden**, from the chambers' powers (now with `coinage`, `treaties`, `finance` and `levy`), the offices'
 kind, seats and vetoes, the levers of the department he staffs and his treasury reach. The details, the per-power readings and what is not yet built are in `docs/plans/government.md`, "H0 as built".
 
+The player reads all of it for his own office in the seal case, on the ribbon **Your charge** (`readOffice`, `packages/shared/src/authority/office-view.ts`; `docs/plans/government.md`, "H5 as built"): what is his alone, with his colleague, the chamber's and not his, the figure within custom, the year's allowance, and each act drafted as an order for the desk.
+
 What it changes in the acts above (in `apply-deltas.ts`, through `apply/competence-gate.ts`):
 
 | Act | Within his charge | Beyond it |
