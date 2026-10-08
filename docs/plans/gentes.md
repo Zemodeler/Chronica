@@ -71,7 +71,7 @@ the last fallback.
 * **Adoption** (`sim/adoption.ts`, one helper; the merchant firms' succession uses the same family, social and contract
   links): the adoptee takes the adopter's praenomen, nomen and cognomen and keeps his old nomen as an *-ianus*
   cognomen (Publius Cornelius Scipio Aemilianus); he enters the gens, its sacra and its imagines, and inherits.
-  A patrician gens takes only a patrician (the road from plebeian to patrician by adoption does not exist in this age);
+  A patrician gens took only a patrician until v58, and now may take a plebeian, who becomes a patrician by it (below);
   the adopter must be a grown man, at least eighteen years older, with no living son (adrogatio), and a
   patrician adoption needs a living pontifex maximus to inquire.
 * **Sacra and priesthoods**: the rex sacrorum, the flamines and the Salii are patrician by birth; the pontiffs and augurs
@@ -180,8 +180,7 @@ Carthage and the kings (all `Gens` with the same structure; no order):
   (`house-succession.ts`) keeps its private helper and its own naming (a steward or freedman takes the head's names), which is the
   freedman's custom and not the -ianus of a true adoptee; the two write the same links. A childless head of a gens of forty-five and
   more looks once a year (a one-in-eight chance) for a young kinsman by marriage of his own order, and failing that names a young
-  man of his own gens his heir. **Not built**: a player's or a model's act to adopt (the letter kinds are a model-facing schema, and the
-  prompt ceilings are over); the engine function is ready for it.
+  man of his own gens his heir. The act of adopting is built since v58 (below).
 * **Births**: a child is of the father's gens and order and bears the parts of the name; the eldest son has the father's names ("the
   Younger"), a younger son the next given name of the gens's own, a daughter her father's nomen in the feminine ("Cornelia",
   "Cornelia Minor") with her father's name for a surname so two girls are not confused.
@@ -209,12 +208,15 @@ Carthage and the kings (all `Gens` with the same structure; no order):
 
 ### What is not built, and what wants deciding
 
-* **The act of adopting** (a player's or a model's): the engine function and the rule are there (`adoptIntoGens`); the letter kind or delta that
-  would let a player ask for it is a model-facing schema change and the prompt ceilings are over, so it waits for a decision on where the
-  words go. The merchant firms' own adoption keeps its private helper and naming; the two write the same links and could be joined.
-* **Priestly offices of the old rites** (the rex sacrorum, the flamines, the Salii) are barred to plebeians by `priestlyBar`, but the scenario has
-  no such offices yet; they are a scenario addition (with their ordo and their sacra) and not an engine one.
-* **Letters**: a gens's feud and alliance are in votes, marriage and the player's sheet; a letter's tone does not yet change by them.
+* **The act of adopting** is built (v58, below). The merchant firms' own adoption keeps its private helper and naming; the two write the same links and could be joined.
+* **Priestly offices of the old rites** are in the scenario since v58 (below).
+* **Letters**: a feud is heard in them since v58 (below); an alliance is still in votes, marriage and the player's sheet only.
 * **The Hannonid, Gisgonid and Magonid houses** are reconstructions (confidence L to M); the plan lists them so they can be replaced.
-* **Ages**: the scenario's existing ages are kept (Gurges at fifty, Marcius Rutilus at fifty), though the sources put several of them ten to
-  forty years older; the nobilitas counts follow the fasti, not the ages.
+* **Ages**: corrected in v58 (below); the nobilitas counts follow the fasti, as before.
+
+## As built, v58 (the adoption act, the old priesthoods, feuds in letters, old ages)
+
+* **Adoption is an act** (`adopt` delta, `shared/src/sim/deltas.ts`; `sim/src/adoption.ts`): a player or a model's NPC writes `adopterRef` and `adopteeRef`, and the engine judges the Roman rules: a free man adopts, grown, at least eighteen years the elder, with no son living; the adoptee a free man and willing (he does not hate the adopter: his feeling is not below -10), his father's leave if the father lives (adoptio), a pontiff alive to inquire if he is his own master (adrogatio); the name with the -ianus cognomen, the gens, the order, the sacra and the estate move as the yearly rule moves them, which is kept. **A patrician adopter may now take a plebeian, who is a patrician after it** (the one road from the plebs to the patriciate, and it goes before the curiae with the pontifices presiding: by rule a pontiff must be alive, the curiate law being the formality it was by then; Gellius 5.19, Cicero, *De domo* 34-38); a plebeian gens still does not take a patrician (Clodius went over to the plebs in 59 and it was a scandal). The act is a household's own business (`own-business.ts`), not a breach of anybody's authority; only the adopter or the adoptee may write it (the world may, for a house it is keeping). Tests: `a-man-adopts-an-heir.test.ts`. The prompt ceilings rose by 0.4k and 0.5k for it (dated in the tests).
+* **The old priesthoods are in the scenario** (v58): the rex sacrorum and the flamines Dialis, Martialis and Quirinalis (`db/src/punic-wars-scenario.ts`, `punic-wars-rosters.ts`), each a patrician by birth (`req-patrician`, `priestlyBar`), held for life, chosen by the pontifex maximus (the pontifex maximus was already there, Tiberius Coruncanius), and in the college of the pontiffs' department, so the public rites are their only charge (`mayAct` gives them no act of the state). Their taboos are eligibility, in code (`priestlyTaboo`, `commandBar`, `shared/src/world/gentes.ts`): the flamen Dialis may hold no other office (Livy 27.8: a flamen refused the praetorship) and no command, since he might not see an army under arms (Gellius 10.15); the rex sacrorum may hold no magistracy (Livy 40.42). **The four men are invented** (L): the sources name no holder in 270; each carries "Invented" in his creation reason (Marcus Papirius Maso, rex; Publius Valerius Falto, Dialis, a Valerius because the first flamen Dialis the sources name, in 209, was a Valerius Flaccus; Servius Cornelius Cossus, Martialis; Quintus Sulpicius Camerinus, Quirinalis). Tests: `the-sacra-stay-in-the-gens.test.ts`.
+* **Feuds in letters** (`sim/src/feuds-in-letters.ts`): where the gens of the man who writes and of the man who reads are at feud (heat of 800 or more), a letter is cooler, in words only and bounded: the answerer's liking for the writer falls by at most `FEUD_LIKING_SHIFT = 15` points (a few points either way is what liking moves a peace or a pact by, never an answer); the counsel the rules give him names the quarrel (`adviceOnALetter`), which he may let lie; the rules' own letter between the two is colder (`FEUD_COLDER_BY` of a point in its tone) and carries a line saying so; the model that words a letter for the player is told of it for the voice and not the substance. Test: `a-feud-outlives-the-feuders.test.ts`.
+* **Old ages** (v58): a man is about forty-two in the year of his first consulship, so in 270 he is at least that year, in years before Christ, plus 42, less 270. Corrected: Quintus Fabius Maximus Gurges (consul 292) 66, not 50; Gaius Marcius Rutilus Censorinus (consul 310, censor 294 and 265) 84; Lucius Postumius Megellus (consul 305) 78; Publius Cornelius Arvina (consul 306) 78; Lucius Papirius Cursor and Spurius Carvilius Maximus (consuls 293) 66; Gaius Claudius Canina (consul 285) 58. Older men die sooner by the ordinary hazards (`mortality.ts`); nobody of the opening is more than 90. Test: `the-roster-is-historical.test.ts`.
