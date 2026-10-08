@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { feudBetween, gensById } from "@chronica/shared";
+import { feudBetween, gensById, modernWordsIn, type DiplomaticMessage } from "@chronica/shared";
+import { FEUD_COLDER_BY, FEUD_LIKING_SHIFT, FEUD_NOTICED_AT, feudColdness, feudLikingShift, quarrelBetween } from "./feuds-in-letters";
+import { adviceOnALetter, letterVerdict } from "./letter-verdict";
+import { writeLetter } from "./letter-craft";
+import { voiceLetters } from "./letter-voice";
+import type { SimModelPort } from "./ports";
 import { FEUD_BEGINS_BPS, FEUD_COOLS_BPS_PER_MONTH, keepGentes } from "./gentes";
 import { FEUD_VOTE_MAX, kinOf, leanAsAGens } from "./gens-loyalty";
 import { killCharacter } from "./mortality";
@@ -82,5 +87,78 @@ describe("a feud outlives the feuders", () => {
     expect(leans[3]).toBe(-20);
     // No gentes in the world, no pull.
     expect(leanAsAGens(seats, [40, -20, 0, -20], undefined)).toEqual([40, -20, 0, -20]);
+  });
+});
+
+/**
+ * A feud is heard in a letter (v58): the counsel the rules give the man who answers names it, his liking for the writer is a few points
+ * the lower, the rules' own letter between the two is cooler and says so, and the model that words a letter for the player is told of it.
+ * Words only and bounded: no answer is forced, and no term is changed.
+ */
+describe("a feud in a letter", () => {
+  const start = opening();
+  const fabius = named(start, "Quintus Fabius Maximus Gurges");
+  const claudius = named(start, "Gaius Claudius Canina");
+  const unrelated = named(start, "Manius Curius Dentatus");
+  const alliance = (from: string, to: string): DiplomaticMessage => ({
+    id: "feud-letter", kind: "alliance_offer", fromPolityId: "rome", fromCharacterId: from, toPolityId: "rome", toCharacterId: to, subject: "An alliance", terms: "Let us stand together.",
+    sentAtStep: 100, replyDueByStep: 160, status: "awaiting_reply", answer: null, answerText: null, answeredAtStep: null, inReplyToMessageId: null, visibility: "polity", onRefusal: null, proposes: ["alliance"],
+  } as DiplomaticMessage);
+
+  it("finds the quarrel between two men of the gentes at feud, and none between others", () => {
+    const quarrel = quarrelBetween(start, fabius.id, claudius.id)!;
+    expect(quarrel.ours).toBe("the Fabii");
+    expect(quarrel.theirs).toBe("the Claudii");
+    expect(quarrel.heat).toBeGreaterThanOrEqual(FEUD_NOTICED_AT);
+    expect(quarrelBetween(start, fabius.id, unrelated.id)).toBeNull();
+    expect(quarrelBetween(start, fabius.id, fabius.id)).toBeNull();
+  });
+
+  it("is bounded: it sours liking by at most a few points whatever the heat, and a colder tone by at most a quarter point", () => {
+    const hottest = { heat: 10_000, ours: "the Fabii", theirs: "the Claudii", over: "x" };
+    expect(feudLikingShift(hottest)).toBe(-FEUD_LIKING_SHIFT);
+    expect(feudLikingShift({ ...hottest, heat: 1_000 })).toBeGreaterThan(-FEUD_LIKING_SHIFT);
+    expect(feudLikingShift(null)).toBe(0);
+    expect(feudColdness(hottest)).toBeLessThanOrEqual(FEUD_COLDER_BY);
+    expect(feudColdness(null)).toBe(0);
+  });
+
+  it("is named in the counsel the rules give the man who answers, and in none the rules give for a stranger", () => {
+    const quarrelled = letterVerdict(start, alliance(claudius.id, fabius.id), fabius)!;
+    expect(quarrelled.feud?.theirs).toBe("the Claudii");
+    expect(adviceOnALetter(quarrelled)).toMatch(/at feud/);
+    expect(adviceOnALetter(quarrelled)).toMatch(/counsel only/);
+    const plain = letterVerdict(start, alliance(unrelated.id, fabius.id), fabius)!;
+    expect(plain.feud).toBeUndefined();
+    expect(adviceOnALetter(plain)).not.toMatch(/at feud/);
+    // The counsel is counsel: an answer is still given, the same kinds of answer as without.
+    expect(typeof quarrelled.accepted).toBe("boolean");
+  });
+
+  it("makes the rules' own letter between the two cooler, with a line saying why", () => {
+    const quarrel = quarrelBetween(start, fabius.id, claudius.id)!;
+    const facts = { us: "Rome", them: "Rome", matter: "the ground at Rhegium", ask: "that it be given back", days: 30 };
+    const without = writeLetter(fabius, 100, "demand", facts, "{us} to {them}");
+    const within = writeLetter(fabius, 100, "demand", { ...facts, feud: quarrel }, "{us} to {them}");
+    expect(without.body).not.toMatch(/quarrel/);
+    expect(within.body).toMatch(/quarrel|forgotten|forget/);
+    expect(within.body).toMatch(/Fabii/);
+    expect(within.body).toMatch(/Claudii/);
+    // The substance is what it was: the same days, the same ask.
+    expect(within.body).toMatch(/30/);
+    // The same every time.
+    expect(writeLetter(fabius, 100, "demand", { ...facts, feud: quarrel }, "{us} to {them}")).toEqual(within);
+    // And no modern word has crept into the line.
+    expect(modernWordsIn(within.body)).toEqual([]);
+  });
+
+  it("is told to the model that words a letter for the player, for the voice and not the substance", async () => {
+    const message = { ...alliance(claudius.id, fabius.id), kind: "protest", fromPolityId: "carthage", toPolityId: "rome" } as DiplomaticMessage;
+    const world = { ...start, diplomacy: [...start.diplomacy, message] };
+    const calls: string[] = [];
+    const port: SimModelPort = { complete: (_operation, _system, user) => { calls.push(user); return Promise.resolve(JSON.stringify({ letters: [] })); } };
+    await voiceLetters({ world, port, playerCharacterId: fabius.id, playerPolityId: "rome", messages: [message] });
+    expect(calls[0]).toMatch(/at feud with the reader's, the Fabii|at feud with the reader's, the Claudii|is at feud with the reader's/);
+    expect(calls[0]).toMatch(/do not change what is asked or offered/);
   });
 });

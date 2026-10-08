@@ -5,6 +5,7 @@ import { favouredNeighbour, hasQuirk } from "./quirks";
 import { perceivedRatio } from "./perceive";
 import type { Intent, LetterFacts, Reason } from "./letter-craft";
 import { tradeVerdict } from "./trade-verdict";
+import { feudCounsel, feudLikingShift, quarrelBetween, type Quarrel } from "./feuds-in-letters";
 
 /**
  * What a person would say to a letter, decided by who they are -- before anyone
@@ -34,6 +35,8 @@ export interface Verdict {
   readonly counter?: TradeTerms;
   /** An offer of trade or a notice of embargo written to somebody who does not decide it: the one who does. */
   readonly redirect?: { readonly characterId: string; readonly name: string };
+  /** The quarrel between his gens and the writer's, where there is one hot enough to be heard (feuds-in-letters.ts): counsel, and a coolness in the words. */
+  readonly feud?: Quarrel;
 }
 
 /** The days between a power's reviews of what has come in: no answer is quicker than the next. */
@@ -59,16 +62,25 @@ export function adviceOnALetter(verdict: Verdict): string {
     const free = verdict.counter.exempt.length > 0 ? `, ${verdict.counter.exempt.join(", ")} free` : "";
     return `      What your interests and nature say: you would not sign this as written (${verdict.why}). Terms you could keep: customs capped at ${verdict.counter.tariffCapBps ?? "no cap"}${free}. This is counsel, and the answer is yours: take it, or answer otherwise and give your reason. To deal on other terms, answer "countered" with counterTrade set to them.`;
   }
-  return `      What your interests and nature say: ${verdict.accepted ? "yes" : "no"} (${verdict.why}). This is counsel, and the answer is yours: follow it, or go against it with a reason, in your own words.`;
+  const counsel = `      What your interests and nature say: ${verdict.accepted ? "yes" : "no"} (${verdict.why}). This is counsel, and the answer is yours: follow it, or go against it with a reason, in your own words.`;
+  return verdict.feud === undefined ? counsel : `${counsel}\n${feudCounsel(verdict.feud)}`;
 }
 
 export function letterVerdict(world: WorldState, message: DiplomaticMessage, answerer: Character): Verdict | null {
+  // A feud between the two men's gentes sours his liking for the writer by a few points (bounded), and is named in the counsel and the words.
+  const quarrel = quarrelBetween(world, answerer.id, message.fromCharacterId);
+  const verdict = decide(world, message, answerer, feudLikingShift(quarrel));
+  if (verdict === null || quarrel === null) return verdict;
+  return { ...verdict, feud: quarrel, extra: { ...verdict.extra, feud: quarrel } };
+}
+
+function decide(world: WorldState, message: DiplomaticMessage, answerer: Character, feudShift: number): Verdict | null {
   const day = world.instant.day;
   const d = dispositionOf(answerer, day);
   const trust = world.polityStances.find((stance) => stance.polityId === message.toPolityId && stance.towardPolityId === message.fromPolityId)?.trustScore ?? 0;
   const proposes = new Set(message.proposes ?? []);
   // What he thinks of the man who wrote, as a man: a friend is given what a stranger would not be, and an enemy is not.
-  const liking = Math.max(-60, Math.min(60, computeOpinion(answerer, message.fromCharacterId)));
+  const liking = Math.max(-60, Math.min(60, computeOpinion(answerer, message.fromCharacterId) + feudShift));
   const near = readBoard(world).get(message.toPolityId)?.neighbours.map((neighbour) => neighbour.polityId) ?? [];
   const unforgiven = favouredNeighbour(answerer, near, "grudge_bearer") === message.fromPolityId;
   const fondOf = favouredNeighbour(answerer, near, "loyal_friend") === message.fromPolityId;

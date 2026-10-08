@@ -2,6 +2,7 @@ import { z } from "zod";
 import { type Character, type DiplomaticMessage, type WorldState } from "@chronica/shared";
 import { dispositionOf, natureInWords } from "./disposition";
 import { conductInWords } from "./nature";
+import { feudForTheVoice } from "./feuds-in-letters";
 import { extractJson } from "./json";
 import type { SimModelPort } from "./ports";
 
@@ -109,6 +110,7 @@ function brief(world: WorldState, message: DiplomaticMessage): string {
     `LETTER [${message.id}] (${message.kind})`,
     `From ${writer?.name ?? "the ruler"} of ${nameOf(message.fromPolityId)}, to ${nameOf(message.toPolityId)}.`,
     `What he is like: ${nature.length === 0 ? "even-tempered" : nature.join("; ")}.${conduct.length === 0 ? "" : ` ${conduct.slice(0, 3).join(" ")}`}`,
+    feudForTheVoice(world, writer, message.toCharacterId) ?? "",
     `Subject: ${message.subject}`,
     `It must say, in substance: ${message.terms}`,
     days === null ? "No deadline." : `Deadline: ${days} days.`,

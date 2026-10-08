@@ -51,6 +51,7 @@ const NEW_FILES = [
   "../../shared/src/authority/your-gens.ts",
   "./gentes.ts",
   "./adoption.ts",
+  "./feuds-in-letters.ts",
   "./gens-loyalty.ts",
   // H2 and H3: the magistrates at their charges and the bodies that sit.
   "./magistrates.ts",

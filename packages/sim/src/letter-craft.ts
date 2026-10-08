@@ -1,6 +1,7 @@
 import { stableHash, type Character } from "@chronica/shared";
 import { dispositionOf } from "./disposition";
 import { flourishOf } from "./quirks";
+import { feudColdness, feudLine, type Quarrel } from "./feuds-in-letters";
 
 /**
  * How a ruler writes, when no model is asked (docs/plans/a-living-world.md).
@@ -51,6 +52,8 @@ export interface LetterFacts {
   readonly reason?: Reason;
   /** What is asked, as a phrase: "that you withdraw your men from our border". */
   readonly ask?: string;
+  /** The quarrel between the writer's gens and the reader's, if there is one: the letter is cooler and says so in a line. */
+  readonly feud?: Quarrel;
 }
 
 export interface Letter {
@@ -78,7 +81,7 @@ export function plainName(name: string): string {
 const unit = (key: string): number => (stableHash([key]) % 10_000) / 10_000;
 
 /** How a ruler would write, as six scores, the highest winning. Weak means the writer cannot afford to threaten. */
-export function toneOf(writer: Character, day: number, intent: Intent, weak = false): Tone {
+export function toneOf(writer: Character, day: number, intent: Intent, weak = false, quarrel: Quarrel | null = null): Tone {
   const d = dispositionOf(writer, day);
   const jitter = (tone: Tone): number => (unit(`${writer.id}:${tone}:tone`) - 0.5) * 0.12;
   const scores: Record<Tone, number> = {
@@ -86,7 +89,7 @@ export function toneOf(writer: Character, day: number, intent: Intent, weak = fa
     blunt: (1 - d.sociability) * 0.45 + d.nerve * 0.3 + (1 - d.pride) * 0.25,
     threatening: weak ? 0 : d.cruelty * 0.35 + d.nerve * 0.35 + d.pride * 0.3,
     pleading: d.fear * 0.65 + (1 - d.pride) * 0.35 + (weak ? 0.3 : 0),
-    cold: d.pride * 0.5 + (1 - d.sociability) * 0.3 + d.steadiness * 0.2,
+    cold: d.pride * 0.5 + (1 - d.sociability) * 0.3 + d.steadiness * 0.2 + feudColdness(quarrel),
     evasive: (1 - d.honour) * 0.65 + (1 - d.steadiness) * 0.35,
   };
   // Some matters are not pleaded and some are not threatened.
@@ -268,7 +271,7 @@ const REASONS: Readonly<Record<Reason, string>> = {
 
 /** One letter, from one man, in his own voice. */
 export function writeLetter(writer: Character, day: number, intent: Intent, facts: LetterFacts, subject: string, weak = false): Letter {
-  const tone = toneOf(writer, day, intent, weak);
+  const tone = toneOf(writer, day, intent, weak, facts.feud ?? null);
   const firmness = intent === "ultimatum" && firmnessOf(tone) === "soft" && tone !== "pleading" ? "firm" : firmnessOf(tone);
   const seed = `${writer.id}:${intent}:${facts.them}:${Math.floor(day / 30)}`;
   const withReason = { ...facts, reason: facts.reason ?? "none" };
@@ -276,7 +279,9 @@ export function writeLetter(writer: Character, day: number, intent: Intent, fact
   // A stalled or evasive letter says little; a long one has an opening and a close.
   const brief = intent === "stall" || intent === "talks_accept" || intent === "aid_accept";
   const flourish = brief ? "" : flourishOf(writer, intent);
-  const parts = [brief ? "" : fill(pick(OPENINGS[tone], `${seed}:open`), facts), body, flourish, brief ? "" : fill(pick(CLOSINGS[tone], `${seed}:close`), facts)].filter((part) => part !== "");
+  // A quarrel between the two gentes, where there is one, is named in a line before the close, as hard as the writer is.
+  const quarrel = brief || facts.feud === undefined ? "" : feudLine(facts.feud, firmness, stableHash([seed, "feud"]));
+  const parts = [brief ? "" : fill(pick(OPENINGS[tone], `${seed}:open`), facts), body, flourish, quarrel, brief ? "" : fill(pick(CLOSINGS[tone], `${seed}:close`), facts)].filter((part) => part !== "");
   return { subject: fill(subject, facts).slice(0, 240), body: capitalised(parts.join(" ")).slice(0, 1_190), tone };
 }
 
