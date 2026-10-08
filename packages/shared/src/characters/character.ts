@@ -435,6 +435,11 @@ export const OfficeSchema = z
      */
     kind: z.enum(["magistracy", "membership", "priesthood"]).optional(),
     /**
+     * For a membership office: the chamber (a `GovernmentInstitution` id) its holders sit in. Said by the data where it is known, so no reader has to
+     * guess a seat's chamber from what the two are called; null says it sits in no chamber (a military tribune, an officer of his legion); absent falls back to the chamber its succession rule names, else the one council the power has.
+     */
+    chamberId: EntityIdSchema.nullable().optional(),
+    /**
      * How many hold it at once, where that is more than the world names. Only
      * named people have seats; the rest of a college of eight quaestors or a
      * Senate of three hundred is implied, and a college is elected whole once

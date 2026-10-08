@@ -47,6 +47,8 @@ export const MerchantHouseSchema = z
     heirSoughtAtStep: ElapsedStepSchema.nullable().optional(),
     /** The power that held the house's seat when the house last looked: a change is a city that has changed hands (`house-seat.ts`). Unset, it is `polityId`. */
     seatPolityId: EntityIdSchema.nullable().optional(),
+    /** A head under age (`house-succession.ts`): the man who keeps the house for him until he comes of age, his guardian in the family graph. Rome: the tutor; the Greek cities: the epitropos. */
+    tutorCharacterId: EntityIdSchema.nullable().optional(),
   })
   .strict();
 export type MerchantHouse = z.infer<typeof MerchantHouseSchema>;

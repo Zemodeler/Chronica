@@ -414,6 +414,26 @@ export const VotingBlocSchema = z
   });
 export type VotingBloc = z.infer<typeof VotingBlocSchema>;
 
+/** The most questions a chamber remembers the votes of, and the most named members kept for each (a Senate of three hundred is not written out three hundred times). */
+export const RECENT_VOTES_KEPT = 20;
+export const RECENT_VOTERS_KEPT = 80;
+
+/** How a chamber's named members divided on one question lately settled: a bounded record, oldest dropped first. */
+export const RecentVoteSchema = z
+  .object({
+    procedureId: EntityIdSchema,
+    label: z.string().trim().min(1).max(160),
+    atStep: ElapsedStepSchema,
+    outcome: z.enum(["passed", "failed"]),
+    yesWeight: z.number().int().nonnegative(),
+    noWeight: z.number().int().nonnegative(),
+    yes: z.array(EntityIdSchema).max(RECENT_VOTERS_KEPT),
+    no: z.array(EntityIdSchema).max(RECENT_VOTERS_KEPT),
+    abstain: z.array(EntityIdSchema).max(RECENT_VOTERS_KEPT),
+  })
+  .strict();
+export type RecentVote = z.infer<typeof RecentVoteSchema>;
+
 export const GovernmentInstitutionSchema = z
   .object({
     id: EntityIdSchema,
@@ -448,6 +468,8 @@ export const GovernmentInstitutionSchema = z
     convenedByOfficeIds: z.array(EntityIdSchema).max(12).optional(),
     /** Where a question it rejects goes next, when a magistrate raised it: Carthage's council sent a split to the people. */
     refersFailuresTo: EntityIdSchema.nullable().optional(),
+    /** How its named members voted on the last questions it settled, newest last (`sim/vote-history.ts`). Bounded: `RECENT_VOTES_KEPT` questions of `RECENT_VOTERS_KEPT` names a side. */
+    recentVotes: z.array(RecentVoteSchema).max(RECENT_VOTES_KEPT).optional(),
   })
   .superRefine((institution, context) => {
     const weight = institution.votingBlocs.reduce((total, bloc) => total + bloc.weight, 0);
@@ -1080,6 +1102,15 @@ export const ForceSchema = z.object({
   formations: z.array(ForceFormationSchema).max(40).optional(),
   /** Posts held by named people. Most posts are nobody in particular, and stay that way. */
   posts: z.array(ForcePostSchema).max(80).optional(),
+  /**
+   * The state of its kit, 0 (a spear and a cloak) to 10,000 (a full issue of new arms): worn by marching, sieges and battles, bought again out of the stoppage
+   * from its home markets, and read, bounded, as a modifier in a fight (`warfare/equipment.ts`, `sim/equipment.ts`). Absent until the engine first looks at the army.
+   */
+  equipmentBps: BasisPointsSchema.optional(),
+  /** The day the engine last reckoned its kit. */
+  equipmentReckonedToStep: ElapsedStepSchema.optional(),
+  /** The day a power at war last filled this army's thinned ranks from its levy (`sim/legion-refill.ts`). */
+  refilledAtStep: ElapsedStepSchema.optional(),
   /** A standing order to drill: in camp, paid and fed, the men get better at it every day. Lifted by an order or a march. */
   drilling: z.boolean().optional(),
   /**

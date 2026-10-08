@@ -119,6 +119,20 @@ export interface OpenQuestion {
   readonly concerns: readonly string[];
 }
 
+/** How the named members of a chamber divided on a question it settled lately, and where he stood. */
+export interface VotedLately {
+  readonly label: string;
+  readonly outcome: string;
+  readonly when: string | null;
+  /** "For 40, against 22", by the weight of the votes. */
+  readonly tally: string;
+  /** Where he stood: null where he did not sit and vote on it. */
+  readonly yourSide: "for" | "against" | "held back" | null;
+  /** The colleagues (named men) who stood on his side, and on the other, a few of each. */
+  readonly withYou: readonly Linked[];
+  readonly against: readonly Linked[];
+}
+
 export interface BodyView {
   readonly id: string;
   readonly name: string;
@@ -136,6 +150,8 @@ export interface BodyView {
   readonly openCount: number;
   /** The last few questions it settled, and how. */
   readonly lately: readonly { readonly label: string; readonly outcome: string; readonly when: string | null; readonly why: string | null }[];
+  /** How he and his colleagues voted on the last questions it settled (the chamber keeps the last twenty; the view shows five). */
+  readonly votedLately: readonly VotedLately[];
   readonly note: string | null;
 }
 
@@ -362,22 +378,17 @@ function chambersOf(world: WorldState, polityId: string): readonly GovernmentIns
   return world.material.institutions.filter((institution) => institution.polityId === polityId);
 }
 
-const stem = (word: string): string => word.toLowerCase().replace(/[^a-z]/g, "").slice(0, 4);
-const STOPWORDS = new Set(["of", "the", "and", "a", "to", "in", "carthaginian", "roman", "syracusan"]);
-
-/** The chamber a membership office is a seat in: by what the two are called, failing that the one council the power has. */
-function chamberOfSeat(office: Office, chambers: readonly GovernmentInstitution[], constitutionRuler: boolean): GovernmentInstitution | null {
+/**
+ * The chamber a membership office is a seat in: the one the office names (`chamberId`; null says it sits in none), else the chamber its succession rule
+ * names where that is a council, else the council that decides (a king's friends sit in his advisory one). Never guessed from what the two are called.
+ */
+function chamberOfSeat(office: Office, chambers: readonly GovernmentInstitution[], rules: ReadonlyMap<string, SuccessionRule>, constitutionRuler: boolean): GovernmentInstitution | null {
   if (chambers.length === 0) return null;
-  const wanted = new Set(office.label.split(/\s+/u).filter((word) => !STOPWORDS.has(word.toLowerCase())).map(stem).filter((word) => word.length >= 4));
-  let best: GovernmentInstitution | null = null;
-  let bestScore = 0;
-  for (const chamber of chambers) {
-    const score = chamber.name.split(/\s+/u).filter((word) => !STOPWORDS.has(word.toLowerCase())).map(stem).filter((word) => wanted.has(word)).length;
-    if (score > bestScore) { best = chamber; bestScore = score; }
-  }
-  if (best !== null) return best;
+  if (office.chamberId !== undefined) return office.chamberId === null ? null : chambers.find((chamber) => chamber.id === office.chamberId) ?? null;
+  const named = rules.get(office.successionRuleId)?.institutionId;
+  const byRule = named == null ? undefined : chambers.find((chamber) => chamber.id === named && chamber.franchise === "council");
+  if (byRule !== undefined) return byRule;
   const councils = chambers.filter((chamber) => chamber.franchise === "council");
-  // A king's friends sit in his council whatever it is called; any other seat goes to the council that decides.
   const preferred = constitutionRuler ? councils.find((chamber) => chamber.advisory === true) : councils.find((chamber) => chamber.advisory !== true && !(chamber.powers?.length === 1 && chamber.powers[0] === "judgment"));
   return preferred ?? councils[0] ?? chambers[0] ?? null;
 }
@@ -449,7 +460,7 @@ export function readOffice(
   const charges = heldCharges.map(({ office, seat }) => chargeOf(ctx, office, seat, scenarioOffices, options)).filter((charge): charge is ChargeView => charge !== null);
   const seats = held
     .filter(({ office }) => !heldCharges.some((entry) => entry.office.id === office.id))
-    .map(({ office }) => ({ officeId: office.id, label: office.label, body: chamberOfSeat(office, chambers, false)?.name ?? null }));
+    .map(({ office }) => ({ officeId: office.id, label: office.label, body: chamberOfSeat(office, chambers, ctx.rules, false)?.name ?? null }));
 
   const role = roleOf(charges, held.map(({ office }) => office), rulerId);
   const stoppers = reachOf(ctx, charges, scenarioOffices);
@@ -712,7 +723,7 @@ function bodiesOf(
   };
   for (const office of held) {
     if (office.kind === "membership") {
-      const chamber = chamberOfSeat(office, chambers, isRuler);
+      const chamber = chamberOfSeat(office, chambers, ctx.rules, isRuler);
       if (chamber !== null) { add(chamber.id, "sits"); seatNotes.set(chamber.id, `You sit in it as ${withArticle(office.label)}.`); }
     }
     const rule = ctx.rules.get(office.successionRuleId);
@@ -774,6 +785,20 @@ function bodiesOf(
         when: dateOf(ctx, procedure.resolvedAtStep!),
         why: procedure.outcomeReason,
       }));
+    const votedLately = (chamber.recentVotes ?? []).slice(-5).reverse().map((vote): VotedLately => {
+      const sideOf = (id: string): "yes" | "no" | "abstain" | null => vote.yes.includes(id) ? "yes" : vote.no.includes(id) ? "no" : vote.abstain.includes(id) ? "abstain" : null;
+      const mine = sideOf(ctx.characterId);
+      const named = (ids: readonly string[]): Linked[] => ids.filter((id) => id !== ctx.characterId && world.characters.some((character) => character.id === id)).slice(0, 4).map((id) => personLink(world, id));
+      return {
+        label: vote.label,
+        outcome: vote.outcome === "passed" ? "carried" : "refused",
+        when: dateOf(ctx, vote.atStep),
+        tally: `For ${vote.yesWeight}, against ${vote.noWeight}.`,
+        yourSide: mine === null ? null : mine === "yes" ? "for" : mine === "no" ? "against" : "held back",
+        withYou: mine === null ? [] : named(vote[mine]),
+        against: mine === "yes" ? named(vote.no) : mine === "no" ? named(vote.yes) : [],
+      };
+    });
     const advisory = chamber.advisory === true;
     out.push({
       id: chamber.id,
@@ -787,6 +812,7 @@ function bodiesOf(
       open: questions,
       openCount: open.length,
       lately,
+      votedLately,
       note: advisory
         ? (kinds.has("counsels you") ? "Its word is counsel. You decide; one who overrules his friends against their counsel pays for it in the trust of his people." : "Its word is counsel and binds nobody.")
         : judgmentOnly(chamber) ? "It tries the magistrates and the generals when their charge is done."
@@ -883,7 +909,8 @@ function neighboursOf(
     if (own) { relation = "colleague"; order = 0; }
     else if (kind === "membership") {
       // A king's friends, and only his: a council's other members sit with him in the chamber, which is shown above.
-      if (!(isRuler && chamberOfSeat(office, chambers, true) !== null && advisoryIds.has(chamberOfSeat(office, chambers, true)!.id))) continue;
+      const seatChamber = isRuler ? chamberOfSeat(office, chambers, ctx.rules, true) : null;
+      if (seatChamber === null || !advisoryIds.has(seatChamber.id)) continue;
       relation = "counsel"; order = 1;
     } else if (kind === "priesthood") {
       const competence = competenceOf(world, office.id, scenarioOffices);
