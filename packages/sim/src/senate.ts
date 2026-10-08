@@ -32,10 +32,12 @@ import { ballotsOfBloc, seatsOf, votesBySeat, type Ballot } from "./ballots";
 import { theSeaIsLostLean } from "./the-sea-is-lost";
 import { clientsFromName, kinOf } from "./gens-loyalty";
 import { carryOutEnactment } from "./enact";
+import { readDecree } from "./decree-reader";
 import type { IdFactory } from "./ports";
 import { concernsOf } from "./questions";
 import { judgmentLean, sentenceByOutcome } from "./trials";
 import { rulerOf } from "./constitutions";
+import { rememberTheVote } from "./vote-history";
 import { tenureLean } from "./command-tenure";
 import { intercessionsAgainst, settleSecessions, type SecessionHooks } from "./tribunes";
 import { creditTheSpeech } from "./standing-deeds";
@@ -155,6 +157,8 @@ export function seatByOutcome(world: WorldState, procedure: PoliticalProcedure, 
 export const voteDayOf = (procedure: PoliticalProcedure): number => procedure.deadlineStep ?? procedure.openedAtStep + MOTION_VOTING_DAYS;
 
 /** Told with a carried question that does nothing by being carried. */
+/** Told with a carried question whose words name an act the rules will carry out (`decrees-by-rule.ts`). */
+const WILL_BE_DONE = "It is a resolution of the Senate that names its act: the man who put it, or the head of the state, will see it carried out within the month.";
 const BEGINS_NOTHING = "It is a resolution of the Senate and begins nothing by itself: no one is charged with it, and what it allows waits on somebody's order.";
 
 /** The kinds of question that move a man -- seat him, unseat him, try him -- by being carried. */
@@ -614,7 +618,7 @@ export function holdVotes(input: HoldVotesInput): { world: WorldState; facts: Fa
       : !record.quorumMet
         ? `The ${institution.name} could not muster a quorum on "${procedure.label}", and it fell.`
         : `The ${institution.name} rejected "${procedure.label}", ${tally}: ${howTheyVoted(leanings)}.`;
-    const leave = carried && beginsNothing(world, procedure) ? `${verdict} ${BEGINS_NOTHING}` : verdict;
+    const leave = carried && beginsNothing(world, procedure) ? `${verdict} ${readDecree(world, procedure) === null ? BEGINS_NOTHING : WILL_BE_DONE}` : verdict;
     const said = debate.length === 0 ? leave : `${leave} ${debate[0]!.toUpperCase()}${debate.slice(1)}.`;
     const settled: PoliticalProcedure = {
       ...procedure,
@@ -632,6 +636,7 @@ export function holdVotes(input: HoldVotesInput): { world: WorldState; facts: Fa
         politicalProcedures: world.material.politicalProcedures.map((candidate) => (candidate.id === procedure.id ? settled : candidate)),
       },
     };
+    world = rememberTheVote(world, institution.id, procedure, record);
     const speakers = latestPositions(world, procedure.id)
       .filter((position) => position.supporterKind === "character" && world.characters.some((character) => character.id === position.supporterId))
       .map((position) => ({ kind: "character" as const, id: position.supporterId }));
@@ -698,6 +703,7 @@ function giveAdvice(
         : candidate)),
     },
   };
+  next = rememberTheVote(next, institution.id, procedure, record);
   if (ruler !== null) {
     const id = boundedId("advice", procedure.id, ruler.id);
     if (!next.characterPressures.some((pressure) => pressure.id === id)) {
@@ -743,7 +749,7 @@ function settleAdvice(world: WorldState, input: HoldVotesInput): { world: WorldS
     if (record === undefined || institution === undefined) continue;
     const carried = record.outcome === "passed";
     const said = carried
-      ? `Nobody overruled the ${institution.name}, and "${procedure.label}" was done as it advised.${beginsNothing(next, procedure) ? ` ${BEGINS_NOTHING}` : ""}`
+      ? `Nobody overruled the ${institution.name}, and "${procedure.label}" was done as it advised.${beginsNothing(next, procedure) ? ` ${readDecree(next, procedure) === null ? BEGINS_NOTHING : WILL_BE_DONE}` : ""}`
       : `Nobody overruled the ${institution.name}, and "${procedure.label}" was let drop as it advised.`;
     const settled: PoliticalProcedure = { ...procedure, stage: carried ? "resolved" : "withdrawn", outcome: carried ? "passed" : "withdrawn", outcomeReason: said.slice(0, 400), resolvedAtStep: input.toDay };
     next = { ...next, material: { ...next.material, politicalProcedures: next.material.politicalProcedures.map((candidate) => (candidate.id === procedure.id ? settled : candidate)) } };

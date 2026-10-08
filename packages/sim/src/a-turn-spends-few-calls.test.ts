@@ -67,16 +67,21 @@ describe("a turn spends few calls", { timeout: 300_000 }, () => {
         expect(port.asked.filter((id) => id === member.characterId).length, `${member.characterId} asked in turn ${turn}`).toBeLessThanOrEqual(2);
       }
       expect(by("simulate_orchestrate")).toBe(0);
-      // The consul, with letters and orders about him, is asked when something of his changes, not in every round: three times in a season at the most.
-      expect(port.asked.filter((id) => id === "gnaeus-cornelius").length, `the consul in turn ${turn}`).toBeLessThanOrEqual(3);
+      // The consul is the player's colleague, so of his circle (the cast rule of 2026-10-08): the few who deal with the player are asked on their weekly turn, no more than that
+      // (a season is thirteen weeks). Before that rule he was asked three times a season among fourteen other men; with those men gone from the rounds the weekly turn is his.
+      expect(port.asked.filter((id) => id === "gnaeus-cornelius").length, `the consul in turn ${turn}`).toBeLessThanOrEqual(13);
+      // And nobody who is not of the player's dealings is asked at all: the asked are the cast, his circle and the near.
+      expect(new Set(port.asked).size, `men asked in turn ${turn}`).toBeLessThanOrEqual(8);
       // The world's own censuses of the Boii and the Britons are candidates; none of them is written up by the model.
       const far = result.audit.filter((row) => row.kind === "mechanic_candidate" && /^(boii|britain|cretan|gaul|hejaz|iberia|thrace|pergamon|illyria|pannonii|garamantes|colchis|galatians|ireland|kush|pontus|rhodes|caucasian|pisidia)/.test(row.actorRef.id));
       for (const row of far) expect(result.skipped.some((skip) => skip.stage === "mechanic" && skip.reason.startsWith(row.reason.split(":")[0]!))).toBe(true);
       expect(by("write_mechanic")).toBeLessThanOrEqual(1);
     }
     const average = perTurn.reduce((sum, calls) => sum + calls, 0) / perTurn.length;
-    expect(average).toBeLessThanOrEqual(8);
+    // 2026-10-08, the cast rule: measured on this model, 2, 6, 8 and 10 calls (6.5 on average) with three men asked in a turn, where the same four seasons before the rule were
+    // 2, 8, 9 and 12 (7.75) with fourteen men asked in the last turn, far rulers among them.
+    expect(average).toBeLessThanOrEqual(7);
     expect(perTurn[0]).toBeLessThanOrEqual(6);
-    expect(Math.max(...perTurn)).toBeLessThanOrEqual(12);
+    expect(Math.max(...perTurn)).toBeLessThanOrEqual(11);
   });
 });

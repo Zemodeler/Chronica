@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { punicWarsScenario } from "@chronica/db";
 import { CAST_ENTER_AT, ScenarioDefinitionSchema, WorldStateSchema, economyOf, ensureProvinceMaterial, modernWordsIn, type CovertPlot, type WorldState } from "@chronica/shared";
-import { HARD_DECISION_AT, plotsOf, reviewCast, salienceOf } from "./cast";
+import { HARD_DECISION_AT, peopleAround, plotsOf, reviewCast, salienceOf } from "./cast";
 import { ensureConstitutions } from "./constitutions";
 import { houseFolkOf } from "./merchant-houses";
 import { withWar } from "./fiscal-test-kit";
@@ -77,17 +77,32 @@ describe("the cast is for plots", () => {
     expect(salienceOf({ ...world, covertPlots: [plotOf(near.id, "gnaeus-cornelius")] }, near, PLAYER).score).toBeGreaterThan(0);
   });
 
-  it("takes the commander of a power's main army, when it is at war, as having a war plan; at peace with nothing before him, not", () => {
+  it("does not take a far power's general for a plot because he has a war on: he must deal with the player", () => {
     const hanno = "hanno-carthage";
     const peaceful = quiet(opening());
     expect(salienceOf(peaceful, person(peaceful, hanno), PLAYER).score).toBe(0);
+    // 2026-10-08: the commander of Carthage's main army, at war with Rome, was a plot of 30 and sat in the cast at the opening. The cast rule is now the player's own dealings,
+    // and he has none with this man: a war on another front is the rules' to play.
     const war = withWar(peaceful, "carthage", "rome");
-    const reading = salienceOf(war, person(war, hanno), PLAYER);
-    expect(reading.score).toBeGreaterThanOrEqual(CAST_ENTER_AT);
-    expect(reading.why).toMatch(/commands the main army of Carthage/);
-    expect(reviewCast(war, PLAYER).cast.members.map((member) => member.characterId)).toContain(hanno);
-    // And the opening's own world, with the Messana thread and his hard decision, keeps him in as it did.
-    expect(reviewCast(opening(), PLAYER).cast.members.map((member) => member.characterId)).toContain(hanno);
+    expect(salienceOf(war, person(war, hanno), PLAYER).score).toBe(0);
+    expect(reviewCast(war, PLAYER).cast.members.map((member) => member.characterId)).not.toContain(hanno);
+    expect(reviewCast(opening(), PLAYER).cast.members.map((member) => member.characterId)).not.toContain(hanno);
+    // Until he writes to the player: then he is one the player deals with, of the wider world's seat.
+    const letter = { id: "m-hanno", kind: "letter", fromPolityId: "carthage", fromCharacterId: hanno, toPolityId: "rome", toCharacterId: PLAYER, subject: "Terms", terms: "Terms.", sentAtStep: 0, replyDueByStep: 30, status: "awaiting_reply", answer: null, answerText: null, answeredAtStep: null, inReplyToMessageId: null, visibility: "private", onRefusal: null } as never;
+    const written = plotsOf({ ...war, diplomacy: [...war.diplomacy, letter] }, person(war, hanno), PLAYER);
+    expect(written.map((plot) => plot.kind)).toContain("letter");
+  });
+
+  it("takes a plot for a plot only where it touches the player or his people", () => {
+    const world = quiet(opening());
+    const patron = person(world, economyOf(world).houses.find((house) => house.polityId === "rome")!.headCharacterId);
+    // A plot of the patron's against a man the player has nothing to do with: nothing.
+    expect(plotsOf({ ...world, covertPlots: [plotOf(patron.id, "manius-curius")] }, patron, PLAYER)).toEqual([]);
+    // Against his colleague in the consulship, it touches him.
+    expect(plotsOf({ ...world, covertPlots: [plotOf(patron.id, "gnaeus-cornelius")] }, patron, PLAYER).map((plot) => plot.why)).toContain("leads a plot");
+    // And a thread he is no party to is nothing either, where the player is.
+    expect(peopleAround(world, person(world, PLAYER)).has("gnaeus-cornelius")).toBe(true);
+    expect(peopleAround(world, person(world, PLAYER)).has("hanno-carthage")).toBe(false);
   });
 
   it("counts a letter that wants an answer, an order that wants doing and a contest for office as plots; kin and rivalry only sharpen one", () => {

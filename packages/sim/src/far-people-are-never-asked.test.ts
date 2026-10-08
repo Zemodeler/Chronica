@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { punicWarsScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, kmBetween, type CovertPlot, type WorldState } from "@chronica/shared";
-import { plotsOf, salienceContextOf } from "./cast";
+import { peopleAround, plotsOf, salienceContextOf } from "./cast";
 import { ASK_REACH_KM, createCognitionPolicy, playerInterests } from "./cognition-policy";
 import { DEFAULT_BUDGET, runSimulationBurst } from "./burst";
 import { routeAmbientActors } from "./attention";
@@ -49,27 +49,41 @@ describe("far people are never asked", () => {
     expect(createCognitionPolicy().shouldAsk({ ref: { kind: "character", id }, characterId: id, name: "x", level: "focused", impetus: "own_business", score: 90, pressing: true, knownFacts: [], why: "x" }, plotted, now, new Map(), new Map())).toBe(false);
   });
 
-  it("asks a man near the player only with a plot or plan of his own", () => {
+  it("asks a man near the player only with a plot or plan of his own, and the men who deal with him always", () => {
     const world = opening();
-    const near = person(world, "gnaeus-cornelius");
-    expect(kmFromPlayer(world, near.id)).toBeLessThanOrEqual(ASK_REACH_KM);
-    expect(plotsOf(world, near, PLAYER, salienceContextOf(world, PLAYER))).toEqual([]);
-    expect(playerInterests(world, PLAYER, offices).detailOf(near.id)).toBe("background");
-    const plotted: WorldState = { ...world, covertPlots: [plotOf(near.id, "manius-curius")] };
+    const circle = peopleAround(world, person(world, PLAYER), { letters: false });
+    const interests = playerInterests(world, PLAYER, offices);
+    // The cast rule (2026-10-08): the consul's colleague is of the player's office, so he is askable by his dealing, plot or none.
+    expect(circle.has("gnaeus-cornelius")).toBe(true);
+    expect(interests.detailOf("gnaeus-cornelius")).toBe("personal");
+    // A man who is near and of nobody's circle, with no plot and no plan, is not.
+    const near = world.characters.find((character) => character.alive && character.id !== PLAYER && !circle.has(character.id) && interests.nearPlaces.has(character.locationProvinceId)
+      && !world.cast.members.some((member) => member.characterId === character.id) && interests.detailOf(character.id) === "background"
+      && plotsOf(world, character, PLAYER, salienceContextOf(world, PLAYER)).length === 0)!;
+    expect(near).toBeDefined();
+    // With a plot that touches the player (laid against his colleague), he is.
+    const plotted: WorldState = { ...world, covertPlots: [plotOf(near.id, "gnaeus-cornelius")] };
     expect(playerInterests(plotted, PLAYER, offices).detailOf(near.id)).toBe("personal");
+    // A plot that touches nobody of his is nothing: it was a plot before 2026-10-08 and is not now.
+    const aside: WorldState = { ...world, covertPlots: [plotOf(near.id, farMan(world))] };
+    expect(playerInterests(aside, PLAYER, offices).detailOf(near.id)).toBe("background");
   });
 
-  it("keeps the cast, the nemesis, a kept relation and a shared thread askable wherever they are", () => {
+  it("keeps the cast, the nemesis and a shared thread askable wherever they are, and a kept relation only as a near man with a plot", () => {
     const world = opening();
     const id = farMan(world);
     expect(playerInterests(world, PLAYER, offices).detailOf(id)).toBe("background");
     const seated: WorldState = { ...world, cast: { ...world.cast, members: [{ characterId: id, seat: "world", sinceStep: 0, salience: 30, why: "rules a power the player deals with", belowFor: 0, reviews: 0 }] } };
     expect(playerInterests(seated, PLAYER, offices).detailOf(id)).toBe("personal");
+    // A relation with a kept cause is not a dealing (2026-10-08: it was in the circle wherever the man stood).
     const related: WorldState = { ...world, characters: world.characters.map((character) => (character.id === PLAYER
       ? { ...character, relations: [...character.relations, { subjectCharacterId: id, causes: [{ id: "c1", label: "An old creditor.", score: 10, occurredAtStep: 0, decayPerYearBps: 0, encounterMemoryId: null }] }] } : character)) };
-    expect(playerInterests(related, PLAYER, offices).detailOf(id)).toBe("personal");
+    expect(playerInterests(related, PLAYER, offices).detailOf(id)).toBe("background");
     const storied: WorldState = { ...world, storylines: [...world.storylines, { id: "s-far", title: "A quarrel", participantIds: [PLAYER, id], provinceId: null, phase: "brewing", stakes: "x", history: [], nextDevelopment: "x", visibility: "private", updatedAtStep: 0, closedAtStep: null } as never] };
     expect(playerInterests(storied, PLAYER, offices).detailOf(id)).toBe("personal");
+    // A man he has ordered is of his circle for the order's life; a letter's far reader is not (he is asked once, at the sending: `a-far-letter-is-not-re-woken`).
+    const lettered: WorldState = { ...world, diplomacy: [...world.diplomacy, { id: "m-far", kind: "letter", fromPolityId: "rome", fromCharacterId: PLAYER, toPolityId: person(world, id).polityId ?? "rome", toCharacterId: id, subject: "x", terms: "x", sentAtStep: 0, replyDueByStep: 30, status: "awaiting_reply", answer: null, answerText: null, answeredAtStep: null, inReplyToMessageId: null, visibility: "private", onRefusal: null } as never] };
+    expect(playerInterests(lettered, PLAYER, offices).detailOf(id)).toBe("background");
   });
 
   it("asks nobody far in a month of the world, whatever his power is doing", async () => {

@@ -9,6 +9,7 @@ import {
   readDepartments,
   type Force,
   type OrchestratorOutput,
+  type RequestAsk,
   type ScenarioWarfareRules,
   type WorldDelta,
   type WorldState,
@@ -17,6 +18,7 @@ import { chestOfPower, payerOf, planSupply } from "./supply-plan";
 import { safeLocalId } from "./safe-local-id";
 import { bidClause, refugeClause } from "./trade-templates";
 import { FLEET_HULLS, fleetBegun, fleetWork } from "./a-fleet-by-decree";
+import { marchClause } from "./march-template";
 
 /**
  * The common routine orders, understood by rule (the user's rule, 2026-10-08: "Orders from a player should still be automatic: an order like 'find supply for my army'
@@ -47,7 +49,9 @@ interface Clause {
   /** What the engine itself found, in the officer's words, for the answer to the order. */
   readonly note?: string;
   readonly deltas: readonly WorldDelta[];
-  readonly delegations: readonly { readonly recipientId: string; readonly instruction: string; readonly ask: { readonly kind: "supply"; readonly ref: string; readonly amount: number } }[];
+  readonly delegations: readonly { readonly recipientId: string; readonly instruction: string; readonly ask: RequestAsk }[];
+  /** What the order will have done, where the acts cannot say it for themselves (`force_at`). */
+  readonly goals?: readonly { readonly kind: "force_at"; readonly ref: string; readonly at: string }[];
   readonly template: string;
   readonly domain: string;
 }
@@ -206,6 +210,8 @@ function holdClause(world: WorldState, playerId: string, text: string, warfare?:
   const { force, ambiguous } = armyNamed(world, playerId, text, warfare);
   if (force === null || ambiguous || !ARMY_NOUN.test(text) && place === null) return null;
   if (place !== null && !/\b(army|legions?|troops|men|host|force)\b/i.test(text) && place !== force.locationId) return null;
+  // "Hold at Rhegium" with the army elsewhere is a march and then a hold: the march template's (`march-template.ts`).
+  if (place !== null && place !== force.locationId && /\b(?:at|in|before|outside)\b/i.test(text)) return null;
   return {
     part: { said: text.trim().slice(0, 200) },
     deltas: [WorldDeltaSchema.parse({ op: "force_modify", forceRef: force.id, hold: true, reason: `${force.name} holds where it stands, by its commander's word.` })],
@@ -338,7 +344,9 @@ function levyClause(world: WorldState, playerId: string, text: string): Clause |
   };
 }
 
-const TEMPLATES: readonly ((world: WorldState, playerId: string, text: string, warfare?: ScenarioWarfareRules) => Clause | null)[] = [supplyClause, holdClause, taxClause, buildClause, fleetClause, levyClause, bidClause, refugeClause];
+// The march template is called through a function so that the two files, which read each other, load in either order.
+const TEMPLATES: readonly ((world: WorldState, playerId: string, text: string, warfare?: ScenarioWarfareRules) => Clause | null)[] = [supplyClause, holdClause, taxClause, buildClause, fleetClause, levyClause, bidClause, refugeClause,
+  (world, playerId, text, warfare) => marchClause(world, playerId, text, warfare)];
 
 /** The clauses of an order: its lines, and its sentences. */
 export function clausesOf(order: string): string[] {
@@ -362,7 +370,7 @@ export function matchOrderTemplates(world: WorldState, playerId: string, orderTe
     read.push(hits[0]!);
   }
   const deltas: WorldDelta[] = [];
-  const parts = read.map((clause) => ({ said: clause.part.said, acts: clause.deltas.map((delta) => { deltas.push(delta); return deltas.length - 1; }), goals: [], spend: null, factLocalIds: [], whyNot: clause.part.whyNot ?? null }));
+  const parts = read.map((clause) => ({ said: clause.part.said, acts: clause.deltas.map((delta) => { deltas.push(delta); return deltas.length - 1; }), goals: (clause.goals ?? []).map((goal) => ({ ...goal })), spend: null, factLocalIds: [], whyNot: clause.part.whyNot ?? null }));
   const delegations = read.flatMap((clause, index) => clause.delegations.map((delegation, at) => ({
     localId: safeLocalId(`${clause.template}_${index}_${at}`), issuerRef: { kind: "character" as const, id: playerId }, recipientRef: { kind: "character" as const, id: delegation.recipientId },
     claimedAuthorityGrantRef: null, instruction: delegation.instruction, part: index, ask: delegation.ask,

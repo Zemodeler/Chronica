@@ -31,6 +31,7 @@ import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
 import { assessExecution } from "./delegation";
 import { payerOf, planSupply } from "./supply-plan";
+import { marchDeltas, placeOfInstruction, staysAfterwards } from "./march-template";
 import { isKin, willingnessOf } from "./apply/asking";
 import { orderAnswerCauses } from "./apply/apply-deltas";
 import { sovereignChamberOf } from "./constitutions";
@@ -354,6 +355,30 @@ function grantable(world: WorldState, attempt: OrderAttempt, ask: RequestAsk, in
             ? { ...after, material: { ...after.material, polityLegitimacy: adjustPolityLegitimacy(after.material.polityLegitimacy, polityId, -plan.legitimacyCost, `Bread taken from the country for ${force.name}`, `requisition:${force.id}:${atStep}`) } }
             : after;
         },
+      };
+    }
+    case "march": {
+      // An army marched, held or sent into winter quarters by the man who commands it, at the word of the man over him (`march-template.ts`).
+      const force = world.material.forces.find((candidate) => candidate.id === ask.ref);
+      const refused = `${giver.name} did not march ${force?.name ?? "the army"}`;
+      if (force === undefined) return { ok: false, reason: "there is no such army", refused };
+      if (force.commanderCharacterId !== giverId) return { ok: false, reason: `${force.name} is not his to march`, refused };
+      const to = placeOfInstruction(world, attempt.instruction);
+      if (to === null) return { ok: false, reason: "no place was named that he knows", refused };
+      if (input.rules === undefined) return { ok: false, reason: "he has no way to carry it out here", refused };
+      const kind = /^withdraw/i.test(attempt.instruction) ? "withdraw" : staysAfterwards(attempt.instruction) ? "hold" : "march";
+      const acts = marchDeltas(force, to, kind, giver.name);
+      const context: ApplyContext = {
+        now: { day: atStep, minute: 540 }, actorRef: { kind: "character", id: giverId }, offices: input.offices, ids: input.ids, playerCharacterId: input.playerCharacterId,
+        orderDeltas: new Set(acts), ...input.rules,
+      };
+      const tried = applyDeltas(world, [...acts], context);
+      if (tried.applied.length === 0) return { ok: false, reason: tried.rejected[0]?.reason.slice(0, 240) ?? "the army cannot be moved there", refused };
+      const place = world.map.provinces.find((province) => province.id === to)?.name ?? to;
+      return {
+        ok: true, refused,
+        done: `${giver.name} ${kind === "withdraw" ? "drew" : kind === "hold" ? "took" : "marched"} ${force.name} ${kind === "hold" ? "into quarters at" : kind === "withdraw" ? "back to" : "to"} ${place}`,
+        carryOut: (current) => applyDeltas(current, [...acts], context).world,
       };
     }
     case "other":

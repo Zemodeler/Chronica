@@ -105,6 +105,7 @@ import { answerByTemper } from "./insubordination";
 import { answerForTheSilent } from "./requests";
 import { stanceOfPart } from "./stance";
 import { matchOrderTemplates } from "./order-templates";
+import { withTheHonestReply } from "./an-order-the-engine-cannot-read";
 import { answerOrdersByRule } from "./order-by-rule";
 import { recordActiveIntents } from "./intents";
 import { decideNarratorSeeds, engineWork, recordSeedsOffered, seedParticipants, seedWasTaken, type NarratorSeed } from "./narrator";
@@ -3575,7 +3576,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       }
     }
     // No order is no call: a stretch with nothing said is time passing, whether it is a continuation or a turn the player gave no word (`a-wait-needs-no-orchestrator.test.ts`).
-    const orchestration = holdForArrival((input.continuation === true || input.answeredDecision === undefined) && (input.orderText === null || input.orderText.trim() === "") ? quietOrchestration() : approachFirst(givenItsDestination(templated !== null ? { output: templated.output, calls: 0, parseFailure: null, salvaged: [] as string[], repairedFrom: null } : await orchestrate(input.port, slice, kindsIn(world)), world), world));
+    // An order the engine cannot read and the orchestrator could write nothing for is answered with what is open to him, not a promise (`an-order-the-engine-cannot-read.ts`).
+    const honestly = <T extends { readonly output: OrchestratorOutput; readonly parseFailure: string | null }>(answer: T): T => answer.parseFailure !== null || input.continuation === true || input.answeredDecision !== undefined || playerId === null
+      ? answer : withTheHonestReply(answer, input.orderText, { world, playerId, offices: input.offices, clock: input.clock, successionRules: input.successionRules, warfare: input.warfare });
+    const orchestration = holdForArrival((input.continuation === true || input.answeredDecision === undefined) && (input.orderText === null || input.orderText.trim() === "") ? quietOrchestration() : honestly(approachFirst(givenItsDestination(templated !== null ? { output: templated.output, calls: 0, parseFailure: null, salvaged: [] as string[], repairedFrom: null } : await orchestrate(input.port, slice, kindsIn(world)), world), world)));
     modelCalls += orchestration.calls;
     iterations += 1;
     if (orchestration.parseFailure !== null) parseFailures.push(orchestration.parseFailure);

@@ -45,3 +45,15 @@ export function withPlans(world: WorldState, playerId: string, count = 4, inDays
   }
   return next;
 }
+
+/**
+ * The same for one man: seated in the cast as a ruler who deals with the player (a letter between them, 2026-10-08), which is what makes a far king askable now that the cast is
+ * those who interact with the player. The tests of a man's plan or a letter's business are not about how he came to be asked.
+ */
+export function seatedInTheCast(world: WorldState, characterId: string, seat: CastSeat = "world"): WorldState {
+  if (world.cast.members.some((member) => member.characterId === characterId)) return world;
+  return {
+    ...world,
+    cast: { ...world.cast, members: [...world.cast.members, { characterId, seat, sinceStep: world.elapsedStep, salience: 60, why: "a letter between him and the player wants an answer", belowFor: 0, reviews: 0 }] },
+  };
+}

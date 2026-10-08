@@ -3,7 +3,7 @@ import type { RoutedActor } from "./attention";
 import { newsRelations } from "./far-powers";
 import { readBoard } from "./board";
 import { houseFolkOf } from "./merchant-houses";
-import { plotsOf, salienceContextOf } from "./cast";
+import { peopleAround, plotsOf, salienceContextOf } from "./cast";
 import type { DueStep } from "./plans";
 
 /**
@@ -57,6 +57,8 @@ function readInterests(world: WorldState, playerId: string | null, offices: read
   const people = new Set<string>();
   /** Askable only if near the player and in a plot of their own, or already in his circle: letters he is party to, and decisions owed. */
   const deferred = new Set<string>();
+  /** Those he holds a relation with a kept cause to: a house's patron among them is a dealing (a loan he asked for), the rest are read as near men's. */
+  const related = new Set<string>();
   const polities = new Set<string>();
   const player = world.characters.find((person) => person.id === playerId);
   if (player !== undefined) {
@@ -64,13 +66,16 @@ function readInterests(world: WorldState, playerId: string | null, offices: read
     people.add(player.id);
     entities.add(player.locationProvinceId);
     for (const id of [...station.forceIds, ...station.accountIds, ...station.holdingIds, ...station.procedureIds]) entities.add(id);
-    // A relationship with a kept cause, rather than an empty acquaintance.
-    for (const relation of player.relations) if (relation.causes.length > 0) people.add(relation.subjectCharacterId);
+    // A relationship with a kept cause, rather than an empty acquaintance, is not a dealing: it is askable only as a near man with a plot or a plan (below).
+    for (const relation of player.relations) if (relation.causes.length > 0) { deferred.add(relation.subjectCharacterId); related.add(relation.subjectCharacterId); }
+    // Whoever deals with him directly (the cast rule, 2026-10-08): the men of his army, office and household, those he ordered. A letter's reader is asked once at the sending (below), and a far one is not woken for it again.
+    for (const id of peopleAround(world, player, { letters: false, household: false })) people.add(id);
     // The cast is askable by its own rule (every seat: a seated person entered for a plot near the player), and so is whoever is set against him.
     for (const member of world.cast.members) people.add(member.characterId);
     for (const nemesis of world.nemeses) if (nemesis.targetCharacterId === player.id && nemesis.retiredAtStep === null) people.add(nemesis.characterId);
     // Honour a decision deferred by an earlier burst, if the man is still one the player's circle reaches (below).
-    for (const owed of world.owed) deferred.add(owed.characterId);
+    // A man owed a call (the last burst chose him and could not pay to ask) is of the circle until he is asked: only men already askable are ever owed.
+    for (const owed of world.owed) people.add(owed.characterId);
     for (const order of world.orders) {
       if (order.actorCharacterId !== player.id) continue;
       for (const part of order.parts) if (part.closedAtStep === null) {
@@ -139,6 +144,7 @@ function readInterests(world: WorldState, playerId: string | null, offices: read
   // The merchant houses' heads and heirs run on rules (`merchant-houses.ts`): the model is not asked about them unless the player's own
   // circle touches them -- a letter, a kinsman, a loan he asked for -- whatever province they happen to live in.
   const houseFolk = houseFolkOf(world);
+  for (const id of related) if (houseFolk.has(id)) people.add(id);
   // Near the places the player stands in and holds: a man in one of these, with a plot or a plan of his own, may be asked; a man further off may not.
   const nearPlaces = player === undefined ? new Set<string>()
     : new Set(kmFromAny(world, world.map.provinces.filter((province) => anchors.has(province.id)).map((province) => province.id), { budgetKm: ASK_REACH_KM }).keys());

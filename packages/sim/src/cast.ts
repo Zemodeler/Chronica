@@ -5,7 +5,6 @@ import {
   CAST_STAY_AT,
   CAST_WORLD_FLOOR,
   computeOpinion,
-  difficultyRules,
   kmFromAny,
   openStorylines,
   readDepartments,
@@ -20,24 +19,23 @@ import { powersDealtWith } from "./far-powers";
 /**
  * The standing cast (docs/plans/a-living-world.md §4; the rule is docs/plans/government.md, "The cast rule").
  *
- * Everybody runs on rules until they matter enough to the player's story to be
- * played by the model. **A person enters the cast for an important plot, and for
- * nothing else**: a scheme he leads or is the hand of, a quarrel the narrator has
- * made a thread of, a contest he stands in, a war plan in an army he commands, a
- * hard decision pending for him (a pressure that wants answering, a question
- * owed), a letter or an order that wants his own answer; and only where that plot
- * is in or near the player's own concerns (the powers he deals with and the
- * ground round the places he holds). Holding an office, being rich, owning a house
- * or ruling somebody else's power gives nothing by itself: a man with none of
- * these runs on the rules (`statecraft.ts`), as the patrons of the trading houses
- * the rules founded do, until a plot reaches him. Once a burst every
- * living person is given a salience -- how much he matters to the player now,
- * which is the sum of his plots -- and the cast is reviewed: those at
- * `CAST_ENTER_AT` or more are promoted, those below `CAST_STAY_AT` for two
+ * Everybody runs on rules until they deal with the player directly, and then the
+ * model plays them. **A person enters the cast for an interaction with the player,
+ * and for nothing else** (the cast rule, 2026-10-08): he is in the player's army,
+ * office or household, the player ordered him or wrote to him, or he wrote to the
+ * player, he is the player's nemesis, friend, rival or kin about him, or he has a
+ * plot that touches the player or his people (`peopleAround`, `plotsOf`). Holding an
+ * office, being rich, owning a house, ruling somebody else's power, commanding an
+ * army elsewhere or standing in a thread the player has no part in gives nothing:
+ * a man with none of these runs on the rules (`statecraft.ts`), as the patrons of
+ * the trading houses the rules founded do, until he deals with the player. Once a
+ * burst every living person is given a salience -- how much he matters to the
+ * player now, which is the sum of his interactions -- and the cast is reviewed:
+ * those at `CAST_ENTER_AT` or more are promoted, those below `CAST_STAY_AT` for two
  * reviews step down once they have served `CAST_MIN_STAY`, and the seats are
- * held: one for the nemesis, one for a friend of his with a plot, up to three for the player's own chain (his
+ * held: one for the nemesis, one for a friend of his who deals with him, up to three for the player's own chain (his
  * superior, those he commands, his rivals, his kin, those he writes to), two
- * for the wider world's rulers, so the cast is never all Roman, and the rest
+ * for a foreign ruler for the turns he writes to the player or is written to, and the rest
  * open. Each member is asked once a burst, handed what the rules had him
  * doing lately and the options the rules would weigh (`statecraft.ts`), and
  * the rules stand back from him while he is played.
@@ -67,6 +65,8 @@ interface SalienceContext {
   readonly dealt: ReadonlySet<string> | null;
   /** The provinces within the player's reach: round the places he stands in and holds. */
   readonly nearby: ReadonlySet<string>;
+  /** The people who deal with him directly (`peopleAround`). */
+  readonly people: ReadonlySet<string>;
 }
 
 /** A friend: a person whose opinion of the player is at least this (the cast's `friend` seat, for a plot of his). */
@@ -98,44 +98,91 @@ function hasAMatterInHand(world: WorldState, polityId: string, board: SalienceCo
   return world.material.politicalProcedures.some((procedure) => procedure.outcome === null && procedure.resolvedAtStep === null && world.material.institutions.some((institution) => institution.id === procedure.institutionId && institution.polityId === polityId));
 }
 
+/** The most seats of one office that are a college the holder works beside (the consuls, the praetors, the quaestors): more is a body he sits in, not a household of colleagues. */
+export const COLLEGE_AT_MOST = 8;
+
+/** How long a letter, sent or received, still makes its writer one the player deals with. */
+export const LETTER_DAYS = 30;
+
 /**
- * The important plots a person is in, with what each is worth: the cast rule's one place. A person with none is of no account to the cast.
+ * The people who deal with the player directly, by the cast rule (2026-10-08, "anything that interacts directly with the player"): the men of his army (who leads it, who
+ * holds a post in it, who serves under him), of his office (his colleagues and the head of his power), of his household (the kin who live where he does), those he has ordered
+ * or written to, those who wrote to him (`letters: false` leaves these out: a letter's reader is asked once, at the sending, and a far one is not woken for it again,
+ * `cognition-policy.ts`), and whoever is set against him. Nobody else is in it: a ruler across the sea or a general in another's army is not, until he
+ * writes, is written to, or is ordered.
+ */
+export function peopleAround(world: WorldState, player: Character | undefined, options: { readonly letters?: boolean; readonly household?: boolean } = {}): ReadonlySet<string> {
+  const people = new Set<string>();
+  if (player === undefined) return people;
+  const day = world.instant.day;
+  // His army: its commander and controller, its posts, and the men of an army he leads.
+  for (const force of world.material.forces) {
+    if (force.outlaw === true) continue;
+    const mine = force.commanderCharacterId === player.id || force.controllerCharacterId === player.id || force.memberCharacterIds.includes(player.id);
+    if (!mine) continue;
+    for (const id of [force.commanderCharacterId, force.controllerCharacterId, ...(force.posts ?? []).map((post) => post.characterId)]) if (id != null) people.add(id);
+  }
+  // His office: the men who hold the same seat with him (a college of a few: a consul's colleague, not the whole Senate), and the head of his power.
+  const held = new Set(world.material.officeSeats.filter((seat) => seat.status === "held" && seat.holderCharacterId === player.id).map((seat) => seat.officeId));
+  for (const officeId of held) {
+    const college = world.material.officeSeats.filter((seat) => seat.officeId === officeId);
+    if (college.length > COLLEGE_AT_MOST) continue;
+    for (const seat of college) if (seat.status === "held" && seat.holderCharacterId !== null) people.add(seat.holderCharacterId);
+  }
+  if (player.polityId !== null) for (const ruler of readDepartments(world).rulers(player.polityId)) people.add(ruler.id);
+  // His household: kin who live where he does.
+  for (const link of options.household === false ? [] : world.familyLinks) {
+    const other = link.characterId === player.id ? link.relatedCharacterId : link.relatedCharacterId === player.id ? link.characterId : null;
+    if (other !== null && world.characters.find((candidate) => candidate.id === other)?.locationProvinceId === player.locationProvinceId) people.add(other);
+  }
+  // Those he has ordered or written to, and those who have written to him.
+  for (const attempt of world.orderAttempts) {
+    if (attempt.recipientRef.kind !== "character" || !["issued", "received", "accepted", "delayed"].includes(attempt.status)) continue;
+    if (attempt.issuerRef.id === player.id || world.orders.some((order) => order.actorCharacterId === player.id && order.parts.some((part) => part.workRefs.some((ref) => ref.kind === "order_attempt" && ref.id === attempt.id)))) people.add(attempt.recipientRef.id);
+  }
+  for (const message of options.letters === false ? [] : world.diplomacy) {
+    if (message.status !== "awaiting_reply" && day - message.sentAtStep > LETTER_DAYS) continue;
+    if (message.fromCharacterId === player.id && message.toCharacterId !== null) people.add(message.toCharacterId);
+    if (message.toCharacterId === player.id && message.fromCharacterId !== null) people.add(message.fromCharacterId);
+  }
+  for (const nemesis of world.nemeses) if (nemesis.targetCharacterId === player.id && nemesis.retiredAtStep === null) people.add(nemesis.characterId);
+  people.delete(player.id);
+  return people;
+}
+
+/**
+ * The plots a person is in that touch the player directly, with what each is worth: the cast rule's one place. A person with none is of no account to the cast.
+ * Since 2026-10-08 a plot counts only where it touches the player: a scheme laid by or against him or his people, a quarrel he is a party to, a contest for an office about
+ * him, the war of an army of his, a letter or an order between him and the man, the head of his own power. A far general with a war on, a foreign ruler with a matter in hand,
+ * a thread he has no part in, a decision owed by nobody he deals with: these were plots and are not.
  */
 export function plotsOf(world: WorldState, character: Character, playerId: string, context?: SalienceContext): Plot[] {
   const player = world.characters.find((candidate) => candidate.id === playerId);
   const board = context?.board ?? readBoard(world);
   const rulers = context?.rulers ?? readDepartments(world);
+  const people = context?.people ?? peopleAround(world, player);
+  const touches = (id: string | null | undefined): boolean => id != null && (id === playerId || people.has(id));
   const plots: Plot[] = [];
   const playerPolity = player?.polityId ?? null;
   const theirPolity = character.polityId;
-  const reading = theirPolity === null ? undefined : board.get(theirPolity);
-  const atWar = (reading?.wars.length ?? 0) > 0;
+  const rulesUs = playerPolity !== null && rulers.rulers(playerPolity).some((ruler) => ruler.id === character.id);
+  const foreignRuler = theirPolity !== null && theirPolity !== playerPolity && rulers.rulers(theirPolity).some((ruler) => ruler.id === character.id);
 
-  // A scheme: a person set against the player, a plot he leads or whose hand he is, or one laid against him.
+  // A scheme: a person set against the player, a plot he leads or whose hand he is, or one laid against him, where it touches the player or his people.
   if (world.nemeses.some((nemesis) => nemesis.characterId === character.id && nemesis.targetCharacterId === playerId && nemesis.retiredAtStep === null)) plots.push({ kind: "scheme", points: 50, why: "set against the player", earns: "nemesis" });
-  if (world.covertPlots.some((plot) => plot.outcome === null && (plot.sponsorCharacterId === character.id || plot.agentCharacterId === character.id))) plots.push({ kind: "scheme", points: 35, why: "leads a plot" });
-  else if (world.covertPlots.some((plot) => plot.outcome === null && plot.targetCharacterId === character.id)) plots.push({ kind: "scheme", points: 20, why: "a plot is laid against him" });
+  const touching = world.covertPlots.filter((plot) => plot.outcome === null && [plot.sponsorCharacterId, plot.agentCharacterId, plot.targetCharacterId].some(touches));
+  if (touching.some((plot) => plot.sponsorCharacterId === character.id || plot.agentCharacterId === character.id)) plots.push({ kind: "scheme", points: 35, why: "leads a plot" });
+  else if (touching.some((plot) => plot.targetCharacterId === character.id)) plots.push({ kind: "scheme", points: 20, why: "a plot is laid against him" });
 
-  // A thread the narrator has made of a quarrel, and what is told in it.
-  const thread = openStorylines(world.storylines).find((storyline) => storyline.participantIds.includes(character.id));
+  // A thread the narrator has made of a quarrel the player is a party to.
+  const thread = openStorylines(world.storylines).find((storyline) => storyline.participantIds.includes(character.id) && storyline.participantIds.includes(playerId));
   if (thread !== undefined) plots.push({ kind: "thread", points: thread.phase === "escalating" || thread.phase === "crisis" ? 35 : 25, why: `caught up in ${thread.title}` });
 
-  // A contest: a candidate in an open election or appointment, or the man who puts a candidate forward.
+  // A contest: a candidate in an open election or appointment, or the man who puts a candidate forward: a rival for an office about him.
   if (world.material.politicalProcedures.some((procedure) => procedure.outcome === null && procedure.resolvedAtStep === null && (procedure.type === "nomination" || procedure.type === "appointment")
     && ((procedure.subjectKind === "character" && procedure.subjectId === character.id) || procedure.sponsorCharacterId === character.id))) plots.push({ kind: "contest", points: 30, why: "stands in a contest for an office" });
 
-  // A war plan: the man who commands an army where his power is at war, and above all the face a power shows the world, the commander of its main army.
-  const commands = world.material.forces.some((force) => force.commanderCharacterId === character.id && force.outlaw !== true);
-  if (commands && atWar) plots.push({ kind: "war_plan", points: 10, why: "commands an army at war" });
-  const rulesHere = theirPolity !== null && rulers.rulers(theirPolity).some((ruler) => ruler.id === character.id);
-  const rulesUs = playerPolity !== null && rulers.rulers(playerPolity).some((ruler) => ruler.id === character.id);
-  const across = playerPolity === null ? undefined : board.get(playerPolity)?.neighbours.find((neighbour) => neighbour.polityId === theirPolity);
-  const hardPressure = world.characterPressures.some((pressure) => pressure.characterId === character.id && pressure.status === "active" && pressure.intensity >= HARD_DECISION_AT);
-  const owes = world.owed.some((owed) => owed.characterId === character.id);
-  if (!rulesHere && !rulesUs && theirPolity !== null && reading !== undefined && commandsMainArmy(world, character.id, theirPolity)
-    && (atWar || hardPressure || owes || thread !== undefined) && (reading.strength >= 20_000 || (across !== undefined && across.relation !== "follows_us" && across.relation !== "leads_us"))) {
-    plots.push({ kind: "war_plan", points: atWar ? 30 : 20, why: `commands the main army of ${reading.name}` });
-  }
+  // A war plan: the man who commands the army the player belongs to or leads, in the field.
   const playerForces = world.material.forces.filter((force) => force.memberCharacterIds.includes(playerId) || force.commanderCharacterId === playerId || force.controllerCharacterId === playerId);
   const inTheField = (force: (typeof playerForces)[number]): boolean => (board.get(force.polityId)?.wars.length ?? 0) > 0
     || world.sieges.some((siege) => siege.status === "active" && siege.forceId === force.id)
@@ -143,47 +190,37 @@ export function plotsOf(world: WorldState, character: Character, playerId: strin
   if (playerForces.some((force) => force.commanderCharacterId === character.id && force.commanderCharacterId !== playerId && inTheField(force))) plots.push({ kind: "war_plan", points: 40, why: "commands the player's army in the field", earns: "chain" });
   if (playerForces.some((force) => force.controllerCharacterId === playerId && force.commanderCharacterId === character.id && inTheField(force))) plots.push({ kind: "war_plan", points: 40, why: "serves under the player in the field", earns: "chain" });
 
-  // A hard decision pending: a pressure that wants answering, a question owed him, a thing done lately that has to be followed.
-  if (hardPressure) plots.push({ kind: "decision", points: 20, why: "has a hard decision before him" });
-  else if (owes) plots.push({ kind: "decision", points: 20, why: "owes a decision" });
-  if (world.statecraft.log.some((entry) => entry.actorCharacterId === character.id && world.instant.day - entry.day <= 60
-    && (entry.act === "declare_war" || entry.act === "revolt" || entry.act === "make_peace" || entry.act === "alliance"))) plots.push({ kind: "decision", points: 15, why: "has just done something great" });
-
-  // A letter that wants his own answer, or an order that wants his own doing, between him and the player.
-  if (world.diplomacy.some((message) => message.status === "awaiting_reply"
-    && ((message.fromCharacterId === playerId && message.toCharacterId === character.id) || (message.toCharacterId === playerId && message.fromCharacterId === character.id)))) plots.push({ kind: "letter", points: 25, why: "a letter between him and the player wants an answer", earns: "chain" });
+  // A letter between him and the player (one that wants an answer, or one of the last month), or an order of the player's that wants his doing. A foreign ruler who
+  // deals with him so is of the wider world's seat; the player's own people are of his chain.
+  const day = world.instant.day;
+  const dealing = foreignRuler ? "world" : "chain";
+  if (world.diplomacy.some((message) => (message.status === "awaiting_reply" || day - message.sentAtStep <= LETTER_DAYS)
+    && ((message.fromCharacterId === playerId && message.toCharacterId === character.id) || (message.toCharacterId === playerId && message.fromCharacterId === character.id)))) plots.push({ kind: "letter", points: 25, why: "a letter between him and the player wants an answer", earns: dealing });
   if (world.orderAttempts.some((attempt) => attempt.recipientRef.id === character.id && ["issued", "received", "accepted", "delayed"].includes(attempt.status)
-    && (attempt.issuerRef.id === playerId || world.orders.some((order) => order.actorCharacterId === playerId && order.parts.some((part) => part.workRefs.some((ref) => ref.kind === "order_attempt" && ref.id === attempt.id)))))) plots.push({ kind: "order", points: 25, why: "has the player's order to carry out", earns: "chain" });
+    && (attempt.issuerRef.id === playerId || world.orders.some((order) => order.actorCharacterId === playerId && order.parts.some((part) => part.workRefs.some((ref) => ref.kind === "order_attempt" && ref.id === attempt.id)))))) plots.push({ kind: "order", points: 25, why: "has the player's order to carry out", earns: dealing });
 
-  // The head of the player's own power, while it has a matter in hand; a foreign ruler, while his power has one.
+  // The head of the player's own power, while it has a matter in hand.
   if (rulesUs && playerPolity !== null && hasAMatterInHand(world, playerPolity, board)) plots.push({ kind: "rule", points: 40, why: "rules the player's power, which has a matter in hand", earns: "chain" });
-  if (rulesHere && !rulesUs && reading !== undefined && theirPolity !== null && hasAMatterInHand(world, theirPolity, board)) {
-    if (reading.strength >= 20_000) plots.push({ kind: "rule", points: 25, why: `rules ${reading.name}, a great power with a matter in hand`, earns: "world" });
-    // A neighbour that is not of our own bloc: Rome's allies by foedus are Rome's business, not a voice of the wider world.
-    if (across !== undefined && across.relation !== "follows_us" && across.relation !== "leads_us") plots.push({ kind: "rule", points: across.bordering ? 20 : 10, why: "rules a power the player's government deals with", earns: "world" });
-    // On a harder world the cast leans toward those who fear the player's power (`hostileSeats`).
-    const hostile = difficultyRules(world.difficulty).hostileSeats;
-    const fear = playerPolity === null ? 0 : world.alarm.find((entry) => entry.polityId === theirPolity && entry.towardPolityId === playerPolity)?.level ?? 0;
-    if (hostile > 0 && fear >= 25) plots.push({ kind: "rule", points: 8 * hostile, why: "fears the player's power", earns: "world" });
-    if (plots.every((plot) => plot.earns !== "world")) plots.push({ kind: "rule", points: 0, why: "rules a power with a matter in hand", earns: "world" });
-  }
 
-  // What does not make a plot of itself but sharpens one: the player's rival, and his kin.
+  // What does not make a plot of itself but sharpens one: a hard decision before him, the player's rival, his kin, his friend.
   if (plots.length > 0) {
+    const hardPressure = world.characterPressures.some((pressure) => pressure.characterId === character.id && pressure.status === "active" && pressure.intensity >= HARD_DECISION_AT);
+    if (hardPressure) plots.push({ kind: "decision", points: 20, why: "has a hard decision before him" });
+    else if (world.owed.some((owed) => owed.characterId === character.id)) plots.push({ kind: "decision", points: 20, why: "owes a decision" });
+    if (world.statecraft.log.some((entry) => entry.actorCharacterId === character.id && day - entry.day <= 60
+      && (entry.act === "declare_war" || entry.act === "revolt" || entry.act === "make_peace" || entry.act === "alliance"))) plots.push({ kind: "decision", points: 15, why: "has just done something great" });
     const against = (from: Character | undefined, toward: string): number =>
       from?.relations.find((relation) => relation.subjectCharacterId === toward)?.causes.reduce((sum, cause) => sum + cause.score, 0) ?? 0;
     if (against(character, playerId) <= -20 || against(player, character.id) <= -20) plots.push({ kind: "scheme", points: 15, why: "the player's rival", earns: "chain" });
     if (world.familyLinks.some((link) => (link.characterId === character.id && link.relatedCharacterId === playerId) || (link.characterId === playerId && link.relatedCharacterId === character.id))) plots.push({ kind: "scheme", points: 10, why: "the player's kin", earns: "chain" });
-  }
-  if (plots.length > 0 && computeOpinion(character, playerId) >= FRIEND_OPINION) {
-    plots.push({ kind: "scheme", points: FRIEND_POINTS, why: "the player's friend", earns: "friend" });
+    if (computeOpinion(character, playerId) >= FRIEND_OPINION) plots.push({ kind: "scheme", points: FRIEND_POINTS, why: "the player's friend", earns: "friend" });
   }
   return plots;
 }
 
 /** The reading a review makes once and every person is scored against (`salienceOf`). */
 export function salienceContextOf(world: WorldState, playerId: string): SalienceContext {
-  return { board: readBoard(world), rulers: readDepartments(world), dealt: powersDealtWith(world, playerId), nearby: nearThePlayer(world, world.characters.find((candidate) => candidate.id === playerId)) };
+  return { board: readBoard(world), rulers: readDepartments(world), dealt: powersDealtWith(world, playerId), nearby: nearThePlayer(world, world.characters.find((candidate) => candidate.id === playerId)), people: peopleAround(world, world.characters.find((candidate) => candidate.id === playerId)) };
 }
 
 /** How much a person matters to the player's story now, and which seat that earns: the sum of his plots, if he is in the player's area. */
@@ -203,13 +240,6 @@ export function salienceOf(world: WorldState, character: Character, playerId: st
   }
   const score = plots.reduce((sum, plot) => sum + plot.points, 0);
   return { score, why: plots.filter((plot) => plot.points > 0).slice(0, 3).map((plot) => plot.why).join(", ") || plots[0]!.why, seat };
-}
-
-/** The man at the head of a power's largest army: the one force of it that the world looks to. */
-function commandsMainArmy(world: WorldState, characterId: string, polityId: string): boolean {
-  const main = world.material.forces.filter((force) => force.polityId === polityId && force.commanderCharacterId !== null)
-    .sort((a, b) => b.authorizedStrength - a.authorizedStrength || a.id.localeCompare(b.id))[0];
-  return main?.commanderCharacterId === characterId;
 }
 
 /** Seats per kind, with this cast size: one nemesis, a chain, the world, the rest open. */

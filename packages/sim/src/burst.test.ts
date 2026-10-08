@@ -605,7 +605,7 @@ const ORDER_AND_PLOT = JSON.stringify({
   frictions: [],
   deltas: [
     { op: "force_modify", forceRef: "legio-i", moraleBpsDelta: 200, reason: "The consul's inspection lifts spirits." },
-    { op: "storyline_open", localId: "plot", seedKey: "seed-plot", title: "The Quaestor's Silence", participantRefs: ["quintus-fabius"], provinceId: world().map.provinces.find((province) => province.settlements.some((city) => city.id === "settlement-rome"))!.id, phase: "brewing", stakes: "Whether the Senate can be turned against the consul unnoticed.", nextDevelopment: "Fabius sounds out the patrician bloc.", visibility: "private", reason: "The world stirs." },
+    { op: "storyline_open", localId: "plot", seedKey: "seed-plot", title: "The Quaestor's Silence", participantRefs: ["quintus-fabius", "marcus-atilius"], provinceId: world().map.provinces.find((province) => province.settlements.some((city) => city.id === "settlement-rome"))!.id, phase: "brewing", stakes: "Whether the Senate can be turned against the consul unnoticed.", nextDevelopment: "Fabius sounds out the patrician bloc.", visibility: "private", reason: "The world stirs." },
     { op: "character_pressure_set", characterRef: "quintus-fabius", action: "create", kind: "political_danger", intensity: 80, label: "Afraid the consul suspects him.", reviewInDays: 30, expiresInDays: null, visibility: "private", reason: "A plotter's fear." },
     { op: "character_intent_set", actorCharacterRef: "quintus-fabius", actionType: "seek_support", targetRefs: [], rationale: "Gather senators against the consul.", priority: 70, visibility: "private" },
   ],

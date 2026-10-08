@@ -1,3 +1,4 @@
+import { seatedInTheCast } from "./askable-test-kit";
 import { describe, expect, it } from "vitest";
 import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, type PlanProposal, type WorldState } from "@chronica/shared";
@@ -252,7 +253,7 @@ describe("a burst", () => {
     // A king with an office is in the ambient cast from the first look. The
     // span is the player waiting a month.
     const result = await runSimulationBurst({
-      world: opening(), clock, offices, warfare: definition.warfare, burstId: "plan", gameId: "game-plans",
+      world: seatedInTheCast(opening(), HIERON), clock, offices, warfare: definition.warfare, burstId: "plan", gameId: "game-plans",
       actorRef: { kind: "character", id: "gaius-genucius" }, actorPolityId: "rome",
       orderText: "Let a month pass.", spanDays: 30, knownFacts: [], queue: [], port, narratorSeeds: [],
       // The step's own week wakes him: a man's plan is asked of him as it falls due, so the rest between asks is not what these tests are about.
@@ -289,7 +290,7 @@ describe("a burst", () => {
       return JSON.stringify({ actors: [{ actorRef: { kind: "character", id: HIERON }, reasoning: "Wait for reports.", proposal: { narrativeSummary: "Hieron reviews.", deltas: [], facts: [fact("review", "Hieron renewed discreet inquiries about Messana.")] }, serves: [{ ref: next, acts: [0] }] }] });
     });
     const result = await runSimulationBurst({
-      world: opening(), clock, offices, warfare: definition.warfare, burstId: "idle", gameId: "game-plans",
+      world: seatedInTheCast(opening(), HIERON), clock, offices, warfare: definition.warfare, burstId: "idle", gameId: "game-plans",
       actorRef: { kind: "character", id: "gaius-genucius" }, actorPolityId: "rome",
       orderText: "Let a month pass.", spanDays: 30, knownFacts: [], queue: [], port, narratorSeeds: [],
       budget: { ...DEFAULT_BUDGET, farRestDays: 0, nearWorldRestDays: 0, maxAskedPerRound: 6 },

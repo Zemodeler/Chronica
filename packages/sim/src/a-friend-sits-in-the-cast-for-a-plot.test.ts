@@ -62,7 +62,7 @@ describe("a friend sits in the cast for a plot", () => {
     expect(plotsOf(cool, person(cool, FRIEND), PLAYER).map((plot) => plot.why)).not.toContain("the player's friend");
     // A far friend with a plot is far from the player's concerns.
     const far = opening().characters.find((character) => character.polityId === "ireland-ulster-communities")!;
-    const worldFar = befriended({ ...quiet(opening()), covertPlots: [plotOf(far.id, "manius-curius")] }, far.id);
+    const worldFar = befriended({ ...quiet(opening()), covertPlots: [plotOf(far.id, "gnaeus-cornelius")] }, far.id);
     expect(salienceOf(worldFar, person(worldFar, far.id), PLAYER)).toMatchObject({ score: 0, why: "far from the player's concerns" });
   });
 

@@ -1,3 +1,4 @@
+import { seatedInTheCast } from "./askable-test-kit";
 import { describe, expect, it } from "vitest";
 import { punicWarsScenario } from "@chronica/db";
 import { DiplomaticMessageSchema, PoliticalProcedureSchema, ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, advanceWorldTo, diplomaticAnswerChangesTrust, diplomaticSituationKey, emitFacts, negotiationBusinesses, redundantDiplomaticOffer, sameDiplomaticTerms, type DiplomaticMessage, type WorldState } from "@chronica/shared";
@@ -232,7 +233,7 @@ describe("a duplicate cannot manufacture progress inside a burst", () => {
       asked = true;
       return Promise.resolve(JSON.stringify({ actors: [{ actorRef: { kind: "character", id: actor }, proposal: { deltas: [proposal()], facts: [{ localId: "manufactured", kind: "diplomatic_message_sent", summary: "Hanno sent a fresh notice proposal again.", affectedRefs: [{ kind: "character", id: actor }], visibility: "public", discoveryState: "public", significance: 40 }] }, serves: [{ ref: step, acts: [0] }] }] }));
     } };
-    const result = await runSimulationBurst({ world, clock: definition.clock, offices: definition.government.offices, warfare: definition.warfare, burstId: "duplicate-burst", gameId: "business", actorRef: { kind: "character", id: "gaius-genucius" }, actorPolityId: "rome", orderText: "Let three days pass.", spanDays: 3, knownFacts: [], queue: [], port, narratorSeeds: [], budget: { ...DEFAULT_BUDGET, maxFocusedActors: 3, maxAmbientActors: 3 } });
+    const result = await runSimulationBurst({ world: seatedInTheCast(world, actor), clock: definition.clock, offices: definition.government.offices, warfare: definition.warfare, burstId: "duplicate-burst", gameId: "business", actorRef: { kind: "character", id: "gaius-genucius" }, actorPolityId: "rome", orderText: "Let three days pass.", spanDays: 3, knownFacts: [], queue: [], port, narratorSeeds: [], budget: { ...DEFAULT_BUDGET, maxFocusedActors: 3, maxAmbientActors: 3 } });
     expect(asked, JSON.stringify({ skipped: result.skipped, plans: result.plans, stop: result.stopReason })).toBe(true);
     expect(result.world.diplomacy.filter((message) => message.fromCharacterId === actor && message.negotiation?.issueKey === negotiation.issueKey)).toHaveLength(1);
     expect(result.newFacts.some((fact) => fact.summary.includes("fresh notice proposal"))).toBe(false);
