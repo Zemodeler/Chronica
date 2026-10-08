@@ -39,6 +39,7 @@ import { tenureLean } from "./command-tenure";
 import { intercessionsAgainst, settleSecessions, type SecessionHooks } from "./tribunes";
 import { creditTheSpeech } from "./standing-deeds";
 import { absenceFrom, seatIsEmpty } from "./quorum";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * A chamber's questions, debated by its people and decided by the count.
@@ -549,7 +550,7 @@ export function holdVotes(input: HoldVotesInput): { world: WorldState; facts: Fa
         },
       };
       facts.push({
-        localId: `vote_${facts.length + 1}`,
+        localId: safeLocalId(`vote_${facts.length + 1}`),
         kind: "motion_vetoed",
         summary: said,
         affectedRefs: [{ kind: "procedure", id: procedure.id }, { kind: "polity", id: institution.polityId }, { kind: "character", id: procedure.sponsorCharacterId }],
@@ -594,7 +595,7 @@ export function holdVotes(input: HoldVotesInput): { world: WorldState; facts: Fa
         },
       };
       facts.push({
-        localId: `vote_${facts.length + 1}`,
+        localId: safeLocalId(`vote_${facts.length + 1}`),
         kind: "motion_adjourned",
         summary: said,
         affectedRefs: [{ kind: "procedure", id: procedure.id }, { kind: "polity", id: institution.polityId }, { kind: "character", id: procedure.sponsorCharacterId }],
@@ -632,7 +633,7 @@ export function holdVotes(input: HoldVotesInput): { world: WorldState; facts: Fa
       .filter((position) => position.supporterKind === "character" && world.characters.some((character) => character.id === position.supporterId))
       .map((position) => ({ kind: "character" as const, id: position.supporterId }));
     facts.push({
-      localId: `vote_${facts.length + 1}`,
+      localId: safeLocalId(`vote_${facts.length + 1}`),
       kind: carried ? "motion_passed" : "motion_failed",
       summary: said,
       affectedRefs: [
@@ -715,7 +716,7 @@ function giveAdvice(
   return {
     world: next,
     fact: {
-      localId: `advice_${procedure.id}`.slice(0, 60),
+      localId: safeLocalId(`advice_${procedure.id}`).slice(0, 60),
       kind: "council_advised",
       summary: said,
       affectedRefs: [{ kind: "procedure", id: procedure.id }, { kind: "polity", id: institution.polityId }, { kind: "character", id: procedure.sponsorCharacterId }, ...(ruler === null ? [] : [{ kind: "character" as const, id: ruler.id }])],
@@ -749,7 +750,7 @@ function settleAdvice(world: WorldState, input: HoldVotesInput): { world: WorldS
       facts.push(...enacted.facts);
     }
     facts.push({
-      localId: `advice_settled_${procedure.id}`.slice(0, 60),
+      localId: safeLocalId(`advice_settled_${procedure.id}`).slice(0, 60),
       kind: carried ? "motion_passed" : "motion_failed",
       summary: said,
       affectedRefs: [{ kind: "procedure", id: procedure.id }, { kind: "polity", id: institution.polityId }, { kind: "character", id: procedure.sponsorCharacterId }],
@@ -790,7 +791,7 @@ function referOn(world: WorldState, settled: PoliticalProcedure, institution: Go
   return {
     world: { ...world, material: { ...world.material, politicalProcedures: world.material.politicalProcedures.map((candidate) => (candidate.id === settled.id ? reopened : candidate)) } },
     fact: {
-      localId: `referred_${settled.id}`.slice(0, 60),
+      localId: safeLocalId(`referred_${settled.id}`).slice(0, 60),
       kind: "motion_referred",
       summary: `The ${institution.name} would not have "${settled.label}", and ${sponsor} has taken it to the ${target.name}, which votes in ${MOTION_VOTING_DAYS} days [${settled.id}].`,
       affectedRefs: [{ kind: "procedure", id: settled.id }, { kind: "polity", id: institution.polityId }, { kind: "character", id: settled.sponsorCharacterId }],
@@ -843,7 +844,7 @@ export function overruleCost(world: WorldState, procedure: PoliticalProcedure, o
   return {
     world: next,
     fact: {
-      localId: `overruled_${procedure.id}`.slice(0, 60),
+      localId: safeLocalId(`overruled_${procedure.id}`).slice(0, 60),
       kind: "council_overruled",
       summary: `${who} carried "${procedure.label}" against the advice of the ${council.name}${customary ? ", as rulers there now do" : ""}.`,
       affectedRefs: [{ kind: "procedure", id: procedure.id }, { kind: "polity", id: polityId }, ...(ruler === null ? [] : [{ kind: "character" as const, id: ruler.id }])],

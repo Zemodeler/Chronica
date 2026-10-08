@@ -12,6 +12,7 @@ import {
 import { resolveEngagement, type BattleAccount } from "./battle";
 import type { IdFactory } from "./ports";
 import { BREACH_AT, marchOut, pressSieges } from "./sieges";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * The besieging player's word at a siege's turning points
@@ -167,7 +168,7 @@ export function stormSiege(
   const carried = holding.length === 0;
   const where = breached ? `the breach at ${place}` : `the walls of ${place}`;
   facts.push({
-    localId: `storm_${siege.id}_${day}`.slice(0, 60),
+    localId: safeLocalId(`storm_${siege.id}_${day}`).slice(0, 60),
     kind: "siege_event",
     summary: garrison.length === 0
       ? `${besieger.name} went in at ${where} and found nobody to hold it: the city lay open.`

@@ -26,6 +26,7 @@ import { grainPrice } from "../grain";
 import type { ApplyContext } from "./context";
 import { SOVEREIGN_AGREEMENTS } from "./nobody-listens";
 import { gravityOf, usurpedLately, type UsurpedAct } from "../usurpation";
+import { safeLocalId } from "../safe-local-id";
 
 /**
  * Who may do this act, asked of the constitution (docs/plans/government.md, "H0 as built").
@@ -197,7 +198,7 @@ function motionFor(world: WorldState, actorId: string, gated: Gated, bodyId: str
   const actor = world.characters.find((character) => character.id === actorId)!;
   return {
     op: "political_procedure_open",
-    localId: `motion_${gated.act}_${actorId}`.slice(0, 60),
+    localId: safeLocalId(`motion_${gated.act}_${actorId}`).slice(0, 60),
     type: "council_deliberation",
     institutionRef: bodyId,
     sponsorCharacterRef: actorId,

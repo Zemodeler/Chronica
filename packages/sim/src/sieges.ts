@@ -38,6 +38,7 @@ import { resolveEngagement, type BattleAccount } from "./battle";
 import { blockadeTightness } from "./blockades";
 import type { IdFactory } from "./ports";
 import { honourSieges, type SiegeDeed } from "./standing-deeds";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Sieges, pressed day by day (`world/siege.ts`).
@@ -214,7 +215,7 @@ export function pressSieges(given: WorldState, toDay: number, options: PressSieg
       ...(besieger === undefined ? [] : [{ kind: "force" as const, id: besieger.id }]),
     ];
     const end = (status: "lifted" | "taken", reason: string, kind: string, summary: string, significance: number): Siege => {
-      facts.push({ localId: `${kind}_${siege.id}`.slice(0, 60), kind, summary, affectedRefs: refs, visibility: "public", discoveryState: "public", knowableInDays: 0, significance });
+      facts.push({ localId: safeLocalId(`${kind}_${siege.id}`).slice(0, 60), kind, summary, affectedRefs: refs, visibility: "public", discoveryState: "public", knowableInDays: 0, significance });
       return { ...siege, status, pressedToStep: toDay, endedAtStep: toDay, endedReason: reason.slice(0, 300) };
     };
 
@@ -256,7 +257,7 @@ export function pressSieges(given: WorldState, toDay: number, options: PressSieg
     let told = siege.told;
     const tell = (key: string, kind: string, summary: string, significance: number, extraRefs: readonly { readonly kind: "character"; readonly id: string }[] = []): void => {
       told = [...told, key].slice(-20);
-      facts.push({ localId: `${key}_${siege.id}_${toDay}`.slice(0, 60), kind, summary: summary.slice(0, 600), affectedRefs: [...extraRefs, ...refs], visibility: "public", discoveryState: "public", knowableInDays: 0, significance });
+      facts.push({ localId: safeLocalId(`${key}_${siege.id}_${toDay}`).slice(0, 60), kind, summary: summary.slice(0, 600), affectedRefs: [...extraRefs, ...refs], visibility: "public", discoveryState: "public", knowableInDays: 0, significance });
     };
     if (runners && !told.includes("runners")) tell("runners", "siege_event", `Ships of ${polityName(siege.defenderPolityId)} slipped into ${place} past the besiegers' lines with grain and men: while the sea is open, the city is not starved.`, 50);
     // The works: finished on their day, and then pressing the city harder --
@@ -381,7 +382,7 @@ export function pressSieges(given: WorldState, toDay: number, options: PressSieg
     const pressed = { ...siege, pressureBps, pressedToStep: toDay, garrisonForceIds: stamped, told, works };
     if (toDay - siege.reportedAtStep < SIEGE_REPORT_DAYS) return pressed;
     facts.push({
-      localId: `siege_report_${siege.id}_${toDay}`.slice(0, 60),
+      localId: safeLocalId(`siege_report_${siege.id}_${toDay}`).slice(0, 60),
       kind: "siege_progress",
       summary: `The siege of ${place} by ${besieger.name} entered its ${ordinal(weeks)} week: ${howItGoes(pressureBps)}${defenders > 0 ? `, and ${left} of the garrison remain on the walls` : ""}.`,
       affectedRefs: refs,
@@ -517,7 +518,7 @@ function sackCities(world: WorldState, sacked: readonly { provinceId: string; pl
     // The market it was the hub of, or belonged to, is stripped, and those who were sold are sold.
     next = sackTheMarket(next, sack.provinceId, lost, 1, sack.takerPolityId);
     facts.push({
-      localId: `sacked_${sack.provinceId}_${toDay}`.slice(0, 60),
+      localId: safeLocalId(`sacked_${sack.provinceId}_${toDay}`).slice(0, 60),
       kind: "city_sacked",
       summary: `${sack.commanderName} let ${sack.forceName} loose on ${sack.place}: some ${lost.toLocaleString("en-GB")} of its people were put to the sword or sold${loot > 0 ? `, and ${loot} in plunder went to ${next.map.polities.find((polity) => polity.id === sack.takerPolityId)?.name ?? sack.takerPolityId}` : ""}.`.slice(0, 400),
       affectedRefs: [{ kind: "province", id: sack.provinceId }, { kind: "character", id: sack.commanderId }, { kind: "polity", id: sack.takerPolityId }, { kind: "polity", id: sack.loserPolityId }],

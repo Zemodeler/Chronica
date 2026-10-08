@@ -13,6 +13,7 @@ import {
 } from "@chronica/shared";
 import { seatsOf } from "./ballots";
 import { remember, type Grievance } from "./grievances";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * The man who did it without leave (the user's rule, 2026-10-08): "If the player says 'propose to declare war' the Senate votes; if he says 'I declare war'
@@ -206,7 +207,7 @@ export function consequencesOfUsurping(world: WorldState, actorId: string, usurp
 
   const officeOf = usurped.officeLabel;
   facts.push({
-    localId: `usurped_${actorId}_${act}`.slice(0, 60),
+    localId: safeLocalId(`usurped_${actorId}_${act}`).slice(0, 60),
     kind: "act_usurped",
     summary: `${actor.name}, ${officeOf}, ${what} on his own word, without the ${chamber?.name ?? "chamber"}. It is done, and the city holds it unlawful: his colleagues, the tribunes and the senators will not forget it, the ${chamber?.name ?? "chamber"} will vote him nothing for it, and he will answer for it when his office ends.${strife ? ` The city is in uproar.` : ""}`.slice(0, 600),
     affectedRefs: [{ kind: "character", id: actorId }, { kind: "polity", id: polityId }, ...(chamber === undefined ? [] : [{ kind: "institution" as const, id: chamber.id }])],

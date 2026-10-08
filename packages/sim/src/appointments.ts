@@ -17,6 +17,7 @@ import {
 } from "@chronica/shared";
 import { rulerOf, rulerOfficeOf, type GovernmentRules } from "./constitutions";
 import { assessExecution, domainOfWork } from "./delegation";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Posts a government made and nobody filled.
@@ -124,7 +125,7 @@ export function fillAppointments(input: FillAppointmentsInput): { readonly world
     world = seatCharacterInOffice(world, chosen.id, { office, vacantSeatId: seat.seatId }, input.toDay, office.termDays ?? null);
     const namer = ruler === null ? "The government" : ruler.name;
     facts.push({
-      localId: `appointed_${seat.seatId ?? office.id}_${input.toDay}`.slice(0, 60),
+      localId: safeLocalId(`appointed_${seat.seatId ?? office.id}_${input.toDay}`).slice(0, 60),
       kind: "office_filled",
       summary: `${namer} named ${chosen.name} ${office.label}, a post that had stood empty.`,
       affectedRefs: [

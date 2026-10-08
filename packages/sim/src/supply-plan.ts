@@ -13,6 +13,7 @@ import {
 import { GrainRefused, breadWhereItStands, grainPrice, sendConvoy } from "./grain";
 import { housesFor, monthlyBill, openVictualling, victuallerOf } from "./army-victualling";
 import type { ExecutionHand } from "./delegation";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Bread for an army, found by rule (docs/economy.md, "Orders, calls and consequences").
@@ -234,7 +235,7 @@ export function planSupply(world: WorldState, force: Force, daysWanted: number, 
     const price = Math.max(DEPOT_LEAST, Math.round((men / 1_000) * DEPOT_PER_THOUSAND));
     if (balance - cost >= price) {
       deltas.push(WorldDeltaSchema.parse({
-        op: "project_create", localId: `depot_${force.id}`.slice(0, 60), kind: "depot", label: `Depot at ${place}`.slice(0, 120), sponsorRef: { kind: "polity", id: force.polityId },
+        op: "project_create", localId: safeLocalId(`depot_${force.id}`).slice(0, 60), kind: "depot", label: `Depot at ${place}`.slice(0, 120), sponsorRef: { kind: "polity", id: force.polityId },
         fundingAccountRef: payAccountId, milestones: [{ label: `The stores of ${place} are raised`, dueInDays: DEPOT_DAYS, costAmount: price }],
         completionOutcome: { kind: "structure", label: `Depot at ${place}`.slice(0, 120), amount: 200, provinceId: force.locationId, polityId: force.polityId, structureKind: "depot", effects: [{ quantity: "supply", direction: "raise", band: "marked", scope: "here" }] },
         reason: `${force.name} will stay at ${place}, and the bread is to be had there.`.slice(0, 240),

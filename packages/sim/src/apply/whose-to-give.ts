@@ -5,6 +5,7 @@ import {
 import { vetoingOffice } from "../tribunes";
 import { sovereignChamberOf } from "../constitutions";
 import { askAConvener, convenersByLikelihood } from "./asking";
+import { safeLocalId } from "../safe-local-id";
 
 /**
  * What a power-wide grant does not reach, however wide it is, and what the
@@ -172,7 +173,7 @@ export function whoseToGive(
         authority: { authorized: true, grant: null, standing: "lawful", reason: "Made, holding nothing." },
         instead: { ...delta, officeLabel: null, officeAuthorises: [] },
         fact: {
-          localId: `unseated_${delta.localId}`.slice(0, 60),
+          localId: safeLocalId(`unseated_${delta.localId}`).slice(0, 60),
           kind: "office_not_given",
           summary: `${delta.name} is no ${delta.officeLabel}: ${why}.`.slice(0, 600),
           affectedRefs: [{ kind: "character", id: actorId }],
@@ -375,7 +376,7 @@ export function sacrilegeOf(
   return {
     world,
     fact: {
-      localId: `sacrilege_${victimId}`.slice(0, 60),
+      localId: safeLocalId(`sacrilege_${victimId}`).slice(0, 60),
       kind: "sacrilege",
       summary: `${victim.name} was killed while ${office.label}, whose person is sacrosanct. ${killer?.name ?? "His killer"} is accursed before the people.`,
       affectedRefs: [{ kind: "character", id: victimId }, { kind: "character", id: actorId }, { kind: "polity", id: office.polityId }],

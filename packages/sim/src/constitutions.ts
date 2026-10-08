@@ -41,6 +41,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Every power's government, as parts that can change.
@@ -997,7 +998,7 @@ export function recast(input: RecastInput): { world: WorldState; facts: FactProp
   return {
     world,
     facts: [{
-      localId: `constitution_${polity.id}_${input.atStep}`.slice(0, 60),
+      localId: safeLocalId(`constitution_${polity.id}_${input.atStep}`).slice(0, 60),
       kind: "constitution_changed",
       summary: `${polity.name} is now ${GOVERNMENT_FORM_IN_WORDS[input.toForm]}${fromForm === input.toForm ? ", under new laws" : `, and no longer ${GOVERNMENT_FORM_IN_WORDS[fromForm]}`}. ${input.summary} ${chambers.length > 0 ? `It is governed through ${chambers.join(" and ")}.` : ""}`.trim().slice(0, 600),
       affectedRefs: [{ kind: "polity", id: polity.id }, ...(input.byCharacterId === null ? [] : [{ kind: "character" as const, id: input.byCharacterId }]), ...[...new Set(ousted)].slice(0, 4).map((id) => ({ kind: "character" as const, id }))],
@@ -1211,7 +1212,7 @@ export function keepThrones(input: KeepThronesInput): { world: WorldState; facts
       world = seatCharacterInOffice(world, heir.id, { office, vacantSeatId: seat.id }, input.toDay, null);
       const age = currentAgeYears(heir, input.toDay);
       facts.push({
-        localId: `throne_${office.id}_${input.toDay}`.slice(0, 60),
+        localId: safeLocalId(`throne_${office.id}_${input.toDay}`).slice(0, 60),
         kind: "succession",
         summary: `${heir.name} succeeds ${late!.name} as ${office.label}${age < MAJORITY_YEARS ? `, a child of ${age}, and will reign through a regent` : ""}.`,
         affectedRefs: [{ kind: "character", id: heir.id }, { kind: "character", id: late!.id }, { kind: "polity", id: polity.id }],
@@ -1239,7 +1240,7 @@ export function keepThrones(input: KeepThronesInput): { world: WorldState; facts
     };
     world = rereadForm(world, polity.id, input.government, input.toDay, "extinction", `The line of ${late?.name ?? "the old rulers"} died out; no heir was found, and ${council.name} took the choosing of the ${office.label} upon itself.`, null);
     facts.push({
-      localId: `extinct_${office.id}_${input.toDay}`.slice(0, 60),
+      localId: safeLocalId(`extinct_${office.id}_${input.toDay}`).slice(0, 60),
       kind: "constitution_changed",
       summary: `No heir came forward for the throne of ${polity.name}. ${council.name} will choose the next ${office.label}.`,
       affectedRefs: [{ kind: "polity", id: polity.id }],

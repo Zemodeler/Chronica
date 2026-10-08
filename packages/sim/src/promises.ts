@@ -14,6 +14,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { kinOf, remember, teach, type Grievance } from "./grievances";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Promises kept and broken (character-sim, commitments).
@@ -199,7 +200,7 @@ export function keepPromises(input: PromiseInput): { world: WorldState; facts: F
     const { promisorCharacterId: promisor, beneficiaryCharacterId: beneficiary } = commitment;
     const refs = [{ kind: "character" as const, id: promisor }, { kind: "character" as const, id: beneficiary }];
     const told = (kind: string, summary: string, significance: number): FactProposalDraft => ({
-      localId: `${kind}_${commitment.id}`.slice(0, 60),
+      localId: safeLocalId(`${kind}_${commitment.id}`).slice(0, 60),
       kind,
       summary: summary.slice(0, 600),
       affectedRefs: refs,

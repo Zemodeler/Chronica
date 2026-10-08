@@ -18,6 +18,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Made things doing what they were made to do (see `world/standing-effects.ts`).
@@ -304,7 +305,7 @@ export function settleStandingEffects(input: { readonly world: WorldState; reado
           legitimacy(carrier, -1, `${carrier.label} falls into disuse`);
           mark(carrier, { lapsedAtStep: input.toDay });
           facts.push({
-            localId: `lapsed_${(count += 1)}`,
+            localId: safeLocalId(`lapsed_${(count += 1)}`),
             kind: "arrangement_lapsed",
             summary: `${carrier.label} fell into disuse: nobody could pay for its keep.`,
             affectedRefs: [
@@ -337,7 +338,7 @@ export function settleStandingEffects(input: { readonly world: WorldState; reado
               const faith = world.faiths.find((candidate) => candidate.id === founded.faithId)!.name;
               const place = world.map.provinces.find((province) => province.id === provinceId)?.name ?? provinceId;
               facts.push({
-                localId: `faith_${(count += 1)}`,
+                localId: safeLocalId(`faith_${(count += 1)}`),
                 kind: "faith_majority",
                 summary: `Most of the people of ${place} now follow ${faith}.`,
                 affectedRefs: [{ kind: "province", id: provinceId }],

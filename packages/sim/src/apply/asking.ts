@@ -20,6 +20,7 @@ import {
 } from "@chronica/shared";
 import { defianceOf, factionAgainst } from "../insubordination";
 import { statedConcerns } from "../questions";
+import { safeLocalId } from "../safe-local-id";
 
 /**
  * Asking a man for something, and whether he says yes.
@@ -202,7 +203,7 @@ export function askAConvener(
     return {
       sponsorId: convenerId,
       fact: {
-        localId: `put_${askerId}_${convenerId}`.slice(0, 60),
+        localId: safeLocalId(`put_${askerId}_${convenerId}`).slice(0, 60),
         kind: "motion_put_for_another",
         summary: `${convener.name} agreed to put ${asker?.name ?? "another man"}'s motion, "${question.label}", to the ${institution.name}: ${answer.why}.`.slice(0, 600),
         affectedRefs: [{ kind: "character", id: convenerId }, { kind: "character", id: askerId }, { kind: "institution", id: institution.id }],
@@ -262,7 +263,7 @@ export function askOf(
     world: { ...world, orderAttempts: [...world.orderAttempts, attempt] },
     attempt,
     fact: {
-      localId: `asked_${attempt.id}`.slice(0, 60),
+      localId: safeLocalId(`asked_${attempt.id}`).slice(0, 60),
       kind: "request_made",
       summary: `${name(request.issuerId)} asked ${name(request.recipientId)}: ${request.instruction}`.slice(0, 600),
       affectedRefs: [{ kind: "character", id: request.issuerId }, { kind: "character", id: request.recipientId }],

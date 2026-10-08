@@ -1,5 +1,6 @@
 import { treasuryOf, type FactProposal, type OrderPartyRef, type WorldDelta, type WorldState } from "@chronica/shared";
 import { accountOf } from "./normalize-refs";
+import { safeLocalId } from "../safe-local-id";
 
 /**
  * The details a person doing something for himself never has to say.
@@ -247,7 +248,7 @@ export function actsBehindFacts(
     }
     const theirs = forces.length === 1 && forces[0]!.controllerCharacterId !== playerCharacterId && forces[0]!.commanderCharacterId !== playerCharacterId;
     if (owned.op === "siege_lay" && theirs) {
-      acts.push({ op: "siege_lay", localId: `siege_${fact.localId}`.slice(0, 60), forceRef: forces[0]!.id, settlementId: null, reason: fact.summary.slice(0, 300) });
+      acts.push({ op: "siege_lay", localId: safeLocalId(`siege_${fact.localId}`).slice(0, 60), forceRef: forces[0]!.id, settlementId: null, reason: fact.summary.slice(0, 300) });
       dropped.push(`"${fact.kind}" is the engine's to tell: made into the siege it describes, for ${forces[0]!.name}.`);
       continue;
     }

@@ -16,6 +16,7 @@ import { watchReading } from "../watch";
 import { mechanicInWords } from "./mechanic-words";
 import { priceMechanic, strongerBand } from "./price-mechanic";
 import { readableRefsFor, type ReadableRefs } from "./refs";
+import { safeLocalId } from "../safe-local-id";
 
 /**
  * Puts a validated rule on its arrangement: charges the setup, folds the keep
@@ -133,7 +134,7 @@ export function attachMechanic(input: AttachInput): AttachOutcome {
     genericEntities: world.genericEntities.map((candidate) => (candidate.id === entity.id ? { ...candidate, mechanic, upkeep } : candidate)),
   };
   facts.push({
-    localId: `mechanic_written_${entity.id}`.slice(0, 60),
+    localId: safeLocalId(`mechanic_written_${entity.id}`).slice(0, 60),
     kind: "mechanic_written",
     summary: `${entity.label} now runs by a rule: ${mechanicInWords(draft, world)}. It cost ${price.setup} to set up.`,
     affectedRefs: [refs.owner, ...(entity.provinceId === null || entity.provinceId === undefined ? [] : [{ kind: "province" as const, id: entity.provinceId }])],

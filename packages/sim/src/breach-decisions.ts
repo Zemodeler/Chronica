@@ -1,4 +1,5 @@
 import type { FactProposalDraft, Force, PlayerDecision, WorldDelta, WorldState } from "@chronica/shared";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * The player's word on a subordinate who went ahead without leave, for big
@@ -119,7 +120,7 @@ export function answerBreach(world: WorldState, playerId: string | null, answere
     }),
   };
   facts.push({
-    localId: `breach_${action}_${breach.characterId}_${day}`.slice(0, 60),
+    localId: safeLocalId(`breach_${action}_${breach.characterId}_${day}`).slice(0, 60),
     kind: action === "censure" ? "subordinate_censured" : "subordinate_endorsed",
     summary: action === "censure"
       ? `${who} was rebuked for going ahead without leave: ${breach.label.replace(/[.\s]+$/, "")}.`.slice(0, 600)

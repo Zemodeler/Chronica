@@ -27,6 +27,7 @@ import { foundHousesByRule } from "./house-founding";
 import { keepTheLine } from "./house-succession";
 import { CREW_SHARE_BPS, dutyOnCargoBps, voyageLossBps } from "./house-voyages";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * The merchant houses (docs/economy.md, "Who manages the economy").
@@ -347,7 +348,7 @@ function keepTheCargoes(world: WorldState, toDay: number, ids: IdFactory): { wor
   const changed = new Map<string, MerchantHouse>();
   const told = (house: MerchantHouse, summary: string, significance: number, kind: string, refs: { kind: "character" | "province"; id: string }[]): void => {
     if (toDay - (house.toldAtStep ?? -999) < 90 || !isLiveProvince(world, house.homeProvinceId)) return;
-    facts.push({ localId: `${kind}_${house.id}_${toDay}`.slice(0, 60), kind, summary: summary.slice(0, 600), affectedRefs: refs, visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance });
+    facts.push({ localId: safeLocalId(`${kind}_${house.id}_${toDay}`).slice(0, 60), kind, summary: summary.slice(0, 600), affectedRefs: refs, visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance });
     changed.set(house.id, { ...(changed.get(house.id) ?? house), toldAtStep: toDay });
   };
 

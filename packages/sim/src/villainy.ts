@@ -1,6 +1,7 @@
 import {
   FactProposalSchema,
   WorldDeltaSchema,
+  currentAgeYears,
   difficultyRules,
   readDepartments,
   stableHash,
@@ -10,6 +11,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import type { StatecraftDecision } from "./statecraft";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Villains, played out (docs/plans/a-living-world.md §6, the user's rule:
@@ -94,7 +96,7 @@ export function decideVillainy(input: VillainyInput): StatecraftDecision[] {
     decisions.push({
       polityId: plotter.polityId, actorCharacterId: plotter.id, act: "plot", targetPolityId: null, why: why.slice(0, 400),
       deltas: [delta({
-        op: "covert_plot_open", localId: `coup_${plotter.id}`.slice(0, 60), kind: plotter.traits.includes("cruel") ? "assassination" : "poison",
+        op: "covert_plot_open", localId: safeLocalId(`coup_${plotter.id}`).slice(0, 60), kind: plotter.traits.includes("cruel") ? "assassination" : "poison",
         targetCharacterRef: ruler.id, sponsorCharacterRef: plotter.id, agentCharacterRef: null,
         fundingAccountRef: purse === undefined || spend === 0 ? null : purse.id, spend,
         cover: `Blame it on ${ruler.name}'s enemies abroad.`, expectedInDays: 90, reason: why.slice(0, 240),
@@ -114,7 +116,7 @@ export function decideVillainy(input: VillainyInput): StatecraftDecision[] {
   // loyal ones (`seizeThrones`), and
   // otherwise begins the plot that may get it him.
   for (const seat of world.material.officeSeats) {
-    if (seat.status !== "held" || seat.holderCharacterId === null || seat.termStartedAtStep === null || seat.termStartedAtStep <= 0 || day - seat.termStartedAtStep > 45) continue;
+    if (seat.status !== "held" || seat.holderCharacterId === null || seat.termStartedAtStep === null || seat.termStartedAtStep <= 0 || day - seat.termStartedAtStep > 45 || isAnOrdinaryTerm(world, seat)) continue;
     const heir = world.characters.find((character) => character.id === seat.holderCharacterId && character.alive);
     if (heir === undefined || heir.polityId === null || heir.id === input.playerCharacterId) continue;
     if (!rulers.rulers(heir.polityId).some((ruler) => ruler.id === heir.id)) continue;
@@ -134,12 +136,12 @@ export function decideVillainy(input: VillainyInput): StatecraftDecision[] {
     decisions.push({
       polityId: heir.polityId, actorCharacterId: claimant.id, act: "plot", targetPolityId: null, why: `${why}: the succession is disputed`.slice(0, 400),
       deltas: [delta({
-        op: "covert_plot_open", localId: `claim_${claimant.id}`.slice(0, 60), kind: "assassination",
+        op: "covert_plot_open", localId: safeLocalId(`claim_${claimant.id}`).slice(0, 60), kind: "assassination",
         targetCharacterRef: heir.id, sponsorCharacterRef: claimant.id, agentCharacterRef: null, fundingAccountRef: null, spend: 0,
         cover: `${heir.name} was never fit to rule.`, expectedInDays: 60, reason: `${why}.`.slice(0, 240),
       })],
       facts: [FactProposalSchema.parse({
-        localId: `disputed_${heir.polityId}_${day}`.slice(0, 60), kind: "succession_disputed",
+        localId: safeLocalId(`disputed_${heir.polityId}_${day}`).slice(0, 60), kind: "succession_disputed",
         summary: `The succession in ${nameOf(heir.polityId)} is disputed: ${claimant.name} does not accept ${heir.name}.`.slice(0, 400),
         affectedRefs: [{ kind: "character", id: claimant.id }, { kind: "character", id: heir.id }, { kind: "polity", id: heir.polityId }],
         visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 60,
@@ -161,7 +163,7 @@ export function decideVillainy(input: VillainyInput): StatecraftDecision[] {
       polityId: ruler.polityId, actorCharacterId: ruler.id, act: "purge", targetPolityId: null, why: why.slice(0, 400),
       deltas: [delta({ op: "character_death", characterRef: plotter.id, manner: "execution", byCharacterRef: ruler.id, reason: why.slice(0, 240) })],
       facts: [FactProposalSchema.parse({
-        localId: `purge_${plotter.id}`.slice(0, 60), kind: "execution",
+        localId: safeLocalId(`purge_${plotter.id}`).slice(0, 60), kind: "execution",
         summary: `${ruler.name} had ${plotter.name} put to death for plotting against him.`.slice(0, 400),
         affectedRefs: [{ kind: "character", id: ruler.id }, { kind: "character", id: plotter.id }, { kind: "polity", id: ruler.polityId }],
         visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 65,
@@ -185,6 +187,8 @@ function isRivalOf(rival: Character, player: Character): boolean {
 }
 
 /** A man who does not let a slight go, and one who hates the player this much, moves against him. */
+/** Below this a person is no one's rival, defamer or plotter. */
+export const ADULT_YEARS = 15;
 const VENGEFUL_AT = 65;
 const HATRED_AT = -30;
 /** What a whispering campaign costs a man's standing. */
@@ -211,6 +215,8 @@ function vendettas(input: VillainyInput, plotting: Set<string>): StatecraftDecis
   const decisions: StatecraftDecision[] = [];
   const enemies = world.characters
     .filter((enemy) => enemy.alive && enemy.id !== player.id && !input.playedByModel.has(enemy.id) && !plotting.has(enemy.id) && enemy.polityId !== null)
+    // A child is nobody's rival and nobody's defamer: only a grown man moves against him.
+    .filter((enemy) => currentAgeYears(enemy, world.elapsedStep) >= ADULT_YEARS)
     .filter((enemy) => (enemy.mind.drives.revenge >= VENGEFUL_AT && opinionOf(enemy, player.id) <= HATRED_AT) || isRivalOf(enemy, player))
     // Within reach of him: his own people, or men where he is.
     .filter((enemy) => enemy.polityId === player.polityId || enemy.locationProvinceId === player.locationProvinceId)
@@ -226,7 +232,7 @@ function vendettas(input: VillainyInput, plotting: Set<string>): StatecraftDecis
       decisions.push({
         polityId: enemy.polityId!, actorCharacterId: enemy.id, act: "plot", targetPolityId: null, why: why.slice(0, 400),
         deltas: [delta({
-          op: "covert_plot_open", localId: `vendetta_${enemy.id}`.slice(0, 60), kind: cruelty >= 60 ? "assassination" : "abduction",
+          op: "covert_plot_open", localId: safeLocalId(`vendetta_${enemy.id}`).slice(0, 60), kind: cruelty >= 60 ? "assassination" : "abduction",
           targetCharacterRef: player.id, sponsorCharacterRef: enemy.id, agentCharacterRef: null,
           fundingAccountRef: purse === undefined || spend === 0 ? null : purse.id, spend,
           cover: cruelty >= 60 ? `Footpads, in a dark street.` : `Bandits on the road.`, expectedInDays: 45, reason: `${why}.`.slice(0, 240),
@@ -240,12 +246,12 @@ function vendettas(input: VillainyInput, plotting: Set<string>): StatecraftDecis
         deltas: [delta({ op: "character_state_set", characterRef: player.id, standingDeltaBps: -DEFAMED_BPS, standingCause: "scandal", reason: `${enemy.name} has his name blackened.`.slice(0, 240) })],
         facts: [
           FactProposalSchema.parse({
-            localId: `defamed_${player.id}_${month}`.slice(0, 60), kind: "scandal",
+            localId: safeLocalId(`defamed_${player.id}_${month}`).slice(0, 60), kind: "scandal",
             summary: `Ugly stories about ${player.name} are going round, and people are repeating them.`.slice(0, 400),
             affectedRefs: [{ kind: "character", id: player.id }], visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 40,
           }),
           FactProposalSchema.parse({
-            localId: `defamer_${enemy.id}_${month}`.slice(0, 60), kind: "defamation",
+            localId: safeLocalId(`defamer_${enemy.id}_${month}`).slice(0, 60), kind: "defamation",
             summary: `${enemy.name} has put the stories about ${player.name} about.`.slice(0, 400),
             affectedRefs: [{ kind: "character", id: enemy.id }, { kind: "character", id: player.id }], visibility: "private", discoveryState: "private", knowableInDays: 0, significance: 30,
             knownToRefs: [{ kind: "character", id: enemy.id }],
@@ -284,7 +290,7 @@ export function usurpations(world: WorldState, playerCharacterId: string | null)
     const name = next.map.polities.find((polity) => polity.id === polityId)?.name ?? polityId;
     const heir = setAside === null ? null : next.characters.find((character) => character.id === setAside)?.name ?? null;
     facts.push({
-      localId: `usurped_${polityId}_${day}`.slice(0, 60),
+      localId: safeLocalId(`usurped_${polityId}_${day}`).slice(0, 60),
       kind: "usurpation",
       summary: `${usurper.name}, whose men killed ${victim.name}, has made himself master of ${name}${heir === null ? "" : `, and set ${heir} aside`}.`.slice(0, 400),
       affectedRefs: [{ kind: "character", id: usurper.id }, { kind: "character", id: victim.id }, { kind: "polity", id: polityId }, ...(setAside === null ? [] : [{ kind: "character" as const, id: setAside }])],
@@ -317,6 +323,16 @@ function takeTheThrone(world: WorldState, usurperId: string, polityId: string, d
 }
 
 /**
+ * A seat a term runs out on, or one of a college, is filled by an election each year: a man new in it is not an heir and nobody disputes his succession.
+ * Hanno "would not have Himilco over him" every year a suffete was chosen, because every annual election looked like a new ruler. Only a seat held
+ * for life, a king's or a tyrant's, can be disputed.
+ */
+export function isAnOrdinaryTerm(world: WorldState, seat: WorldState["material"]["officeSeats"][number]): boolean {
+  if (seat.termExpiresAtStep !== null && seat.termStartedAtStep !== null && seat.termExpiresAtStep - seat.termStartedAtStep <= 1_100) return true;
+  return world.material.officeSeats.filter((other) => other.officeId === seat.officeId).length > 1;
+}
+
+/**
  * A disputed succession settled by the sword: a new ruler whose own power's
  * army is mostly another man's -- an ambitious general who will not have a
  * boy or a weak man over him -- is set aside by him, and he rules. For people
@@ -329,7 +345,7 @@ export function seizeThrones(world: WorldState, playerCharacterId: string | null
   let next = world;
   const fit = (force: WorldState["material"]["forces"][number]): number => force.personnel.reduce((count, group) => count + group.fit, 0);
   for (const seat of world.material.officeSeats) {
-    if (seat.status !== "held" || seat.holderCharacterId === null || seat.termStartedAtStep === null || seat.termStartedAtStep <= 0 || day - seat.termStartedAtStep > 45) continue;
+    if (seat.status !== "held" || seat.holderCharacterId === null || seat.termStartedAtStep === null || seat.termStartedAtStep <= 0 || day - seat.termStartedAtStep > 45 || isAnOrdinaryTerm(world, seat)) continue;
     const heir = next.characters.find((character) => character.id === seat.holderCharacterId && character.alive);
     if (heir === undefined || heir.polityId === null || heir.id === playerCharacterId || !rulers.rulers(heir.polityId).some((ruler) => ruler.id === heir.id)) continue;
     const general = next.material.forces
@@ -345,7 +361,7 @@ export function seizeThrones(world: WorldState, playerCharacterId: string | null
     next = taken;
     const name = next.map.polities.find((polity) => polity.id === heir.polityId)?.name ?? heir.polityId;
     facts.push({
-      localId: `seized_${heir.polityId}_${day}`.slice(0, 60), kind: "succession_seized",
+      localId: safeLocalId(`seized_${heir.polityId}_${day}`).slice(0, 60), kind: "succession_seized",
       summary: `${general.name} would not have ${heir.name} over him: he set him aside and took the rule of ${name} with the army behind him.`.slice(0, 400),
       affectedRefs: [{ kind: "character", id: general.id }, { kind: "character", id: heir.id }, { kind: "polity", id: heir.polityId }],
       visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 85,

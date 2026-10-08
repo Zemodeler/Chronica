@@ -11,6 +11,7 @@ import {
 } from "@chronica/shared";
 import { endPolity } from "./polity-end";
 import { addGrievance, hasGrievance, menUnderArms, trustOf } from "./treaties";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * An ally taken into the state (L15).
@@ -154,7 +155,7 @@ export function settleUnionOffers(world: WorldState, toDay: number, facts: FactP
         : candidate)),
     };
     facts.push({
-      localId: `union_${message.id}`.slice(0, 60),
+      localId: safeLocalId(`union_${message.id}`).slice(0, 60),
       kind: "letter_answered",
       summary: verdict.why.slice(0, 600),
       affectedRefs: [{ kind: "polity", id: verdict.follower }, { kind: "polity", id: verdict.leader }],
@@ -197,7 +198,7 @@ export function deditio(world: WorldState, toDay: number, playerPolityId: string
     if (victor === undefined) continue;
     const ended = endPolity(next, polity.id, "absorbed", victor, toDay, false);
     next = ended.world;
-    facts.push(...ended.facts.map((fact) => ({ ...fact, localId: `deditio_${polity.id}`.slice(0, 60), kind: "deditio" })));
+    facts.push(...ended.facts.map((fact) => ({ ...fact, localId: safeLocalId(`deditio_${polity.id}`).slice(0, 60), kind: "deditio" })));
   }
   return { world: next, facts };
 }

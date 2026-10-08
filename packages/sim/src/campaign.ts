@@ -21,6 +21,7 @@ import {
   applyForagingScar,
   drawStock,
 } from "@chronica/shared";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * An army in the field, fed, sickening and resting, day by day.
@@ -177,7 +178,7 @@ export function keepTheField(input: KeepTheFieldInput): { world: WorldState; fac
   };
   const say = (kind: string, force: Force, summary: string, significance: number): void => {
     facts.push({
-      localId: `${kind}_${force.id}_${toDay}`.slice(0, 60),
+      localId: safeLocalId(`${kind}_${force.id}_${toDay}`).slice(0, 60),
       kind,
       summary: summary.slice(0, 600),
       affectedRefs: [{ kind: "force", id: force.id }, { kind: "province", id: force.locationId }],

@@ -8,6 +8,7 @@ import {
   type GoodId,
   type WorldState,
 } from "@chronica/shared";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * What a power's trade is doing, as one line for its rulers and as news
@@ -125,7 +126,7 @@ export function reliefNews(world: WorldState, relief: ReadonlyMap<string, { unit
   const facts: FactProposalDraft[] = candidates.map(([polityId, kept]) => {
     const from = [...kept.from].sort();
     return {
-      localId: `relief_ship_${polityId}_${toDay}`.slice(0, 60),
+      localId: safeLocalId(`relief_ship_${polityId}_${toDay}`).slice(0, 60),
       kind: "relief_ship",
       summary: `Ships with grain have reached ${nameOf(world, polityId)}'s dear markets${from.length === 0 ? "" : ` from ${listed(from.slice(0, 3).map((id) => nameOf(world, id)))}`}: some ${Math.round(kept.units).toLocaleString("en-GB")} measures this month, easing the price of bread.`.slice(0, 600),
       affectedRefs: [{ kind: "polity" as const, id: polityId }, ...from.slice(0, 2).map((id) => ({ kind: "polity" as const, id }))],

@@ -19,6 +19,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { aGensKeepsItsName } from "./adoption";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * The gentes, kept once a month.
@@ -163,7 +164,7 @@ function keepFeuds(world: WorldState, membersOf: ReadonlyMap<string, Character[]
         const against = gensById(world, entry.againstGensId);
         if (against !== undefined) {
           facts.push({
-            localId: `feud_${gens.id}_${against.id}`.slice(0, 60), kind: "gens_feud",
+            localId: safeLocalId(`feud_${gens.id}_${against.id}`).slice(0, 60), kind: "gens_feud",
             summary: `${gens.plural.replace(/^the /, "The ")} have a feud with ${against.plural}: ${entry.reason}.`.slice(0, 600),
             affectedRefs: [...(gens.polityId === null ? [] : [{ kind: "polity" as const, id: gens.polityId }])],
             visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 30,
@@ -237,7 +238,7 @@ export function keepGentes(start: WorldState, toDay: number): { world: WorldStat
         : (heirWithin(world, members, gens.sacraKeeperId) ?? first?.id ?? null);
     if (first !== undefined && gens.princepsId !== null && gens.princepsId !== first.id && living.length >= 3) {
       facts.push({
-        localId: `princeps_${gens.id}_${toDay}`.slice(0, 60), kind: "gens_head",
+        localId: safeLocalId(`princeps_${gens.id}_${toDay}`).slice(0, 60), kind: "gens_head",
         summary: `${first.name} is now the first man of ${gens.plural}.`.slice(0, 600),
         affectedRefs: [{ kind: "character", id: first.id }, ...(gens.polityId === null ? [] : [{ kind: "polity" as const, id: gens.polityId }])],
         visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 25,

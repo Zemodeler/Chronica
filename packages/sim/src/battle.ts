@@ -39,6 +39,7 @@ import { handOverForcesOf, killCharacter } from "./mortality";
 import { divertFieldFates, openFieldPerils } from "./field-perils";
 import { summonToJudgment } from "./trials";
 import { recordTheFight } from "./ranks";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Battle (VISION §3, §12, §29).
@@ -528,7 +529,7 @@ function factsFor(world: WorldState, result: BattleResult, provinceId: string, i
   const provinceName = world.map.provinces.find((province) => province.id === provinceId)?.name ?? provinceId;
   const facts: FactProposalDraft[] = [
     {
-      localId: `battle_${index}`,
+      localId: safeLocalId(`battle_${index}`),
       kind: "battle",
       summary: summarizeBattleResult(result, names, provinceName, naval).slice(0, 600),
       affectedRefs: [
@@ -548,7 +549,7 @@ function factsFor(world: WorldState, result: BattleResult, provinceId: string, i
     if (change.outcome === "unharmed") continue;
     const commander = world.characters.find((character) => character.id === change.characterId);
     facts.push({
-      localId: `commander_${index}_${change.characterId}`,
+      localId: safeLocalId(`commander_${index}_${change.characterId}`),
       kind: change.outcome === "killed" ? "character_death" : `commander_${change.outcome}`,
       summary: `${commander?.name ?? change.characterId} was ${change.outcome} at ${provinceName}.`,
       affectedRefs: [{ kind: "character", id: change.characterId }, { kind: "province", id: provinceId }],
@@ -570,7 +571,7 @@ function factsFor(world: WorldState, result: BattleResult, provinceId: string, i
     const injury = fate.injuryId === null ? undefined : INJURIES.find((candidate) => candidate.id === fate.injuryId);
     const what = fate.outcome === "killed" ? "was killed" : injury !== undefined ? `${injury.label}` : "was wounded";
     facts.push({
-      localId: `member_${index}_${fate.characterId}`,
+      localId: safeLocalId(`member_${index}_${fate.characterId}`),
       kind: fate.outcome === "killed" ? "character_death" : `soldier_${fate.outcome}`,
       summary: `${member?.name ?? fate.characterId}, in the ranks of ${forceName}, ${what} at ${provinceName}.`,
       // Named with his army's power: a polity fact is known to those whose
@@ -595,7 +596,7 @@ function factsFor(world: WorldState, result: BattleResult, provinceId: string, i
     // passed to Boii" reads as nonsense in a Chronicle and is also untrue.
     const changedHands = change.newControllerPolityId !== held;
     facts.push({
-      localId: `ground_${index}_${change.provinceId}`,
+      localId: safeLocalId(`ground_${index}_${change.provinceId}`),
       kind: changedHands ? "province_control_change" : "province_control_weakened",
       summary: changedHands
         ? `${provinceName} passed to ${taken?.name ?? "no one"}. ${change.explanation}`
@@ -613,7 +614,7 @@ function factsFor(world: WorldState, result: BattleResult, provinceId: string, i
 
   for (const refusal of result.rejectedTactics) {
     facts.push({
-      localId: `tactic_${index}_${refusal.actorId}`,
+      localId: safeLocalId(`tactic_${index}_${refusal.actorId}`),
       kind: "tactic_refused",
       summary: `The attempt failed before it began: ${refusal.reason}`,
       affectedRefs: [{ kind: "character", id: refusal.actorId }],
@@ -646,7 +647,7 @@ function spoilsFacts(world: WorldState, spoils: readonly SpoilsTaken[], index: n
     const by = taken.byForceId === null ? name(taken.byPolityId, "polity") : name(taken.byForceId, "force");
     return taken.kind === "province"
       ? {
-        localId: `spoils_${index}_${order}`,
+        localId: safeLocalId(`spoils_${index}_${order}`),
         kind: "province_plundered",
         summary: `${by} carried ${taken.amount} out of ${name(taken.ofId, "province")}, and left it the poorer for it.`,
         affectedRefs: [
@@ -661,7 +662,7 @@ function spoilsFacts(world: WorldState, spoils: readonly SpoilsTaken[], index: n
         significance: 80,
       }
       : {
-        localId: `spoils_${index}_${order}`,
+        localId: safeLocalId(`spoils_${index}_${order}`),
         kind: "war_chest_taken",
         summary: `${by} took ${taken.amount} from the pay chest of ${name(taken.ofId, "force")}.`,
         affectedRefs: [

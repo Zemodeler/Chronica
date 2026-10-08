@@ -38,6 +38,7 @@ import { remember, type Grievance } from "./grievances";
 import type { IdFactory } from "./ports";
 import { statedConcerns } from "./questions";
 import { deservesPromotion } from "./ranks";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Every request is answered (E14, L4).
@@ -445,7 +446,7 @@ function decided(
   return {
     world: next,
     facts: [{
-      localId: `answered_${attempt.id}`.slice(0, 60),
+      localId: safeLocalId(`answered_${attempt.id}`).slice(0, 60),
       kind: `request_${answered.status}`,
       summary: told.slice(0, 600),
       affectedRefs: [issuer, recipient],
@@ -499,7 +500,7 @@ function settleAccepted(world: WorldState, attempt: OrderAttempt, input: Omit<Re
 
 function closing(attempt: OrderAttempt, summary: string, input: Omit<RequestsInput, "world">): FactProposalDraft {
   return {
-    localId: `closed_${attempt.id}`.slice(0, 60),
+    localId: safeLocalId(`closed_${attempt.id}`).slice(0, 60),
     kind: "request_closed",
     summary: summary.slice(0, 600),
     affectedRefs: [attempt.issuerRef, attempt.recipientRef],

@@ -22,6 +22,7 @@ import { chooseBattlePlan, chooseManoeuvre, temperOf } from "./battle-plan";
 import { enemyArmies, monthOf, reachOf, worthOf, type StrategyContext } from "./grand-strategy";
 import { SIEGE_NEEDED_AT } from "./occupation";
 import type { StatecraftDecision } from "./statecraft";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * An army's orders, given it from the plan of the war and kept to (docs/plans/war-plans.md).
@@ -338,7 +339,7 @@ export function conductByPlan(ctx: ConductContext, force: Force, cp: CampaignPla
       if (temper.skill >= 55) works.push("towers");
       return decide(ctx, force, "besiege", hereProvince.controllerPolityId, `before ${hereProvince.name}, held by ${ctx.world.map.polities.find((polity) => polity.id === hereProvince.controllerPolityId)?.name ?? "the enemy"}, with no army to stop us`, [
         ...unhold,
-        wd({ op: "siege_lay", localId: `siege_${force.id}`.slice(0, 60), forceRef: force.id, settlementId: null, ...(works.length === 0 ? {} : { works: works.slice(0, 2) }), reason: `${force.name} lays siege.` }),
+        wd({ op: "siege_lay", localId: safeLocalId(`siege_${force.id}`).slice(0, 60), forceRef: force.id, settlementId: null, ...(works.length === 0 ? {} : { works: works.slice(0, 2) }), reason: `${force.name} lays siege.` }),
       ]);
     }
     return null;
@@ -393,7 +394,7 @@ export function besiegerOrder(ctx: StrategyContext, force: Force): StatecraftDec
   const starving = force.provisionStatus === "critical";
   const place = ctx.provinces.get(siege.provinceId)?.name ?? siege.provinceId;
   const lay = (assault: boolean, works: ("rams" | "towers" | "lines" | "mine")[], why: string): StatecraftDecision =>
-    decide(ctx, force, "besiege", siege.defenderPolityId, why, [wd({ op: "siege_lay", localId: `siege_${force.id}`.slice(0, 60), forceRef: force.id, settlementId: siege.settlementId, ...(works.length === 0 ? {} : { works }), ...(assault ? { assault: true } : {}), reason: `${force.name} presses the siege of ${place}.` })]);
+    decide(ctx, force, "besiege", siege.defenderPolityId, why, [wd({ op: "siege_lay", localId: safeLocalId(`siege_${force.id}`).slice(0, 60), forceRef: force.id, settlementId: siege.settlementId, ...(works.length === 0 ? {} : { works }), ...(assault ? { assault: true } : {}), reason: `${force.name} presses the siege of ${place}.` })]);
   // Leave it: a relief that will crush the lines, or no bread and no hope of the walls.
   if (reliefMen >= men * 1.5 || (starving && siege.pressureBps < 8_000)) {
     if (temper.careful >= 40 || starving) {

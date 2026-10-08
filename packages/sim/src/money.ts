@@ -10,6 +10,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Money a private man can come by (play-test E18, L8).
@@ -243,7 +244,7 @@ export function loanOffersFact(world: WorldState, characterId: string, known: re
   if (toldLately) return null;
   const who = offers.map((offer) => `${offer.lenderName} up to ${offer.amount} at ${(offer.interestBps / 100).toFixed(1)}% a month over ${offer.periods} months`).join("; ");
   return {
-    localId: `loan_offered_${characterId}`.slice(0, 60),
+    localId: safeLocalId(`loan_offered_${characterId}`).slice(0, 60),
     kind: "loan_offered",
     summary: `Word reaches him that his purse is known to be low, and that men would lend to him: ${who}.`.slice(0, 600),
     affectedRefs: [{ kind: "character", id: characterId }, ...offers.map((offer) => ({ kind: "character" as const, id: offer.lenderId }))],
@@ -371,7 +372,7 @@ export function keepPatronage(world: WorldState, ids: IdFactory, atStep: number)
         struck.add(pair.linkId);
         if (turned) {
           facts.push({
-            localId: `client_turned_${pair.clientId}`.slice(0, 60), kind: "clientage_ended",
+            localId: safeLocalId(`client_turned_${pair.clientId}`).slice(0, 60), kind: "clientage_ended",
             summary: `${name(pair.clientId)} voted against his patron ${name(pair.patronId)}, who will keep him no longer: the stipend is stopped.`,
             affectedRefs: [{ kind: "character", id: pair.clientId }, { kind: "character", id: pair.patronId }],
             visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 30,
@@ -384,7 +385,7 @@ export function keepPatronage(world: WorldState, ids: IdFactory, atStep: number)
     if (!answer.willing) {
       struck.add(pair.linkId);
       facts.push({
-        localId: `client_refused_${pair.clientId}`.slice(0, 60), kind: "clientage_refused",
+        localId: safeLocalId(`client_refused_${pair.clientId}`).slice(0, 60), kind: "clientage_refused",
         summary: `${name(pair.patronId)} will not have ${name(pair.clientId)} as his client: ${answer.reason}.`,
         affectedRefs: [{ kind: "character", id: pair.clientId }, { kind: "character", id: pair.patronId }],
         visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 20,
@@ -398,7 +399,7 @@ export function keepPatronage(world: WorldState, ids: IdFactory, atStep: number)
       priority: 300, arrears: 0, missedPeriods: 0, active: true,
     });
     facts.push({
-      localId: `client_taken_${pair.clientId}`.slice(0, 60), kind: "clientage_begun",
+      localId: safeLocalId(`client_taken_${pair.clientId}`).slice(0, 60), kind: "clientage_begun",
       summary: `${answer.reason}: ${amount} a month from his purse, and his voice when it is wanted.`,
       affectedRefs: [{ kind: "character", id: pair.clientId }, { kind: "character", id: pair.patronId }],
       visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 25,

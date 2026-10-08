@@ -12,6 +12,7 @@ import {
   type FactProposalDraft,
   type WorldState,
 } from "@chronica/shared";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * A Roman adopts a son.
@@ -165,7 +166,7 @@ export function adoptIntoGens(world: WorldState, adopterId: string, adopteeId: s
     world: next,
     adopteeName: finalName,
     facts: [{
-      localId: `adoption_${adopter.id}_${adoptee.id}`.slice(0, 60), kind: "adoption",
+      localId: safeLocalId(`adoption_${adopter.id}_${adoptee.id}`).slice(0, 60), kind: "adoption",
       summary: `${adopter.name} has adopted ${adoptee.name}, who is now ${finalName}${gens === undefined ? "" : ` of ${gens.plural}`}.`.slice(0, 600),
       affectedRefs: [{ kind: "character", id: adopter.id }, { kind: "character", id: adoptee.id }, ...(adopter.polityId === null ? [] : [{ kind: "polity" as const, id: adopter.polityId }])],
       visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 40,
@@ -208,7 +209,7 @@ export function aGensKeepsItsName(world: WorldState, toDay: number): { world: Wo
     if (own === undefined || head.heirCharacterId === own.id) continue;
     next = { ...next, characters: next.characters.map((character) => (character.id === head.id ? { ...character, heirCharacterId: own.id } : character)) };
     facts.push({
-      localId: `heir_${head.id}_${year}`.slice(0, 60), kind: "heir_named",
+      localId: safeLocalId(`heir_${head.id}_${year}`).slice(0, 60), kind: "heir_named",
       summary: `${head.name}, having no son, names ${own.name} of his own gens his heir.`.slice(0, 600),
       affectedRefs: [{ kind: "character", id: head.id }, { kind: "character", id: own.id }],
       visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 25,

@@ -15,6 +15,7 @@ import {
 import { applyDeltas } from "./apply/apply-deltas";
 import { diplomaticAnswererOf } from "./letters";
 import type { ApplyContext } from "./apply/context";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Making peace (the treaty system).
@@ -167,7 +168,7 @@ export function concludePeace(world: WorldState, peace: PeaceTerms, context: Omi
   }
 
   const delta = WorldDeltaSchema.parse({
-    op: "agreement_open", localId: `peace_${peace.proposerPolityId}_${peace.otherPolityId}`.slice(0, 60), kind: "peace",
+    op: "agreement_open", localId: safeLocalId(`peace_${peace.proposerPolityId}_${peace.otherPolityId}`).slice(0, 60), kind: "peace",
     polityId: peace.proposerPolityId, otherPolityId: peace.otherPolityId, terms: peace.terms.slice(0, 600),
     clauses: peace.clauses, forDays: null, sourceMessageRef: null, visibility: "public",
     reason: dictated ? `${name(peace.proposerPolityId)} dictated the peace.` : `Agreed with ${representative.name}.`,
@@ -207,7 +208,7 @@ export function concludePeace(world: WorldState, peace: PeaceTerms, context: Omi
     dictated,
     refusal: null,
     facts: [...result.factProposals, {
-      localId: `peace_${peace.otherPolityId}`.slice(0, 60),
+      localId: safeLocalId(`peace_${peace.otherPolityId}`).slice(0, 60),
       kind: "peace_made",
       summary: summary.slice(0, 600),
       affectedRefs: [{ kind: "polity", id: peace.proposerPolityId }, { kind: "polity", id: peace.otherPolityId }, { kind: "character", id: representative.id }, ...(speaker === undefined ? [] : [{ kind: "character" as const, id: speaker.id }])],

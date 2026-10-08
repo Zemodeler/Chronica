@@ -7,6 +7,7 @@ import {
   type WorldDelta,
   type WorldState,
 } from "@chronica/shared";
+import { safeLocalId } from "../safe-local-id";
 
 /**
  * The two acts that lay down a plan (`world/war-plan.ts`): the plan of a war, and an army's orders.
@@ -75,7 +76,7 @@ export function applyWarPlanSet(world: WorldState, delta: WarPlanSet, handles: H
     const what = delta.aims.slice(0, 2).map((aim) => `${aim.kind === "hold_province" ? "to hold" : aim.kind === "take_province" ? "to take" : aim.kind === "raid" ? "to raid" : aim.kind === "blockade" ? "to shut up the harbours of" : aim.kind === "break_army" ? "to break the army of" : "to bring to peace"} ${aim.provinceId !== undefined ? nameOfProvince(world, aim.provinceId) : nameOfPolity(world, aim.polityId ?? enemyId)}`).join(" and ");
     const stance = plan.posture === "decisive" ? "means to have it out in the field" : plan.posture === "defend" ? "means to stand on the defence" : "means to wear the enemy down";
     handles.emitFact({
-      localId: `war_plan_${polityId}_${enemyId}_${atStep}`.slice(0, 60), kind: "war_plan",
+      localId: safeLocalId(`war_plan_${polityId}_${enemyId}_${atStep}`).slice(0, 60), kind: "war_plan",
       summary: `${nameOfPolity(world, polityId)}'s plan for the war with ${nameOfPolity(world, enemyId)} is ${what}; it ${stance}${main === undefined ? "" : `, and the weight of it falls on ${main.provinceIds.slice(0, 2).map((id) => nameOfProvince(world, id)).join(" and ")}`}.`.slice(0, 400),
       affectedRefs: [{ kind: "polity", id: polityId }, { kind: "polity", id: enemyId }],
       visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 35,
@@ -115,7 +116,7 @@ export function applyCampaignPlanSet(world: WorldState, delta: CampaignPlanSet, 
     const verb = plan.mode === "seek_battle" ? "sends" : plan.mode === "siege" ? "sends" : plan.mode === "raid" ? "sends" : plan.mode === "winter" ? "quarters" : plan.mode === "garrison" ? "keeps" : "bids";
     const rest = plan.mode === "seek_battle" ? `against ${where}` : plan.mode === "siege" ? `to besiege ${where}` : plan.mode === "raid" ? `to harry ${where}` : plan.mode === "winter" ? `at ${where} for the winter` : plan.mode === "garrison" ? `at ${where}` : `keep clear of ${where} and spare his men`;
     handles.emitFact({
-      localId: `orders_${forceId}_${atStep}`.slice(0, 60), kind: "campaign_orders",
+      localId: safeLocalId(`orders_${forceId}_${atStep}`).slice(0, 60), kind: "campaign_orders",
       summary: `${giver} ${verb} ${force.name} ${rest}.`.slice(0, 300),
       affectedRefs: [{ kind: "force", id: forceId }, { kind: "polity", id: force.polityId }],
       visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 25,

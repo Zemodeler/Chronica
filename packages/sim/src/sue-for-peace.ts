@@ -13,6 +13,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Powers that sue for peace by themselves (docs/plans/departments.md §13).
@@ -101,7 +102,7 @@ export function sueForPeace(world: WorldState, toDay: number, ids: IdFactory): {
       };
       letters.push(letter);
       facts.push({
-        localId: `sues_${polity.id}_${enemyId}`.slice(0, 60),
+        localId: safeLocalId(`sues_${polity.id}_${enemyId}`).slice(0, 60),
         kind: "diplomacy",
         summary: `${writer.name} wrote to ${them} for ${us}, asking for ${peace ? "peace" : "a truce"}: ${weariness.parts.slice(0, 3).join(", ") || "the war has gone on long enough"}.`.slice(0, 400),
         affectedRefs: [{ kind: "polity", id: polity.id }, { kind: "polity", id: enemyId }, { kind: "character", id: writer.id }],

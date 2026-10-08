@@ -17,6 +17,7 @@ import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
 import { diplomaticAnswererOf } from "./letters";
 import { INDEMNITY_MEANS_FLOOR, concludePeace, meansOf, provinceWorth, willingToGive, type PeaceClause } from "./peace";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * The peace table (docs/plans/a-living-world.md §8), after Hearts of Iron IV.
@@ -143,9 +144,9 @@ export function treatyOf(world: WorldState, terms: readonly PeaceTerm[], giver: 
     if (term.kind === "hostage") clauses.push({ kind: "hostage", characterRef: term.characterId, heldByPolityId: taker });
     if (term.kind === "submission") clauses.push({ kind: "submission", polityId: giver, toPolityId: taker });
     if (term.kind === "demilitarize") clauses.push({ kind: "undertaking", byPolityId: giver, duty: "other", what: `No army of ${nameOf(world, giver)} in ${world.map.provinces.find((province) => province.id === term.provinceId)?.name ?? term.provinceId}`.slice(0, 120), withinDays: 3_650 });
-    if (term.kind === "tribute") besides.push(delta({ op: "agreement_open", localId: `tribute_${giver}`.slice(0, 60), kind: "tributary", polityId: giver, otherPolityId: taker, terms: `${nameOf(world, giver)} pays tribute to ${nameOf(world, taker)}.`, forDays: null, sourceMessageRef: null, visibility: "public", reason: "By the peace." }));
-    if (term.kind === "client") besides.push(delta({ op: "agreement_open", localId: `client_${giver}`.slice(0, 60), kind: "protectorate", polityId: giver, otherPolityId: taker, terms: `${nameOf(world, giver)} comes under the protection of ${nameOf(world, taker)}.`, forDays: null, sourceMessageRef: null, visibility: "public", reason: "By the peace." }));
-    if (term.kind === "trade") besides.push(delta({ op: "agreement_open", localId: `trade_${giver}`.slice(0, 60), kind: "trade_pact", polityId: giver, otherPolityId: taker, terms: `${nameOf(world, giver)} opens its markets to ${nameOf(world, taker)}.`, trade: { tariffCapBps: PEACE_TRADE_TARIFF_CAP_BPS }, forDays: null, sourceMessageRef: null, visibility: "public", reason: "By the peace." }));
+    if (term.kind === "tribute") besides.push(delta({ op: "agreement_open", localId: safeLocalId(`tribute_${giver}`).slice(0, 60), kind: "tributary", polityId: giver, otherPolityId: taker, terms: `${nameOf(world, giver)} pays tribute to ${nameOf(world, taker)}.`, forDays: null, sourceMessageRef: null, visibility: "public", reason: "By the peace." }));
+    if (term.kind === "client") besides.push(delta({ op: "agreement_open", localId: safeLocalId(`client_${giver}`).slice(0, 60), kind: "protectorate", polityId: giver, otherPolityId: taker, terms: `${nameOf(world, giver)} comes under the protection of ${nameOf(world, taker)}.`, forDays: null, sourceMessageRef: null, visibility: "public", reason: "By the peace." }));
+    if (term.kind === "trade") besides.push(delta({ op: "agreement_open", localId: safeLocalId(`trade_${giver}`).slice(0, 60), kind: "trade_pact", polityId: giver, otherPolityId: taker, terms: `${nameOf(world, giver)} opens its markets to ${nameOf(world, taker)}.`, trade: { tariffCapBps: PEACE_TRADE_TARIFF_CAP_BPS }, forDays: null, sourceMessageRef: null, visibility: "public", reason: "By the peace." }));
     if (term.kind === "break_alliance") {
       const alliance = world.polityAgreements.find((agreement) => agreement.status === "active" && agreement.kind === "alliance"
         && [agreement.polityId, agreement.otherPolityId].includes(giver) && [agreement.polityId, agreement.otherPolityId].includes(term.withPolityId));
@@ -238,7 +239,7 @@ export function putTerms(
     return {
       world: withSession(world, "walked_out", words, "walked_out"),
       facts: [{
-        localId: `walked_out_${tableId}`.slice(0, 60), kind: "peace_talks_failed",
+        localId: safeLocalId(`walked_out_${tableId}`).slice(0, 60), kind: "peace_talks_failed",
         summary: `The envoys of ${nameOf(world, giver)} walked out of the peace talks with ${nameOf(world, byPolityId)}: what was asked was more than their war has cost them.`.slice(0, 400),
         affectedRefs: [{ kind: "polity", id: giver }, { kind: "polity", id: byPolityId }],
         visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 55,
@@ -342,7 +343,7 @@ export function bribeAtTable(world: WorldState, tableId: string, briberId: strin
       : candidate)),
   };
   const facts: FactProposalDraft[] = caught ? [{
-    localId: `bribe_${tableId}_${day}`.slice(0, 60), kind: "scandal",
+    localId: safeLocalId(`bribe_${tableId}_${day}`).slice(0, 60), kind: "scandal",
     summary: takes
       ? `It is said ${briber.name} paid ${target.name} to soften the terms at the peace table.`.slice(0, 400)
       : `${target.name} refused ${possessive(briber.name)} money at the peace table, and said so.`.slice(0, 400),

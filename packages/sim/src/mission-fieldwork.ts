@@ -22,6 +22,7 @@ import { WorldDeltaSchema } from "@chronica/shared";
 import { proportionalDraw } from "./apply/detachments";
 import { SIEGE_NEEDED_AT } from "./occupation";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * The field work behind "send two thousand men to claim their territory",
@@ -204,7 +205,7 @@ export function continueMissions(input: FieldworkInput): { world: WorldState; fa
           whyNot: null,
         }));
         facts.push({
-          localId: `mission_made_${id}`.slice(0, 60), kind: "force_reformed",
+          localId: safeLocalId(`mission_made_${id}`).slice(0, 60), kind: "force_reformed",
           summary: `${men} men of ${source.name} were detached as ${name}, to take ${place} from ${nameOf(holder)}.`.slice(0, 600),
           affectedRefs: [{ kind: "force", id }, { kind: "force", id: source.id }, { kind: "province", id: province.id }, { kind: "polity", id: polityId }],
           visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 45,
@@ -246,7 +247,7 @@ export function continueMissions(input: FieldworkInput): { world: WorldState; fa
         };
         updatePart(original.id, index, (current) => ({ ...current, workRefs: [...current.workRefs, { kind: "project" as const, id }].slice(-12), whyNot: null }));
         facts.push({
-          localId: `mission_march_${mission.id}`.slice(0, 60), kind: "march_begun",
+          localId: safeLocalId(`mission_march_${mission.id}`).slice(0, 60), kind: "march_begun",
           summary: `${mission.name} set out from ${placeName(mission.locationId)} for ${placeName(province.id)} to take ${place} from ${nameOf(holder)}: about ${days} days on the road.`.slice(0, 600),
           affectedRefs: [{ kind: "force", id: mission.id }, { kind: "province", id: province.id }, { kind: "polity", id: polityId }],
           visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 35,
@@ -273,7 +274,7 @@ export function continueMissions(input: FieldworkInput): { world: WorldState; fa
         }] };
         updatePart(original.id, index, (current) => ({ ...current, workRefs: [...current.workRefs, { kind: "siege" as const, id: siegeId }].slice(-12), whyNot: null }));
         facts.push({
-          localId: `mission_siege_${siegeId}`.slice(0, 60), kind: "siege_laid",
+          localId: safeLocalId(`mission_siege_${siegeId}`).slice(0, 60), kind: "siege_laid",
           summary: `${mission.name} laid siege to ${wall.name}, held by ${nameOf(holder)}, as the order to take it required.`.slice(0, 600),
           affectedRefs: [{ kind: "force", id: mission.id }, { kind: "province", id: province.id }, { kind: "polity", id: polityId }, { kind: "polity", id: holder }],
           visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 55,

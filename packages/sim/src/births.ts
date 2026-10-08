@@ -14,6 +14,7 @@ import {
   type FactProposalDraft,
   type WorldState,
 } from "@chronica/shared";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Children, born to the couples the world already records.
@@ -219,7 +220,7 @@ export function bearChild(
     world: next,
     childId,
     facts: [{
-      localId: `birth_${childId}`,
+      localId: safeLocalId(`birth_${childId}`),
       kind: "birth",
       summary: `${mother.name} has given ${father.name} a ${gender === "male" ? "son" : "daughter"}, ${created.character.name}.`,
       affectedRefs: [

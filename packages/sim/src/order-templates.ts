@@ -12,6 +12,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { chestOfPower, payerOf, planSupply } from "./supply-plan";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * The common routine orders, understood by rule (the user's rule, 2026-10-08: "Orders from a player should still be automatic: an order like 'find supply for my army'
@@ -234,7 +235,7 @@ function buildClause(world: WorldState, playerId: string, text: string): Clause 
   return {
     part: { said: text.trim().slice(0, 200) },
     deltas: [WorldDeltaSchema.parse({
-      op: "project_create", localId: `${work.name}_${province.id}`.toLowerCase().replace(/[^a-z0-9_-]/g, "_").slice(0, 60), kind: work.name, label,
+      op: "project_create", localId: safeLocalId(`${work.name}_${province.id}`).toLowerCase().replace(/[^a-z0-9_-]/g, "_").slice(0, 60), kind: work.name, label,
       sponsorRef: { kind: "polity", id: player.polityId }, fundingAccountRef: chest,
       milestones: [
         { label: `The ground is cleared and the stuff gathered`, dueInDays: Math.max(7, Math.round(work.days / 3)), costAmount: Math.round(cost / 2) },
@@ -263,7 +264,7 @@ function levyClause(world: WorldState, playerId: string, text: string): Clause |
   return {
     part: { said: text.trim().slice(0, 200) },
     deltas: [WorldDeltaSchema.parse({
-      op: "force_create", localId: `levy_${province.id}_${men}`.toLowerCase().replace(/[^a-z0-9_-]/g, "_").slice(0, 60), name: `Levy of ${polity?.name ?? "the power"} at ${province.name}`.slice(0, 120), polityId: player.polityId,
+      op: "force_create", localId: safeLocalId(`levy_${province.id}_${men}`).toLowerCase().replace(/[^a-z0-9_-]/g, "_").slice(0, 60), name: `Levy of ${polity?.name ?? "the power"} at ${province.name}`.slice(0, 120), polityId: player.polityId,
       commanderCharacterRef: player.id, controllerCharacterRef: player.id, locationId: province.id, authorizedStrength: men, payObligationRef: null,
       reason: `${player.name} calls ${men} men to the standards at ${province.name}.`.slice(0, 240),
     })],
@@ -297,7 +298,7 @@ export function matchOrderTemplates(world: WorldState, playerId: string, orderTe
   const deltas: WorldDelta[] = [];
   const parts = read.map((clause) => ({ said: clause.part.said, acts: clause.deltas.map((delta) => { deltas.push(delta); return deltas.length - 1; }), goals: [], spend: null, factLocalIds: [], whyNot: clause.part.whyNot ?? null }));
   const delegations = read.flatMap((clause, index) => clause.delegations.map((delegation, at) => ({
-    localId: `${clause.template}_${index}_${at}`, issuerRef: { kind: "character" as const, id: playerId }, recipientRef: { kind: "character" as const, id: delegation.recipientId },
+    localId: safeLocalId(`${clause.template}_${index}_${at}`), issuerRef: { kind: "character" as const, id: playerId }, recipientRef: { kind: "character" as const, id: delegation.recipientId },
     claimedAuthorityGrantRef: null, instruction: delegation.instruction, part: index, ask: delegation.ask,
   })));
   const output = OrchestratorOutputSchema.parse({

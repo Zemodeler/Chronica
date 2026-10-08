@@ -29,6 +29,7 @@ import { courtForTheft, type MagistrateInput } from "./magistrates";
 import { armiesLedBy } from "./command-tenure";
 import { sentenceByOutcome } from "./trials";
 import type { StatecraftDecision } from "./statecraft";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Accountability, as each people had it (docs/plans/government.md, "H4 as built").
@@ -213,7 +214,7 @@ export function renderTheAccounts(input: AccountsInput): { world: WorldState; fa
       if (!spoke.has(polityId) && (found || stableHash([man.id, "accounts-told", String(day)]) % 100 < 40)) {
         spoke.add(polityId);
         facts.push(fact({
-          localId: `accounts_${polityId}_${monthOf(day)}`.slice(0, 60), kind: found ? "accounts_found" : "accounts_rendered", summary: `${words} in ${polityName}.`.slice(0, 400),
+          localId: safeLocalId(`accounts_${polityId}_${monthOf(day)}`).slice(0, 60), kind: found ? "accounts_found" : "accounts_rendered", summary: `${words} in ${polityName}.`.slice(0, 400),
           affectedRefs: [{ kind: "character", id: man.id }, { kind: "polity", id: polityId }], visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance,
         }));
       }
@@ -291,7 +292,7 @@ export function examineTheReturned(input: AccountsInput): { world: WorldState; f
       if (brought.procedure === null) continue;
       world = logged(world, { day, polityId: polity.id, actorCharacterId: man.id, act: "magistrate", targetPolityId: null, why: `examination: ${man.name} home, called before the ${court.name.replace(/^the\s+/iu, "")}${sentence === "death" ? " for his life" : ""} [${man.id}]`.slice(0, 400) });
       facts.push(fact({
-        localId: `examined_${man.id}`.slice(0, 60), kind: "examination", visibility: "public", discoveryState: "public", knowableInDays: 0, significance: sentence === "death" ? 65 : 45,
+        localId: safeLocalId(`examined_${man.id}`).slice(0, 60), kind: "examination", visibility: "public", discoveryState: "public", knowableInDays: 0, significance: sentence === "death" ? 65 : 45,
         summary: `${man.name} is home, and the ${court.name} examines him: ${what}.${sentence === "death" ? " It is his life they will vote on." : " It is a fine they will vote on."}`.slice(0, 400),
         affectedRefs: [{ kind: "character", id: man.id }, { kind: "polity", id: polity.id }, { kind: "procedure", id: brought.procedure.id }],
       }));
@@ -338,7 +339,7 @@ export function theKingsJustice(input: AccountsInput): { world: WorldState; fact
     if (!toldThisMonth(world, polityId, day, "royal-audit-told")) {
       world = logged(world, { day, polityId, actorCharacterId: king.id, act: "magistrate", targetPolityId: null, why: `royal-audit-told: ${man.name} [${man.id}]`.slice(0, 400) });
       facts.push(fact({
-        localId: `royal_audit_${man.id}`.slice(0, 60), kind: "royal_audit", visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 45,
+        localId: safeLocalId(`royal_audit_${man.id}`).slice(0, 60), kind: "royal_audit", visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 45,
         summary: `${king.name} had the books of ${man.name} gone through, and ${row.amount} was found kept back; ${man.name} is put out of his charge and must pay it back${rival === undefined ? "" : `, on the word of ${rival.name}, who is no friend of his`}.`.slice(0, 400),
         affectedRefs: [{ kind: "character", id: man.id }, { kind: "character", id: accuser.id }, { kind: "polity", id: polityId }],
       }));
@@ -445,7 +446,7 @@ export function decideAudits(input: MagistrateInput): StatecraftDecision[] {
     const subject = target?.name ?? `the estates of ${suspectMan!.name}`;
     const maker = auditing.id;
     const deltas = [WorldDeltaSchema.parse({
-      op: "audit_open", localId: `audit_${polity.id}_${monthOf(day)}`.slice(0, 60), auditorCharacterRef: maker,
+      op: "audit_open", localId: safeLocalId(`audit_${polity.id}_${monthOf(day)}`).slice(0, 60), auditorCharacterRef: maker,
       ...(target === undefined ? { householdOwnerRef: suspectMan!.id } : { departmentRef: target.id }),
       reason: `${auditing.name} goes through the books of ${subject}: ${why}.`.slice(0, 240),
     })];

@@ -38,6 +38,7 @@ import { closeBook, cutOffHubs, marketMonth, monthsToHarvest, openBook, stockThe
 import { tradeMonth } from "./trade-flows";
 import { merchantLiftByHub } from "./merchant-houses";
 import { reliefNews } from "./trade-summary";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * The land, reckoned by the calendar (VISION §6, §7).
@@ -657,7 +658,7 @@ export function reviewTheLand(input: LandInput): LandResult {
       wasteNews.push({ polityId, atStep: toDay, districts: after.length });
       const worst = [...after].sort((a, b) => (rows.get(b)?.scarBps ?? 0) - (rows.get(a)?.scarBps ?? 0) || a.localeCompare(b));
       facts.push({
-        localId: `waste_${polityId}_${toDay}`.slice(0, 60),
+        localId: safeLocalId(`waste_${polityId}_${toDay}`).slice(0, 60),
         kind: "devastation",
         summary: `The countryside of ${listed(worst.slice(0, 3).map((id) => provinceName(world, id)))}${worst.length > 3 ? ` and ${worst.length - 3} more districts` : ""} of ${polityName(world, polityId)} lies waste: the war has left it with a fraction of the people, the roads and the fields it had, and it will be a generation before it is what it was.`.slice(0, 600),
         affectedRefs: [{ kind: "polity", id: polityId }, ...worst.slice(0, 3).map((id) => ({ kind: "province" as const, id }))],
@@ -679,7 +680,7 @@ export function reviewTheLand(input: LandInput): LandResult {
     for (const [provinceId, dead] of famines) {
       const holder = world.map.provinces.find((province) => province.id === provinceId)?.controllerPolityId ?? null;
       facts.push({
-        localId: `famine_${provinceId}_${toDay}`.slice(0, 60),
+        localId: safeLocalId(`famine_${provinceId}_${toDay}`).slice(0, 60),
         kind: "famine",
         summary: `Famine in ${provinceName(world, provinceId)}${holder === null ? "" : `, held by ${polityName(world, holder)}`}: some ${dead} people have died of hunger.`,
         affectedRefs: [{ kind: "province", id: provinceId }, ...(holder === null ? [] : [{ kind: "polity" as const, id: holder }])],
@@ -692,7 +693,7 @@ export function reviewTheLand(input: LandInput): LandResult {
     const arrivals = [...settledIn.entries()].filter(([provinceId, tally]) => tally.count >= 500 && live.has(provinceId)).sort((a, b) => b[1].count - a[1].count).slice(0, 4);
     for (const [provinceId, tally] of arrivals) {
       facts.push({
-        localId: `migrants_${provinceId}_${toDay}`.slice(0, 60),
+        localId: safeLocalId(`migrants_${provinceId}_${toDay}`).slice(0, 60),
         kind: "migration",
         summary: `Some ${tally.count} people who had fled ${listed([...tally.from].sort().map((id) => provinceName(world, id)).slice(0, 3))} have settled in ${provinceName(world, provinceId)}.`,
         affectedRefs: [{ kind: "province", id: provinceId }, ...[...tally.from].sort().slice(0, 3).map((id) => ({ kind: "province" as const, id }))],
@@ -802,7 +803,7 @@ function bringInTheHarvest(world: WorldState, year: number): Omit<LandResult, "m
   for (const [polityId, provinceIds] of [...failed.entries()].sort((a, b) => hungry(b[1]) - hungry(a[1]) || a[0].localeCompare(b[0])).slice(0, 8)) {
     const price = polityGrainPriceBps(next, polityId);
     facts.push({
-      localId: `harvest_failed_${polityId}_${year}`.slice(0, 60),
+      localId: safeLocalId(`harvest_failed_${polityId}_${year}`).slice(0, 60),
       kind: "harvest_failed",
       summary: `The harvest failed in ${listed(provinceIds.slice(0, 4).map((id) => provinceName(next, id)))}${provinceIds.length > 4 ? ` and ${provinceIds.length - 4} more of ${polityName(next, polityId)}'s provinces` : ""}: drought, and the granaries must see the country through to the next crop.${price >= 15_000 ? ` Grain in ${polityName(next, polityId)} sells at ${(price / 10_000).toFixed(1)} times its ordinary price.` : ""}`.slice(0, 600),
       affectedRefs: [{ kind: "polity", id: polityId }, ...provinceIds.slice(0, 4).map((id) => ({ kind: "province" as const, id }))],
@@ -814,7 +815,7 @@ function bringInTheHarvest(world: WorldState, year: number): Omit<LandResult, "m
   }
   for (const [polityId, provinceIds] of [...glutted.entries()].sort((a, b) => hungry(b[1]) - hungry(a[1]) || a[0].localeCompare(b[0])).slice(0, 4)) {
     facts.push({
-      localId: `harvest_${polityId}_${year}`.slice(0, 60),
+      localId: safeLocalId(`harvest_${polityId}_${year}`).slice(0, 60),
       kind: "harvest",
       summary: `${listed(provinceIds.slice(0, 4).map((id) => provinceName(next, id)))}${provinceIds.length > 4 ? ` and ${provinceIds.length - 4} more of ${polityName(next, polityId)}'s provinces` : ""} brought in a glut: the granaries full, and grain cheap.`.slice(0, 600),
       affectedRefs: [{ kind: "polity", id: polityId }, ...provinceIds.slice(0, 4).map((id) => ({ kind: "province" as const, id }))],

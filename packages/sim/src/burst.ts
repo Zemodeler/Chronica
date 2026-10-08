@@ -153,6 +153,7 @@ import { brokenBy, whyItWillNotLoad } from "./checkpoint";
 import { theOrdersOwnParts } from "./order-parts";
 import { actsHeCanDo, dedupeStages, resolveHandles } from "./order-stages";
 import { stampOrderMoney } from "./order-money";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * One simulation burst: everything that happens between the player pressing
@@ -1241,7 +1242,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     if (recipient === undefined || attempt.issuerRef.kind !== "character") return;
     const told = materializeFacts({
       proposals: [{
-        localId: `delegate_report_${attempt.id}`,
+        localId: safeLocalId(`delegate_report_${attempt.id}`),
         kind: "delegate_report",
         summary: `${recipient.name} sent word to ${world.characters.find((character) => character.id === attempt.issuerRef.id)?.name ?? "the one who ordered it"} of "${attempt.instruction.slice(0, 160)}": ${what}.`.slice(0, 600),
         affectedRefs: [attempt.issuerRef, attempt.recipientRef],
@@ -1421,7 +1422,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
           };
           const materialized = materializeFacts({
             proposals: [...tried.factProposals, {
-              localId: `order_resumed_${partIndex}_${stageIndex}`,
+              localId: safeLocalId(`order_resumed_${partIndex}_${stageIndex}`),
               kind: "order_resumed",
               summary: `What it waited on was settled, and the order was taken up again: "${part.said}".`.slice(0, 600),
               affectedRefs: [actorRef],
@@ -1470,7 +1471,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
                   .sort((a, b) => Number(qualified(b.id)) - Number(qualified(a.id)) || (b.skills.subSkills.logistics ?? 0) - (a.skills.subSkills.logistics ?? 0) || b.prestigeBps - a.prestigeBps)[0];
                 if (recipient !== undefined) {
                   const before = new Set(world.orderAttempts.map((attempt) => attempt.id));
-                  world = recordDelegations(world, [{ localId: `resume_${partIndex}_${stageIndex}`, issuerRef: { kind: "character", id: order.actorCharacterId }, recipientRef: { kind: "character", id: recipient.id }, claimedAuthorityGrantRef: null, instruction, part: null }], ids, new Map(), input.offices);
+                  world = recordDelegations(world, [{ localId: safeLocalId(`resume_${partIndex}_${stageIndex}`), issuerRef: { kind: "character", id: order.actorCharacterId }, recipientRef: { kind: "character", id: recipient.id }, claimedAuthorityGrantRef: null, instruction, part: null }], ids, new Map(), input.offices);
                   const attempt = world.orderAttempts.find((candidate) => !before.has(candidate.id));
                   if (attempt !== undefined) { world = { ...world, orderAttempts: world.orderAttempts.map((candidate) => candidate.id === attempt.id ? { ...candidate, servesRef: ref } : candidate) }; next = { ...next, whyNot: null, workRefs: [...next.workRefs, { kind: "order_attempt", id: attempt.id }] }; settled = { ...stage, status: "resumed" }; }
                 }
@@ -1493,7 +1494,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
               const waited = [...new Set(stage.waitsOn.map((condition) => conditionInWords(condition)))].join(" and ");
               const told = materializeFacts({
                 proposals: [{
-                  localId: `order_wait_review_${partIndex}_${stageIndex}`,
+                  localId: safeLocalId(`order_wait_review_${partIndex}_${stageIndex}`),
                   kind: "order_wait_review",
                   summary: `Still waiting for ${waited} (${world.elapsedStep - since} days) before "${part.said}" can go ahead. It lapses on day ${since + STAGE_LAPSE_DAYS}; your word?`.slice(0, 600),
                   affectedRefs: [actorRef], visibility: "private" as const, discoveryState: "private" as const, knowableInDays: 0, knownToRefs: [actorRef], significance: 35,
@@ -1512,7 +1513,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
             const needsShips = stage.waitsOn.some((condition) => condition.kind === "transport_capacity");
             const told = materializeFacts({
               proposals: [{
-                localId: `order_stage_failed_${partIndex}_${stageIndex}`,
+                localId: safeLocalId(`order_stage_failed_${partIndex}_${stageIndex}`),
                 kind: "order_stage_failed",
                 summary: `"${part.said}" could not go ahead: ${(settled.reason ?? "what it waited on did not come").replace(/^It could not go ahead: /, "")} ${needsShips ? "Hire or build the ships, then order the crossing again." : "Give the order again, changed, if you still want it."}`.slice(0, 600),
                 affectedRefs: [actorRef], visibility: "private" as const, discoveryState: "private" as const, knowableInDays: 0, knownToRefs: [actorRef], significance: 45,
@@ -1613,7 +1614,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
             const other = world.material.accounts.find((account) => account.id === project.fundingAccountId);
             note = `${note === null ? "" : `${note}; `}${project.label} was paid from ${other?.owner.kind === "character" ? "a private purse" : "another chest"}, not the one the order named`.slice(0, 400);
             told.push({
-              localId: `envelope_payer_${project.id}`.slice(0, 60),
+              localId: safeLocalId(`envelope_payer_${project.id}`).slice(0, 60),
               kind: "envelope_breach",
               summary: `${project.label} was paid for from another account than the one the order named.`,
               affectedRefs: [{ kind: "character", id: order.actorCharacterId }, { kind: "project", id: project.id }],
@@ -2080,7 +2081,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       if (province === undefined || province.controllerPolityId === null || province.controllerPolityId !== input.actorPolityId) return [];
       revealedThreads.add(storyline.id);
       return [{
-        localId: `rumour_${storyline.id}`,
+        localId: safeLocalId(`rumour_${storyline.id}`),
         kind: "rumour_of_trouble",
         summary: `Word came, weeks late and unconfirmed, of some trouble stirring in ${province.name}.`,
         affectedRefs: [{ kind: "province" as const, id: province.id }],
@@ -2127,7 +2128,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       const noticers = covert ? [] : findWhoWouldNotice(world, input.offices, breach, actorRef.id);
       const soonest = noticers.reduce((days, noticer) => Math.min(days, noticer.afterDays), Number.POSITIVE_INFINITY);
       return {
-        localId: `breach_${newFacts.length}_${index}`,
+        localId: safeLocalId(`breach_${newFacts.length}_${index}`),
         kind: "authority_breach",
         summary: describeBreach(breach.delta, world, actorName),
         // The act's own things beside the actor -- the chest spent from, the
@@ -2155,7 +2156,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         if (noticers.length === 0) return [];
         const deed = breach.delta.op.replace(/_/g, " ");
         return [{
-          localId: `insubordination_${newFacts.length}_${index}`,
+          localId: safeLocalId(`insubordination_${newFacts.length}_${index}`),
           kind: "insubordination",
           summary: `${actorName} went ahead without leave (${deed}), and word of it reached those who answer for him.`,
           affectedRefs: [actorRef],
@@ -2280,7 +2281,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       const ignored = rejection.kind === "ignored";
       const friction = materializeFacts({
         proposals: [{
-          localId: `friction_${scheduled.length}_${newFacts.length}`,
+          localId: safeLocalId(`friction_${scheduled.length}_${newFacts.length}`),
           kind: ignored ? "order_ignored" : "execution_friction",
           summary: rejection.reason,
           affectedRefs: [actorRef],
@@ -2804,7 +2805,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         const payload = ScheduledEventPayloadSchema.safeParse(event.payload ?? {});
         const details = payload.success ? payload.data : ScheduledEventPayloadSchema.parse({});
         return {
-          localId: `due_${event.id}_${index}`,
+          localId: safeLocalId(`due_${event.id}_${index}`),
           kind: event.kind,
           summary: reportOf(event.kind, event.summary, details.knownTo, details.subjectIds),
           affectedRefs: details.subjectIds.flatMap((id) => {
@@ -3059,7 +3060,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     };
     const told = materializeFacts({
       proposals: unanswered.slice(0, 6).map(({ part, index }) => ({
-        localId: `order_part_${index}`,
+        localId: safeLocalId(`order_part_${index}`),
         kind: "order_part_unanswered",
         summary: `${who} ordered: "${part.said}" ${part.whyNot ?? whyNot(index)}`.slice(0, 600),
         affectedRefs: [input.actorRef],

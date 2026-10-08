@@ -50,6 +50,7 @@ import { decideAudits } from "./close-of-office";
 import { perceivedRatio } from "./perceive";
 import { directTheWar } from "./war-direction";
 import { STEP_DAYS, letterVerdict } from "./letter-verdict";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * The world AI: every power's big moves, by rule (docs/plans/a-living-world.md §2).
@@ -506,7 +507,7 @@ function climb(candidate: MoveCandidate, d: Disposition, rung: "complaint" | "de
       polityId, actorCharacterId: ruler.id, act: "letter", targetPolityId: neighbour.polityId,
       why: `wrote to ${them} (${rung}): ${casus.matter}`.slice(0, 400),
       deltas: [delta({
-        op: "diplomatic_message_send", localId: `${kind}_${polityId}_${neighbour.polityId}`.slice(0, 60), kind,
+        op: "diplomatic_message_send", localId: safeLocalId(`${kind}_${polityId}_${neighbour.polityId}`).slice(0, 60), kind,
         fromPolityId: polityId, fromCharacterRef: ruler.id, toPolityId: neighbour.polityId, toCharacterRef: null,
         subject: letter.subject, terms: letter.body, replyWithinDays: days, inReplyToRef: null, visibility: "polity",
         ...(rung === "ultimatum" ? { onRefusal: "war" } : {}),
@@ -525,7 +526,7 @@ function openTheWar(world: WorldState, polityId: string, ruler: Character, neigh
     ? `${us} throws off the foedus with ${neighbour.name} and takes up arms.`
     : `${us} is at war with ${neighbour.name}.`;
   const deltas: WorldDelta[] = [delta({
-    op: "agreement_open", localId: `war_${polityId}_${neighbour.polityId}`.slice(0, 60), kind: "war",
+    op: "agreement_open", localId: safeLocalId(`war_${polityId}_${neighbour.polityId}`).slice(0, 60), kind: "war",
     polityId, otherPolityId: neighbour.polityId, terms, forDays: null, sourceMessageRef: null, visibility: "public",
     reason: `${ruler.name} chose war: ${reasons}`.slice(0, 240),
   })];
@@ -534,7 +535,7 @@ function openTheWar(world: WorldState, polityId: string, ruler: Character, neigh
     why: reasons.slice(0, 400) || "the odds were good",
     deltas,
     facts: [fact({
-      localId: `why_war_${polityId}_${neighbour.polityId}`.slice(0, 60),
+      localId: safeLocalId(`why_war_${polityId}_${neighbour.polityId}`).slice(0, 60),
       kind: act === "revolt" ? "revolt" : "war_cause",
       summary: (act === "revolt"
         ? `${us} rose against ${neighbour.name} under ${ruler.name}: ${reasons}.`
@@ -594,7 +595,7 @@ function raiseLevy(world: WorldState, reading: PowerReading, ruler: Character, a
     polityId: reading.polityId, actorCharacterId: ruler.id, act: "raise_levy", targetPolityId: null,
     why: `at war with ${against} and no army in the field`.slice(0, 400),
     deltas: [delta({
-      op: "force_create", localId: `levy_${reading.polityId}`.slice(0, 60), name: `Levy of ${reading.name}`.slice(0, 120), polityId: reading.polityId,
+      op: "force_create", localId: safeLocalId(`levy_${reading.polityId}`).slice(0, 60), name: `Levy of ${reading.name}`.slice(0, 120), polityId: reading.polityId,
       commanderCharacterRef: ruler.id, controllerCharacterRef: ruler.id, locationId: at, authorizedStrength: men, payObligationRef: null,
       reason: `${reading.name} calls out its men for the war with ${against}.`.slice(0, 240),
     })],
@@ -646,7 +647,7 @@ function conductOfWar(world: WorldState, force: WorldState["material"]["forces"]
   // town with none, is occupied by standing in it (`occupation.ts`).
   if (here.controllerPolityId !== null && enemies.has(here.controllerPolityId) && here.settlements.some((settlement) => settlement.fortificationLevel >= SIEGE_NEEDED_AT && (settlement.controllerPolityId === null || enemies.has(settlement.controllerPolityId)))) {
     const already = world.sieges.some((siege) => siege.status === "active" && siege.provinceId === here.id);
-    if (!already) return decide("besiege", here.controllerPolityId, `before ${here.name}, held by ${nameOf(here.controllerPolityId)}, with no army to stop us`, [delta({ op: "siege_lay", localId: `siege_${force.id}`.slice(0, 60), forceRef: force.id, settlementId: null, reason: `${force.name} lays siege.` })]);
+    if (!already) return decide("besiege", here.controllerPolityId, `before ${here.name}, held by ${nameOf(here.controllerPolityId)}, with no army to stop us`, [delta({ op: "siege_lay", localId: safeLocalId(`siege_${force.id}`).slice(0, 60), forceRef: force.id, settlementId: null, reason: `${force.name} lays siege.` })]);
     return null;
   }
 
@@ -747,12 +748,12 @@ function allianceAgainstThreats(
       decisions.push({
         polityId: reading.polityId, actorCharacterId: ruler.id, act: "alliance", targetPolityId: partner.polityId, why,
         deltas: [delta({
-          op: "agreement_open", localId: `alliance_${reading.polityId}_${partner.polityId}`.slice(0, 60), kind: "alliance",
+          op: "agreement_open", localId: safeLocalId(`alliance_${reading.polityId}_${partner.polityId}`).slice(0, 60), kind: "alliance",
           polityId: reading.polityId, otherPolityId: partner.polityId, terms: `${reading.name} and ${partner.name} stand together against ${threat.name}.`.slice(0, 600),
           forDays: null, sourceMessageRef: null, visibility: "public", reason: why.slice(0, 240),
         })],
         facts: [fact({
-          localId: `ally_${reading.polityId}_${partner.polityId}`.slice(0, 60), kind: "alliance_made",
+          localId: safeLocalId(`ally_${reading.polityId}_${partner.polityId}`).slice(0, 60), kind: "alliance_made",
           summary: `${reading.name} and ${partner.name} made an alliance against ${threat.name}.`.slice(0, 400),
           affectedRefs: [{ kind: "polity", id: reading.polityId }, { kind: "polity", id: partner.polityId }, { kind: "polity", id: threat.polityId }],
           visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 60,
@@ -903,13 +904,13 @@ function peacesByRule(world: WorldState, input: StatecraftInput, rulerOf: (polit
     decisions.push({
       polityId: victor, actorCharacterId: speaker.id, act: "make_peace", targetPolityId: loser, why,
       deltas: [delta({
-        op: "agreement_open", localId: `peace_${victor}_${loser}`.slice(0, 60), kind: "peace",
+        op: "agreement_open", localId: safeLocalId(`peace_${victor}_${loser}`).slice(0, 60), kind: "peace",
         polityId: victor, otherPolityId: loser, terms,
         ...(surrender ? { clauses: [{ kind: "submission", polityId: loser, toPolityId: victor }] } : {}),
         forDays: null, sourceMessageRef: null, visibility: "public", reason: `${why}.`.slice(0, 240),
       })],
       facts: [fact({
-        localId: `why_peace_${victor}_${loser}`.slice(0, 60), kind: "peace_made",
+        localId: safeLocalId(`why_peace_${victor}_${loser}`).slice(0, 60), kind: "peace_made",
         summary: `${nameOf(victor)} and ${nameOf(loser)} made peace after ${Math.round(days / 30)} months of war: ${why}. ${terms}`.slice(0, 400),
         affectedRefs: [{ kind: "polity", id: victor }, { kind: "polity", id: loser }, { kind: "character", id: speaker.id }],
         visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 75,

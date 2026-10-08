@@ -17,6 +17,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { findPolityGaps } from "./population";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * The narrator: the world making trouble where nobody is looking (VISION §5,
@@ -1285,7 +1286,7 @@ export function engineWork(seed: NarratorSeed, winter = false): { readonly delta
       reason: news,
     }],
     fact: {
-      localId: `stirring_${seed.key.replace(/[^a-z0-9_-]/g, "_")}`,
+      localId: safeLocalId(`stirring_${seed.key.replace(/[^a-z0-9_-]/g, "_")}`),
       kind: seed.archetype,
       summary: news,
       affectedRefs: [

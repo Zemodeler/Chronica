@@ -17,6 +17,7 @@ import {
 import { remember } from "./grievances";
 import { bindGentes } from "./gentes";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Marrying into a house (play-test L10).
@@ -171,7 +172,7 @@ export function answerMarriageOffers(world: WorldState, ids: IdFactory, toDay: n
     if (match === null || barred !== null) {
       next = answerOf("refused", `No marriage can come of it: ${barred}.`);
       facts.push({
-        localId: `marriage_refused_${message.id}`.slice(0, 60), kind: "marriage_refused",
+        localId: safeLocalId(`marriage_refused_${message.id}`).slice(0, 60), kind: "marriage_refused",
         summary: `${recipient} answers ${sender}'s offer of marriage: no marriage can come of it, for ${barred}.`.slice(0, 600),
         affectedRefs: [{ kind: "character", id: message.fromCharacterId }, { kind: "character", id: message.toCharacterId! }],
         visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 20,
@@ -183,7 +184,7 @@ export function answerMarriageOffers(world: WorldState, ids: IdFactory, toDay: n
     if (verdict.score < WILLING_AT) {
       next = answerOf("refused", `${recipient} will not give ${match.bride.name} to ${match.groom.name}${why}.`);
       facts.push({
-        localId: `marriage_refused_${message.id}`.slice(0, 60), kind: "marriage_refused",
+        localId: safeLocalId(`marriage_refused_${message.id}`).slice(0, 60), kind: "marriage_refused",
         summary: `${recipient} has refused the match between ${match.groom.name} and ${match.bride.name}${why}.`.slice(0, 600),
         affectedRefs: [{ kind: "character", id: match.groom.id }, { kind: "character", id: match.bride.id }, { kind: "character", id: match.giver.id }],
         visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 25,
@@ -241,7 +242,7 @@ function wed(world: WorldState, match: Match, ids: IdFactory, atStep: number, fa
   }
   const riser = next.characters.find((character) => character.id === risesId)?.name ?? "the lesser house";
   facts.push({
-    localId: `marriage_${groom.id}_${bride.id}`.slice(0, 60), kind: "marriage",
+    localId: safeLocalId(`marriage_${groom.id}_${bride.id}`).slice(0, 60), kind: "marriage",
     summary: `${groom.name} has married ${bride.name}, given by ${giver.id === bride.id ? "herself" : giver.name}${dowry > 0 ? `, with a dowry of ${dowry}` : ""}.${gain > 0 ? ` ${riser} stands the higher for the match.` : ""}${groomGens !== undefined && brideGens !== undefined && groomGens.id !== brideGens.id ? ` ${groomGens.plural.replace(/^the /, "The ")} and ${brideGens.plural} are bound by it.` : ""}`.slice(0, 600),
     affectedRefs: [{ kind: "character", id: groom.id }, { kind: "character", id: bride.id }, ...(giver.id === bride.id ? [] : [{ kind: "character" as const, id: giver.id }]), ...(groom.polityId === null ? [] : [{ kind: "polity" as const, id: groom.polityId }])],
     visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 45,

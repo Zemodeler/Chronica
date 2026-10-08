@@ -14,6 +14,7 @@ import {
 } from "@chronica/shared";
 import { enrolFormerMagistrates } from "./elections";
 import { NOTA_KIND } from "./nota";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * The censors' *lectio*: the roll of the Senate read anew at the lustrum (docs/plans/government.md, "H6 as built").
@@ -150,7 +151,7 @@ export function keepTheRoll(input: LectioInput): { world: WorldState; facts: Fac
       }].slice(-STATECRAFT_LOG_MAX) },
     };
     facts.push(fact({
-      localId: `lectio_${polity.id}_${Math.floor(day / MONTH)}`.slice(0, 60), kind: "lectio", summary: summary.slice(0, 400), visibility: "polity", discoveryState: "polity", knowableInDays: 0,
+      localId: safeLocalId(`lectio_${polity.id}_${Math.floor(day / MONTH)}`).slice(0, 60), kind: "lectio", summary: summary.slice(0, 400), visibility: "polity", discoveryState: "polity", knowableInDays: 0,
       significance: found.length > 0 ? 50 : 30, affectedRefs: [{ kind: "polity", id: polity.id }, { kind: "character", id: censor.id }, ...found.slice(0, 3).map(({ man }) => ({ kind: "character" as const, id: man.id }))],
     }));
   }

@@ -1,5 +1,6 @@
 import { decideOrderAttempt, findOrderPart, receiveOrderAttempt, type Character, type FactProposalDraft, type OrderAttempt, type WorldState } from "@chronica/shared";
 import { answerByTheEngine, type RequestsInput } from "./requests";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * An order is answered by rule for the man who is not the model's (the user's rule, 2026-10-08).
@@ -63,7 +64,7 @@ export function answerOrdersByRule(world: WorldState, input: Omit<RequestsInput,
       const put = decideOrderAttempt(received, "delay", "He will see to it presently, and means to do it properly.", input.toDay);
       next = { ...next, orderAttempts: next.orderAttempts.map((candidate) => (candidate.id === attempt.id ? put : candidate)) };
       facts.push({
-        localId: `delayed_${attempt.id}`.slice(0, 60), kind: "request_delayed",
+        localId: safeLocalId(`delayed_${attempt.id}`).slice(0, 60), kind: "request_delayed",
         summary: `${man.name} took the order -- "${attempt.instruction.slice(0, 120)}" -- and said he would see to it within the week.`.slice(0, 600),
         affectedRefs: [attempt.issuerRef, attempt.recipientRef], visibility: "private", discoveryState: "private", knowableInDays: 0, knownToRefs: [attempt.issuerRef, attempt.recipientRef], significance: 20,
       });

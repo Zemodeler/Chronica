@@ -14,6 +14,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * The duties a treaty's words put on each side, made things the world can check
@@ -230,7 +231,7 @@ export function workOnTreatyDuties(input: TreatyDutyInput): { world: WorldState;
           material: { ...world.material, forces: world.material.forces.map((candidate) => candidate.id === force.id ? { ...candidate, hold: false } : candidate) },
         };
         facts.push({
-          localId: `treaty_withdrawal_${force.id}`.slice(0, 60),
+          localId: safeLocalId(`treaty_withdrawal_${force.id}`).slice(0, 60),
           kind: "march_begun",
           summary: `${force.name} set out from ${placeName(goal.fromProvinceId)} for ${placeName(home.provinceId)}, as the treaty obliges ${nameOfPolity(world, polityId)}: about ${days} days on the road.`.slice(0, 600),
           affectedRefs: [{ kind: "force", id: force.id }, { kind: "province", id: goal.fromProvinceId }, { kind: "polity", id: polityId }],
@@ -251,7 +252,7 @@ export function workOnTreatyDuties(input: TreatyDutyInput): { world: WorldState;
             : { ...candidate, settlements: candidate.settlements.map((settlement) => settlement.id === goal.settlementId ? { ...settlement, controllerPolityId: goal.polityId } : settlement) }) },
         };
         facts.push({
-          localId: `treaty_restored_${goal.settlementId ?? province.id}`.slice(0, 60),
+          localId: safeLocalId(`treaty_restored_${goal.settlementId ?? province.id}`).slice(0, 60),
           kind: "province_ceded",
           summary: `${nameOfPolity(world, polityId)} restored ${name} to ${nameOfPolity(world, goal.polityId)}, as the treaty obliged it.`.slice(0, 600),
           affectedRefs: [{ kind: "province", id: province.id }, { kind: "polity", id: polityId }, { kind: "polity", id: goal.polityId }],

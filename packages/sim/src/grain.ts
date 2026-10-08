@@ -26,6 +26,7 @@ import {
 } from "@chronica/shared";
 import { voyageLossBps } from "./house-voyages";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Bread for an army beyond what it forages (docs/plans/battles-that-last.md).
@@ -191,7 +192,7 @@ export function breadWhereItStands(opened: WorldState, force: Force, how: "buy" 
   return {
     world: next,
     facts: [{
-      localId: `bread_${force.id}_${day}`.slice(0, 60),
+      localId: safeLocalId(`bread_${force.id}_${day}`).slice(0, 60),
       kind: how === "buy" ? "grain_bought" : "grain_requisitioned",
       summary,
       affectedRefs: [{ kind: "force", id: force.id }, { kind: "province", id: province.id }],
@@ -235,7 +236,7 @@ export function sendConvoy(opened: WorldState, force: Force, fromProvinceId: str
       convoys: [...world.convoys.filter((candidate) => candidate.status === "on_the_road" || candidate.arrivesAtStep > day - 60), convoy],
     },
     facts: [{
-      localId: `convoy_${convoy.id}`.slice(0, 60),
+      localId: safeLocalId(`convoy_${convoy.id}`).slice(0, 60),
       kind: "convoy_sent",
       summary: `A convoy of ${days} days' bread set out from ${from.name} for ${force.name}, ${km === 0 ? "close at hand" : `${describeKm(km)} off`}.`,
       affectedRefs: [{ kind: "force", id: force.id }, { kind: "province", id: fromProvinceId }],
@@ -337,7 +338,7 @@ export function countDelivered(world: WorldState, convoy: Pick<Convoy, "contract
 
 function said(convoy: Convoy, kind: string, summary: string, significance: number, forceIds: readonly string[] = [convoy.forceId]): FactProposalDraft {
   return {
-    localId: `${kind}_${convoy.id}`.slice(0, 60),
+    localId: safeLocalId(`${kind}_${convoy.id}`).slice(0, 60),
     kind,
     summary: summary.slice(0, 600),
     affectedRefs: [{ kind: "province", id: convoy.toProvinceId }, ...forceIds.map((id) => ({ kind: "force" as const, id }))],

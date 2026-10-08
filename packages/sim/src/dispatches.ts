@@ -12,6 +12,7 @@ import {
 import { dispositionOf } from "./disposition";
 import { toneOf, type Tone } from "./letter-craft";
 import type { StatecraftDecision } from "./statecraft";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * The people who work for the player write to him (docs/plans/a-living-world.md).
@@ -175,7 +176,7 @@ export function decideDispatches(world: WorldState, playerCharacterId: string | 
       .replaceAll("{place}", concern.place).replaceAll("{what}", concern.what);
     const body = `${opening} ${said} ${ASKS[concern.matter]} ${closing}`.slice(0, 390);
     const fact: FactProposal = FactProposalSchema.parse({
-      localId: `dispatch_${concern.key}`.toLowerCase().replace(/[^a-z0-9_-]/g, "_").slice(0, 60),
+      localId: safeLocalId(`dispatch_${concern.key}`).toLowerCase().replace(/[^a-z0-9_-]/g, "_").slice(0, 60),
       kind: "dispatch",
       summary: `${concern.sender.name} writes: ${body}`.slice(0, 400),
       affectedRefs: [{ kind: "character", id: concern.sender.id }, { kind: "character", id: playerCharacterId }],

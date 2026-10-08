@@ -171,6 +171,7 @@ import { commandChanges } from "../command-changes";
 import { endPolity } from "../polity-end";
 import { LOAN_TERM_PERIODS, loanInstalment } from "../debts";
 import { EMBARGO_BREACH_TRUST, endObligationsOfEndedAgreements, hasGrievance, shiftTrust } from "../treaties";
+import { safeLocalId } from "../safe-local-id";
 
 /** The words added to the news of an embargo when it ended a trade pact that stood: the pact was broken, not closed. */
 const brokenPactNote = (world: WorldState, a: string, b: string): string =>
@@ -1092,7 +1093,7 @@ function applyUngroupedDeltas(world: WorldState, deltas: readonly WorldDelta[], 
       const flight = context.actorRef.kind === "character" ? fleesHisMaster(delta, current, context.actorRef.id) : null;
       if (flight !== null) {
         emitted.push({
-          localId: `fled_${context.actorRef.id}`.slice(0, 60), kind: "runaway", summary: flight,
+          localId: safeLocalId(`fled_${context.actorRef.id}`).slice(0, 60), kind: "runaway", summary: flight,
           affectedRefs: [{ kind: "character", id: context.actorRef.id }], visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 35,
         });
       }
@@ -1196,7 +1197,7 @@ function applyUngroupedDeltas(world: WorldState, deltas: readonly WorldDelta[], 
           const motion = ofTheOrder && !declaredNow && context.actorRef.kind === "character" ? layBeforeTheChamber(delta, current, context.actorRef.id, resolve) : null;
           if (declaredNow) {
             factProposals.push({
-              localId: `nobody_follows_${context.actorRef.id}_${delta.op}`.slice(0, 60), kind: "nobody_follows", summary: unheard.slice(0, 600),
+              localId: safeLocalId(`nobody_follows_${context.actorRef.id}_${delta.op}`).slice(0, 60), kind: "nobody_follows", summary: unheard.slice(0, 600),
               affectedRefs: [{ kind: "character", id: context.actorRef.id }], visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 35,
             });
           }
@@ -1220,7 +1221,7 @@ function applyUngroupedDeltas(world: WorldState, deltas: readonly WorldDelta[], 
         }
         if (willing !== null) {
           emitted.push({
-            localId: `willing_${willing.listenerId}_${delta.op}`.slice(0, 60),
+            localId: safeLocalId(`willing_${willing.listenerId}_${delta.op}`).slice(0, 60),
             kind: "done_unbidden",
             summary: willing.why,
             affectedRefs: [{ kind: "character", id: willing.listenerId }, { kind: "character", id: context.actorRef.id }],
@@ -1462,7 +1463,7 @@ export function acceptedAgreementDelta(replied: WorldState, message: WorldState[
     : [message.toPolityId, message.fromPolityId];
   return {
     op: "agreement_open",
-    localId: `accepted_${message.id}`.slice(0, 60),
+    localId: safeLocalId(`accepted_${message.id}`).slice(0, 60),
     kind,
     polityId: first,
     otherPolityId: second,
@@ -1514,7 +1515,7 @@ export function layBeforeTheChamber(delta: WorldDelta, world: WorldState, actorI
   const war = delta.op === "agreement_open" && delta.kind === "war";
   return {
     op: "political_procedure_open",
-    localId: `motion_${"localId" in delta ? delta.localId : delta.op}`.slice(0, 60),
+    localId: safeLocalId(`motion_${"localId" in delta ? delta.localId : delta.op}`).slice(0, 60),
     type: war || delta.op === "agreement_close" ? "council_deliberation" : "treaty_ratification",
     institutionRef: chamber.id,
     sponsorCharacterRef: actorId,
@@ -1617,7 +1618,7 @@ export function awaitingTheQuestion(
   return {
     delta: waiting,
     fact: {
-      localId: `awaits_${localId}`.slice(0, 60),
+      localId: safeLocalId(`awaits_${localId}`).slice(0, 60),
       kind: "order_awaits_vote",
       summary: `${actor.name} held back "${label}" until the vote on "${chosen.procedure.label}" is in, to be done if it ${outcome === "failed" ? "fails" : "passes"}.`.slice(0, 600),
       affectedRefs: [{ kind: "character", id: actor.id }],
@@ -1678,7 +1679,7 @@ function callOffMarches(
   for (const project of overridden) {
     const near = project === walk && onTheRoad !== undefined && onTheRoad.locationId !== force?.locationId ? provinceName(onTheRoad.locationId) : null;
     emitFact({
-      localId: `called_off_${project.id}`.slice(0, 60),
+      localId: safeLocalId(`called_off_${project.id}`).slice(0, 60),
       kind: "march_called_off",
       summary: `${force?.name ?? forceId} turned ${near === null ? "back from the road to" : `on the road near ${near}, short of`} ${provinceName(project.completionOutcome?.provinceId ?? null)}${keepTo === null ? "" : ` and makes for ${provinceName(keepTo)} instead`}: a later order sent it elsewhere, and "${project.label}" is called off.`.slice(0, 600),
       affectedRefs: [{ kind: "force", id: forceId }, { kind: "project", id: project.id }],
@@ -1758,7 +1759,7 @@ function arrangeCrossing(
   const shore = provinceName(plan.embarkProvinceId);
   const leg = (mover: Force, days: number, kind: "march" | "sailing"): WorldDelta => ({
     op: "project_create",
-    localId: `${kind}-${mover.id}`.slice(0, 60),
+    localId: safeLocalId(`${kind}-${mover.id}`).slice(0, 60),
     kind,
     label: `${mover.name} ${kind === "march" ? "marches" : "sails"} to ${shore} for the crossing`.slice(0, 160),
     sponsorRef: context.actorRef,
@@ -1807,7 +1808,7 @@ function arrangeCrossing(
     }),
   };
   emitFact({
-    localId: `crossing_${army.id}`.slice(0, 60),
+    localId: safeLocalId(`crossing_${army.id}`).slice(0, 60),
     kind: "crossing_arranged",
     summary: `${describePassagePlan(world, army, plan)}: about ${gatherDays + plan.crossingDays} days until the last of it is landed in ${provinceName(to)}.`.slice(0, 600),
     affectedRefs: [{ kind: "force", id: army.id }, ...plan.fleets.map((entry) => ({ kind: "force" as const, id: entry.fleet.id })), { kind: "province", id: to }],
@@ -1861,7 +1862,7 @@ function setOutOn(
   const sails = isNavalForce(force, warfareWith(world, context.warfare));
   const journey: WorldDelta = {
     op: "project_create",
-    localId: `march-${forceId}`.slice(0, 60),
+    localId: safeLocalId(`march-${forceId}`).slice(0, 60),
     kind: carried === null ? (sails ? "sailing" : "march") : "crossing",
     label: `${force.name} ${carried === null ? (sails ? "sails for" : "marches on") : "crosses to"} ${provinceName(to)}`.slice(0, 160),
     sponsorRef: context.actorRef,
@@ -1878,7 +1879,7 @@ function setOutOn(
   // Turned, it goes on from where it got to; it did not set out from home again.
   const whence = wasTurnedOnTheRoad(force) ? `turned on the road near ${provinceName(force.locationId)} and makes` : `${sails ? "sailed" : "set out"} from ${provinceName(force.locationId)}`;
   emitFact({
-    localId: `march_${forceId}`.slice(0, 60),
+    localId: safeLocalId(`march_${forceId}`).slice(0, 60),
     kind: carried === null ? "march_begun" : "crossing_begun",
     summary: carried === null
       ? `${force.name} ${whence} for ${provinceName(to)}, about ${describeKm(km)} off: about ${days} days ${sails ? "at sea" : "on the road"}.`
@@ -1998,7 +1999,7 @@ function applyOne(
           const procedureId = assignedIds.get(localId);
           if (procedureId !== undefined) {
             emitFact(letterFact(moved, {
-              localId: `awaits_ratification_${message.id}`,
+              localId: safeLocalId(`awaits_ratification_${message.id}`),
               kind: "treaty_awaits_ratification",
               summary: `${theirs} accepted "${message.subject}", but ${sender.name} could not bind ${polityName(replied, message.fromPolityId)} to it: the ${chamber.name} must ratify it first.`,
               fromPolityId: message.fromPolityId,
@@ -2024,7 +2025,7 @@ function applyOne(
     } catch (error) {
       if (!(error instanceof DeltaRejection)) throw error;
       emitFact(letterFact(replied, {
-        localId: `unbound_${message.id}`,
+        localId: safeLocalId(`unbound_${message.id}`),
         kind: "acceptance_unbound",
         summary: `${polityName(replied, message.toPolityId)} accepted "${message.subject}", but no ${kind.replace(/_/g, " ")} could be made of it: ${error.message}`,
         fromPolityId: message.fromPolityId,
@@ -2050,7 +2051,7 @@ function applyOne(
     if (message.onRefusal === "embargo") {
       const laying: WorldDelta = {
         op: "agreement_open",
-        localId: `embargo_${message.id}`.slice(0, 60),
+        localId: safeLocalId(`embargo_${message.id}`).slice(0, 60),
         kind: "embargo",
         polityId: message.fromPolityId,
         otherPolityId: message.toPolityId,
@@ -2073,7 +2074,7 @@ function applyOne(
     // of the words, with the pause kept, is not what it threatened (R15).
     if (threatWaitsOnAttack(message)) {
       emitFact(letterFact(replied, {
-        localId: `threat_stands_${message.id}`,
+        localId: safeLocalId(`threat_stands_${message.id}`),
         kind: "threat_stands",
         summary: `${polityName(replied, message.toPolityId)} refused "${message.subject}". ${polityName(replied, message.fromPolityId)}'s threat of war stands, and will be carried out if ${polityName(replied, message.toPolityId)} attacks.`,
         fromPolityId: message.fromPolityId,
@@ -2086,7 +2087,7 @@ function applyOne(
     }
     const declaring: WorldDelta = {
       op: "agreement_open",
-      localId: `threat_${message.id}`.slice(0, 60),
+      localId: safeLocalId(`threat_${message.id}`).slice(0, 60),
       kind: "war",
       polityId: message.fromPolityId,
       otherPolityId: message.toPolityId,
@@ -2099,7 +2100,7 @@ function applyOne(
     try {
       const opened = applyOne(replied, declaring, context, assignedIds, resolve, emitFact, emitAccount);
       emitFact(letterFact(opened, {
-        localId: `threat_${message.id}`,
+        localId: safeLocalId(`threat_${message.id}`),
         kind: "war_declared",
         summary: `${polityName(opened, message.fromPolityId)} made war on ${polityName(opened, message.toPolityId)}, as "${message.subject}" had said it would if refused.`,
         fromPolityId: message.fromPolityId,
@@ -2134,7 +2135,7 @@ function applyOne(
     const named = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
     const ownMan = context.playerCharacterId === offender.id;
     const demand = {
-      op: "diplomatic_message_send", localId: `redress_${band.id}`.slice(0, 60), kind: "ultimatum",
+      op: "diplomatic_message_send", localId: safeLocalId(`redress_${band.id}`).slice(0, 60), kind: "ultimatum",
       fromPolityId: injuredPolityId, fromCharacterRef: senderId, toPolityId: band.polityId, toCharacterRef: null,
       subject: `Redress for the attack on ${where}`.slice(0, 240),
       terms: `${offender.name}'s own men fell on ${where}. ${named(band.polityId)} may ${ownMan ? "make good the damage" : "deliver him to us, or make good the damage"} within thirty days. If it will do neither, we shall hold the deed to be its own, and make war.`.slice(0, 1_100),
@@ -2155,13 +2156,13 @@ function applyOne(
   const beginWarByAttack = (attacker: WorldState["material"]["forces"][number], defenderPolityId: string, where: string): WorldState => {
     const named = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
     const opened = applyOne(world, {
-      op: "agreement_open", localId: `attack_${attacker.id}_${atStep}`.slice(0, 60), kind: "war",
+      op: "agreement_open", localId: safeLocalId(`attack_${attacker.id}_${atStep}`).slice(0, 60), kind: "war",
       polityId: attacker.polityId, otherPolityId: defenderPolityId,
       terms: `War begun by ${attacker.name}'s attack at ${where}.`.slice(0, 600), forDays: null, sourceMessageRef: null, visibility: "public",
       reason: `${attacker.name} attacked in ${where}.`.slice(0, 240),
     }, context, assignedIds, resolve, emitFact, emitAccount);
     emitFact({
-      localId: `war_by_attack_${attacker.id}`.slice(0, 60),
+      localId: safeLocalId(`war_by_attack_${attacker.id}`).slice(0, 60),
       kind: "war_declared",
       summary: `${named(attacker.polityId)} made war on ${named(defenderPolityId)}, beginning it with ${attacker.name}'s attack at ${where}.`,
       affectedRefs: [{ kind: "polity", id: attacker.polityId }, { kind: "polity", id: defenderPolityId }, { kind: "force", id: attacker.id }],
@@ -2193,7 +2194,7 @@ function applyOne(
       }
       if (paying < delta.amount) {
         emitFact({
-          localId: `short_${fromId}_${delta.amount}`.slice(0, 60),
+          localId: safeLocalId(`short_${fromId}_${delta.amount}`).slice(0, 60),
           kind: "payment_short",
           summary: `Of ${delta.amount} to be paid for ${delta.reason.slice(0, 160)}, only ${paying} could be found; ${delta.amount - paying} is still owed.`,
           affectedRefs: [{ kind: "account", id: fromId }, ...(toId === null ? [] : [{ kind: "account" as const, id: toId }])],
@@ -2500,7 +2501,7 @@ function applyOne(
             causeId: id, explanation: `Part of what was voted for ${delta.label}`, visibility: "private",
           }, context);
           emitFact({
-            localId: `skim_${id}`,
+            localId: safeLocalId(`skim_${id}`),
             kind: "peculation",
             summary: `${hand.name} let ${takeable} of what was voted for ${delta.label} find its way into his own purse.`,
             affectedRefs: [{ kind: "character", id: doerId }],
@@ -2636,7 +2637,7 @@ function applyOne(
           },
         };
         emitFact({
-          localId: `drawn_${id}`.slice(0, 60),
+          localId: safeLocalId(`drawn_${id}`).slice(0, 60),
           kind: "force_reformed",
           summary: `${drawn} men of ${source.name} became ${delta.name}${emptied ? `, and ${source.name} is no more` : `; ${remaining.reduce((sum, group) => sum + Math.max(0, group.fit), 0)} remain in it`}.${delta.serviceTerms === undefined ? "" : ` ${delta.serviceTerms}`}`.slice(0, 600),
           affectedRefs: [{ kind: "force", id }, { kind: "force", id: source.id }, { kind: "polity", id: forcePolityId }],
@@ -2645,7 +2646,7 @@ function applyOne(
           knowableInDays: 0,
           significance: 45,
         });
-        if (garrison) emitFact({ localId: `garrison_${id}`.slice(0, 60), kind: "garrison_set", summary: `${delta.name} stands as the garrison of ${world.map.provinces.find((province) => province.id === delta.locationId)?.name ?? delta.locationId}, ${drawn} men under orders to hold it.`.slice(0, 600), affectedRefs: [{ kind: "force", id }, { kind: "province", id: delta.locationId }], visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 40 });
+        if (garrison) emitFact({ localId: safeLocalId(`garrison_${id}`).slice(0, 60), kind: "garrison_set", summary: `${delta.name} stands as the garrison of ${world.map.provinces.find((province) => province.id === delta.locationId)?.name ?? delta.locationId}, ${drawn} men under orders to hold it.`.slice(0, 600), affectedRefs: [{ kind: "force", id }, { kind: "province", id: delta.locationId }], visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 40 });
         const settled = emptied ? disbandForces(withForce, new Set([source.id]), null) : withForce;
         // Left to hold a place the army is not in: drawn off here and sent there.
         return delta.locationId === source.locationId || !world.map.provinces.some((province) => province.id === delta.locationId) ? settled
@@ -2656,7 +2657,7 @@ function applyOne(
       if (leader !== null && "naval" in category && category.naval === true && owesShipsTo(world, forcePolityId, leader)) {
         const sent = requisitionAlliedHulls(world, { id, chestId: context.ids.next("account"), allyId: forcePolityId, name: delta.name, wanted: delta.authorizedStrength, commanderId, controllerId, categoryId: category.id, label: category.label, atStep });
         if (typeof sent === "string") reject(sent);
-        emitFact({ localId: `requisitioned_${id}`.slice(0, 60), kind: "hulls_requisitioned", summary: `${sent.hulls} ${category.label.toLowerCase()} were requisitioned from ${world.map.polities.find((polity) => polity.id === forcePolityId)?.name ?? forcePolityId}, as its treaty with ${world.map.polities.find((polity) => polity.id === leader)?.name ?? leader} binds it, and gather at ${world.map.provinces.find((province) => province.id === sent.shore)?.name ?? sent.shore}.`.slice(0, 600), affectedRefs: [{ kind: "force", id }, { kind: "polity", id: forcePolityId }, { kind: "polity", id: leader }], visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 40 });
+        emitFact({ localId: safeLocalId(`requisitioned_${id}`).slice(0, 60), kind: "hulls_requisitioned", summary: `${sent.hulls} ${category.label.toLowerCase()} were requisitioned from ${world.map.polities.find((polity) => polity.id === forcePolityId)?.name ?? forcePolityId}, as its treaty with ${world.map.polities.find((polity) => polity.id === leader)?.name ?? leader} binds it, and gather at ${world.map.provinces.find((province) => province.id === sent.shore)?.name ?? sent.shore}.`.slice(0, 600), affectedRefs: [{ kind: "force", id }, { kind: "polity", id: forcePolityId }, { kind: "polity", id: leader }], visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 40 });
         return sent.world;
       }
       // Raised out of a country and paid for, and a large levy musters over
@@ -2665,7 +2666,7 @@ function applyOne(
       const levy = raiseLevy(world, { polityId: forcePolityId, provinceId: delta.locationId, men: delta.authorizedStrength, payerAccountId, pays: true, atStep, cause: id, ids: context.ids });
       if (levy.men <= 0) reject(levy.short ?? `No men could be raised for ${delta.name}.`);
       if (levy.short !== null) {
-        emitFact({ localId: `levy_short_${id}`.slice(0, 60), kind: "levy_short", summary: levy.short, affectedRefs: [{ kind: "province", id: delta.locationId }, { kind: "polity", id: forcePolityId }], visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 45 });
+        emitFact({ localId: safeLocalId(`levy_short_${id}`).slice(0, 60), kind: "levy_short", summary: levy.short, affectedRefs: [{ kind: "province", id: delta.locationId }, { kind: "polity", id: forcePolityId }], visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 45 });
       }
       const levied = levy.world;
       // Paid from a man's own purse, it is his band and not the state's.
@@ -2932,7 +2933,7 @@ function applyOne(
       if (delta.outlaw !== undefined && delta.outlaw !== (force.outlaw === true)) {
         const home = world.map.polities.find((polity) => polity.id === force.polityId)?.name ?? force.polityId;
         emitFact({
-          localId: `outlaw_${forceId}`.slice(0, 60),
+          localId: safeLocalId(`outlaw_${forceId}`).slice(0, 60),
           kind: delta.outlaw ? "gone_outlaw" : "come_in",
           summary: delta.outlaw
             ? `${force.name} has thrown off ${home} and answers to nobody now but the man who leads it.`
@@ -2949,7 +2950,7 @@ function applyOne(
       const trespass = movedProvince ? trespassOf(world, updated, delta.locationId!) : null;
       if (trespass !== null) {
         emitFact({
-          localId: `trespass_${forceId}`,
+          localId: safeLocalId(`trespass_${forceId}`),
           kind: "trespass",
           summary: trespass.summary,
           affectedRefs: [
@@ -2973,7 +2974,7 @@ function applyOne(
         : perilsOfTheRoad(world, updated, world.material.forces.filter((candidate) => escort.some((fleet) => fleet.id === candidate.id)), delta.locationId!, overWater, monthOf(context), atStep, `${forceId}:crossing`);
       if (voyage !== null && voyage.words !== "") {
         emitFact({
-          localId: `storm_${forceId}`.slice(0, 60),
+          localId: safeLocalId(`storm_${forceId}`).slice(0, 60),
           kind: "storm_at_sea",
           summary: `${updated.name} crossed to ${world.map.provinces.find((candidate) => candidate.id === delta.locationId)?.name ?? delta.locationId}.${voyage.words}`.slice(0, 600),
           affectedRefs: [{ kind: "force", id: forceId }, ...escort.slice(0, 3).map((fleet) => ({ kind: "force" as const, id: fleet.id })), { kind: "province", id: delta.locationId! }],
@@ -3085,7 +3086,7 @@ function applyOne(
         const levy = raiseLevy(world, { polityId: force.polityId, provinceId: force.locationId, men: joining, payerAccountId, pays: true, atStep, cause: forceId, ids: context.ids });
         if (levy.men <= 0) reject(levy.short ?? `No men could be raised for ${force.name}.`);
         if (levy.short !== null) {
-          emitFact({ localId: `levy_short_${forceId}_${atStep}`.slice(0, 60), kind: "levy_short", summary: levy.short, affectedRefs: [{ kind: "force", id: forceId }, { kind: "province", id: force.locationId }], visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 45 });
+          emitFact({ localId: safeLocalId(`levy_short_${forceId}_${atStep}`).slice(0, 60), kind: "levy_short", summary: levy.short, affectedRefs: [{ kind: "force", id: forceId }, { kind: "province", id: force.locationId }], visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 45 });
         }
         base = levy.world;
         forces = base.material.forces;
@@ -3168,7 +3169,7 @@ function applyOne(
       // The engine's own count, not the author's. A loss nobody can read in
       // the record is a loss that did not happen.
       emitFact({
-        localId: `attrition_${forceId}`,
+        localId: safeLocalId(`attrition_${forceId}`),
         kind: "force_attrition",
         summary: `${force.name} lost ${lost === 1 ? "a man" : `${lost} men`} ${WORD[delta.cause]}.`,
         affectedRefs: [{ kind: "force", id: forceId }],
@@ -3271,7 +3272,7 @@ function applyOne(
       const outlawed = attacker.outlaw === true || defender.outlaw === true || privateBand;
       if (privateBand && attacker.polityId !== defender.polityId && !atWar(world.polityAgreements, attacker.polityId, defender.polityId)) {
         emitFact({
-          localId: `private_attack_${attacker.id}`.slice(0, 60), kind: "private_attack",
+          localId: safeLocalId(`private_attack_${attacker.id}`).slice(0, 60), kind: "private_attack",
           summary: `${attacker.name}, a band kept at one man's own cost, fell on ${defender.name}. It is a quarrel of private men and not a war between ${polityName(world, attacker.polityId)} and ${polityName(world, defender.polityId)}, though the injured power may demand redress.`,
           affectedRefs: [{ kind: "force", id: attacker.id }, { kind: "force", id: defender.id }, { kind: "polity", id: defender.polityId }], visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 55,
         });
@@ -3280,13 +3281,13 @@ function applyOne(
       if (!outlawed && attacker.polityId !== defender.polityId && !atWar(world.polityAgreements, attacker.polityId, defender.polityId)) {
         const where = world.map.provinces.find((province) => province.id === attacker.locationId)?.name ?? attacker.locationId;
         const opened = applyOne(world, {
-          op: "agreement_open", localId: `attack_${attacker.id}_${atStep}`.slice(0, 60), kind: "war",
+          op: "agreement_open", localId: safeLocalId(`attack_${attacker.id}_${atStep}`).slice(0, 60), kind: "war",
           polityId: attacker.polityId, otherPolityId: defender.polityId,
           terms: `War begun by ${attacker.name}'s attack at ${where}.`.slice(0, 600), forDays: null, sourceMessageRef: null, visibility: "public",
           reason: `${attacker.name} attacked ${defender.name}.`.slice(0, 240),
         }, context, assignedIds, resolve, emitFact, emitAccount);
         emitFact({
-          localId: `war_by_attack_${attacker.id}`.slice(0, 60),
+          localId: safeLocalId(`war_by_attack_${attacker.id}`).slice(0, 60),
           kind: "war_declared",
           summary: `${polityName(world, attacker.polityId)} made war on ${polityName(world, defender.polityId)}, beginning it with ${attacker.name}'s attack at ${where}.`,
           affectedRefs: [{ kind: "polity", id: attacker.polityId }, { kind: "polity", id: defender.polityId }, { kind: "force", id: attacker.id }],
@@ -3377,7 +3378,7 @@ function applyOne(
         const polityName = world.map.polities.find((polity) => polity.id === attacker.polityId)?.name ?? attacker.polityId;
         const commanderName = (force: typeof attacker): string => world.characters.find((character) => character.id === force.commanderCharacterId)?.name ?? force.name;
         emitFact({
-          localId: `strife_${battleId}`,
+          localId: safeLocalId(`strife_${battleId}`),
           kind: "civil_strife",
           summary: `${polityName}'s own armies fought each other: ${commanderName(attacker)}'s ${attacker.name} fell upon ${commanderName(defender)}'s ${defender.name}.`,
           affectedRefs: [{ kind: "polity", id: attacker.polityId }, { kind: "force", id: attacker.id }, { kind: "force", id: defender.id },
@@ -3776,7 +3777,7 @@ function applyOne(
         })
         : memory.coinages;
       emitFact({
-        localId: `coinage_${debasing ? "debased" : "reformed"}_${coinage.id}_${atStep}`.slice(0, 60),
+        localId: safeLocalId(`coinage_${debasing ? "debased" : "reformed"}_${coinage.id}_${atStep}`).slice(0, 60),
         kind: debasing ? "coinage_debased" : "coinage_reformed",
         summary: debasing
           ? `${issuer.name} has had its mint strike ${coinage.name} with less silver in it (${struck} of the ${coinage.silverBps} it held): the treasury is the richer by ${sum} for it, and prices will follow the coin down.`.slice(0, 600)
@@ -4067,7 +4068,7 @@ function applyOne(
         if (vetoing !== undefined) {
           const who = world.characters.find((character) => character.id === supporterId)?.name ?? supporterId;
           emitFact({
-            localId: `veto_${procedureId}_${supporterId}`.slice(0, 60),
+            localId: safeLocalId(`veto_${procedureId}_${supporterId}`).slice(0, 60),
             kind: "veto",
             summary: `${who}, as ${vetoing.label}, forbade "${procedure.label}". Unless he relents, it cannot be put to the vote.`,
             affectedRefs: [{ kind: "character", id: supporterId }, { kind: "procedure", id: procedureId }, ...(procedurePolity === undefined || procedurePolity === null ? [] : [{ kind: "polity" as const, id: procedurePolity }])],
@@ -4087,7 +4088,7 @@ function applyOne(
         const who = world.characters.find((character) => character.id === supporterId)?.name ?? supporterId;
         const side = delta.position === "support" ? "for" : delta.position === "oppose" ? "against" : "on";
         emitFact({
-          localId: `speech_${procedureId}_${supporterId}_${atStep}`.slice(0, 60),
+          localId: safeLocalId(`speech_${procedureId}_${supporterId}_${atStep}`).slice(0, 60),
           kind: before === undefined ? "senate_speech" : "political_position_changed",
           summary: `${who} spoke ${side} "${procedure.label}"${house === undefined ? "" : ` in the ${house.name}`}: "${delta.words}"`.slice(0, 600),
           affectedRefs: [{ kind: "procedure", id: procedureId }, { kind: "character", id: supporterId }, ...(house === undefined ? [] : [{ kind: "polity" as const, id: house.polityId }])],
@@ -4296,7 +4297,7 @@ function applyOne(
       // commander is the one it concerns -- the force is named in the fact, so
       // the attention router brings its commander to it.
       emitFact({
-        localId: `deserted_${characterId}_${forceId}`.slice(0, 80),
+        localId: safeLocalId(`deserted_${characterId}_${forceId}`).slice(0, 80),
         kind: "desertion",
         summary: `${person.name} deserted from the ranks of ${force.name}.`,
         // With the army's power named, or nobody at all could know of it.
@@ -4339,7 +4340,7 @@ function applyOne(
       const unitIndex = !overUnit ? null : delta.unitIndex !== undefined ? Math.trunc(delta.unitIndex) : own?.formationId === formation.id ? own.unitIndex : null;
       if (overUnit && (unitIndex === null || unitIndex < 0 || unitIndex > 500)) reject(`Say which ${formation.bodyLabel} unit ${person.name} is to be ${rank.label} of.`);
       emitFact({
-        localId: `posted_${characterId}_${rank.id}`.slice(0, 60),
+        localId: safeLocalId(`posted_${characterId}_${rank.id}`).slice(0, 60),
         kind: "soldier_promoted",
         summary: `${person.name} is made ${rank.label} in ${force.name}.`,
         affectedRefs: [{ kind: "character", id: characterId }, { kind: "force", id: force.id }],
@@ -4403,7 +4404,7 @@ function applyOne(
       const cargo = bySea ? { cost: terms.price, good: bestGapGood(world, from.id, to.id).good, sailedAtStep: atStep, arrivesAtStep: atStep + voyageDays(world, from.id, to.id), voyages: 0, rollsOver: delta.band !== "slight" } : undefined;
       if (cargo !== undefined) {
         emitFact({
-          localId: `cargo_${ventureId}`.slice(0, 60), kind: "cargo_sailed",
+          localId: safeLocalId(`cargo_${ventureId}`).slice(0, 60), kind: "cargo_sailed",
           summary: `${delta.title}: a cargo worth ${cargo.cost} sails from ${from.name} for ${to.name}, and should come in within ${cargo.arrivesAtStep - atStep} days.`,
           affectedRefs: [{ kind: "character", id: ownerId }, { kind: "province", id: from.id }, { kind: "province", id: to.id }],
           visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 20,
@@ -4863,7 +4864,7 @@ function applyOne(
           const cured = stableHash([physician.id, characterId, atStep, "treatment"]) % 100 < Math.min(90, 25 + Math.round(skill * 0.6));
           healthDeltaBps = cured ? 1_500 + skill * 30 : 0;
           emitFact({
-            localId: `treated_${characterId}`.slice(0, 60),
+            localId: safeLocalId(`treated_${characterId}`).slice(0, 60),
             kind: "treatment",
             summary: cured
               ? `${physician.name} treated ${person.name}, and he mended.`
@@ -5198,7 +5199,7 @@ function applyOne(
         status: "active" as const,
       }] } };
       emitFact({
-        localId: `hired_${id}`.slice(0, 60),
+        localId: safeLocalId(`hired_${id}`).slice(0, 60),
         kind: "contract_opened",
         summary: farming
           ? `${employee.name} took the tax farm of ${world.map.provinces.find((province) => province.id === delta.provinceId)?.name ?? delta.provinceId}, paying ${delta.advance} for it${delta.monthlyPay > 0 ? ` and ${delta.monthlyPay} a month` : ""}.`
@@ -5236,7 +5237,7 @@ function applyOne(
         }
       }
       emitFact({
-        localId: `closed_${contract.id}`.slice(0, 60),
+        localId: safeLocalId(`closed_${contract.id}`).slice(0, 60),
         kind: walking && early ? "contract_broken" : "contract_ended",
         summary: walking && early
           ? `${employee?.name ?? "The man hired"} walked out on his contract before its term: ${contract.label}.`
@@ -5318,7 +5319,7 @@ function applyOne(
       }
 
       emitFact({
-        localId: `status_${person.id}`.slice(0, 60),
+        localId: safeLocalId(`status_${person.id}`).slice(0, 60),
         kind: "legal_status",
         summary,
         affectedRefs: [{ kind: "character", id: person.id }, ...[person.ownerCharacterId, newOwnerId].filter((id): id is string => id !== null).map((id) => ({ kind: "character" as const, id }))],
@@ -5435,7 +5436,7 @@ function applyOne(
         // own band it is his quarrel, not the state's war (see isPrivateBand).
         if (!isPrivateBand(world, force)) return applyOne(beginWarByAttack(force, province.controllerPolityId, province.name), delta, context, assignedIds, resolve, emitFact, emitAccount);
         emitFact({
-          localId: `private_attack_${force.id}`.slice(0, 60), kind: "private_attack",
+          localId: safeLocalId(`private_attack_${force.id}`).slice(0, 60), kind: "private_attack",
           summary: `${force.name}, a band kept at one man's own cost, raided ${province.name}. It is a quarrel of private men and not a war between ${polityName(force.polityId)} and ${polityName(province.controllerPolityId)}, though the injured power may demand redress.`,
           affectedRefs: [{ kind: "force", id: force.id }, { kind: "polity", id: province.controllerPolityId }], visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 55,
         });
@@ -5462,7 +5463,7 @@ function applyOne(
       });
       const victims = province.controllerPolityId === null ? "its people" : `the ${polityName(province.controllerPolityId)}`;
       emitFact({
-        localId: `raid_${forceId}`,
+        localId: safeLocalId(`raid_${forceId}`),
         kind: "province_raided",
         summary: seized.taken > 0
           ? `${force.name} raided ${province.name}, burning farms and driving off what could be carried: ${seized.taken} taken from ${victims}.`
@@ -5575,7 +5576,7 @@ function applyOne(
       const travelDays = writerAt === null || readerAt === null ? 0 : newsDaysBetween(world, writerAt, readerAt);
       const deliveredOnDay = atStep + travelDays;
       emitFact(letterFact(world, {
-        localId: `letter_${messageId}`,
+        localId: safeLocalId(`letter_${messageId}`),
         kind: "letter_sent",
         summary: `${characterName(world, senderId)} wrote for ${polityName(world, letterFromId)} to ${recipientId === null ? polityName(world, letterToId) : `${characterName(world, recipientId)} of ${polityName(world, letterToId)}`}: "${delta.subject}". ${delta.terms}`,
         fromPolityId: letterFromId,
@@ -5648,7 +5649,7 @@ function applyOne(
         if (from === null) return countered;
         return applyOne(countered, {
           op: "diplomatic_message_send",
-          localId: `counter_${message.id}`.slice(0, 60),
+          localId: safeLocalId(`counter_${message.id}`).slice(0, 60),
           kind: "trade_offer",
           fromPolityId: message.toPolityId,
           fromCharacterRef: from,
@@ -5682,7 +5683,7 @@ function applyOne(
         if (from === null) return countered;
         return applyOne(countered, {
           op: "diplomatic_message_send",
-          localId: `counter_${message.id}`.slice(0, 60),
+          localId: safeLocalId(`counter_${message.id}`).slice(0, 60),
           kind: message.kind,
           fromPolityId: message.toPolityId,
           fromCharacterRef: from,
@@ -5728,7 +5729,7 @@ function applyOne(
       const betweenPeople = message.kind === "letter" && offeredAgreementKinds(message).length === 0 && message.toCharacterId !== null;
       const personalHow = { accepted: "agreed to", refused: "refused", countered: "wrote back to", ignored: "left unanswered" }[delta.answer];
       emitFact(letterFact(world, {
-        localId: `reply_${messageId}`,
+        localId: safeLocalId(`reply_${messageId}`),
         kind: "letter_answered",
         summary: betweenPeople
           ? `${characterName(world, message.toCharacterId!)} ${personalHow} ${characterName(world, message.fromCharacterId)}'s letter "${message.subject}": ${delta.answerText}`
@@ -5792,7 +5793,7 @@ function applyOne(
           && ((message.fromPolityId === partyId && message.toPolityId === otherPartyId) || (message.fromPolityId === otherPartyId && message.toPolityId === partyId)));
         if (pending !== undefined) {
           emitFact(letterFact(world, {
-            localId: `threat_made_${pending.id}`,
+            localId: safeLocalId(`threat_made_${pending.id}`),
             kind: "war_threatened",
             summary: `${polityName(world, pending.fromPolityId)} will make war on ${polityName(world, pending.toPolityId)} if "${pending.subject}" is refused or goes unanswered.`,
             fromPolityId: pending.fromPolityId,
@@ -5839,7 +5840,7 @@ function applyOne(
       if (standing !== undefined && delta.kind !== "war" && (delta.clauses ?? []).length > 0) {
         const added = carryOutClauses(world, delta.clauses ?? [], standing.id, partyId, otherPartyId, required, context, emitFact, sourceMessageId);
         emitFact({
-          localId: `terms_added_${delta.localId}`.slice(0, 60),
+          localId: safeLocalId(`terms_added_${delta.localId}`).slice(0, 60),
           kind: "treaty_amended",
           summary: `${polityName(world, partyId)} and ${polityName(world, otherPartyId)} added to the ${delta.kind.replace(/_/g, " ")} between them: ${delta.terms}`.slice(0, 600),
           affectedRefs: [{ kind: "polity", id: partyId }, { kind: "polity", id: otherPartyId }],
@@ -5859,7 +5860,7 @@ function applyOne(
       // that revised it is the one it now comes from. Without terms of its own it is the same pact said twice.
       if (standing !== undefined && delta.kind === "trade_pact" && delta.trade !== undefined) {
         emitFact({
-          localId: `trade_pact_revised_${delta.localId}`.slice(0, 60),
+          localId: safeLocalId(`trade_pact_revised_${delta.localId}`).slice(0, 60),
           kind: "treaty_amended",
           summary: `${polityName(world, partyId)} and ${polityName(world, otherPartyId)} revised the trade pact between them: ${delta.terms}`.slice(0, 600),
           affectedRefs: [{ kind: "polity", id: partyId }, { kind: "polity", id: otherPartyId }],
@@ -5924,7 +5925,7 @@ function applyOne(
       // refused ultimatum tell it their own way (`attack_`, `threat_`).
       if (delta.kind === "war" && !/^(attack|threat)_/.test(delta.localId)) {
         emitFact({
-          localId: `war_opened_${delta.localId}`.slice(0, 60),
+          localId: safeLocalId(`war_opened_${delta.localId}`).slice(0, 60),
           kind: "war_declared",
           summary: `${polityName(world, partyId)} and ${polityName(world, otherPartyId)} went to war. ${delta.terms}`.slice(0, 600),
           affectedRefs: [{ kind: "polity", id: partyId }, { kind: "polity", id: otherPartyId }],
@@ -5939,7 +5940,7 @@ function applyOne(
         const embargo = delta.kind === "embargo";
         const goods = (delta.trade?.goods ?? []).map((good) => good.replace(/_/g, " "));
         emitFact({
-          localId: `${embargo ? "embargo_laid" : "trade_pact_opened"}_${delta.localId}`.slice(0, 60),
+          localId: safeLocalId(`${embargo ? "embargo_laid" : "trade_pact_opened"}_${delta.localId}`).slice(0, 60),
           kind: embargo ? "embargo_laid" : "trade_pact_opened",
           summary: embargo
             ? `${polityName(world, partyId)} has laid an embargo on trade with ${polityName(world, otherPartyId)}${goods.length === 0 ? "" : `, of ${goods.join(", ")}`}: no merchant carries ${goods.length === 0 ? "goods" : "them"} between their markets until it is lifted.${brokenPactNote(world, partyId, otherPartyId)}`.slice(0, 600)
@@ -6139,7 +6140,7 @@ function applyOne(
       if (!atWar(world.polityAgreements, force.polityId, defenderId) && force.outlaw !== true) {
         if (!isPrivateBand(world, force)) return applyOne(beginWarByAttack(force, defenderId, place), delta, context, assignedIds, resolve, emitFact, emitAccount);
         emitFact({
-          localId: `private_attack_${force.id}`.slice(0, 60), kind: "private_attack",
+          localId: safeLocalId(`private_attack_${force.id}`).slice(0, 60), kind: "private_attack",
           summary: `${force.name}, a band kept at one man's own cost, laid siege to ${place}. It is a quarrel of private men and not a war between ${name(force.polityId)} and ${name(defenderId)}, though the injured power may demand redress.`,
           affectedRefs: [{ kind: "force", id: force.id }, { kind: "polity", id: defenderId }], visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 55,
         });
@@ -6158,7 +6159,7 @@ function applyOne(
       if (standing !== undefined) return assaultIf(raiseWorks(world, standing, force, delta.works ?? [], atStep, context, emitFact), standing.id);
       const siegeId = mint("siege", delta.localId);
       emitFact({
-        localId: `siege_${siegeId}`.slice(0, 60),
+        localId: safeLocalId(`siege_${siegeId}`).slice(0, 60),
         kind: "siege_laid",
         summary: `${force.name} laid siege to ${place}, held by ${name(defenderId)}.`,
         affectedRefs: [{ kind: "force", id: force.id }, { kind: "province", id: province.id }, { kind: "polity", id: force.polityId }, { kind: "polity", id: defenderId }],
@@ -6237,7 +6238,7 @@ function applyOne(
       const place = world.map.provinces.flatMap((province) => province.settlements).find((city) => city.id === siege.settlementId)?.name
         ?? world.map.provinces.find((province) => province.id === siege.provinceId)?.name ?? siege.provinceId;
       emitFact({
-        localId: `lifted_${siege.id}`.slice(0, 60),
+        localId: safeLocalId(`lifted_${siege.id}`).slice(0, 60),
         kind: "siege_lifted",
         summary: `${force?.name ?? "The besiegers"} raised the siege of ${place} after ${atStep - siege.startedAtStep} days. ${delta.reason}`.slice(0, 600),
         affectedRefs: [{ kind: "province", id: siege.provinceId }, { kind: "polity", id: siege.besiegerPolityId }, { kind: "polity", id: siege.defenderPolityId }, ...(force === undefined ? [] : [{ kind: "force" as const, id: force.id }])],
@@ -6466,7 +6467,7 @@ function applyOne(
       };
       if (fleet !== undefined) {
         emitFact({
-          localId: `takes_the_fleet_${fleet.id}`.slice(0, 60),
+          localId: safeLocalId(`takes_the_fleet_${fleet.id}`).slice(0, 60),
           kind: "command_given",
           summary: `${holder?.name ?? holderId}, as ${office.label}, takes command of ${fleet.name}.`,
           affectedRefs: [{ kind: "character", id: holderId }, { kind: "force", id: fleet.id }],
@@ -6498,7 +6499,7 @@ function applyOne(
       if (settlement.controllerPolityId !== polityId) reject(`${polity.name} does not hold ${settlement.name} and cannot make it its capital.`);
       if (polity.capitalSettlementId === settlement.id && polity.displacedCapital == null) reject(`${settlement.name} is already ${polity.name}'s capital.`);
       emitFact({
-        localId: `capital_${polityId}_${atStep}`.slice(0, 60), kind: "capital_relocated",
+        localId: safeLocalId(`capital_${polityId}_${atStep}`).slice(0, 60), kind: "capital_relocated",
         summary: `${polity.name} designated ${settlement.name} as its capital.`,
         affectedRefs: [{ kind: "polity", id: polityId }, { kind: "settlement", id: settlement.id }],
         visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 60,
@@ -6607,7 +6608,7 @@ function applyOne(
       // held" it -- the change was in the map and nowhere in the record.
       const loserId = settlement.controllerPolityId;
       emitFact({
-        localId: `city_${settlement.id}_${atStep}`.slice(0, 60),
+        localId: safeLocalId(`city_${settlement.id}_${atStep}`).slice(0, 60),
         kind: "city_taken",
         summary: `${settlement.name}${loserId === null ? "" : `, held by ${polityName(world, loserId)},`} ${delta.sacked ? "was stormed and sacked by" : "passed to"} ${takerId === null ? "no one" : polityName(world, takerId)}${allTaken ? `, and with it ${province.name}` : ""}.`,
         affectedRefs: [
@@ -6698,7 +6699,7 @@ function applyOne(
           transactionId: context.ids.next("txn"),
         });
       emitFact({
-        localId: `province_${province.id}_${atStep}`.slice(0, 60),
+        localId: safeLocalId(`province_${province.id}_${atStep}`).slice(0, 60),
         kind: "province_control_change",
         summary: province.controllerPolityId === null
           ? `${polityName(world, takerId)} claimed ${province.name}, which no power had held.`
@@ -6884,7 +6885,7 @@ function applyOne(
         const verb = decided.status === "refused" ? "would not do as" : decided.status === "ignored" ? "gave no answer to" : "seemed to agree with, and did otherwise than";
         const subverted = decided.status === "subverted";
         emitFact({
-          localId: `order_${attemptId}`,
+          localId: safeLocalId(`order_${attemptId}`),
           kind: `order_${decided.status}`,
           summary: `${who(decided.recipientRef)} ${verb} ${who(decided.issuerRef)} asked: ${delta.reason}`.slice(0, 600),
           affectedRefs: [decided.issuerRef, decided.recipientRef],
@@ -7001,7 +7002,7 @@ function applyOne(
         const who = world.characters.find((character) => character.id === confirmed.characterId)?.name ?? confirmed.characterId;
         const label = TRAIT_REGISTRY[confirmed.traitId]?.label ?? confirmed.traitId;
         emitFact({
-          localId: `trait_${confirmed.characterId}_${confirmed.traitId}`,
+          localId: safeLocalId(`trait_${confirmed.characterId}_${confirmed.traitId}`),
           kind: "reputation",
           summary: `${who} has a name now for being ${label.toLowerCase()}, and more than one person has said so.`,
           affectedRefs: [{ kind: "character", id: confirmed.characterId }],
@@ -7015,7 +7016,7 @@ function applyOne(
       for (const lost of outcome.traitsLost) {
         const who = world.characters.find((character) => character.id === lost.characterId)?.name ?? lost.characterId;
         emitFact({
-          localId: `trait_lost_${lost.characterId}_${lost.traitId}`,
+          localId: safeLocalId(`trait_lost_${lost.characterId}_${lost.traitId}`),
           kind: "reputation",
           summary: `${who} is no longer thought ${(TRAIT_REGISTRY[lost.traitId]?.label ?? lost.traitId).toLowerCase()}: people have seen him be ${(TRAIT_REGISTRY[lost.contradictedBy]?.label ?? lost.contradictedBy).toLowerCase()}.`,
           affectedRefs: [{ kind: "character", id: lost.characterId }],
@@ -7194,7 +7195,7 @@ function carryOutClauses(
         },
       };
       emitFact({
-        localId: `ceded_${province.id}`.slice(0, 60),
+        localId: safeLocalId(`ceded_${province.id}`).slice(0, 60),
         kind: "province_ceded",
         summary: `${province.name} was ceded to ${name(toId)} by treaty.`,
         affectedRefs: [{ kind: "province", id: province.id }, { kind: "polity", id: toId }, { kind: "polity", id: otherOf(toId) }],
@@ -7234,7 +7235,7 @@ function carryOutClauses(
         },
       };
       emitFact({
-        localId: `handed_over_${force.id}`.slice(0, 60),
+        localId: safeLocalId(`handed_over_${force.id}`).slice(0, 60),
         kind: "force_handed_over",
         summary: `By the treaty, ${force.name} passed into the service of ${name(toId)}${receiver === null ? "" : `, under ${receiver.name}`}.`.slice(0, 600),
         affectedRefs: [{ kind: "force", id: force.id }, { kind: "polity", id: toId }, { kind: "polity", id: otherOf(toId) }, ...(receiver === null ? [] : [{ kind: "character" as const, id: receiver.id }])],
@@ -7375,7 +7376,7 @@ function raiseWorks(
   const paid = moveMoney(world, { from: treasury.id, to: null, amount: cost, kind: "purchase", causeId: siege.id, explanation: `Siege works before the city: ${wanted.map((kind) => SIEGE_WORKS[kind].label).join(", ")}.` }, context);
   const place = world.map.provinces.find((province) => province.id === siege.provinceId)?.name ?? siege.provinceId;
   emitFact({
-    localId: `works_${siege.id}_${atStep}`.slice(0, 60),
+    localId: safeLocalId(`works_${siege.id}_${atStep}`).slice(0, 60),
     kind: "siege_event",
     summary: `${force.name} began raising ${wanted.map((kind) => SIEGE_WORKS[kind].label).join(" and ")} before ${place}.`,
     affectedRefs: [{ kind: "force", id: force.id }, { kind: "province", id: siege.provinceId }],
@@ -7538,7 +7539,7 @@ export function payOrBorrow(
   const serviceId = context.ids.next("obligation");
   const atStep = world.elapsedStep;
   emitFact({
-    localId: `credit_${loanId}`.slice(0, 60),
+    localId: safeLocalId(`credit_${loanId}`).slice(0, 60),
     kind: "bought_on_credit",
     summary: `${what} was bought for ${price}: ${down} paid down${reserve > 0 ? `, ${payer.balance - down} kept back for the household` : ""}, and ${owed} owed to the seller at interest.`,
     affectedRefs: [{ kind: "account", id: payerId }],

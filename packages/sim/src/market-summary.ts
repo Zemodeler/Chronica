@@ -10,6 +10,7 @@ import {
   type MarketHub,
   type WorldState,
 } from "@chronica/shared";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * What a power's markets are doing, as one line for its rulers and as news.
@@ -139,7 +140,7 @@ export function marketNews(world: WorldState, toDay: number): { readonly facts: 
     return was !== undefined && toDay - was < MARKET_NEWS_REPEAT_DAYS ? [] : [{ polityId, kind, market }];
   }).sort((a, b) => Math.abs(b.market.grainBps - 10_000) - Math.abs(a.market.grainBps - 10_000) || a.polityId.localeCompare(b.polityId)).slice(0, MAX_NEWS_PER_PASS);
   const facts: FactProposalDraft[] = candidates.map(({ polityId, kind, market }) => ({
-    localId: `${kind}_${polityId}_${toDay}`.slice(0, 60),
+    localId: safeLocalId(`${kind}_${polityId}_${toDay}`).slice(0, 60),
     kind,
     summary: kind === "shortage"
       ? `Grain is short in ${name(polityId)}: it sells at ${times(market.grainBps)} its ordinary price, with ${market.grainMonths === null ? "little" : `${Math.round(market.grainMonths)} months`} in store${market.shortHubs > 0 ? ` and ${market.shortHubs} of its ${market.hubs} markets short` : ""}; armies cost more to keep and the poor will go hungry.`.slice(0, 600)

@@ -25,6 +25,7 @@ import { factionAgainst } from "./insubordination";
 import { concernsOf } from "./questions";
 import { blocLeanings, countVote, electiveOfficesOf, isAdvisoryFor, isBindingChamberQuestion, isChamberQuestion, latestPositions, openQuestions, voteDayOf } from "./senate";
 import type { StatecraftDecision } from "./statecraft";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * The bodies of a state: the Senate and the assemblies, the Council of Elders, the Hundred and Four, the king's friends (docs/plans/government.md, "H3 as built").
@@ -143,7 +144,7 @@ export function sitTheBodies(input: BodiesInput): { world: WorldState; facts: Fa
       const province = world.map.provinces.find((candidate) => candidate.settlements.some((settlement) => settlement.id === capital));
       if (province === undefined || !live.has(province.id)) continue;
       facts.push(fact({
-        localId: `sitting_${bodyId}_${input.toDay}`.toLowerCase().replace(/[^a-z0-9_-]/gu, "_").slice(0, 60), kind: "chamber_sat", visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 30,
+        localId: safeLocalId(`sitting_${bodyId}_${input.toDay}`).toLowerCase().replace(/[^a-z0-9_-]/gu, "_").slice(0, 60), kind: "chamber_sat", visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 30,
         summary: shut
           ? `The ${institution.name} could not sit with its city shut, and ${count} question${count === 1 ? " waits" : "s wait"}.`
           : `The ${institution.name} sat, and ${count} question${count === 1 ? " was" : "s were"} left over to its next sitting.`,
@@ -271,7 +272,7 @@ export function theAuspices(input: BodiesInput): { world: WorldState; facts: Fac
   for (const [procedureId, stop] of stopped) {
     const procedure = world.material.politicalProcedures.find((candidate) => candidate.id === procedureId)!;
     facts.push(fact({
-      localId: `omens_${procedureId}`.slice(0, 60), kind: "auspices", visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 50,
+      localId: safeLocalId(`omens_${procedureId}`).slice(0, 60), kind: "auspices", visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 50,
       summary: `${stop.by.name}, as ${stop.office.label}, reported ill omens before the assembly met, and "${procedure.label}" was put off a month.`.slice(0, 400),
       affectedRefs: [{ kind: "procedure", id: procedureId }, { kind: "character", id: stop.by.id }, { kind: "polity", id: stop.office.polityId }],
     }));
@@ -329,7 +330,7 @@ export function ratifyTheWar(input: BodiesInput): { world: WorldState; facts: Fa
     };
     const what = procedure.label.replace(/^Motion of [^:]+: that /u, "that ");
     facts.push(fact({
-      localId: `ratified_${procedure.id}`.slice(0, 60), kind: carried ? "war_ratified" : "war_refused", visibility: "public", discoveryState: "public", knowableInDays: 0, significance: carried ? 45 : 60,
+      localId: safeLocalId(`ratified_${procedure.id}`).slice(0, 60), kind: carried ? "war_ratified" : "war_refused", visibility: "public", discoveryState: "public", knowableInDays: 0, significance: carried ? 45 : 60,
       summary: (carried
         ? `The ${assembly.name} ratified what the ${senate.name} had carried, by ${count.yesWeight} to ${count.noWeight}: "${what}".`
         : `The ${assembly.name} would not ratify what the ${senate.name} had carried, ${count.yesWeight} for it and ${count.noWeight} against: "${what}". The war is on, and the people grumble.`).slice(0, 400),

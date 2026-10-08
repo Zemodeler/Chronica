@@ -17,6 +17,7 @@ import { carryOutDepartment } from "./departments";
 import { carryOutReformLaws } from "./reform-laws";
 import { grantForBudget } from "./voted-budgets";
 import { grantFranchise } from "./submission";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * A measure carried, and what it does.
@@ -292,7 +293,7 @@ export function carryOutEnactment(
   };
   if (said.length > 0) {
     facts.push({
-      localId: `enacted_${procedureId}`.slice(0, 60),
+      localId: safeLocalId(`enacted_${procedureId}`).slice(0, 60),
       kind: "law_enacted",
       summary: `${title} was carried, and ${said.join("; ")}.`,
       affectedRefs: [{ kind: "polity", id: enactment.polityId }],

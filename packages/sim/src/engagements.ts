@@ -25,6 +25,7 @@ import {
 import { resolveEngagement, type BattleAccount } from "./battle";
 import { remember } from "./grievances";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Fights that last (docs/plans/battles-that-last.md, phase 1).
@@ -249,7 +250,7 @@ export function fightRound(input: FightInput, engagementId: string, day: number,
       : candidate)),
   });
   const fact = (localId: string, kind: string, summary: string, forces: readonly Force[], significance: number): FactProposalDraft => ({
-    localId: `${localId}_${engagement.id}_${day}`.slice(0, 60),
+    localId: safeLocalId(`${localId}_${engagement.id}_${day}`).slice(0, 60),
     kind,
     summary: summary.slice(0, 600),
     affectedRefs: [{ kind: "province", id: engagement.provinceId }, ...forces.slice(0, 6).map((force) => ({ kind: "force" as const, id: force.id }))],
@@ -336,7 +337,7 @@ export function fightRound(input: FightInput, engagementId: string, day: number,
       facts.push(fact("withdrew", "force_withdrew", `${names(weakSide)}, outnumbered three to one, would not stand against ${names(strongSide)} at ${where}, and fell back into ${provinceName(world, to)}.`, [...weakSide, ...strongSide], 55));
       world = end("withdrew", weakSide === attacking ? "defender" : "attacker");
       const taken = takeTheCamp(world, strongSide, weakSide, engagement.provinceId, day);
-      facts.push(...taken.facts.map((drafted) => ({ ...drafted, localId: `${drafted.localId}_${engagement.id}`.slice(0, 60) })));
+      facts.push(...taken.facts.map((drafted) => ({ ...drafted, localId: safeLocalId(`${drafted.localId}_${engagement.id}`).slice(0, 60) })));
       return { world: taken.world, facts, battles };
     }
   }
@@ -457,7 +458,7 @@ export function fightRound(input: FightInput, engagementId: string, day: number,
       facts.push(fact("gave_up_the_camp", "force_withdrew", `${names(defenders)}, disheartened after refusing battle day after day, left ${defenders.length === 1 ? "its" : "their"} camp at ${where} by night and fell back into ${provinceName(world, to)}, leaving the field to ${names(attacking)}.`, [...defenders, ...attacking], 60));
       world = end("withdrew", "attacker");
       const taken = takeTheCamp(world, attacking, defenders, engagement.provinceId, day);
-      facts.push(...taken.facts.map((drafted) => ({ ...drafted, localId: `${drafted.localId}_${engagement.id}`.slice(0, 60) })));
+      facts.push(...taken.facts.map((drafted) => ({ ...drafted, localId: safeLocalId(`${drafted.localId}_${engagement.id}`).slice(0, 60) })));
       return { world: taken.world, facts, battles };
     }
   }
@@ -549,7 +550,7 @@ export function fightRound(input: FightInput, engagementId: string, day: number,
     if (winner !== null) {
       const taken = takeTheCamp(world, winner === "attacker" ? stillAttacking : stillDefending, winner === "attacker" ? defenders : attacking, engagement.provinceId, day);
       world = taken.world;
-      facts.push(...taken.facts.map((drafted) => ({ ...drafted, localId: `${drafted.localId}_${engagement.id}`.slice(0, 60) })));
+      facts.push(...taken.facts.map((drafted) => ({ ...drafted, localId: safeLocalId(`${drafted.localId}_${engagement.id}`).slice(0, 60) })));
     }
   }
 
@@ -849,7 +850,7 @@ export function noteWhoFaces(world: WorldState, toDay: number, warfare: Scenario
         const days = toDay - record.openedAtStep;
         if (known !== undefined && days !== FACING_REMINDER_DAYS) continue;
         facts.push({
-          localId: `facing_${record.id}_${toDay}`.slice(0, 60),
+          localId: safeLocalId(`facing_${record.id}_${toDay}`).slice(0, 60),
           kind: "armies_facing",
           summary: days === 0
             ? `${a.name} and ${b.name}, whose powers are at war, stand facing each other in ${provinceName(world, provinceId)}. Neither has been ordered to attack.`

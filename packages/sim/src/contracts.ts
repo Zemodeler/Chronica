@@ -1,4 +1,5 @@
 import { economyOf, employerPolityOf, mercenaryGracePeriods, silverDeficitBps, type FactProposalDraft, type ServiceContract, type WorldState } from "@chronica/shared";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Service contracts over time (roles plan phase 5): a term that runs out, and
@@ -47,7 +48,7 @@ export function keepContracts(world: WorldState, toDay: number): { world: WorldS
         const arrived = contract.journey.arrivesAtStep;
         next = { ...next, characters: next.characters.map((character) => character.id === employee.id ? { ...character, locationProvinceId: contract.journey!.toProvinceId } : character),
           material: { ...next.material, contracts: next.material.contracts.map((candidate) => candidate.id === contract.id ? { ...candidate, journey: { ...contract.journey!, arrivedAtStep: arrived } } : candidate) } };
-        facts.push({ localId: `arrival_${contract.id}`.slice(0, 60), kind: "contract_agent_arrived", summary: `${employee.name} reached ${world.map.provinces.find((province) => province.id === contract.journey!.toProvinceId)?.name ?? contract.journey.toProvinceId} for ${contract.label}.`, affectedRefs: [{ kind: "character", id: employee.id }, { kind: "account", id: contract.employerAccountId }], visibility: contract.role === "agent" ? "private" : "polity", discoveryState: contract.role === "agent" ? "private" : "polity", knownToRefs: [{ kind: "character", id: employee.id }, ...(world.material.accounts.find((account) => account.id === contract.employerAccountId)?.owner.kind === "character" ? [{ kind: "character" as const, id: world.material.accounts.find((account) => account.id === contract.employerAccountId)!.owner.id }] : [])], knowableInDays: 0, significance: 25 });
+        facts.push({ localId: safeLocalId(`arrival_${contract.id}`).slice(0, 60), kind: "contract_agent_arrived", summary: `${employee.name} reached ${world.map.provinces.find((province) => province.id === contract.journey!.toProvinceId)?.name ?? contract.journey.toProvinceId} for ${contract.label}.`, affectedRefs: [{ kind: "character", id: employee.id }, { kind: "account", id: contract.employerAccountId }], visibility: contract.role === "agent" ? "private" : "polity", discoveryState: contract.role === "agent" ? "private" : "polity", knownToRefs: [{ kind: "character", id: employee.id }, ...(world.material.accounts.find((account) => account.id === contract.employerAccountId)?.owner.kind === "character" ? [{ kind: "character" as const, id: world.material.accounts.find((account) => account.id === contract.employerAccountId)!.owner.id }] : [])], knowableInDays: 0, significance: 25 });
       }
       continue;
     }
@@ -59,7 +60,7 @@ export function keepContracts(world: WorldState, toDay: number): { world: WorldS
     }
     const who = name(contract.employeeCharacterId);
     facts.push({
-      localId: `contract_${contract.id}`.slice(0, 60),
+      localId: safeLocalId(`contract_${contract.id}`).slice(0, 60),
       kind: unpaid ? "contract_lapsed" : "contract_ended",
       summary: died
         ? `${who}'s contract -- ${contract.label} -- ended with his life.`

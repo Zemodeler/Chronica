@@ -15,6 +15,7 @@ import { grainPrice } from "./grain";
 import { purseOfHouse } from "./merchant-houses";
 import { endContract } from "./contracts";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * An army victualled by a house of its own power (docs/economy.md, "Grain bought, and bread by contract").
@@ -132,7 +133,7 @@ export function openVictualling(world: WorldState, force: Force, termDays: numbe
   const first = dispatch(opened, contract, atStep, ids);
   const name = (id: string): string => world.map.provinces.find((province) => province.id === id)?.name ?? id;
   const facts: FactProposalDraft[] = [{
-    localId: `victualler_${contractId}`.slice(0, 60), kind: "army_victualled",
+    localId: safeLocalId(`victualler_${contractId}`).slice(0, 60), kind: "army_victualled",
     summary: `${house.name} undertook to feed ${force.name} for ${Math.round(term / 30)} months, at ${price} for every thousand men a day, to be paid for what reaches the army; ${first.sentDays > 0 ? `the first bread is on the road to ${name(force.locationId)}` : "it has not the means to send the first bread yet"}.`.slice(0, 600),
     affectedRefs: [{ kind: "force", id: force.id }, { kind: "character", id: head.id }, { kind: "province", id: force.locationId }],
     visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 35,
@@ -203,7 +204,7 @@ export function keepVictualling(world: WorldState, toDay: number, ids: IdFactory
     if (force === undefined || fitStrengthOf(force) <= 0 || house === undefined || house.status !== "trading" || head === undefined) {
       current = endContract(current, contract, "ended", toDay);
       facts.push({
-        localId: `victualler_ended_${contract.id}`.slice(0, 60), kind: "army_victualling_ended",
+        localId: safeLocalId(`victualler_ended_${contract.id}`).slice(0, 60), kind: "army_victualling_ended",
         summary: force === undefined || fitStrengthOf(force) <= 0 ? `The army that ${house?.name ?? "a firm"} was feeding is no more, and the contract with it is at an end.` : `${house?.name ?? "The house"} that fed ${force.name} is no more, and the contract with it is at an end.`,
         affectedRefs: [{ kind: "force", id: victuals.forceId }], visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 28,
       });
@@ -226,7 +227,7 @@ export function keepVictualling(world: WorldState, toDay: number, ids: IdFactory
     if (sent.sentDays === 0) {
       const purse = purseOfHouse(current, house);
       facts.push({
-        localId: `victualler_short_${contract.id}_${toDay}`.slice(0, 60), kind: "army_victualling_short",
+        localId: safeLocalId(`victualler_short_${contract.id}_${toDay}`).slice(0, 60), kind: "army_victualling_short",
         summary: `${house.name} could not find the bread for ${force.name} this month: ${purse === null || purse.balance < HOUSE_RESERVE + LEAST_CAPITAL / 4 ? "its purse is thin" : "the markets within its reach have none to spare"}.`.slice(0, 600),
         affectedRefs: [{ kind: "force", id: force.id }], visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 30,
       });

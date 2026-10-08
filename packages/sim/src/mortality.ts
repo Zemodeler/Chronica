@@ -23,6 +23,7 @@ import {
 import { teach } from "./grievances";
 import { bearChild, birthChance, CHILDBED_MORTALITY_BPS } from "./births";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Ageing, illness, and death that is earned (slice 9).
@@ -430,7 +431,7 @@ function openPeril(
       characterPressures: [...pressured.characterPressures],
     },
     facts: [{
-      localId: `peril_${character.id}_${atStep}`,
+      localId: safeLocalId(`peril_${character.id}_${atStep}`),
       kind: worsening ? "failing_health" : "illness",
       summary: worsening
         ? `${character.name} is worse, and ${pronouns(character).his} people have begun to speak of what comes after ${pronouns(character).him}.`
@@ -488,7 +489,7 @@ export function killCharacter(
   return {
     world: next,
     facts: [{
-      localId: `death_${characterId}_${atStep}`,
+      localId: safeLocalId(`death_${characterId}_${atStep}`),
       kind: "death",
       summary: `${person.name} is dead. ${cause}`.slice(0, 600),
       affectedRefs: [{ kind: "character", id: characterId }],
@@ -509,7 +510,7 @@ function creditorsFactOf(person: Character, settled: ReturnType<typeof settleEst
     : debts.soldUp ? "with no heir, the estate was sold to his creditors"
       : "his heir took the estate and the debts with it";
   return [{
-    localId: `creditors_${person.id}_${atStep}`,
+    localId: safeLocalId(`creditors_${person.id}_${atStep}`),
     kind: "estate_creditors",
     summary: `${person.name} died owing ${debts.owed}: ${how}. The creditors had ${paid} of it${debts.lost > 0 ? `, and ${debts.lost} is lost to them` : debts.leftOnHeir > 0 ? `, and ${debts.leftOnHeir} is still owed` : ""}.`.slice(0, 600),
     affectedRefs: [{ kind: "character", id: person.id }, ...settled.beneficiaryIds.slice(0, 2).map((id) => ({ kind: "character" as const, id }))],
@@ -560,7 +561,7 @@ function estateFacts(
     return {
       world: land.length === 0 ? world : { ...world, storylines: [...world.storylines, storyline] },
       facts: [{
-        localId: `estate_${person.id}_${atStep}`,
+        localId: safeLocalId(`estate_${person.id}_${atStep}`),
         kind: "estate_escheated",
         summary: `${person.name} left no heir. ${settled.coin > 0 ? `${settled.escheatedToAccountId === null ? "The coin lies sealed" : `${settled.coin} in coin went to the state`}` : "There was little coin"}${land.length === 0 ? "." : `, and ${land.join(", ")} ${land.length === 1 ? "waits" : "wait"} for somebody to claim ${land.length === 1 ? "it" : "them"}.`}`.slice(0, 600),
         affectedRefs: affected,
@@ -583,7 +584,7 @@ function estateFacts(
   return {
     world,
     facts: [{
-      localId: `estate_${person.id}_${atStep}`,
+      localId: safeLocalId(`estate_${person.id}_${atStep}`),
       kind: "inheritance",
       summary: `${settled.reason} To ${parts.join("; to ")}.`.slice(0, 600),
       affectedRefs: affected,

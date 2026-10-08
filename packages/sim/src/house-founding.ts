@@ -24,6 +24,7 @@ import {
 } from "@chronica/shared";
 import { findKinsman, merchantFit, spokenFor } from "./house-succession";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Houses are founded in play (docs/economy.md, "Houses are founded").
@@ -260,7 +261,7 @@ export function foundTheHouse(start: WorldState, plan: FoundingPlan, toDay: numb
   const placeName = world.map.provinces.find((province) => province.id === plan.homeProvinceId)?.settlements.find((settlement) => settlement.kind === "port")?.name
     ?? world.map.provinces.find((province) => province.id === plan.homeProvinceId)?.name ?? "the port";
   const fact: FactProposalDraft = {
-    localId: `house_founded_${houseId}`.slice(0, 60), kind: "house_founded",
+    localId: safeLocalId(`house_founded_${houseId}`).slice(0, 60), kind: "house_founded",
     summary: (keepsBooks
       ? `${founder.name} sets up ${name} at ${placeName}, with ${plan.capital} of his own, and puts ${head.name}, ${isRoman(founder) ? "his freedman" : "his factor"}, at its books.`
       : `${founder.name} sets up ${name} at ${placeName}, with what he has, to carry goods between the ports.`).slice(0, 600),

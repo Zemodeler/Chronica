@@ -11,6 +11,7 @@ import {
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
 import { deditio } from "./submission";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Powers ending, and rising again.
@@ -208,7 +209,7 @@ export function endPolity(
   return {
     world: cleared,
     facts: [{
-      localId: `polity_ended_${polityId}`.slice(0, 60),
+      localId: safeLocalId(`polity_ended_${polityId}`).slice(0, 60),
       kind: "polity_ended",
       summary,
       affectedRefs: [{ kind: "polity", id: polityId }, ...(into === null ? [] : [{ kind: "polity" as const, id: into }])],
@@ -360,7 +361,7 @@ function rise(world: WorldState, provinceId: string, atStep: number, ids: IdFact
   return {
     world: next,
     facts: [{
-      localId: `rising_${provinceId}_${atStep}`.slice(0, 60),
+      localId: safeLocalId(`rising_${provinceId}_${atStep}`).slice(0, 60),
       kind: "rising",
       summary: restoring
         ? `${province.name} rose against ${nameOf(world, holder)} under ${who}, and ${polity.name} stood again.`

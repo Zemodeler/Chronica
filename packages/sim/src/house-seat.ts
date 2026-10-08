@@ -14,6 +14,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Whose house it is, and where it sits (docs/economy.md, "Who manages the economy", "Where the house sits").
@@ -85,7 +86,7 @@ export function keepTheSeats(start: WorldState, toDay: number, ids: IdFactory, d
   let world = start;
   const told = (house: MerchantHouse, kind: string, summary: string, significance: number, refs: readonly { kind: "character" | "province" | "polity"; id: string }[]): void => {
     if (!isLiveProvince(world, house.homeProvinceId)) return;
-    facts.push({ localId: `${kind}_${house.id}_${toDay}`.slice(0, 60), kind, summary: summary.slice(0, 600), affectedRefs: [...refs], visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance });
+    facts.push({ localId: safeLocalId(`${kind}_${house.id}_${toDay}`).slice(0, 60), kind, summary: summary.slice(0, 600), affectedRefs: [...refs], visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance });
   };
   for (const first of economyOf(world).houses) {
     if (first.status !== "trading" || !dueIds.has(first.id)) continue;

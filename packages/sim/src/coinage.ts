@@ -15,6 +15,7 @@ import {
   readDepartments,
 } from "@chronica/shared";
 import { coinsBadName } from "./levers";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * The coinages' monthly pass (phase E of the economy rework): where prices
@@ -140,7 +141,7 @@ export function monthOfCoinage(world: WorldState, days: readonly number[], toDay
       strained += 1;
       current = { ...current, strainToldStep: toDay };
       facts.push({
-        localId: `coinage_strain_${coinage.id}_${toDay}`.slice(0, 60),
+        localId: safeLocalId(`coinage_strain_${coinage.id}_${toDay}`).slice(0, 60),
         kind: "coinage_strain",
         summary: `${nameOf(world, issuer)} is at war and behind on what its treasury owes, and its coin, ${coinage.name}, is under strain: the money-changers take it at less, and its rulers may be tempted to strike it with less silver.`.slice(0, 600),
         affectedRefs: [{ kind: "polity", id: issuer }],

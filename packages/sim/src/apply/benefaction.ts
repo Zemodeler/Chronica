@@ -8,6 +8,7 @@ import {
 } from "@chronica/shared";
 import { relieveAHub } from "../grain-purchases";
 import type { ApplyContext } from "./context";
+import { safeLocalId } from "../safe-local-id";
 
 /**
  * Games, feasts, doles and buildings given to the people (`public_benefaction`,
@@ -179,7 +180,7 @@ export function giveToThePeople(
   return {
     world: next,
     fact: {
-      localId: `benefaction_${context.ids.next("gift").replace(/[^a-z0-9_-]/gi, "_").toLowerCase()}`.slice(0, 60),
+      localId: safeLocalId(`benefaction_${context.ids.next("gift").replace(/[^a-z0-9_-]/gi, "_").toLowerCase()}`).slice(0, 60),
       kind: "public_benefaction",
       summary: `${giver.name} gave the people of ${place} ${what}${fromTreasury ? " out of the treasury" : " at his own cost"}, ${paid} spent${paid < delta.amount ? ` of the ${delta.amount} meant` : ""}: ${delta.reason.replace(/[.\s]+$/, "")}. ${relief === null ? "" : `${relief.fact.summary.replace(/^.*? bought /, "He bought ")} `}${gain > 0 ? `His name is the better for it${repeats > 0 ? ", if less than the first time" : ""}.` : "It was hardly noticed."}`.slice(0, 600),
       affectedRefs: [{ kind: "character", id: giver.id }, ...(provinceId === null ? [] : [{ kind: "province" as const, id: provinceId }]), ...(relief === null ? [] : relief.legs.map((leg) => ({ kind: "province" as const, id: leg.hubId })))],

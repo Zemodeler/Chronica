@@ -9,6 +9,7 @@ import {
   type PoliticalProcedure,
   type WorldState,
 } from "@chronica/shared";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * The tribune of the plebs: his veto, his intercession, and the plebs' last
@@ -73,7 +74,7 @@ export function vetoFact(world: WorldState, procedure: PoliticalProcedure, actor
   if (office === null) return null;
   const who = world.characters.find((character) => character.id === actorId)?.name ?? actorId;
   return {
-    localId: `veto_${procedure.id}_${actorId}`.slice(0, 60),
+    localId: safeLocalId(`veto_${procedure.id}_${actorId}`).slice(0, 60),
     kind: "motion_vetoed",
     summary: `${who}, as ${office.label}, interposed his veto, and "${procedure.label}" was stopped: it will not be put or carried out.`.slice(0, 600),
     affectedRefs: [{ kind: "procedure", id: procedure.id }, { kind: "character", id: actorId }, { kind: "character", id: procedure.sponsorCharacterId }, { kind: "polity", id: office.polityId }],
@@ -160,7 +161,7 @@ export function settleSecessions(world: WorldState, offices: readonly Office[], 
     const office = leader === undefined || polityId === null ? undefined
       : allOffices(next, offices).find((candidate) => candidate.tribunician === true && candidate.polityId === polityId && heldBy(next, leader.id, candidate.id));
     const tell = (kind: string, summary: string, significance: number, extra: FactProposalDraft["affectedRefs"] = []) => facts.push({
-      localId: `${kind}_${entity.id}_${toDay}`.slice(0, 60), kind, summary: summary.slice(0, 600),
+      localId: safeLocalId(`${kind}_${entity.id}_${toDay}`).slice(0, 60), kind, summary: summary.slice(0, 600),
       affectedRefs: [...(leader === undefined ? [] : [{ kind: "character" as const, id: leader.id }]), ...(polityId === null ? [] : [{ kind: "polity" as const, id: polityId }]), ...extra],
       visibility: "public", discoveryState: "public", knowableInDays: 0, significance,
     });

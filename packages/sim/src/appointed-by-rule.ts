@@ -19,6 +19,7 @@ import {
 import { carryOutDepartment } from "./departments";
 import type { GovernmentRules } from "./constitutions";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Appointments by rule (docs/economy.md, "What the model is left to"; docs/plans/government.md, "Appointments by rule").
@@ -254,7 +255,7 @@ export function appointByRule(input: AppointByRuleInput): { readonly world: Worl
     made += 1;
     const work = (measure.levers ?? []).map((lever) => leverDefinition(lever).words);
     facts.push({
-      localId: `charge_by_rule_${polity.id}_${input.toDay}`.slice(0, 60),
+      localId: safeLocalId(`charge_by_rule_${polity.id}_${input.toDay}`).slice(0, 60),
       kind: "government",
       summary: `${ruler.name} set up ${title}${work.length === 0 ? "" : ` to take charge of ${work.join(", ")}`}, and means to name a man over it, because ${why}.`.slice(0, 400),
       affectedRefs: [{ kind: "polity", id: polity.id }, { kind: "character", id: ruler.id }],

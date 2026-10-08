@@ -18,6 +18,7 @@ import {
 } from "@chronica/shared";
 import { hireAtThePlace } from "./apply/hiring-market";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Who follows the head of a merchant house (docs/economy.md, "Who manages the economy", "Who follows the head").
@@ -245,7 +246,7 @@ function nameHeir(world: WorldState, headId: string, heirId: string): WorldState
 const noteOf = (world: WorldState, house: MerchantHouse, kind: string, toDay: number, summary: string, significance: number, refs: readonly string[]): FactProposalDraft[] => (
   isLiveProvince(world, house.homeProvinceId)
     ? [{
-      localId: `${kind}_${house.id}_${toDay}`.slice(0, 60), kind, summary: summary.slice(0, 600),
+      localId: safeLocalId(`${kind}_${house.id}_${toDay}`).slice(0, 60), kind, summary: summary.slice(0, 600),
       affectedRefs: [...refs.map((id) => ({ kind: "character" as const, id })), { kind: "province" as const, id: house.homeProvinceId }],
       visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance,
     }]

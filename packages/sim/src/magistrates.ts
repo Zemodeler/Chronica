@@ -36,6 +36,7 @@ import { grainPrice } from "./grain";
 import { housesFor, monthlyBill, victuallerOf } from "./army-victualling";
 import { suppliedByDelegation } from "./supply-plan";
 import type { StatecraftDecision, StatecraftInput } from "./statecraft";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * The magistrates at their charges, by rule (docs/plans/government.md, "H2 as built").
@@ -336,7 +337,7 @@ const theLevy: Routine = (cx) => {
             text: `sent its contingent to ${leader.name}, ${men} men, as the foedus asks, for ${leader.name} is at war`,
             why: `muster: a contingent of ${men} for ${leader.name}'s war (the foedus)`,
             deltas: [delta({
-              op: "force_create", localId: `contingent_${polity.id}`.slice(0, 60), name: `Contingent of ${reading.name}`.slice(0, 120), polityId: polity.id,
+              op: "force_create", localId: safeLocalId(`contingent_${polity.id}`).slice(0, 60), name: `Contingent of ${reading.name}`.slice(0, 120), polityId: polity.id,
               commanderCharacterRef: found.man.id, controllerCharacterRef: found.man.id, locationId: capital, authorizedStrength: men, payObligationRef: null,
               reason: `${found.man.name} sends the men ${reading.name} owes ${leader.name} by the foedus.`.slice(0, 240),
             })],
@@ -360,7 +361,7 @@ const theLevy: Routine = (cx) => {
             text: `held the levy, ${men} men, for the war with ${reading.wars.map((id) => nameOf(world, id)).join(" and ")}`,
             why: `dilectus: a levy of ${men} for the war (the host fields ${reading.fielded} of ${reading.levy})`,
             deltas: [delta({
-              op: "force_create", localId: `dilectus_${polity.id}_${cx.month}`.slice(0, 60), name: `Levy of ${reading.name}`.slice(0, 120), polityId: polity.id,
+              op: "force_create", localId: safeLocalId(`dilectus_${polity.id}_${cx.month}`).slice(0, 60), name: `Levy of ${reading.name}`.slice(0, 120), polityId: polity.id,
               commanderCharacterRef: found.man.id, controllerCharacterRef: found.man.id, locationId: capital, authorizedStrength: men, payObligationRef: null,
               reason: `${found.man.name} holds the levy of ${reading.name}: the host is thin and the war goes on.`.slice(0, 240),
             })],
@@ -465,7 +466,7 @@ const thePraetor: Routine = (cx) => {
     text: `set a day for the case of ${accused.name}, who took ${row.amount} from ${what}, before the ${court.name.replace(/^the\s+/iu, "")}`,
     why: `justice: the case of ${accused.name} for what he took from ${what} [${accused.id}]`.slice(0, 400),
     deltas: [delta({
-      op: "political_procedure_open", localId: `case_${accused.id}_${row.id}`.toLowerCase().replace(/[^a-z0-9_-]/gu, "_").slice(0, 60), type: "denunciation", institutionRef: court.id, sponsorCharacterRef: man.id,
+      op: "political_procedure_open", localId: safeLocalId(`case_${accused.id}_${row.id}`).toLowerCase().replace(/[^a-z0-9_-]/gu, "_").slice(0, 60), type: "denunciation", institutionRef: court.id, sponsorCharacterRef: man.id,
       subjectKind: "character", subjectRef: accused.id, label: `The case of ${accused.name} for what he took from ${what}`.slice(0, 200), resolutionMechanism: "vote", deadlineInDays: 30,
       visibility: "public", enacts: null, concerns: ["punishment"], reason: `An audit found ${row.amount} in ${accused.name}'s hands; ${man.name} brings the case.`.slice(0, 240),
     })],
@@ -514,7 +515,7 @@ const theCensors: Routine = (cx) => {
     text: `closed the lustrum: the census counted ${rounded} people`,
     why: `census: the roll of ${polity.name} taken, ${rounded} counted`,
     deltas: [delta({
-      op: "generic_entity_create", localId: `census_${polity.id}_${Math.floor(cx.day / YEAR)}`.slice(0, 60), kind: "census", label: `The census of ${polity.name}`.slice(0, 120),
+      op: "generic_entity_create", localId: safeLocalId(`census_${polity.id}_${Math.floor(cx.day / YEAR)}`).slice(0, 60), kind: "census", label: `The census of ${polity.name}`.slice(0, 120),
       ownerRef: { kind: "polity", id: polity.id }, attributes: { atStep: cx.day, counted: rounded, by: man.id }, reason: `${man.name} takes the roll.`.slice(0, 240),
     })],
   };
@@ -576,7 +577,7 @@ const theEmbassies: Routine = (cx) => {
     text: `sent an embassy to ${them} to ask for talks, for the war goes ill`,
     why: `embassy: envoys sent to ${them} to ask for talks (the war stands at ${losing.standing.score}) [${losing.enemy}]`.slice(0, 400),
     deltas: [delta({
-      op: "diplomatic_message_send", localId: `embassy_${polity.id}_${losing.enemy}`.slice(0, 60), kind: "peace_talks", fromPolityId: polity.id, fromCharacterRef: man.id, toPolityId: losing.enemy,
+      op: "diplomatic_message_send", localId: safeLocalId(`embassy_${polity.id}_${losing.enemy}`).slice(0, 60), kind: "peace_talks", fromPolityId: polity.id, fromCharacterRef: man.id, toPolityId: losing.enemy,
       toCharacterRef: null, subject: `${polity.name} asks to talk of peace`.slice(0, 120), terms: `${polity.name} sends envoys to ${them} to ask on what terms this war may be ended.`.slice(0, 600),
       replyWithinDays: 40, inReplyToRef: null, visibility: "polity", reason: `${man.name} sends the envoys.`.slice(0, 240),
     })],
@@ -656,7 +657,7 @@ export function decideMagistrates(input: MagistrateInput, already: readonly Stat
         deltas: [...doing.deltas, ...asked.map((entry) => entry.delta)],
         facts: news
           ? [fact({
-            localId: `magistrate_${doing.kind}_${polity.id}_${month}`.slice(0, 60), kind: "magistrate", summary,
+            localId: safeLocalId(`magistrate_${doing.kind}_${polity.id}_${month}`).slice(0, 60), kind: "magistrate", summary,
             affectedRefs: [{ kind: "polity", id: polity.id }, { kind: "character", id: doing.man.id }, ...(doing.target == null ? [] : [{ kind: "polity" as const, id: doing.target }])],
             visibility: "public", discoveryState: "public", knowableInDays: 0, significance: doing.significance ?? 35,
           })]

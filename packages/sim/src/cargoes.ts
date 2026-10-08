@@ -23,6 +23,7 @@ import {
 import type { IdFactory } from "./ports";
 import { routeOpenBps } from "./tick";
 import { CREW_SHARE_BPS, LITURGY_OF_PROFIT_BPS, dutyOnCargoBps, houseOfVenture, voyageIsLost, voyageLossBps } from "./house-voyages";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Cargoes at sea (play-test L9).
@@ -164,7 +165,7 @@ export function landCargoes(world: WorldState, toDay: number, ids: IdFactory, wa
           if (!kept.told && world.elapsedStep - (house.toldAtStep ?? -999) >= 90 && isLiveProvince(world, house.homeProvinceId)) {
             kept.told = true;
             facts.push({
-              localId: `cargo_lost_${venture.id}`.slice(0, 60), kind: "cargo_lost",
+              localId: safeLocalId(`cargo_lost_${venture.id}`).slice(0, 60), kind: "cargo_lost",
               summary: `${house.name} has lost a cargo of ${cargo.good ?? "goods"} bound for ${port}, with the ship: ${cargo.cost} gone.`.slice(0, 600),
               affectedRefs: [{ kind: "character", id: venture.ownerCharacterId }, { kind: "province", id: venture.toProvinceId }],
               visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 22,
@@ -179,7 +180,7 @@ export function landCargoes(world: WorldState, toDay: number, ids: IdFactory, wa
         // Said once, the day it should have come in; after that it simply waits.
         if (venture.interruptedBy === null) {
           facts.push({
-            localId: `cargo_held_${venture.id}`.slice(0, 60), kind: "venture_interrupted",
+            localId: safeLocalId(`cargo_held_${venture.id}`).slice(0, 60), kind: "venture_interrupted",
             summary: `${venture.title} cannot come in at ${port}: ${held}. The ship waits in a friendly harbour.`,
             affectedRefs: [{ kind: "character", id: venture.ownerCharacterId }, { kind: "province", id: venture.toProvinceId }],
             visibility: "private", discoveryState: "private", knowableInDays: 0, significance: 25, knownToRefs: [{ kind: "character", id: venture.ownerCharacterId }],
@@ -195,7 +196,7 @@ export function landCargoes(world: WorldState, toDay: number, ids: IdFactory, wa
       }
       if (venture.interruptedBy !== null && house === undefined) {
         facts.push({
-          localId: `cargo_free_${venture.id}`.slice(0, 60), kind: "venture_resumed",
+          localId: safeLocalId(`cargo_free_${venture.id}`).slice(0, 60), kind: "venture_resumed",
           summary: `The way into ${port} is open again, and the ${venture.title} comes in.`,
           affectedRefs: [{ kind: "character", id: venture.ownerCharacterId }, { kind: "province", id: venture.toProvinceId }],
           visibility: "private", discoveryState: "private", knowableInDays: 0, significance: 20, knownToRefs: [{ kind: "character", id: venture.ownerCharacterId }],
@@ -267,7 +268,7 @@ export function landCargoes(world: WorldState, toDay: number, ids: IdFactory, wa
         ? `${cargo.cost} of it buys the next cargo, and the ship sails again.`
         : cargo.rollsOver ? `There is not ${cargo.cost} to buy another, and the trade is wound up.` : "The venture is done.";
       if (house === undefined) facts.push({
-        localId: `cargo_sold_${venture.id}_${cargo.voyages}`.slice(0, 60), kind: "cargo_sold",
+        localId: safeLocalId(`cargo_sold_${venture.id}_${cargo.voyages}`).slice(0, 60), kind: "cargo_sold",
         summary: `The ${venture.title} came in at ${port}; the cargo sold for ${sold}, against the ${cargo.cost} it cost (${Math.round(margin / 100)}% over). ${after}`.slice(0, 600),
         affectedRefs: [{ kind: "character", id: venture.ownerCharacterId }, { kind: "account", id: purse.id }, { kind: "province", id: venture.toProvinceId }],
         visibility: "private", discoveryState: "private", knowableInDays: 0, significance: 30, knownToRefs: [{ kind: "character", id: venture.ownerCharacterId }],

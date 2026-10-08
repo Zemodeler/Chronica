@@ -35,6 +35,7 @@ import { bodyHasRoom } from "./bodies";
 import { purseOfHouse } from "./merchant-houses";
 import { modelHasActedOnTheBooks } from "./played-ruler-books";
 import type { StatecraftDecision, StatecraftInput } from "./statecraft";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Who keeps a power's books when nobody is playing it (docs/economy.md, "Who manages the economy").
@@ -351,7 +352,7 @@ export function weigh(world: WorldState, officer: Character, polity: { readonly 
     text: `laid it before the ${chamber} that ${matter.label}, for it is not his to decide${sponsor.id === officer.id ? "" : `, and ${sponsor.name} put it`}`,
     why: `asked the ${chamber} that ${matter.label}`,
     delta: WorldDeltaSchema.parse({
-      op: "political_procedure_open", localId: `motion_${matter.kind}_${polity.id}_${month}`.slice(0, 60), type: "council_deliberation", institutionRef: stand.body.id,
+      op: "political_procedure_open", localId: safeLocalId(`motion_${matter.kind}_${polity.id}_${month}`).slice(0, 60), type: "council_deliberation", institutionRef: stand.body.id,
       sponsorCharacterRef: sponsor.id, subjectKind: "polity", subjectRef: polity.id, label: `Motion of ${officer.name}: that ${matter.label}`.slice(0, 200),
       resolutionMechanism: "vote", deadlineInDays: 10, visibility: "public", enacts: null, concerns: [...matter.concerns],
       reason: `${officer.name} may not decide it alone, and moved it in the ${stand.body.name}.`.slice(0, 240),
@@ -543,14 +544,14 @@ export function decideFiscal(input: Pick<StatecraftInput, "world" | "gameId" | "
       for (const lender of lenders) {
         n += 1;
         loanDeltas.push(delta({
-          op: "loan_open", localId: `fiscal_loan_${polity.id}_${month}_${n}`.slice(0, 60), lenderKind: "character", lenderRef: lender.head.id, borrowerAccountRef: book.treasuryId,
+          op: "loan_open", localId: safeLocalId(`fiscal_loan_${polity.id}_${month}_${n}`).slice(0, 60), lenderKind: "character", lenderRef: lender.head.id, borrowerAccountRef: book.treasuryId,
           principal: lender.amount, interestBps: rateBps, cadenceDays: 30, terms: `A loan from ${lender.house} to the treasury of ${polity.name}, at ${pct(rateBps)} a month`.slice(0, 300), collateralHoldingRef: null,
           reason: `${officer.name} borrows from ${lender.house} for the war.`.slice(0, 240),
         }));
       }
       if (remaining >= 10_000) {
         loanDeltas.push(delta({
-          op: "loan_open", localId: `fiscal_loan_${polity.id}_${month}_abroad`.slice(0, 60), lenderKind: "foreign", lenderRef: null, borrowerAccountRef: book.treasuryId,
+          op: "loan_open", localId: safeLocalId(`fiscal_loan_${polity.id}_${month}_abroad`).slice(0, 60), lenderKind: "foreign", lenderRef: null, borrowerAccountRef: book.treasuryId,
           principal: remaining, interestBps: 250, cadenceDays: 30, terms: `A loan from the bankers abroad to the treasury of ${polity.name}, at 2.5% a month`,
           collateralHoldingRef: null, reason: `${officer.name} borrows abroad for the war.`.slice(0, 240),
         }));
@@ -605,7 +606,7 @@ export function decideFiscal(input: Pick<StatecraftInput, "world" | "gameId" | "
       deltas: [...deltas, ...asked.map((entry) => entry.delta)],
       facts: news
         ? [fact({
-          localId: `fiscal_${polity.id}_${month}`.slice(0, 60), kind: "fiscal", summary,
+          localId: safeLocalId(`fiscal_${polity.id}_${month}`).slice(0, 60), kind: "fiscal", summary,
           affectedRefs: [{ kind: "polity", id: polity.id }, { kind: "character", id: officer.id }],
           visibility: "public", discoveryState: "public", knowableInDays: 0, significance: parts.some((part) => part.kind === "coinage") ? 55 : 35,
         })]
@@ -700,7 +701,7 @@ function tradeDiplomacy(
     const pact: Matter = {
       kind: "pact", act: "pacts", label: pactLabel, concerns: ["peace", "trade"],
       deltas: [delta({
-        op: "agreement_open", localId: `fiscal_pact_${candidate.a}_${candidate.b}_${Math.floor(day / 30)}`.slice(0, 60), kind: "trade_pact", polityId: candidate.a, otherPolityId: candidate.b,
+        op: "agreement_open", localId: safeLocalId(`fiscal_pact_${candidate.a}_${candidate.b}_${Math.floor(day / 30)}`).slice(0, 60), kind: "trade_pact", polityId: candidate.a, otherPolityId: candidate.b,
         terms: `Their merchants trade on the best terms either gives: neither lays more than ${pct(PACT_TARIFF_CAP_BPS)} on the other's goods.`,
         trade: { tariffCapBps: PACT_TARIFF_CAP_BPS, mostFavoured: false, exempt: [], goods: [] }, visibility: "public",
         reason: `${ruler.name} binds the trade with ${nameOf(candidate.b)} by a pact: both would gain.`.slice(0, 240),

@@ -33,6 +33,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * The passage of time for departments (docs/plans/departments.md §3, §4).
@@ -84,7 +85,7 @@ export function keepDepartments(world: WorldState, toDay: number, before?: World
     if (!told) continue;
     const work = formed.levers.map((lever) => leverDefinition(lever).words);
     facts.push({
-      localId: `department_formed_${formed.id}`,
+      localId: safeLocalId(`department_formed_${formed.id}`),
       kind: "government",
       summary: `${formed.name} has been organised and takes charge of ${work.length === 0 ? "its work" : work.join(", ")}.`.slice(0, 400),
       affectedRefs: [formed.scope.kind === "polity" ? { kind: "polity", id: formed.scope.id } : { kind: "character", id: formed.scope.id }],
@@ -429,7 +430,7 @@ function settleMoney(world: WorldState, toDay: number, before: WorldState): { wo
     if (diverted > 0 && diverted >= collected * RUMOUR_SHARE && (rumouredAtStep === null || toDay - rumouredAtStep >= RUMOUR_EVERY_DAYS)) {
       rumouredAtStep = toDay;
       facts.push({
-        localId: `department_short_${department.id}_${toDay}`.slice(0, 60),
+        localId: safeLocalId(`department_short_${department.id}_${toDay}`).slice(0, 60),
         kind: "government",
         summary: `Men say less reaches ${department.name} than the rolls promise.`,
         affectedRefs: [{ kind: "polity", id: polityId }],
@@ -550,7 +551,7 @@ export function resolveAudits(world: WorldState, toDay: number): { world: WorldS
     const auditor = named ?? standIn(world, department, audit);
     if (auditor === undefined) {
       facts.push({
-        localId: `audit_${audit.id}`.slice(0, 60),
+        localId: safeLocalId(`audit_${audit.id}`).slice(0, 60),
         kind: "audit_interrupted",
         summary: `The inquiry into the books of ${department?.name ?? householdOf(audit.scope.id)} stopped: ${world.characters.find((character) => character.id === audit.auditorCharacterId)?.name ?? "the man sent"} could not finish it, and there was nobody to take it up. Nothing was found, and nobody was cleared.`.slice(0, 400),
         affectedRefs: told, visibility: "private", discoveryState: "private", knowableInDays: 0, knownToRefs: told, significance: 45,
@@ -585,7 +586,7 @@ export function resolveAudits(world: WorldState, toDay: number): { world: WorldS
     const status = found.length > 0 ? "found" as const : missed !== null ? "incomplete" as const : "no_discrepancy" as const;
     const by = auditor.id === audit.auditorCharacterId ? auditor.name : `${auditor.name}, taking it up after ${world.characters.find((character) => character.id === audit.auditorCharacterId)?.name ?? "the man first sent"},`;
     facts.push({
-      localId: `audit_${audit.id}`.slice(0, 60),
+      localId: safeLocalId(`audit_${audit.id}`).slice(0, 60),
       kind: found.length > 0 ? "peculation_found" : status === "incomplete" ? "audit_incomplete" : "audit_no_discrepancy",
       // What an inquiry that found nothing can say is that it found nothing:
       // "the books were in order" is a stronger thing than looking once.

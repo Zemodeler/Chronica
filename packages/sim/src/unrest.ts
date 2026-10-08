@@ -18,6 +18,7 @@ import { constitutionOf, rulerOf, type GovernmentRules } from "./constitutions";
 import type { IdFactory } from "./ports";
 import { armyLoyaltyTo } from "./society";
 import { RISING_AT_BPS } from "./polity-end";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Provinces that rise by themselves, and generals who march on the city.
@@ -181,7 +182,7 @@ function riseAsItsOwn(world: WorldState, provinceId: string, holder: string, inp
         },
       },
       facts: [{
-        localId: `rising_crushed_${provinceId}_${input.toDay}`.slice(0, 60),
+        localId: safeLocalId(`rising_crushed_${provinceId}_${input.toDay}`).slice(0, 60),
         kind: "rising_crushed",
         summary: `${province.name} rose against ${nameOf(world, holder)} after months of misery, and the garrison put it down; some ${dead} died.`,
         affectedRefs: [{ kind: "province", id: provinceId }, { kind: "polity", id: holder }],
@@ -238,7 +239,7 @@ function riseAsItsOwn(world: WorldState, provinceId: string, holder: string, inp
   return {
     world: next,
     facts: [{
-      localId: `rising_${provinceId}_${input.toDay}`.slice(0, 60),
+      localId: safeLocalId(`rising_${provinceId}_${input.toDay}`).slice(0, 60),
       kind: "rising",
       summary: `After months of misery ${province.name} rose against ${nameOf(world, holder)} under ${leader.name}, and holds itself as ${name}, with ${men} men in arms.`.slice(0, 600),
       affectedRefs: [{ kind: "province", id: provinceId }, { kind: "polity", id: polityId }, { kind: "polity", id: holder }, { kind: "character", id: leader.id }],
@@ -315,7 +316,7 @@ function marchOnTheCity(world: WorldState, input: UnrestInput, government: Gover
     };
     next = withMemory(next, { civilWars: [...economyOf(next).civilWars, { rebelPolityId: rebelId, fromPolityId: polity.id, leaderCharacterId: general.character.id, sinceStep: input.toDay }].slice(-60) });
     facts.push({
-      localId: `civil_war_${rebelId}`.slice(0, 60),
+      localId: safeLocalId(`civil_war_${rebelId}`).slice(0, 60),
       kind: "civil_war",
       summary: `Civil war in ${polity.name}: ${general.character.name}, at the head of ${general.men} men who answer to him, has taken up arms against ${ruler.name} and a government nobody believes in${held.size > 0 ? `, and holds the ground his army stands on` : ""}.`.slice(0, 600),
       affectedRefs: [{ kind: "polity", id: polity.id }, { kind: "polity", id: rebelId }, { kind: "character", id: general.character.id }, { kind: "character", id: ruler.id }],
@@ -365,7 +366,7 @@ function reconcile(world: WorldState, toDay: number): { world: WorldState; facts
         ? { ...agreement, status: "ended" as const, endedAtStep: toDay, endedReason: reason } : agreement)),
     };
     facts.push({
-      localId: `reconciled_${rebel.id}`.slice(0, 60),
+      localId: safeLocalId(`reconciled_${rebel.id}`).slice(0, 60),
       kind: "civil_war_ended",
       summary: `The civil war in ${parent.name} is over: ${rebel.name} has made its peace and come home, its men and its ground with it.`,
       affectedRefs: [{ kind: "polity", id: parent.id }, { kind: "polity", id: rebel.id }, { kind: "character", id: war.leaderCharacterId }],

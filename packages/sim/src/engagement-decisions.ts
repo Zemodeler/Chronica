@@ -12,6 +12,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { stoodIdle } from "./engagements";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * The player's word at a turning point of a fight (docs/plans/battles-that-last.md, phase 3).
@@ -182,7 +183,7 @@ export function answerEngagement(world: WorldState, player: string | null, answe
       };
       const toName = world.map.provinces.find((province) => province.id === to)?.name ?? to;
       facts.push({
-        localId: `fell_back_${engagement.id}_${day}`.slice(0, 60),
+        localId: safeLocalId(`fell_back_${engagement.id}_${day}`).slice(0, 60),
         kind: "force_withdrew",
         summary: `${names(mine)} left ${mine.length === 1 ? "its" : "their"} fires burning at ${where} and slipped away by night into ${toName}, leaving the field to ${names(theirs)}.`.slice(0, 600),
         affectedRefs: [{ kind: "province", id: engagement.provinceId }, { kind: "province", id: to }, ...[...mine, ...theirs].slice(0, 6).map((force) => ({ kind: "force" as const, id: force.id }))],

@@ -17,6 +17,7 @@ import {
 } from "@chronica/shared";
 import { cutOffHubs } from "./markets";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Grain bought with the state's silver (docs/economy.md, "Grain bought, and bread by contract").
@@ -207,7 +208,7 @@ export function relieveAHub(world: WorldState, input: {
     spent: bought.spent,
     legs: bought.legs,
     fact: {
-      localId: `grain_bought_${input.cause}`.replace(/[^a-z0-9_-]/gi, "_").slice(0, 60),
+      localId: safeLocalId(`grain_bought_${input.cause}`).replace(/[^a-z0-9_-]/gi, "_").slice(0, 60),
       kind: "treasury_grain_bought",
       summary: `${nameOf(world, input.polityId, "polity")} bought ${bought.units.toLocaleString("en-GB")} modii of grain for ${nameOf(world, toHub)}, where bread stood dear, ${bought.spent.toLocaleString("en-GB")} out of the chest: ${join(where)}; it will be there in about ${last} days.`.slice(0, 600),
       affectedRefs: [{ kind: "polity", id: input.polityId }, { kind: "province", id: toHub }, ...bought.legs.map((leg) => ({ kind: "province" as const, id: leg.hubId }))],
@@ -233,7 +234,7 @@ export function landShipments(world: WorldState, toDay: number): { readonly worl
     const shut = cut.has(row.toHubId) || (province !== undefined && province.controllerPolityId !== null && province.controllerPolityId !== row.polityId && atWar(world.polityAgreements, row.polityId, province.controllerPolityId));
     if (shut) {
       facts.push({
-        localId: `grain_lost_${row.id}`.slice(0, 60), kind: "grain_shipment_lost",
+        localId: safeLocalId(`grain_lost_${row.id}`).slice(0, 60), kind: "grain_shipment_lost",
         summary: `The grain ${nameOf(world, row.polityId, "polity")} had bought for ${nameOf(world, row.toHubId)} found the place shut against it, and was lost.`.slice(0, 600),
         affectedRefs: [{ kind: "polity", id: row.polityId }, { kind: "province", id: row.toHubId }], visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 35,
       });
@@ -241,7 +242,7 @@ export function landShipments(world: WorldState, toDay: number): { readonly worl
     }
     current = addStock(current, row.toHubId, "grain", row.units);
     facts.push({
-      localId: `grain_landed_${row.id}`.slice(0, 60), kind: "grain_shipment_landed",
+      localId: safeLocalId(`grain_landed_${row.id}`).slice(0, 60), kind: "grain_shipment_landed",
       summary: `${row.units.toLocaleString("en-GB")} modii of the grain ${nameOf(world, row.polityId, "polity")} bought came into ${nameOf(world, row.toHubId)} from ${nameOf(world, row.fromHubId)}.`.slice(0, 600),
       affectedRefs: [{ kind: "polity", id: row.polityId }, { kind: "province", id: row.toHubId }], visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 30,
     });

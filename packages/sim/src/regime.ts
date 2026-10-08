@@ -14,6 +14,7 @@ import { constitutionOf, foundDeposedParty, readForm, recast, rulerOf, rulerOffi
 import { armyLoyaltyTo } from "./society";
 import { prosecutionOf } from "./command-tenure";
 import { remember } from "./grievances";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * A government taken by force, or dictated by a conqueror.
@@ -213,14 +214,14 @@ export function attemptRegimeChange(input: RegimeChangeInput): RegimeChangeResul
     };
     if (ruler !== null) next = remember(next, [{ subjectCharacterId: ruler.id, targetCharacterId: actorId, label: `He tried to ${how} ${polity.name}.`, score: -20, dimensions: { trust: -50, fear: 10 }, decayPerYearBps: 0 }], input.atStep, `regime:${actorId}:${input.atStep}`);
     const trial = prosecutionOf(next, actorId, polityId, [{ label: `treason, for trying to ${how} ${polity.name} by force`, weight: 10 }], input.atStep, null, "", 1);
-    const tried: FactProposalDraft[] = trial === null ? [] : [{ localId: `treason_${actorId}_${input.atStep}`.slice(0, 60), ...trial.fact }];
+    const tried: FactProposalDraft[] = trial === null ? [] : [{ localId: safeLocalId(`treason_${actorId}_${input.atStep}`).slice(0, 60), ...trial.fact }];
     if (trial !== null) next = { ...next, material: { ...next.material, politicalProcedures: [...next.material.politicalProcedures, trial.procedure] } };
     return {
       world: next,
       succeeded: false,
       chanceBps,
       facts: [{
-        localId: `regime_failed_${actorId}_${input.atStep}`.slice(0, 60),
+        localId: safeLocalId(`regime_failed_${actorId}_${input.atStep}`).slice(0, 60),
         kind: "regime_change_failed",
         summary: `${actor.name} tried to ${how} ${polity.name}, and failed${defenders > 0 ? `: the ${defenders} men who held the capital stood by its government` : ""}. He has lost his offices and much of his name, is declared an outlaw, and is hunted.`,
         affectedRefs: [{ kind: "character", id: actorId }, { kind: "polity", id: polityId }, ...(ruler === null ? [] : [{ kind: "character" as const, id: ruler.id }])],
@@ -255,7 +256,7 @@ export function attemptRegimeChange(input: RegimeChangeInput): RegimeChangeResul
     const done = recastHistoryOnly(next, polityId, current, actorId, input.atStep, summary, route);
     next = ruler === null ? done : foundDeposedParty(done, polityId, ruler.id, [ruler.id], input.atStep, current);
     facts = [{
-      localId: `regime_${polityId}_${input.atStep}`.slice(0, 60),
+      localId: safeLocalId(`regime_${polityId}_${input.atStep}`).slice(0, 60),
       kind: "constitution_changed",
       summary: `${actor.name} has seized ${polity.name} and made himself its master. ${summary}`,
       affectedRefs: [{ kind: "character", id: actorId }, { kind: "polity", id: polityId }, ...(ruler === null ? [] : [{ kind: "character" as const, id: ruler.id }])],

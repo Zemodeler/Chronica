@@ -1,5 +1,6 @@
 import { isAilment, type FactProposalDraft, type WorldState } from "@chronica/shared";
 import { scarredBy } from "./skill-decline";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Ailments written as words pass in their time (`characters/ailments.ts`).
@@ -22,7 +23,7 @@ export function lapseAilments(world: WorldState, toDay: number): { world: WorldS
     if (passed.length === 0) return character;
     changed = true;
     facts.push({
-      localId: `recovered_${character.id}_${toDay}`.slice(0, 60),
+      localId: safeLocalId(`recovered_${character.id}_${toDay}`).slice(0, 60),
       kind: "recovery",
       summary: `${character.name} recovered from ${passed.join(" and ")}, and took up ${character.gender === "female" ? "her" : "his"} affairs again.`,
       affectedRefs: [{ kind: "character", id: character.id }, ...(character.polityId === null ? [] : [{ kind: "polity" as const, id: character.polityId }])],

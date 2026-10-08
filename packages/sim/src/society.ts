@@ -21,6 +21,7 @@ import {
 } from "@chronica/shared";
 import { circleName, clientsName, CLASS_NAMES } from "./group-names";
 import { forceLever, polityLever, type WarfareContext } from "@chronica/shared";
+import { safeLocalId } from "./safe-local-id";
 
 /** The doctrines a world's powers and armies practise, for the levers society reads. */
 const contextOf = (world: WorldState): WarfareContext => ({ establishments: world.establishments, doctrines: world.doctrines, today: world.elapsedStep });
@@ -542,7 +543,7 @@ function groupFact(world: WorldState, group: PoliticalGroup, what: "appeared" | 
   const where = group.polityId === null ? "" : ` in ${polityName(world, group.polityId)}`;
   const leader = group.leaderCharacterId === null ? undefined : world.characters.find((character) => character.id === group.leaderCharacterId);
   return {
-    localId: `group_${what}_${group.id}`.slice(0, 60),
+    localId: safeLocalId(`group_${what}_${group.id}`).slice(0, 60),
     kind: what === "appeared" ? "group_formed" : "group_dissolved",
     summary: what === "appeared"
       ? `${group.name}: ${GROUP_TYPE_IN_WORDS[group.type] ?? "a new party"} has formed${where}${leader === undefined ? "" : `, around ${leader.name}`}.`
@@ -728,7 +729,7 @@ function officesByNeed(world: WorldState, government: GovernmentRules, warfare: 
         successionRules: next.successionRules.some((rule) => rule.id === ruleId) ? next.successionRules : [...next.successionRules, { id: ruleId, label: "Named by the government", kind: "appointment", institutionId: null }],
       };
       facts.push({
-        localId: `office_need_${id}`.slice(0, 60), kind: "office_created",
+        localId: safeLocalId(`office_need_${id}`).slice(0, 60), kind: "office_created",
         summary: `${polityPhrase(polity.name).replace(/^the/u, "The")} has made the office of ${office.label}: ${why}.`,
         affectedRefs: [{ kind: "polity", id: polity.id }], visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 35,
       });
@@ -764,7 +765,7 @@ function officesByNeed(world: WorldState, government: GovernmentRules, warfare: 
       society: { ...next.society, precedents: [...next.society.precedents, { polityId: office.polityId, kind: "emergency_office" as const, key: office.label.toLowerCase().slice(0, 160), atStep: toDay }].slice(-200) },
     };
     facts.push({
-      localId: `office_lapsed_${office.id}`.slice(0, 60), kind: "office_lapsed",
+      localId: safeLocalId(`office_lapsed_${office.id}`).slice(0, 60), kind: "office_lapsed",
       summary: `Nobody has held the office of ${office.label} in three years, and it has lapsed.`,
       affectedRefs: [{ kind: "polity", id: office.polityId }], visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 25,
     });
@@ -820,7 +821,7 @@ function customs(world: WorldState, toDay: number, ids: IdFactory, facts: FactPr
       }],
     };
     facts.push({
-      localId: `custom_${entry.polityId}_${entry.kind}`.slice(0, 60), kind: "custom_formed",
+      localId: safeLocalId(`custom_${entry.polityId}_${entry.kind}`).slice(0, 60), kind: "custom_formed",
       summary: `It has become the custom: ${label.charAt(0).toLowerCase()}${label.slice(1)}.`,
       affectedRefs: [{ kind: "polity", id: entry.polityId }], visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 45,
     });
