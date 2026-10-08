@@ -55,6 +55,8 @@ const NEW_FILES = [
   // Grain bought with the state's silver, and armies fed by contract (v58).
   "./grain-purchases.ts",
   "./army-victualling.ts",
+  // The cast rule: a person is in the standing cast for an important plot near the player (v58).
+  "./cast.ts",
   "./gens-loyalty.ts",
   // H2 and H3: the magistrates at their charges and the bodies that sit.
   "./magistrates.ts",
