@@ -79,8 +79,8 @@ export function isBeneath(world: Pick<WorldState, "material">, office: Office, o
  * so nobody could rise -- a quaestor could never become consul, nor a
  * tribune a praetor.
  */
-export function isEligibleFor(world: WorldState, office: Office, requirementIds: readonly string[], character: Character, toDay: number): boolean {
-  return admissionRefusal(world, office, requirementIds, character, toDay) === null;
+export function isEligibleFor(world: WorldState, office: Office, requirementIds: readonly string[], character: Character, toDay: number, steps = true): boolean {
+  return admissionRefusal(world, office, requirementIds, character, toDay, steps) === null;
 }
 
 /**
@@ -89,7 +89,7 @@ export function isEligibleFor(world: WorldState, office: Office, requirementIds:
  * required." Null when he may stand. A man refused used to be dropped from
  * the count without a word, and never learned he had not been on the ballot.
  */
-export function admissionRefusal(world: WorldState, office: Office, requirementIds: readonly string[], character: Character, toDay: number): string | null {
+export function admissionRefusal(world: WorldState, office: Office, requirementIds: readonly string[], character: Character, toDay: number, steps = true): string | null {
   const sitting = world.material.officeSeats.some((seat) => seat.officeId === office.id && seat.status === "held" && seat.holderCharacterId === character.id);
   if (sitting) return `${character.name} already holds it.`;
   if (!character.alive) return `${character.name} is dead.`;
@@ -97,7 +97,7 @@ export function admissionRefusal(world: WorldState, office: Office, requirementI
   const barred = priestlyBar(office, character) ?? priestlyTaboo(world, office, character);
   if (barred !== null) return barred;
   // The custom of the ladder, and a conviction's bar (`cursus.ts`).
-  const custom = cursusRefusal(world, office, character, toDay, requirementIds);
+  const custom = cursusRefusal(world, office, character, toDay, requirementIds, steps);
   if (custom !== null) return custom;
   const result = resolveEligibility({ ...world, elapsedStep: toDay }, character.id, requirementIds, office.id);
   return result.eligible ? null : result.failedReasons.join(" ");

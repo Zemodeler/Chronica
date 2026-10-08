@@ -239,10 +239,15 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
     /** Who could hold it: eligible, alive, and not already sitting in it. */
     const eligible = (character: Character): boolean => isEligibleFor(world, office, requirementIds, character, input.toDay);
     /** Who the Senate would think of unprompted: eligible, of standing, not above it, and not the player. */
-    const electable = (): Character[] =>
-      world.characters
-        .filter((character) => character.id !== player && character.prestigeBps >= minStanding && !beneath(character) && eligible(character))
+    const electable = (): Character[] => {
+      const ranked = (steps: boolean): Character[] => world.characters
+        .filter((character) => character.id !== player && character.prestigeBps >= minStanding && !beneath(character) && isEligibleFor(world, office, requirementIds, character, input.toDay, steps))
         .sort((a, b) => candidateScore(office, b, input.toDay, world) - candidateScore(office, a, input.toDay, world) || a.id.localeCompare(b.id));
+      // The custom of the ladder first; where it leaves nobody (the few men a world names run out of years), the likeliest men after them, who may hold only the one office.
+      const keeping = ranked(true);
+      const kept = new Set(keeping.map((character) => character.id));
+      return [...keeping, ...ranked(false).filter((character) => !kept.has(character.id))];
+    };
 
     /**
      * Custom, where it was not law: the voters preferred a man who had served

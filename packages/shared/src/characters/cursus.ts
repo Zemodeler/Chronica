@@ -85,7 +85,7 @@ export function infamyOf(world: Pick<WorldState, "genericEntities">, characterId
  * Why a man may not stand for this office by the custom of the ladder or by his name: null if he may. Offices with no rung are asked only about infamy
  * (and about the censors' mark for the military tribunate and the Senate).
  */
-export function cursusRefusal(world: WorldState, office: Pick<Office, "id" | "kind">, character: Character, toDay: number, requirementIds: readonly string[] = ["req-standing-"]): string | null {
+export function cursusRefusal(world: WorldState, office: Pick<Office, "id" | "kind">, character: Character, toDay: number, requirementIds: readonly string[] = ["req-standing-"], steps = true): string | null {
   // The ladder is part of what an office asks: a seat whose requirements were set aside (a test of how a count is made, a law that waived them) asks only after the man's name.
   const ladder = requirementIds.some((id) => id.startsWith("req-standing-"));
   const infamous = infamyOf(world, character.id, toDay);
@@ -115,7 +115,8 @@ export function cursusRefusal(world: WorldState, office: Pick<Office, "id" | "ki
       return `${character.name} is already ${seat.designateCharacterId === character.id ? "chosen for" : "newly chosen to"} another magistracy of the city (${seat.officeId.replace(/^roman-/, "")}): a man does not hold two.`;
     }
   }
-  if (waived) return null;
+  // Where nobody who keeps to the custom can be found, the electors take the likeliest man: the order of the ladder yields, one office at a time and a good name do not (`steps` false).
+  if (waived || !steps) return null;
   const age = currentAgeYears(character, toDay);
   const minAge = CURSUS_MIN_AGE[rung] ?? 0;
   if (age < minAge) return `${character.name} is ${age}: the custom asks ${minAge} years of a man who stands for this office.`;
