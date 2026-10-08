@@ -119,6 +119,14 @@ export function endPolity(
     return account;
   });
 
+  // What was taken is written down, one line a chest, so that the money is seen to have gone where it went (the money audit asks for it).
+  const spoils = victorTreasury === undefined ? [] : world.material.accounts
+    .filter((account) => treasuryIds.has(account.id) && account.balance > 0)
+    .map((account) => ({
+      id: safeLocalId(`txn_end_${polityId}_${account.id}`).slice(0, 100), atStep, kind: "spoils" as const, amount: account.balance, sourceAccountId: account.id, destinationAccountId: victorTreasury.id,
+      cause: { kind: "action" as const, id: `end-${polityId}`, explanation: `The chests of ${name} taken into the treasury of its victor`.slice(0, 200) }, visibility: "public" as const,
+    }));
+
   const heirIds = new Set(heirs.map((force) => force.id));
   // Taken into service, they answer to whoever raises the victor's levies, or
   // its ruler, or the general of its largest army; a man who ruled the power
@@ -178,6 +186,7 @@ export function endPolity(
     material: {
       ...world.material,
       accounts,
+      transactions: spoils.length === 0 ? world.material.transactions : [...world.material.transactions, ...spoils],
       incomeSources,
       obligations,
       forces: heirIds.size === 0 ? world.material.forces

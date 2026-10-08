@@ -2,6 +2,7 @@ import { COGNITION_REVIEW_DAYS, COGNITION_REVIEW_VERSION, answerDueOf, type Cogn
 import type { RoutedActor } from "./attention";
 import { renderCharacterPortrait } from "./cognition";
 import { stateCrisisLine } from "./kept-by-the-officers";
+import { FAR_REST_DAYS } from "./far-cast-rests";
 
 /** Ignore countdown prose in the comparison only; prompts and the simulation clock remain unchanged. */
 function circumstances(text: string): string {
@@ -47,16 +48,22 @@ export function createCognitionMemory(saved: readonly CognitionReview[] = [], no
   const contexts = new Map<string, { context: string; reason: string; atStep: number }>();
   const weights = new Map<string, number>();
   for (const review of saved) {
-    if (review.version !== COGNITION_REVIEW_VERSION || nowStep - review.atStep > COGNITION_REVIEW_DAYS) continue;
+    // Kept for the far men's rest (`FAR_REST_DAYS`), though only a review of the last `COGNITION_REVIEW_DAYS` says what has changed.
+    if (review.version !== COGNITION_REVIEW_VERSION || nowStep - review.atStep > FAR_REST_DAYS) continue;
     contexts.set(review.characterId, { context: review.context, reason: review.reason, atStep: review.atStep });
     weights.set(review.characterId, review.weight);
   }
   return {
     weights,
     changed(actor: RoutedActor, world: WorldState, clock: ScenarioClock, wanted?: string): boolean {
-      const previous = contexts.get(actor.characterId);
+      const found = contexts.get(actor.characterId);
+      const previous = found === undefined || world.elapsedStep - found.atStep > COGNITION_REVIEW_DAYS ? undefined : found;
       return previous === undefined || previous.context !== hashOf(cognitionDecisionContext(actor, world, clock))
         || (wanted !== undefined && previous.reason !== hashOf(circumstances(wanted)));
+    },
+    /** The step the model was last asked about this person (within `FAR_REST_DAYS`), or null. */
+    lastAskedStep(characterId: string): number | null {
+      return contexts.get(characterId)?.atStep ?? null;
     },
     remember(actor: RoutedActor, world: WorldState, clock: ScenarioClock, wanted: string | undefined, answerSize: number): void {
       contexts.set(actor.characterId, { context: hashOf(cognitionDecisionContext(actor, world, clock)), reason: hashOf(circumstances(wanted ?? "")), atStep: world.elapsedStep });
@@ -65,7 +72,7 @@ export function createCognitionMemory(saved: readonly CognitionReview[] = [], no
     /** What to keep on the world: the freshest reviews, at most as many as the world holds. */
     snapshot(nowStep: number): CognitionReview[] {
       return [...contexts.entries()]
-        .filter(([, entry]) => nowStep - entry.atStep <= COGNITION_REVIEW_DAYS)
+        .filter(([, entry]) => nowStep - entry.atStep <= FAR_REST_DAYS)
         .sort((a, b) => b[1].atStep - a[1].atStep)
         .slice(0, 200)
         .map(([characterId, entry]) => ({ characterId, context: entry.context, reason: entry.reason, atStep: entry.atStep, weight: Math.min(10_000, weights.get(characterId) ?? 1), version: COGNITION_REVIEW_VERSION }));

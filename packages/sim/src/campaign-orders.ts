@@ -40,6 +40,8 @@ const DEFEND_ODDS = 0.9;
 const RETREAT_ODDS = 1.6;
 /** How far an army looks for a quarter, an enemy to meet, or ground to feed on. */
 const QUARTERS_KM = 350;
+/** A town fed below this (the famine line is 4,000) is not wintered in while another of ours is within reach. */
+const HUNGRY_TOWN_BPS = 4_000;
 const SIGHT_KM = 600;
 /** How far the roads are worked out from an army, for what it may be sent to. */
 export const REACH_KM = 900;
@@ -79,7 +81,9 @@ function quartersFor(ctx: StrategyContext, force: Force, reach: ReadonlyMap<stri
     const province = ctx.provinces.get(id);
     if (province === undefined || province.controllerPolityId !== ctx.polityId || province.settlements.length === 0) continue;
     const walls = province.settlements.reduce((top, settlement) => Math.max(top, settlement.fortificationLevel), 0);
-    const score = km - Math.min(5, walls) * 30 - (id === preferred ? 60 : 0);
+    // A town whose own people are starving (a city lately taken, its stores eaten by the siege) cannot feed an army as well: it is a quarter of the last resort, not of the first.
+    const hungry = (ctx.world.material.provinceMaterial.find((row) => row.provinceId === id)?.foodSecurityBps ?? 10_000) < HUNGRY_TOWN_BPS;
+    const score = km - Math.min(5, walls) * 30 - (id === preferred ? 60 : 0) + (hungry ? 2_000 : 0);
     if (best === null || score < best.score || (score === best.score && id < best.id)) best = { id, score };
   }
   void force;

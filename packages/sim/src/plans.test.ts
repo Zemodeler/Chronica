@@ -255,7 +255,8 @@ describe("a burst", () => {
       world: opening(), clock, offices, warfare: definition.warfare, burstId: "plan", gameId: "game-plans",
       actorRef: { kind: "character", id: "gaius-genucius" }, actorPolityId: "rome",
       orderText: "Let a month pass.", spanDays: 30, knownFacts: [], queue: [], port, narratorSeeds: [],
-      ...(budget === undefined ? {} : { budget: { ...DEFAULT_BUDGET, ...budget } }),
+      // The step's own week wakes him: a man's plan is asked of him as it falls due, so the rest between asks is not what these tests are about.
+      budget: { ...DEFAULT_BUDGET, farRestDays: 0, nearWorldRestDays: 0, maxAskedPerRound: 6, ...budget },
     });
 
     const plan = plansOf(result.world).find((ambition) => ambition.label === TAKE_MESSANA.ambition)!;
@@ -291,6 +292,7 @@ describe("a burst", () => {
       world: opening(), clock, offices, warfare: definition.warfare, burstId: "idle", gameId: "game-plans",
       actorRef: { kind: "character", id: "gaius-genucius" }, actorPolityId: "rome",
       orderText: "Let a month pass.", spanDays: 30, knownFacts: [], queue: [], port, narratorSeeds: [],
+      budget: { ...DEFAULT_BUDGET, farRestDays: 0, nearWorldRestDays: 0, maxAskedPerRound: 6 },
     });
     const plan = plansOf(result.world).find((ambition) => ambition.label === TAKE_MESSANA.ambition)!;
     expect(plan.steps[0]!.status).not.toBe("done");

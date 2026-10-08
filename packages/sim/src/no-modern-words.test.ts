@@ -83,6 +83,11 @@ const NEW_FILES = [
   "./naval-orders.ts",
   "./battle-plan.ts",
   "./war-direction.ts",
+  // Playtest fix batch 2: far men rest between asks, the appeal goes to the people, a fleet by decree and the corvus, Carthage in Sicily.
+  "./far-cast-rests.ts",
+  "./the-appeal-goes-to-the-people.ts",
+  "./a-fleet-by-decree.ts",
+  "../../db/src/punic-wars-sicily.ts",
 ];
 
 describe("no modern words", () => {

@@ -170,6 +170,8 @@ import { carryOutEnactment } from "../enact";
 import { commandChanges } from "../command-changes";
 import { endPolity } from "../polity-end";
 import { LOAN_TERM_PERIODS, loanInstalment } from "../debts";
+import { receiveDefector } from "../defection";
+import { loanRefusal, termPeriodsOf } from "../lending";
 import { EMBARGO_BREACH_TRUST, endObligationsOfEndedAgreements, hasGrievance, shiftTrust } from "../treaties";
 import { safeLocalId } from "../safe-local-id";
 import { clipOverlong } from "../clip-overlong";
@@ -1491,6 +1493,9 @@ export function acceptedAgreementDelta(replied: WorldState, message: WorldState[
  * decides it, with him moving it. Null where no chamber decides it -- a king's
  * war is the king's -- or the act is not his own power's.
  */
+/** The days a request for peace or a truce may wait for its answer when its writer named none. */
+export const PEACE_REQUEST_ANSWER_DAYS = 60;
+
 export function layBeforeTheChamber(delta: WorldDelta, world: WorldState, actorId: string, resolve: (ref: string) => string | undefined): WorldDelta | null {
   if (delta.op !== "agreement_open" && delta.op !== "agreement_close") return null;
   const kind = delta.op === "agreement_open" ? delta.kind : world.polityAgreements.find((candidate) => candidate.id === (resolve(delta.agreementRef) ?? delta.agreementRef))?.kind;
@@ -4581,9 +4586,17 @@ function applyOne(
       };
       // A state is asked for what its credit is worth (the `credit` charge): the man who keeps it keeps its good name with the lenders.
       const rateBps = creditRateBps(world, readDepartments(world), borrowerId, taken.interestBps);
-      const periods = offer?.periods ?? LOAN_TERM_PERIODS;
+      const periods = offer?.periods ?? termPeriodsOf(taken.terms, LOAN_TERM_PERIODS);
 
       const lenderId = taken.lenderRef === null ? null : required(taken.lenderRef, "The lender");
+      // A loan is a bargain, and a state's is the treasury's keeper's to take or leave (`lending.ts`): a private man's offer to the chest at any rate, for any
+      // sum, was taken without anybody's word. Where a standing offer was taken, or a fiscal officer asked it, it was agreed; a rate nobody pays is refused.
+      const actingId = context.actorRef.kind === "character" ? context.actorRef.id : null;
+      const refusedLoan = loanRefusal(world, {
+        borrowerAccountId: borrowerId, lenderKind: taken.lenderKind, lenderId, actorId: actingId, principal: taken.principal, interestBps: taken.interestBps, periods,
+        day: world.elapsedStep, agreed: offer !== undefined || context.sanctionedDeltas?.has(delta) === true || context.actsForTheWorld === true || (actingId !== null && lenderId !== null && actingId !== lenderId),
+      });
+      if (refusedLoan !== null) reject(refusedLoan);
       if (taken.lenderKind !== "foreign" && lenderId === null) {
         reject("A loan from someone in this world has to say who they are.", "reference");
       }
@@ -4918,6 +4931,14 @@ function applyOne(
       let changed = world;
       if (newPolityId !== undefined && newPolityId !== person.polityId) {
         changed = handOverForcesOf(vacateOfficesOf(changed, characterId, "resignation", atStep), characterId, newPolityId);
+        // A man who goes over is a guest and no citizen, and the power he left answers for it (`defection.ts`).
+        const went = person.polityId === null ? null : receiveDefector(changed, person, newPolityId, atStep);
+        if (went !== null) {
+          if (went.refusal !== undefined) reject(went.refusal);
+          changed = went.world;
+          for (const fact of went.facts) emitFact(fact);
+          for (const status of went.statuses) if (!statuses.includes(status)) statuses.push(status);
+        }
       }
 
       // What he got better or worse at, one step at a time. A step is years
@@ -5607,7 +5628,8 @@ function applyOne(
             terms: delta.terms,
             sentAtStep: atStep,
             deliveredOnDay,
-            replyDueByStep: delta.replyWithinDays === null ? null : deliveredOnDay + delta.replyWithinDays,
+            // A request for peace or a truce is answered in a season, by the man or by his silence, even where the writer named no term: one sat unanswered eighteen months.
+            replyDueByStep: delta.replyWithinDays === null ? (offer.kind === "peace_offer" || offer.kind === "peace_talks" || offer.proposes.includes("peace") || offer.proposes.includes("truce") ? deliveredOnDay + PEACE_REQUEST_ANSWER_DAYS : null) : deliveredOnDay + delta.replyWithinDays,
             status: "awaiting_reply" as const,
             answer: null,
             answerText: null,
@@ -7541,6 +7563,10 @@ export function payOrBorrow(
   }
   const down = Math.max(deposit, Math.min(payer.balance - reserve, price));
   const owed = price - down;
+  // The player is told what the credit is before it is taken, and takes it by saying so; a man who did not say it is not put in debt on a guess.
+  if (payer.owner.kind === "character" && payer.owner.id === context.playerCharacterId && context.creditAccepted !== true) {
+    reject(`${what} needs credit: ${Math.round((down / price) * 100)}% down (${down}), ${owed} owed to the seller at ${SELLER_CREDIT_BPS / 100}% a month over ${LOAN_TERM_PERIODS} months. Say "on credit" in your order to take it, or find ${price - Math.max(0, payer.balance - reserve)} more.`);
+  }
   const loanId = context.ids.next("loan");
   const serviceId = context.ids.next("obligation");
   const atStep = world.elapsedStep;

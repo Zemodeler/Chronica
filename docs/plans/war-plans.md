@@ -81,8 +81,41 @@ A fleet seeks the enemy's when it is the stronger and the man is bold or the pos
 when it has no fleet to meet (or the power is at the defence and none is near); stands ready as escort where an aim lies over water (the
 engine arranges the crossing of an army from the hulls of its power: `passagePlanFor`); gives battle to ships on the same water at six to
 five, otherwise draws off to a harbour; and keeps to harbour when the sea is shut (`sailingSeason`). Boarding: the Ptolemaic great ships
-have the `boarding` lever; Rome's boarding-bridge (the corvus) is not in the scenario's doctrines and is not invented here (it would be
-scenario data, Polybius 1.22, and a version bump).
+have the `boarding` lever; Rome's boarding-bridge (the corvus) is not in the scenario's doctrines on purpose (Rome has no fleet in 270, and the corvus is of 260,
+Polybius 1.22): it is a way of war a rule-led Rome puts to the Senate once it has ships (see "Rome at sea", below).
+
+## Rome at sea (`packages/sim/src/a-fleet-by-decree.ts`, playtest fix batch 2)
+
+Rome had the hulls of its allies (`socii-navales.ts`) and no fleet. A power by rule that is at war with a sea power (a war of ninety days or more, the enemy holding forty
+warships or more) and has no warship of its own and no shipbuilding work begun lays a motion before the chamber that holds the purse (`weigh`, as the books' motions are
+laid): "that a fleet of a hundred quinqueremes and twenty triremes be built" (Polybius 1.20). The motion carries the work with it (`enacts.project`), which begins the day it
+carries: three stages (timber and keels, 60 days; hulls, 50; rowers trained on benches, 40), 12,000 a hull out of the chest, never more than three-fifths of the chest in a
+season (a poor power builds fewer hulls and says so), the hulls raised out of the country's men on launching (`tick.ts`, `raiseLevy`) and paid by a standing obligation. The consul
+may carry it alone only within two months of the year's takings (his charge, `mayAct`); 120 hulls are more. A king builds at once. Once there are ships, and the war goes on against a
+sea power, the corvus is moved the same way, with the reform it enacts (`THE_CORVUS`: boarding up a band, the ships' speed down a band, for warships), which the military-reform machinery carries out and
+refits over months. The player's own "build a fleet" or "build sixty ships" is a template (`fleet`, `order-templates.ts`) read as the same work, which the competence gate puts to the Senate where
+the chest is not his to open. Tests: `rome-builds-a-fleet-by-decree`, `the-corvus-makes-boarding`.
+
+## The rules' orders and a man the model plays (playtest fix batch 2)
+
+An army the model's man commands was left to him, and a model asked about a consul's army answers that he does nothing: the Roman field army sat at the Almo for years under "orders" the
+rules had written in his name, and "winter" orders written in March stood in May because a played head's orders stand until they run out. Now an order the rules write carries `byRule`
+and `forCommanderId` (`CampaignPlan`): the rules keep carrying it out for a played general, it is looked at again like any rule-made order (the season, the bread, the road), and it is written
+afresh when the man who commands the army changes (a new consul takes up the plan, in his own name); the theatre's commander is part of the allotment, so a plan is written again when he changes.
+What a played man orders himself (`campaign_plan_set` by his own hand) still stands, as before. An order the army cannot carry out (no road to its object, no ships for the water) is
+cancelled: the new order says so ("the order for X could not be carried out, there being no road and no ships to it"), and the army keeps its quarters until a road or ships are found.
+Tests: `a-consular-army-marches-within-a-month`, `a-new-consul-takes-up-the-plan`, `an-impossible-order-is-replaced`.
+
+## The war with Carthage (playtest fix batch 2)
+
+Carthage's army is in Sicily in the opening (`punic-wars-sicily.ts`, `docs/plans/scenario-notes-batch2.md`): a strategos' army at Lilybaeum and garrisons at Panormus and Agrigentum, so a Roman army that
+crosses meets one. The war itself comes by the rules the old way (a power's appetite, its fear, its cause) and, new, by appeal (`the-appeal-goes-to-the-people.ts`): a people hard pressed in its war
+(under seven in ten of its enemy's men) writes once in three hundred days to the two strongest powers near it that are not its enemies (`decideCallsForHelp`); a request for aid or an
+alliance from a people at war with a power, or with that power's army on its ground, or an ally of ours at war with it, is a cause that adds to a power's score for war on that power; and where the Senate has refused a
+war on such a cause, the consul takes the question to the assembly that holds the power of war within sixty days, the people vote it by their blocs and gentes, and what they carry stands as carried (the war is made the
+month after, by the consul, as a war the Senate carried is: `decideTheAppealWar`). The people's refusal ends it. A request for peace or a truce has a term of its own, sixty days, where its writer named none, so that it is answered by the man it is
+written to, or refused by his silence (`PEACE_REQUEST_ANSWER_DAYS`). A legate or a proconsul who proclaims war or peace is refused with the reason (only the chamber could decide it, and nobody acted on his word); an
+order of his to the same end is moved in the chamber for him (`layBeforeTheChamber`), as before. Tests: `messana-calls-and-rome-answers`, `a-truce-request-is-answered`, `carthage-holds-western-sicily`.
 
 ## The model's general
 
@@ -106,7 +139,8 @@ touched. The orchestrator is not shown the two acts (his armies ignore plans); a
 ## Tests
 
 `a-war-has-aims-and-a-main-effort`, `a-consul-keeps-to-his-theatre`, `a-cautious-general-holds-his-towns`, `a-bold-general-seeks-the-battle`,
-`a-defender-chooses-the-ground`, `a-general-obeys-his-heads-order`, `a-cast-general-overrides-the-plan`, `a-besieger-starves-or-storms`,
+`a-defender-chooses-the-ground`, `a-general-obeys-his-heads-order`, `a-cast-general-overrides-the-plan`, `a-besieger-starves-or-storms`, `a-consular-army-marches-within-a-month`,
+`a-new-consul-takes-up-the-plan`, `an-impossible-order-is-replaced`, `rome-builds-a-fleet-by-decree`, `the-corvus-makes-boarding`, `messana-calls-and-rome-answers`,
 `an-army-winters-in-a-town`, `a-fleet-escorts-and-blockades`, `war-plans-are-deterministic`, and a ten-army plan within a time bound in
 `a-thousand-provinces`. `npm run sanity:war` (`scripts/war-sanity.mts`) runs the Punic opening model-less with a Rome-Carthage war
 opened at month 6 and reports per year the wars, battles, sieges, march orders and flips, plan shifts, naval moves, men under arms and
