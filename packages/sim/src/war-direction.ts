@@ -212,8 +212,8 @@ function directFollower(input: DirectInput, ctx: StrategyContext, mine: readonly
       if (order !== null) decisions.push(order);
       continue;
     }
-    // In winter the leader's army is in quarters and so are his allies: with nothing to follow they stay.
-    if (cp === undefined && (world.campaigns ?? []).some((entry) => entry.polityId === leader && entry.mode === "winter" && entry.expiresStep > day)) continue;
+    // While the leader has orders out and none that an ally can keep (he winters, he holds a town), the allies stay: they do not go off on their own.
+    if (cp === undefined && (world.campaigns ?? []).some((entry) => entry.polityId === leader && entry.expiresStep > day)) continue;
     const order = cp === undefined ? input.legacy(force) : conductByPlan({ ...ctx, sets: input.sets }, force, cp, input.gameId);
     if (order !== null) decisions.push(order);
   }
