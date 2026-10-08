@@ -25,6 +25,8 @@
     "play": "tsx scripts/hand-played-burst.mts",
     "world:alone": "tsx scripts/world-alone.mts",
     "sanity:economy": "tsx scripts/economy-sanity.mts",
+    "sanity:war": "tsx scripts/war-sanity.mts",
+    "sanity:government": "tsx scripts/government-sanity.mts",
     "play:turn": "tsx --env-file=.env.local scripts/play-turn.mts",
     "eval:orders": "tsx scripts/eval-orders/run.mts",
     "audit:deltas": "tsx scripts/delta-audit.mts",

@@ -763,6 +763,74 @@ stand), the censors' and a governor's pages (H6), accounts at the close of offic
 the colleague's last act and opinion; the draft and its lay-before past the figure; a reform of the tribute, a recast as a monarchy and a vacated seat; the banned words) and `office-sheet.test.tsx` (web: the page
 for a consul, a king, a suffete, an elder, a private man and a man of no power, and the banned-words scan over the rendered text).
 
+## H4 as built
+
+Phase H4: accountability as each people had it. Nobody is asked for a tally of a quarter; each power asks what its own people asked (`sim/src/close-of-office.ts`). `accountStyleOf(world, polity)` reads it off the parts: a department
+with the audit lever and the census (Rome's censorship) is *rationes*; a gate `judge_commander` (the Hundred and Four) is *examination*; any other republic or league is *euthynai*; a king, a priest-king, a tribal chief and a soldiers'
+commune are *none*.
+
+- **Accounts at the close of office** (`renderTheAccounts`, from `tick.ts` on the day a term runs out, before the commander's year-end reads the marks). For a magistrate who handled the chest: the draw in the year against his allowance
+  (`ActMark`: bread, works and the army's among it; what the chamber decreed, as a quaestor's pay-outs, is the chamber's and not counted against him), and the gap between what his charge ought to have brought in and what reached the chest
+  (the `Diversion` rows the skim leaves). The examiner (the man over the tax roll, else the head) finds a row by his eye against the thief's care, the same odds as an audit (*rationes* at 0.9 of them). A gap found: the row marked found, -700
+  standing, a mark against the man (`answerable`, weight 2, below the weight that prosecutes alone); a draw past the allowance: -250 and a mark of 1. One fact a power a month, and the log keeps a line (`accounts: ...`). A quaestor with
+  clean books is told so and nothing follows.
+- **The case.** In Rome the praetor brings it in his month (`thePraetor`: any found row within a year, never twice for a man) **before the people**: `courtForTheft` gives the tribal assembly (a fine, *iudicium populi*), the Senate keeping
+  the special inquiry (`courtOf`); no standing court (the *quaestiones perpetuae* are of 149 and later, kept out of 270). Carthage and the Greek cities bring it at once (`bringTheCase`) before the Hundred and Four or the assembly that judges.
+  The verdict is the old machinery: `judgmentLean`, the count, `sentenceByOutcome` (repayment, a fifth of the purse, loss of office, standing, exile; the gentes' grievances against the accuser and the presiding judge).
+- **The censors' audits and the others** (`decideAudits`, in `statecraft.ts` beside the magistrates): the `audit_open` mission (60 days) opened by rule, by a censor at the lustrum (within 90 days of the census) or on suspicion (the chest
+  short of what the roll promised by a tenth of a month's takings, or somebody wanting an officer out for his charge's sake: the `replace-` wants of `grumbling.ts`); by a king's dioiketes (else the friend with most of a steward in him)
+  once a year and on the same suspicion; by Carthage's suffetes or Elders once a year; for a city only on suspicion. Never twice in 150 days, never while the same books are being read, never of a man's own, never by a man the player or the model plays.
+- **Carthage** (`examineTheReturned`, monthly): a general or magistrate of a power that examines, home at the capital's province with no army in the field, is examined once a year: nothing against him, he is approved (+150 standing);
+  marks against him (a defeat, a breach), he is called before the Hundred and Four for a fine; marks of weight 5 (an army lost), for his life. A man already summoned this year (`trials.ts`, after a battle) is not examined twice.
+- **Kings** (`theKingsJustice`, monthly): no accounts at the close of anything. A found row against a king's officer within 35 days is judged by the king himself: the officer put out of his charge and made to repay, the friend of the king who
+  thinks worst of him named as the one who spoke (the cabal), else the dioiketes; no court and no vote.
+- **Consequences**: a fine, exile, standing lost, the gentes' feud against the accuser, the mark (`answerable`); and **prorogation denied**: `tenureLean` takes 14 from the Senate's lean for a man with a found gap, up to 10 for a breach mark.
+- **Bounded.** One fact a power a month; the log keeps the findings among its 900 entries; the marks the ledger's 400.
+
+Tests: `a-quaestor-renders-his-accounts`, `a-skimmer-is-found-at-the-close-of-office`, `the-104-examine-a-returning-general`, `a-king-has-no-accounts-to-render`, `the-censors-go-through-the-books`; `a-praetor-hears-the-case` now has the people judging.
+
+## H6 as built
+
+Phase H6: culture depth and balance.
+
+- **The lectio** (`sim/src/the-lectio.ts`, from `tick.ts` in the review month after the census): the roll of the Senate read anew by the censors (the holders of both the census and the audit). A senator whose hand was found in the chest within
+  five years or who is an exile (3 each), in debt past bearing (2), or with no name (1) is struck when the sum reaches the censors' bar: 2 for a dutiful censor (duty 65 and over), 3 otherwise. At most ten; the censors themselves never; the
+  player's man only for the graver reasons. The mark (`nota.ts`, a small record) costs 600 standing and bars him from the enrolment of the men who held a magistracy (`enrolFormerMagistrates`, now also run at the lectio) until the next censors,
+  who lift every mark they find and lay it again where the man has not mended. One fact naming up to three.
+- **The provinces** (`sim/src/the-provinces.ts`, called in `command-tenure.ts` as the year ends): the armies waiting for their successors are given to the new colleagues, the graver front (the enemy in its province counted twice, and its own
+  men) to the abler soldier by decree, the rest by lot (*sortitio*, `stableHash` of the year), a single free man simply sent. Not for the player's own army, nor for a power he rules. Prorogation of a command in a war is the Senate's vote as
+  before (`tenureLean`), now also denied for a breach. The urban praetor keeps the courts as his province.
+- **Quorum** (`sim/src/quorum.ts`, read in `blocLeanings`): a member who leads an army away from the city, or stands in another power's country, leaves his seat out of the count; an assembly of the people is thinned by the share of its
+  men under arms (the men in the field against a fifth of the people, at most 35 in a hundred); `countVote` then asks the quorum of the present, and a chamber short of it "could not muster a quorum".
+- **The people's vote on war** (`ratifyTheWar`): the assembly that holds the power of war votes the Senate's war with its blocs, gentes and absentees, by the same count; carried, it adds 75 to 300 basis points by the margin; refused, it
+  takes as much and the war goes on (the user's simplification stands: war is the Senate's); the tribunes are 25 the more moved to forbid a levy or a war for 400 days after a refusal (`thePeopleRefusedLately`).
+- **Carthage.** The parties of Hanno the Great and the Barcids are of the 240s and after (Hamilcar's rise is later than 270); nothing of them is authored for 270: the Council decides, the people when the suffetes and the Council
+  split (`refersFailuresTo`), the generals answer to the Hundred and Four (H4). The doubt (research, "Disputed", 2) is left as it was.
+- **Hellenistic courts.** The king's friends vie for his ear (`sim/src/court-rivalry.ts`): the favourite is the dioiketes, else the friend of highest standing; up to two friends who think ill of him (-25 and worse) come to want him out
+  of the king's favour (an ambition, as `grumbling.ts` makes them); the king's audit (H4) names the friend who spoke. Royal estates stay the oikonomoi's households, audited as households.
+- **A tribal power has one chief.** The scenario's stand-in "ruler", "councillor" and "priest" offices of a template power ("boii-ruler") are reformed into the offices its constitution builds ("boii:ruler"), where nobody sits in the
+  stand-in (`retireTheTemplate`, `constitutions.ts`). The old test had passed on the phantom: `every-power-has-a-head-who-can-act` now says that a tribe has no standing tax and no loans by its form.
+- **The government's sanity run** (`scripts/government-sanity.mts`, `npm run sanity:government -- 5`).
+
+Tests: `the-lectio-strikes-a-man`, `the-senate-assigns-the-provinces`, `a-body-needs-its-quorum`, `the-people-vote-the-war`, `a-tribal-power-has-one-chief`, `the-friends-of-a-king-vie-for-his-ear`.
+
+### The sanity run
+
+`npm run sanity:government -- 5` runs the Punic opening five years, a month at a time, with a silent model, an empty cast and a private man of Rome for the actor, so that every power is governed by its rules; per power and year it prints the acts by charge,
+the matters asked of a chamber (and the most open at once), the votes (carried, failed, forbidden, lapsed), the seats that changed hands, the cases and verdicts, the audits, the accounts rendered (and found short), the men struck from the roll, the changes of the tax
+rate (and the reversals), the silver in the coin, the chest (and the months below nothing) and the charges with no man in them; it closes with the flags and the money audit. About ten minutes of wall time for five years.
+
+The run of 2026-10-08 (years 1 to 3 shown, then five years in all): Rome, year 1: justice 3 (three cases, all three convicted), census, lectio, audit, games, festival; seven votes carried and none failed; thirty-six seats changed hands; the coin whole (7,300 of 7,300);
+year 2: accounts 2, audit 1, festival; year 3: accounts 1, audit 1, games, festival, justice 1. Carthage: one audit and one festival a year, the census in year 3, one vote carried a year, coin 9,000 of 9,000. Syracuse and Egypt: an audit a year or so (the king's
+dioiketes), no accounts. The tribal peoples (the Boii) act little: one motion in two years, a vote failing now and then. No power changed its tax rate in the five years (no flip-flopping: 0 reversals), no chest stood below nothing, no questions piled up (the most
+open at once: 2), no coin was debased, and the money audit over the five years found **nothing unexplained** (harvest +103.9m, market +137.0m / -61.8m, plunder +9.2m, the unnamed sink -81.1m).
+
+What it exposed, and what was done: (1) the first reading of "vacant charges" flagged Rome's quaestors, censors and dictator and every template power's priesthood: a college is elected whole and its places are the implied colleagues' (`society.ts`, "a place nobody
+named wins stays with the implied colleagues"), the censorship stands only every fifth year and the dictatorship only in a crisis, so the script no longer counts them; (2) the offices *made by need* ("Governor of the conquered lands" in Macedon and the Seleucid kingdom) stand empty
+until they lapse after three years (`officesByNeed`): not mended here, flagged below; (3) a ZodError (a fact with more than sixteen affected entities in a statecraft proposal) stopped the first five-year run in year four; it did not come again on the next run and none of the
+facts of this phase carries more than six, so it is left to whoever sees it again (open decision).
+
+
 ## The cast rule (v58)
 
 The standing cast is the people the model plays (`sim/src/cast.ts`, `world.cast`). **A person enters it for an important plot, and for nothing else**, and only where the plot is in or near the player's area. The plots (`plotsOf`): a *scheme* (set against the player, a plot he leads or is the hand of, one laid against him); a *thread* the narrator has made of a quarrel; a *contest* (a candidate in an open nomination or appointment, or the man who puts one forward); a *war plan* (the commander of an army where his power is at war, and above all of a power's main army, the face it shows the world; the commander of the player's own army in the field); a *hard decision* pending (a pressure of `HARD_DECISION_AT` or more, a question owed him, a great thing he has just done); a *letter* awaiting an answer, or an *order* to carry out, between him and the player; the *rule* of the player's power, or of a foreign power, while that power has a matter in hand (a war, a thread its people are in, a hard pressure on one of them, a question before its chamber). Rivalry and kinship only sharpen a plot a man already has. The area is the player's own power and the powers he deals with (`powersDealtWith`) and the ground within `NEAR_THE_PLAYER_KM` of the places he stands in, holds and leads armies in; his own circle (his chain and his nemesis) is always near. Office-holding, wealth and the ownership of a firm give nothing by themselves, so a man with none of these runs on the rules (`statecraft.ts`, `magistrates.ts`), as the patrons of the trading firms the rules founded do, until a plot reaches him; and a ruler of a great power with nothing in hand is not a voice of the wider world. The score is the sum of the plots (`CAST_ENTER_AT` to enter, `CAST_STAY_AT` to stay); the seats are as before. At the opening of 270 the cast is Decius Vibellius (the Rhegium thread, the Campanian army, a hard decision), Hanno of Carthage (the Messana thread, the main army of Carthage), Hieron and the Mamertines' spokesman (the Messana thread, a hard decision each) and the consul's colleague (Rome has the Rhegium war in hand); Ptolemy, the suffetes and the Seleucid, who have nothing in hand, are not. Tests: `the-cast-is-for-plots.test.ts`; `the-cast.test.ts` was changed on 2026-10-08 to ask for Hieron's section, since which of the three of the Messana thread comes first in the six places of a round falls by a hash.

@@ -593,6 +593,10 @@ ratifying the war; a king's friends counsel, and he takes it or overrules it, pa
 `a-censor-takes-the-roll`, `an-embassy-is-received`, `a-magistrate-exceeds-his-charge`, `the-senate-sits-and-votes`, `a-tribune-vetoes-a-levy-in-session`, `an-augur-stops-the-business`, `a-war-needs-the-senate`,
 `the-king-overrules-his-friends`, `the-104-judge-a-general`, `a-government-month`.
 
+### Accounts, the roll and the provinces (H4, H6)
+
+Who answers for the chest is read the same way. When a magistrate who handled it lays down his office, his accounts are read as his people read them (`sim/src/close-of-office.ts`): the *rationes* of Rome's quaestors and magistrates, the *euthynai* of a Greek city, the Hundred and Four's examination of the men who come home to Carthage, and none for a king or a chief (his *dioiketes* goes through his officers' books, and the king judges what is found). What the draw in the year was against his allowance, and the gap between what his charge should have brought in and what reached the chest, are compared; a gap found loses him standing, marks him, and the praetor brings the case before the people. The censors read the books at the lustrum and when the chest is short, and then the roll of the Senate (*lectio*: `the-lectio.ts`); the Senate gives the new year's armies to the new colleagues by decree or by lot (`the-provinces.ts`); a chamber counts only the men who are not away with the armies (`quorum.ts`); the people vote the Senate's war (`ratifyTheWar`). All by rule; the player is asked for nothing. `docs/plans/government.md`, "H4 as built" and "H6 as built"; the run that watches it is `npm run sanity:government`.
+
 ## What the model is left to
 
 The model's calls are for the human drama. The routine government of a state is kept by its officers, by rule, and a person the model plays is neither shown it nor
