@@ -39,6 +39,7 @@ const ACT_WORDS: Readonly<Record<WorldDeltaOp, string>> = {
   force_membership_set: "enrol men in forces and discharge them",
   force_post_set: "give posts in an army",
   trade_venture_open: "open trading ventures",
+  house_found: "found a merchant house",
   trade_venture_close: "close trading ventures",
   generic_entity_update: "amend matters of state",
   loan_open: "lend and borrow",

@@ -52,6 +52,8 @@ export const MerchantHouseSchema = z
 export type MerchantHouse = z.infer<typeof MerchantHouseSchema>;
 
 /** No world has more houses than this: they are a handful of families, not a market. */
-export const MAX_HOUSES = 40;
+export const MAX_HOUSES = 80;
+/** The most houses trading at once: past this nobody founds another (wound-up houses are forgotten after two years). */
+export const MAX_TRADING_HOUSES = 60;
 /** The most cargoes a house keeps at sea at once: a firm, not a fleet. */
 export const MAX_VENTURES_PER_HOUSE = 3;

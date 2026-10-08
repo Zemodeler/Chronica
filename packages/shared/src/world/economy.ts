@@ -135,6 +135,8 @@ export const EconomyMemorySchema = z
     coinages: z.array(CoinageSchema).max(MAX_COINAGES).default([]),
     /** The merchant houses (`world/houses.ts`, `sim/merchant-houses.ts`): a handful of families whose cargoes and loans the markets feel. */
     houses: z.array(MerchantHouseSchema).max(MAX_HOUSES).default([]),
+    /** The day the world last looked for a man to found a house (`sim/house-founding.ts`): once a month. */
+    housesLookedToAtStep: ElapsedStepSchema.optional(),
     /** What each power spends to go on being one, and the public works let to contractors (`world/keeping.ts`, `sim/keeping-the-state.ts`). */
     keeping: z.array(StateKeepingSchema).max(MAX_KEEPING_ROWS).default([]),
     works: z.array(PublicWorkContractSchema).max(MAX_WORK_CONTRACTS).default([]),

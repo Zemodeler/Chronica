@@ -212,6 +212,7 @@ import { journeysOf, onTheWayTo, settledCourse, shoreItMakesFor, turnOnTheRoad, 
 import { WORLD_THREAD_CAP, makeRoomForTheOrder, worldThreadsFull } from "../storyline-cap";
 import { admitCandidacy } from "../candidacy";
 import { benefactionPayer, giveToThePeople } from "./benefaction";
+import { foundHouseByOrder } from "../house-founding";
 import { voyageDays } from "../cargoes";
 import { monthlyOutgoingsOf, standingLoanOffer } from "../money";
 
@@ -625,6 +626,7 @@ const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   force_membership_set: "command",
   force_post_set: "appoint",
   trade_venture_open: "spend",
+  house_found: "spend",
   trade_venture_close: "spend",
   storyline_open: "propose",
   storyline_advance: "propose",
@@ -4308,6 +4310,12 @@ function applyOne(
         significance: 45,
       });
       return putInPost(world, force.id, { formationId: formation.id, unitIndex, rankId: rank.id, characterId }, atStep);
+    }
+    case "house_found": {
+      const founded = foundHouseByOrder(world, delta, context.actorRef, resolve, context.ids);
+      if ("refusal" in founded) reject(founded.refusal, founded.kind);
+      emitFact(founded.fact);
+      return founded.world;
     }
     case "public_benefaction": {
       const given = giveToThePeople(world, delta, context, resolve);

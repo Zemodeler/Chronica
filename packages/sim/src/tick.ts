@@ -1714,7 +1714,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
   const reckoned = reviewTheLand({ world: met.world, toDay: input.toDay, clock: input.clock, targets: () => withGovernment(provinceTargetsFrom(met.world), met.world, readDepartments(met.world)) });
   // What the month's trade earned each power in customs is paid into its treasury the day it is reckoned.
   // And the merchant houses look to their cargoes once the markets have moved and the customs are in (`merchant-houses.ts`).
-  const housed = keepMerchantHouses(payCustoms(reckoned.world, input.toDay, input.ids), input.toDay, input.ids);
+  const housed = keepMerchantHouses(payCustoms(reckoned.world, input.toDay, input.ids), input.toDay, input.ids, input.playerCharacterId ?? null);
   const land = { ...reckoned, world: housed.world };
   facts.push(...land.facts, ...housed.facts);
   // And the noble families keep their heads, honours, rites, grudges and marriages, a month at a time (`gentes.ts`).

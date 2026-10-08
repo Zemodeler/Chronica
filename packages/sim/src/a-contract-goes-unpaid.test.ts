@@ -40,7 +40,7 @@ describe("a man hired, and paid", () => {
     expect(hired.rejected).toEqual([]);
     expect(hired.breaches).toEqual([]);
     expect(balance(hired.world, "curius-purse")).toBe(before - 20);
-    const contract = hired.world.material.contracts[0]!;
+    const contract = hired.world.material.contracts.at(-1)!;
     expect(contract.status).toBe("active");
 
     // A wage no purse and no farm of his can find: the next month is missed, and the contract is over.
@@ -73,11 +73,11 @@ describe("what the work needs", () => {
     expect(theirs.controllerCharacterId).toBe("gaius-genucius");
     expect(theirs.polityId).toBe("rome");
 
-    const contractId = hired.world.material.contracts[0]!.id;
+    const contractId = hired.world.material.contracts.at(-1)!.id;
     const walked = as("decius-vibellius", [{ op: "service_contract_close", contractRef: contractId, reason: "Carthage pays better." }], hired.world);
     expect(walked.rejected).toEqual([]);
     expect(walked.breaches).toEqual([]);
-    expect(walked.world.material.contracts[0]!.status).toBe("broken");
+    expect(walked.world.material.contracts.at(-1)!.status).toBe("broken");
     const back = walked.world.material.forces.find((force) => force.id === company.id)!;
     expect(back.polityId).toBe(company.polityId);
     expect(back.controllerCharacterId).toBe(company.controllerCharacterId);
@@ -90,10 +90,10 @@ describe("what the work needs", () => {
       employeeRef: "manius-curius", advance: 30, termDays: 90, duties: "Treat with Hieron.", counterpartPolityId: "syracuse", reason: "Rome sends its most respected man.",
     }]);
     expect(hired.rejected).toEqual([]);
-    const grant = hired.world.authorityGrants.find((candidate) => candidate.sourceRef === hired.world.material.contracts[0]!.id)!;
+    const grant = hired.world.authorityGrants.find((candidate) => candidate.sourceRef === hired.world.material.contracts.at(-1)!.id)!;
     expect(grant.powers).toEqual(["negotiate"]);
     const over = tickTo(hired.world, 90).world;
-    expect(over.material.contracts[0]!.status).toBe("ended");
+    expect(over.material.contracts.at(-1)!.status).toBe("ended");
     expect(over.authorityGrants.find((candidate) => candidate.id === grant.id)?.revokedAtStep).not.toBeNull();
   });
 
@@ -107,7 +107,7 @@ describe("what the work needs", () => {
     }]);
     expect(farmed.rejected).toEqual([]);
     expect(balance(farmed.world, "rome-treasury")).toBe(before + 100);
-    const take = farmed.world.material.incomeSources.find((source) => source.id === farmed.world.material.contracts[0]!.incomeSourceId)!;
+    const take = farmed.world.material.incomeSources.find((source) => source.id === farmed.world.material.contracts.at(-1)!.incomeSourceId)!;
     expect(take.beneficiaryAccountId).toBe(person(world(), "quintus-ogulnius").personalAccountId);
     expect(take.amount).toBeGreaterThan(0);
     // Counted against what Rome's land can bear, like Rome's own tax.
@@ -145,7 +145,7 @@ describe("a man hired to serve an army", () => {
     const after = hired.world.material.forces.find((force) => force.id === "roman-field-army")!;
     expect(after.controllerCharacterId).toBe(army.controllerCharacterId);
     expect(after.polityId).toBe(army.polityId);
-    expect(hired.world.material.contracts[0]!.forceId).toBeNull();
+    expect(hired.world.material.contracts.at(-1)!.forceId).toBeNull();
     expect(hired.factProposals.find((fact) => fact.kind === "contract_opened")?.summary).toMatch(/in the service of/);
   });
 

@@ -483,6 +483,7 @@ export function killCharacter(
   if (principal !== undefined) next = applyLegacy(next, characterId, principal, atStep);
   const inheritance = estateFacts(next, person, settled, atStep);
   next = inheritance.world;
+  const creditorsFact = creditorsFactOf(person, settled, atStep);
 
   return {
     world: next,
@@ -495,8 +496,28 @@ export function killCharacter(
       discoveryState: "public",
       knowableInDays: 0,
       significance: 90,
-    }, ...inheritance.facts],
+    }, ...inheritance.facts, ...creditorsFact],
   };
+}
+
+/** One line for what a dead man's creditors had of the estate, where he owed on loans (docs/economy.md, "The creditors are paid first"). */
+function creditorsFactOf(person: Character, settled: ReturnType<typeof settleEstate>, atStep: number): FactProposalDraft[] {
+  const debts = settled.debts;
+  if (debts === undefined || debts === null) return [];
+  const paid = debts.paidInCoin + debts.paidInKind;
+  const how = debts.abstained ? "his heir refused the estate and it was sold to his creditors"
+    : debts.soldUp ? "with no heir, the estate was sold to his creditors"
+      : "his heir took the estate and the debts with it";
+  return [{
+    localId: `creditors_${person.id}_${atStep}`,
+    kind: "estate_creditors",
+    summary: `${person.name} died owing ${debts.owed}: ${how}. The creditors had ${paid} of it${debts.lost > 0 ? `, and ${debts.lost} is lost to them` : debts.leftOnHeir > 0 ? `, and ${debts.leftOnHeir} is still owed` : ""}.`.slice(0, 600),
+    affectedRefs: [{ kind: "character", id: person.id }, ...settled.beneficiaryIds.slice(0, 2).map((id) => ({ kind: "character" as const, id }))],
+    visibility: "polity",
+    discoveryState: "polity",
+    knowableInDays: 1,
+    significance: debts.lost > 0 ? 40 : 25,
+  }];
 }
 
 /**

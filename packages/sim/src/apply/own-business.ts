@@ -44,6 +44,9 @@ export function isOwnBusiness(
     // What he believes, and what he persuades others of.
     case "belief_set":
       return isActor(delta.holderCharacterRef) || isActor(delta.sourceCharacterRef);
+    // A house founded out of his own purse is his own business; a power's purse is not his (the act refuses it).
+    case "house_found":
+      return delta.founderRef === null || isActor(delta.founderRef);
     // Declaring for or against a motion is his voice; how much it weighs is
     // the vote's business, not his authority's.
     case "political_support_set":

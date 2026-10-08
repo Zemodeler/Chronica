@@ -440,8 +440,12 @@ dead, carried off or gone to another power, so the second head of a house has an
    60 in a hundred). On a pass the head either takes a factor found in his market by the hiring-market machinery (`hireAtThePlace`, younger than the head, adopted as
    in 2) or sends for a young man of another branch of the family (19 to 24, with 3,000 of his own, tied to the head as a relative and named as in 1; the brief asked for a minor
    kinsman: a boy could not keep the books, so he is of age). Each arrives with an endowment, the one door by which the books let a man bring money into the world.
-4. *Wound up.* A head who dies with nobody named leaves an estate with nobody to take it: `settleEstate` sends the coin to his power's treasury, closes the cargoes
-   and leaves the debts unpaid, and the house is ended. A head who is the last of his line is therefore ended only by his death, never by his having no heir yet.
+4. *Wound up.* A head who dies with nobody named leaves an estate with nobody to take it: `settleEstate` pays his creditors first (below), sends what coin is left to
+   his power's treasury, closes the cargoes, and the house is ended. So is a house whose head's heir abstained from an estate that owed more than it held (`estateWasSoldUp`). A head who is the last of his line is therefore ended only by his death, never by his having no heir yet.
+
+Since v57 each of the seventeen houses also has the man at its books, seeded with a purse (1,500) and a contract of service: at Rome a freedman who bears his patron's praenomen and
+nomen (`Titus Sicinius Philargyros`, `ownerCharacterId` the head, `steward`), at the Greek and Punic firms a factor (`Nikon son of Apollodoros`, `agent`), 31 to 39 years old, able and honest. Adoption
+asks him first, so a house with no son has a man before it looks further, and the new-man branch is rarer than it was.
 
 In the Punic opening a house is made of a head and an heir with no family about them, so kinsmen exist only where the engine has made them (the kinsmen brought in
 under 3, whose families then become kin to the house). Sixty months of the Punic opening, with the lives as they fall: two heirs died among the seventeen houses and
@@ -449,6 +453,37 @@ both were made good (one adopted, a man of Carthage; one a young man of another 
 dead in the second month and every head in the twentieth: three adoptions, one kinsman (of the family a new man had founded) and twenty-five new men over the sixty months
 (the pools of men free of office and army are thin in a world whose people are mostly notable), fourteen houses followed their heads, and three were wound up (their new men
 had not come by the throw before the head died).
+
+**Houses are founded** (`packages/sim/src/house-founding.ts`, the `house_found` delta). A world with seventeen houses and nobody to found another lost one with each wind-up for ever. Two doors, one row:
+
+- *By rule*, once a month (`economy.housesLookedToAtStep`, run from `keepMerchantHouses`; cost O(characters) with the cheap tests first). A man who is free, male, 25 to 66, no soldier, not the head or
+  heir of a house, and not the man the model plays, whose purse is past `18,000 + 700 x (age - 25)` (to 40,000), who has a merchant's mind (`merchantFit` 52 or more, a wish for wealth 55, honesty 30,
+  risk 25 to 85) and lives in a port town of a power that acts as a state (cohesion 5,000 or more: a confederation of tribes has no counting-houses), has each month a chance of 1.5% to 8% (by fit and by wish for wealth) of founding, by `stableHash` of him and the month. A man
+  with an office, or a figure of the state (standing past 4,500), founds it under an agent: at Rome the lex Claudia of 218 BCE that barred senators from sea-going trade is later than the age and is not applied,
+  but a magistrate's trade went through his freedmen and clients all the same, so a freedman is made (a factor elsewhere) to keep the books, tied to him by a `patron` link and a `steward`/`agent` contract, and
+  60% of the patron's purse (at most 120,000) is moved into the freedman's purse (a transfer). Any other man is his own head and his purse is the house's capital; his kin are looked to for an heir at once
+  (`findKinsman`), else by the line's own rules (`house-succession.ts`).
+- *By order*: `{ op: "house_found", name, kind, headRef?, heirRef?, homeProvinceId?, capital, reason }`. Always a private man's act out of his own purse: a power cannot (it has no purse that is not the
+  state's), nor can a man for another's purse, a slave, a head or heir of a house already, nor at a place with no market and no port within 260 km; the capital is at least 5,000 and a man who keeps the
+  books himself puts his whole purse behind it. It is the actor's own business (`own-business.ts`): no breach is recorded.
+
+Limits: one founding a month and two a year for any power by rule (three a month in all), 60 houses trading at once (`MAX_TRADING_HOUSES`; the list holds 80, wound-up houses are dropped after two years). One fact for
+each founding (`house_founded`, significance 28). The founded house has its `actedAtStep` set to the day, so its first cargo comes a month later; from then on it is a house like the rest, in `houseFolkOf` and out of the
+model's room. Tests: `a-house-is-founded.test.ts`.
+
+**The creditors are paid first** (`packages/shared/src/characters/estate-creditors.ts`, called from `settleEstate` for every dead man, not only house heads). Before his heirs or the treasury have anything:
+
+1. *What he owed and left.* The loans on his purses against his coin, his land (ten years' rent) and the cost of the cargoes he had afloat.
+2. *Accept or abstain.* An heir takes an estate that covers its debts (Rome's universal successor, who answered for them, here to the extent of the estate). Where the debts are more than the estate holds, or there is no heir, the estate
+   is sold to the creditors (the `sui heredes` could abstain by the praetor's `ius abstinendi`; any other heir could refuse, and the creditors had it sold up, `bonorum venditio`). The heir who abstains keeps the name and
+   the friendships and feuds it carries, and the dependants, and nothing else; a house whose head's heir abstained is wound up.
+3. *The order, out of his coin:* the secured first (a loan with land pledged for it; in a sale the creditor also takes the pledge at its value, rents and all), then the public debts (a power's treasury: the fiscus's privilege), then the private
+   loans, men's and foreign bankers', in proportion to what each is owed. A payment is a transfer between purses; a foreign banker's leaves by the `credit` door, so the audit is where it was.
+4. *In a sale* what coin did not cover is met out of the land and the cargoes, given to the men still owed, the largest claim first, at their value (a treasury is paid in coin, or by a pledge's rents, not by land).
+5. *What is left.* A debt beyond the estate in a sale is lost to the creditor (the loan is `defaulted`, its instalments end); where the heir took the estate he takes the rest of each loan with it, the loan and its instalment now on his purse
+   (and an authored rule that forgives debts loses it to the creditor instead). What the dead man lent goes to his heir, else to his power.
+
+One fact per death with loans (`estate_creditors`): what was owed, how it was settled, what the creditors had, what was lost. Tests: `the-creditors-are-paid-first.test.ts`.
 
 **Where the house sits** (`packages/sim/src/house-seat.ts`). A house is its head's. Each month its `polityId` is the power its head belongs to (so a
 head who changes his allegiance takes the house's lending, its liturgy and its customs with him: lending reads `polityId`, a cargo's liturgy and duty read the

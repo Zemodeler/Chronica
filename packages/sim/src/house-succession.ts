@@ -5,6 +5,7 @@ import {
   createCanonicalNpc,
   currentAgeYears,
   economyOf,
+  estateWasSoldUp,
   familyLinksOf,
   isLiveProvince,
   ordoOfRomanName,
@@ -112,7 +113,7 @@ function heirStands(world: WorldState, head: Character): boolean {
 }
 
 /** The men and women of the house already spoken for: the heads of the houses and the heirs they named. */
-function spokenFor(world: WorldState): Set<string> {
+export function spokenFor(world: WorldState): Set<string> {
   const taken = new Set<string>();
   for (const house of economyOf(world).houses) {
     if (house.status !== "trading") continue;
@@ -385,7 +386,8 @@ export function keepTheLine(start: WorldState, toDay: number, ids: IdFactory, du
         const transfer = [...world.material.inheritanceTransfers].reverse().find((entry) => entry.deceasedCharacterId === dead.id && entry.beneficiaryCharacterId !== null && entry.assetKind === "account_balance");
         return transfer === undefined ? undefined : world.characters.find((character) => character.id === transfer.beneficiaryCharacterId);
       })();
-      const next = [named, inherited].find((person) => person !== undefined && person.alive && person.legalStatus !== "enslaved");
+      // An estate sold up to the creditors leaves no house to take: the heir who refused it takes the name and nothing else.
+      const next = dead !== undefined && estateWasSoldUp(world, dead.id) ? undefined : [named, inherited].find((person) => person !== undefined && person.alive && person.legalStatus !== "enslaved");
       if (next === undefined) {
         house = { ...house, status: "wound_up" };
         world = withHouse(world, house);

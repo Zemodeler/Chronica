@@ -48,7 +48,7 @@ function romeHires(state: WorldState, monthlyPay: number): { world: WorldState; 
   };
   const hired = applyDeltas(state, deltas, context);
   expect(hired.rejected).toEqual([]);
-  const contract = hired.world.material.contracts[0]!;
+  const contract = hired.world.material.contracts.at(-1)!;
   return { world: hired.world, contractId: contract.id, forceId: company.id, obligationId: contract.obligationId! };
 }
 
@@ -69,7 +69,7 @@ describe("a mercenary wants good silver", () => {
     expect(coinageOfPolity(sound, "rome").silverBps).toBe(7_300);
     expect(silverDeficitBps(debased, "rome")).toBe(2_000);
     const { world } = romeHires(sound, 5_000);
-    const contract = world.material.contracts[0]!;
+    const contract = world.material.contracts.at(-1)!;
     // Sound coin: the wage as written; a coin a fifth short in silver, a quarter more of it (a sound unit's silver over what this holds).
     expect(mercenaryWageBps(sound, contract, 0)).toBe(10_000);
     expect(mercenaryWageBps(debased, contract, 0)).toBe(12_500);

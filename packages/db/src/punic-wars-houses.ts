@@ -55,6 +55,18 @@ const HOUSES: readonly HouseSpec[] = [
   { slug: "hermias-ephesus", name: "The house of Hermias", head: "Hermias son of Menandros", heir: "Menandros son of Hermias", town: "Ephesus", kind: "maritime", culture: "greek", capital: 150_000, headAge: 52 },
 ];
 
+/** The names of the men at the books: the freedmen's Greek names that Rome's freedmen bore, and the factors' of the Greek and Punic firms. */
+const STEWARDS: Record<HouseSpec["culture"], readonly string[]> = {
+  roman: ["Philargyros", "Hermeros", "Eutychos", "Zosimos"],
+  greek: ["Nikon", "Pamphilos", "Kerdon", "Menas", "Eubulos", "Sosias"],
+  carthaginian: ["Gerosiris", "Himilkat", "Bodmelqart", "Eshmunhilles", "Malchos", "Shipitbaal"],
+  italic: ["Marcus", "Vibius"],
+};
+const FACTOR_FATHERS: Record<HouseSpec["culture"], readonly string[]> = {
+  roman: ["Hermes"], greek: ["Apollodoros", "Demetrios", "Kleon", "Sosikles", "Diophantos"], carthaginian: ["Abdosir", "Magon", "Yatonmilk", "Hannon"], italic: ["Gaius"],
+};
+const stewardFor = (spec: HouseSpec): string => STEWARDS[spec.culture][stableHash([spec.slug, "steward-name"]) % STEWARDS[spec.culture].length]!;
+
 const FAITH = { roman: "faith-roman", greek: "faith-greek", carthaginian: "faith-punic", italic: "faith-italic" } as const;
 
 function skillsFor(id: string, age: number): Record<string, unknown> {
@@ -70,6 +82,7 @@ export function withMerchantHouses(world: WorldState): WorldState {
   const characters: Record<string, unknown>[] = [];
   const accounts: Record<string, unknown>[] = [];
   const houses: Record<string, unknown>[] = [];
+  const contracts: Record<string, unknown>[] = [];
   const taken = new Set(world.characters.map((character) => character.id));
   for (const spec of HOUSES) {
     const home = world.map.provinces.find((province) => province.settlements.some((settlement) => settlement.name === spec.town));
@@ -90,6 +103,29 @@ export function withMerchantHouses(world: WorldState): WorldState {
     };
     characters.push(person(headId, spec.head, spec.headAge, heirId, {}));
     characters.push({ ...person(heirId, spec.heir, 20 + (stableHash([spec.slug, "heir-age"]) % 7), null, {}), heirCharacterId: null, prestigeBps: 2_000 });
+    // The man who keeps the books: a freedman of the head's name at Rome, a factor elsewhere (v57). He has a purse and a contract of service, and is who
+    // the house asks first when it has no son to follow the head (`house-succession.ts`).
+    const stewardId = `house-${spec.slug}-steward`;
+    if (taken.has(stewardId)) continue;
+    const rome = spec.culture === "roman";
+    const fathers = FACTOR_FATHERS[spec.culture];
+    const stewardName = rome ? `${spec.head.split(" ").slice(0, 2).join(" ")} ${stewardFor(spec)}` : `${stewardFor(spec)} son of ${fathers[stableHash([spec.slug, "father"]) % fathers.length]!}`;
+    const stewardAge = 31 + (stableHash([spec.slug, "steward-age"]) % 9);
+    const steward = person(stewardId, stewardName, stewardAge, null, {});
+    const stewardMind = steward.mind as { drives: Record<string, number>; temperament: Record<string, number> };
+    characters.push({
+      ...steward, heirCharacterId: null, prestigeBps: 1_200,
+      // Able and honest, as a man is who is trusted with another's books; a freedman is his patron's.
+      mind: { ...stewardMind, drives: { ...stewardMind.drives, wealth: 62, status: 55 }, temperament: { ...stewardMind.temperament, honesty: 72 }, riskTolerance: 35 },
+      skills: { ...(steward.skills as Record<string, number>), stewardship: 72 },
+      legalStatus: rome ? "freed" : "free", ownerCharacterId: rome ? headId : null,
+    });
+    accounts.push({ id: `${stewardId}-purse`, owner: { kind: "character", id: stewardId }, currencyId: "drachma", balance: 1_500, status: "active", visibility: "private" });
+    contracts.push({
+      id: `contract-${stewardId}`, role: rome ? "steward" : "agent", label: rome ? "Keeps the books of the house" : "Factor of the house", employerAccountId: `${headId}-purse`, employeeCharacterId: stewardId,
+      obligationId: null, incomeSourceId: null, grantId: null, advance: 0, monthlyPay: 0, duties: "Keeps the books and the factors of the house, and sells its cargoes at the quay.",
+      openedAtStep: 0, endsAtStep: null, forceId: null, forceWas: null, provinceId: home.id, counterpartPolityId: null, status: "active",
+    });
     accounts.push({ id: `${headId}-purse`, owner: { kind: "character", id: headId }, currencyId: "drachma", balance: spec.capital, status: "active", visibility: "private" });
     accounts.push({ id: `${heirId}-purse`, owner: { kind: "character", id: heirId }, currencyId: "drachma", balance: 4_000, status: "active", visibility: "private" });
     houses.push({ id: `house-${spec.slug}`, name: spec.name, kind: spec.kind, polityId: home.controllerPolityId, homeProvinceId: home.id, headCharacterId: headId, status: "trading", foundedAtStep: 0 });
@@ -98,6 +134,6 @@ export function withMerchantHouses(world: WorldState): WorldState {
     ...world,
     characters: [...world.characters, ...characters] as WorldState["characters"],
     economy: { ...world.economy!, houses: [...(world.economy!.houses ?? []), ...houses] as never },
-    material: { ...world.material, accounts: [...world.material.accounts, ...accounts] as WorldState["material"]["accounts"] },
+    material: { ...world.material, accounts: [...world.material.accounts, ...accounts] as WorldState["material"]["accounts"], contracts: [...world.material.contracts, ...contracts] as WorldState["material"]["contracts"] },
   };
 }

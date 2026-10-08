@@ -268,7 +268,8 @@ ${auditInWords(audit)}`).toEqual([]);
       for (const fact of ticked.factProposals) if (fact.kind.startsWith("house_heir")) kinds.set(fact.kind, (kinds.get(fact.kind) ?? 0) + 1);
       world = { ...ticked.world, instant: { day: toDay, minute: 0 }, elapsedStep: toDay };
     }
-    const trading = economyOf(world).houses.filter((entry) => entry.status === "trading");
+    // The seventeen of the opening (v57 gave each a steward or freedman, so the house has a man to ask before it looks further); houses founded since by rule are not these.
+    const trading = economyOf(world).houses.filter((entry) => entry.status === "trading" && entry.foundedAtStep === 0);
     expect(trading.length).toBe(17);
     // Many have an heir again, and not all (a new man is not found for every house); where the throw missed the head goes on with nobody named and the line is looked to again.
     const followed = trading.filter((entry) => named(world, entry.headCharacterId) !== null);

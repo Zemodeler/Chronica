@@ -1101,6 +1101,23 @@ const TradeVentureOpenSchema = z.object({
   reason: ReasonSchema,
 }).strict();
 
+/**
+ * A man founds a merchant house (`sim/house-founding.ts`, docs/economy.md "Houses are founded"): capital out of his own purse, a head (himself, or a
+ * freedman, client or factor of his who keeps the books), a home market, and from then on the house is run by the rules like any other. A private
+ * man's act only: a power has no purse to found one with.
+ */
+const HouseFoundSchema = z.object({
+  op: z.literal("house_found"),
+  name: NameSchema,
+  kind: z.enum(["maritime", "grain", "silver", "banking", "publicani"]).default("maritime"),
+  founderRef: MaybeRefSchema.default(null).describe("null: the man giving the order; it is always his own purse"),
+  headRef: MaybeRefSchema.default(null).describe("null: the founder keeps the books himself; or the freedman, client or factor who does"),
+  heirRef: MaybeRefSchema.default(null).describe("null: the house looks for one by its own rules (a kinsman, an adopted son)"),
+  homeProvinceId: MaybeIdSchema.default(null).describe("null: where the founder lives; a province with a market within reach of a port"),
+  capital: MoneySchema,
+  reason: ReasonSchema,
+}).strict();
+
 /** Winding a venture up. Nothing is returned: the capital is in ships and goods already sold. */
 const TradeVentureCloseSchema = z.object({
   op: z.literal("trade_venture_close"),
@@ -2090,6 +2107,7 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   ForcePostSetSchema,
   TradeVentureOpenSchema,
   TradeVentureCloseSchema,
+  HouseFoundSchema,
   GenericEntityUpdateSchema,
   LoanOpenSchema,
   LoanSettleSchema,
@@ -2160,6 +2178,7 @@ export const WORLD_DELTA_OPS = [
   "force_post_set",
   "trade_venture_open",
   "trade_venture_close",
+  "house_found",
   "generic_entity_update",
   "loan_open",
   "loan_settle",
@@ -2233,6 +2252,7 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   force_post_set: "military",
   trade_venture_open: "fiscal",
   trade_venture_close: "fiscal",
+  house_found: "fiscal",
   generic_entity_update: "civil",
   loan_open: "fiscal",
   loan_settle: "fiscal",
