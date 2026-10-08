@@ -1111,9 +1111,9 @@ const HouseFoundSchema = z.object({
   name: NameSchema,
   kind: z.enum(["maritime", "grain", "silver", "banking", "publicani"]).default("maritime"),
   founderRef: MaybeRefSchema.default(null).describe("null: the man giving the order; it is always his own purse"),
-  headRef: MaybeRefSchema.default(null).describe("null: the founder keeps the books himself; or the freedman, client or factor who does"),
-  heirRef: MaybeRefSchema.default(null).describe("null: the house looks for one by its own rules (a kinsman, an adopted son)"),
-  homeProvinceId: MaybeIdSchema.default(null).describe("null: where the founder lives; a province with a market within reach of a port"),
+  headRef: MaybeRefSchema.default(null).describe("null: the founder; or the freedman or client who keeps the books"),
+  heirRef: MaybeRefSchema.default(null).describe("null: the house looks for one by its rules"),
+  homeProvinceId: MaybeIdSchema.default(null).describe("null: where the founder lives; a province with a market near a port"),
   capital: MoneySchema,
   reason: ReasonSchema,
 }).strict();

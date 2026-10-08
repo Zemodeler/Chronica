@@ -143,7 +143,9 @@ describe("what the player's government can see of the world", () => {
     // powers, and orders already answered kept apart from those awaiting one.
     // Moved 20k -> 20.25k (2026-10-07): Rome opens with two trade pacts (v49), one line each among its agreements.
     // Moved 20.25k -> 20.5k (2026-10-07): the merge of the economy rework with the work on moods and dispatches.
-    expect(text.length).toBeLessThan(20_500);
+    // Moved 20.5k -> 21.5k (2026-10-08): the opening now carries seventeen merchant houses (v54, with their stewards at v57) and sixty gentes (v56), and the
+    // foreign powers' figures (up to four a power) name the kin of a king and the man at a house's books beside the offices; measured 21.3k.
+    expect(text.length).toBeLessThan(21_500);
   });
 });
 

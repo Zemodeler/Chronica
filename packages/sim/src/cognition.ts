@@ -242,8 +242,7 @@ ${KEPT_BY_THE_OFFICERS}
 For each person, decide what they actually do now. Nobody is here by accident, and
 "nothing" is an answer only when it is a choice: leave them out of "actors" when
 their business truly waits. Where a section says what lies open to them, take one,
-do better, or decline it knowing what they decline. Play people as they are: the
-ambitious reach, the cruel are cruel, the faithless break faith when it pays.
+do better, or decline it knowing what they decline. Play people as they are: the ambitious reach, the cruel are cruel.
 
 That is also an answer for someone whose business is waiting on a real dependency.
 Do not invent activity to fill a round. It is otherwise rarely the answer for
@@ -252,16 +251,13 @@ because they have a war to press, a promise to keep, a city to hold or a rival t
 manage, and a month of their own is not nothing. Move their business on by a step
 they could actually take from where they stand -- an act the world takes: an
 army moved or engaged, a letter sent, money spent, a man hired, a question put
-to a chamber -- with the fact that says it happened beside it. Reviewing,
-maintaining and reaffirming change nothing; an answer of
-only those is "nothing", and a step is not done by it. Waiting on a courier,
+to a chamber -- with the fact that says it happened beside it. Reviewing, maintaining and reaffirming change nothing; an answer of only those is "nothing". Waiting on a courier,
 reply or vote is legitimate: leave the actor out until it arrives or its deadline
 expires, and make the plan depend on that exact letter ("letter_answered", with
 "messageId") or question, with "afterConditionDays" for the time to act after
 the reply arrives. Never count another version of an outstanding request
 as progress. Each actor carries their own responsibility forward: a negotiator
-settles terms, a commander prepares or moves troops. Shared government aims do not require everyone to negotiate them. They are not waiting for the ruler; they do not know
-what the ruler is doing. Business that will take months is a plan: give it in
+settles terms, a commander prepares or moves troops. Shared government aims do not require everyone to negotiate them. They do not know what the ruler is doing. Business that will take months is a plan: give it in
 "plan" as up to four steps in order, each an act of that kind, with the days
 by which it should be done and, if it must wait for something, "when". What an act
 is for goes in "serves": the step's, order's or promise's id, and the act's place in "deltas"; only
@@ -276,11 +272,7 @@ marks the step done when the project completes; do not redo the work. Only use
 this for a step with no further dependency (when: null). Use null
 for steps that still need a decision. Failed or overdue projects need a decision.
 
-Someone may act within their authority, beyond it, or against it. A general may
-march without orders; an official may quietly divert funds; a senator may begin
-opposing the very policy they were told to support. None of these are invalid. They
-are what makes the world political. Where someone acts outside their authority, do
-it anyway and record it honestly as a fact.
+Someone may act within their authority, beyond it, or against it: a general may march without orders, an official quietly divert funds, a senator oppose the policy he was told to support. None is invalid; it is what makes the world political. Do it anyway and record it honestly as a fact.
 
 The same engine rules apply as elsewhere:
 
@@ -303,9 +295,7 @@ The same engine rules apply as elsewhere:
   something expected. "Holding the province rather than advancing" is a posture,
   "is expected to answer" is a diary entry: neither happened. If nothing
   happened, write no fact. Say what was done, never what was not ("made no pledge").
-- Someone who sets out to find something out, and succeeds, records it in
-  "discoveries" -- the fact already existed; what changed is that they now know
-  it. Someone who sets out to deceive uses "belief_set" on the person they are
+- Someone who sets out to find something out, and succeeds, records it in "discoveries": the fact already existed; they now know it. Someone who sets out to deceive uses "belief_set" on the person they are
   deceiving. A belief is never checked against the truth.
 - An army can only fight what it is standing next to. To attack, step it into
   the enemy's province with "force_modify" and engage in the same answer; if
@@ -359,9 +349,7 @@ The same engine rules apply as elsewhere:
   are like, put it in that same event's "observedTraits": the person judged,
   the person judging, and one of cautious, bold, ambitious, dutiful, vengeful,
   sociable, disciplined, deceitful, compassionate, cruel -- those ten words
-  and no others. Say only what this person actually saw. It takes two
-  different people to make it true, so one opinion is an opinion, and that is
-  deliberate.
+  and no others. Say only what this person actually saw. It takes two different people to make it true.
 - Something they have found out that somebody did without the authority to do
   it is theirs to make of what they will. They may sit on it, tell somebody
   ("belief_set"), demand an accounting, or put it to the body that can judge it
@@ -375,7 +363,7 @@ The same engine rules apply as elsewhere:
   has no standing to command them, or when obeying would cost them more than
   refusing. "subvert" is appearing to comply and doing otherwise. Answer every
   one of them: an order left unanswered is simply put to them again next time.
-  A refusal is an event, and the man who gave the order will hear of it.
+  A refusal is an event the giver hears of.
 - A letter put to them is theirs to answer: "diplomatic_message_answer", naming
   the letter, accepting, refusing or countering it, and saying why in their own
   words. Answer it as the person who received it, weighing what it would cost
