@@ -50,7 +50,7 @@ describe("a body needs its quorum", () => {
     const full = present({ ...world, material: { ...world.material, forces: [] } });
     expect(record.presentWeight).toBeLessThan(full.presentWeight);
     expect(full.presentWeight - record.presentWeight).toBeGreaterThanOrEqual(sent.length - 1);
-    const ballots = record.ballots.map((b) => b.characterId);
+    const ballots = (record.ballots ?? []).map((b) => b.characterId);
     for (const id of sent) expect(ballots).not.toContain(id);
   });
 
@@ -78,7 +78,7 @@ describe("a body needs its quorum", () => {
 
   it("thins an assembly of the people by the share of its men under arms, never past the most", () => {
     const { world: out } = sendOut(world, 30);
-    const big = { ...out, material: { ...out.material, forces: out.material.forces.map((f) => (f.id.startsWith("army-abroad") ? { ...f, personnel: f.personnel.map((p) => ({ ...p, fit: p.fit * 400, total: (p.total ?? p.fit) * 400 })) } : f)) } };
+    const big = { ...out, material: { ...out.material, forces: out.material.forces.map((f) => (f.id.startsWith("army-abroad") ? { ...f, personnel: f.personnel.map((p) => ({ ...p, fit: p.fit * 400 })) } : f)) } };
     const share = underArmsShare(big, "rome");
     expect(share).toBeGreaterThan(0);
     expect(share).toBeLessThanOrEqual(MOST_AWAY_SHARE);

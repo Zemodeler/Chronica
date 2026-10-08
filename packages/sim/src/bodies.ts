@@ -143,7 +143,7 @@ export function sitTheBodies(input: BodiesInput): { world: WorldState; facts: Fa
       const province = world.map.provinces.find((candidate) => candidate.settlements.some((settlement) => settlement.id === capital));
       if (province === undefined || !live.has(province.id)) continue;
       facts.push(fact({
-        localId: `sitting_${bodyId}_${input.toDay}`.slice(0, 60), kind: "chamber_sat", visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 30,
+        localId: `sitting_${bodyId}_${input.toDay}`.toLowerCase().replace(/[^a-z0-9_-]/gu, "_").slice(0, 60), kind: "chamber_sat", visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 30,
         summary: shut
           ? `The ${institution.name} could not sit with its city shut, and ${count} question${count === 1 ? " waits" : "s wait"}.`
           : `The ${institution.name} sat, and ${count} question${count === 1 ? " was" : "s were"} left over to its next sitting.`,
@@ -166,6 +166,8 @@ export function opposition(world: WorldState, tribune: Character, procedure: Pol
   // His own nature on the question (a man who loves peace is against a war, a man who loves the poor against a tax), and what he wants to be: the plebs' man.
   let score = -mindLean(tribune.mind, concerns) * 1.5;
   if (burden > 0) score += 12 * burden + Math.max(0, tribune.mind.drives.status - 55) / 2;
+  // A people that would not ratify the war lately has given the tribunes their word against its levies and its burdens (`ratifyTheWar`).
+  if (tribune.polityId !== null && (concerns.includes("war") || concerns.includes("levy")) && thePeopleRefusedLately(world, tribune.polityId)) score += REFUSAL_SPUR;
   const sponsor = procedure.sponsorCharacterId;
   if (sponsor !== tribune.id) {
     const opinion = computeOpinion(tribune, sponsor);
@@ -279,6 +281,17 @@ export function theAuspices(input: BodiesInput): { world: WorldState; facts: Fac
 
 // ── The people ratify a war ─────────────────────────────────────────────────
 
+/** What a people's refusal of a war adds to a tribune's will to forbid a levy or a war: the plebs' own word, used. */
+export const REFUSAL_SPUR = 25;
+/** How long a refusal is remembered. */
+export const REFUSAL_DAYS = 400;
+
+/** Whether the people of a power voted down a war within `REFUSAL_DAYS`. */
+export function thePeopleRefusedLately(world: WorldState, polityId: string): boolean {
+  return world.genericEntities.some((entity) => entity.kind === "ratification" && entity.ownerRef?.kind === "polity" && entity.ownerRef.id === polityId
+    && entity.attributes?.["carried"] === false && world.elapsedStep - Number(entity.attributes?.["atStep"] ?? -Infinity) <= REFUSAL_DAYS);
+}
+
 /** A question whose words say a war is to be made. */
 export const isAWarMotion = (procedure: Pick<PoliticalProcedure, "label">): boolean => /\bwar be made on\b/iu.test(procedure.label);
 
@@ -298,17 +311,28 @@ export function ratifyTheWar(input: BodiesInput): { world: WorldState; facts: Fa
     if (assembly === undefined) continue;
     const marker = `ratified_${procedure.id}`.slice(0, 80);
     if (world.genericEntities.some((entity) => entity.kind === "ratification" && entity.label === marker)) continue;
+    // The people vote it: its centuries and tribes by their blocs and their gentes, the men away at the wars not counted (`quorum.ts`). War stays the Senate's, as the
+    // doc has it: what the people say moves the power's standing, and the tribunes may use a refusal.
+    const put = { ...procedure, id: `ratify-${procedure.id}`.slice(0, 100), institutionId: assembly.id, voteRecordId: null, outcome: null, stage: "gathering_support" as const, concerns: [...new Set([...(procedure.concerns ?? []), "war" as const])] } as PoliticalProcedure;
+    const count = countVote(`ratify-${procedure.id}`.slice(0, 100), put, assembly, blocLeanings(world, put, assembly), input.toDay);
+    const carried = count.outcome === "passed";
+    const weight = Math.max(1, count.yesWeight + count.noWeight);
+    const margin = Math.abs(count.yesWeight - count.noWeight) / weight;
+    const bps = Math.round(RATIFICATION_BPS * (0.5 + 1.5 * margin));
     world = {
       ...world,
       genericEntities: [...world.genericEntities, GenericEntitySchema.parse({
-        id: `ratification-${procedure.id}`.slice(0, 100), kind: "ratification", label: marker, ownerRef: { kind: "polity", id: senate.polityId }, attributes: { procedureId: procedure.id, atStep: input.toDay },
-        createdAtStep: input.toDay,
+        id: `ratification-${procedure.id}`.slice(0, 100), kind: "ratification", label: marker, ownerRef: { kind: "polity", id: senate.polityId },
+        attributes: { procedureId: procedure.id, atStep: input.toDay, carried, yes: count.yesWeight, no: count.noWeight, present: count.presentWeight }, createdAtStep: input.toDay,
       })],
-      material: { ...world.material, polityLegitimacy: adjustPolityLegitimacy(world.material.polityLegitimacy, senate.polityId, RATIFICATION_BPS, `The ${assembly.name} ratified the war`, procedure.id) },
+      material: { ...world.material, polityLegitimacy: adjustPolityLegitimacy(world.material.polityLegitimacy, senate.polityId, carried ? bps : -bps, carried ? `The ${assembly.name} ratified the war` : `The ${assembly.name} would not have the war`, procedure.id) },
     };
+    const what = procedure.label.replace(/^Motion of [^:]+: that /u, "that ");
     facts.push(fact({
-      localId: `ratified_${procedure.id}`.slice(0, 60), kind: "war_ratified", visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 45,
-      summary: `The ${assembly.name} ratified what the ${senate.name} had carried: "${procedure.label.replace(/^Motion of [^:]+: that /u, "that ")}".`.slice(0, 400),
+      localId: `ratified_${procedure.id}`.slice(0, 60), kind: carried ? "war_ratified" : "war_refused", visibility: "public", discoveryState: "public", knowableInDays: 0, significance: carried ? 45 : 60,
+      summary: (carried
+        ? `The ${assembly.name} ratified what the ${senate.name} had carried, by ${count.yesWeight} to ${count.noWeight}: "${what}".`
+        : `The ${assembly.name} would not ratify what the ${senate.name} had carried, ${count.yesWeight} for it and ${count.noWeight} against: "${what}". The war is on, and the people grumble.`).slice(0, 400),
       affectedRefs: [{ kind: "procedure", id: procedure.id }, { kind: "polity", id: senate.polityId }],
     }));
   }
