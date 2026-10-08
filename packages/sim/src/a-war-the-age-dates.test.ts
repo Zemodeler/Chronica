@@ -46,14 +46,14 @@ describe("a war the age dates", { timeout: 240_000 }, () => {
   });
 
   const hardPressed = dated(longanus.world, 2_040);
-  const appealed = dated(hardPressed.world, 2_160);
+  const appealed = dated(hardPressed.world, 2_300);
 
   it("has the Mamertines, hard pressed, write to Rome and to Carthage, once each (the rules' own call for help, or the dated one where nobody has)", () => {
     const letters = hardPressed.world.diplomacy.filter((message) => message.fromPolityId === "mamertines" && message.kind === "military_aid_request");
     expect(new Set(letters.map((message) => message.toPolityId))).toEqual(new Set(["rome", "carthage"]));
     expect(letters).toHaveLength(2);
-    const stillOnce = dated(appealed.world, 2_190).world.diplomacy.filter((message) => message.fromPolityId === "mamertines" && message.kind === "military_aid_request");
-    expect(stillOnce.filter((message) => message.sentAtStep >= 2_160)).toEqual([]);
+    const stillOnce = dated(appealed.world, 2_330).world.diplomacy.filter((message) => message.fromPolityId === "mamertines" && message.kind === "military_aid_request");
+    expect(stillOnce.filter((message) => message.sentAtStep >= 2_300)).toEqual([]);
   });
 
   it("puts a Carthaginian garrison into Messana, once", () => {
@@ -61,7 +61,7 @@ describe("a war the age dates", { timeout: 240_000 }, () => {
     expect(garrisons).toHaveLength(1);
     expect(garrisons[0]!.polityId).toBe("carthage");
     expect(appealed.world.map.provinces.find((province) => province.id === garrisons[0]!.locationId)?.settlements.some((settlement) => /messana/i.test(settlement.id))).toBe(true);
-    const again = dated(appealed.world, 2_190);
+    const again = dated(appealed.world, 2_330);
     expect(again.world.material.forces.filter((force) => force.name === "Carthaginian garrison of Messana")).toHaveLength(1);
   });
 

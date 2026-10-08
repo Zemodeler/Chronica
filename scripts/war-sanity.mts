@@ -10,6 +10,7 @@
  *
  * `--free` leaves the war with Carthage unopened: the report then says whether, and when, the rules went to it of themselves, and what stood in Sicily.
  */
+import { writeFileSync } from "node:fs";
 import { punicWarsScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, WorldDeltaSchema, ensureProvinceMaterial, fitStrengthOf, isNavalForce, formatWorldDate, type WorldState } from "@chronica/shared";
 import { DEFAULT_BUDGET, applyDeltas, auditMoney, combineAudits, emptyAudit, auditInWords, createIdFactory, runSimulationBurst, type SimModelPort } from "@chronica/sim";
@@ -27,9 +28,6 @@ const silent: SimModelPort = {
 };
 const idFor = createIdFactory("war-sanity");
 let world = ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
-/** --from-day=N: the same world opened on day N (the age's dated things are done on their days, not the years before them), for a run that is only about what comes after. */
-const fromDay = Number(args.find((a) => a.startsWith("--from-day="))?.split("=")[1] ?? "0");
-if (fromDay > 0) world = { ...world, instant: { ...world.instant, day: fromDay }, elapsedStep: fromDay };
 const context = () => ({ now: world.instant, actorRef: { kind: "character" as const, id: actor }, actsForTheWorld: true, offices: definition.government.offices, warfare: definition.warfare, terrains: definition.terrains ?? definition.map.terrains, ids: idFor, gameId: "war-sanity" });
 
 interface Year { orders: number; flips: number; naval: number; battles: number; sieges: number; planShifts: number; retargets: number; wars: number; cpu: number; men: number; engagements: number }
@@ -49,6 +47,17 @@ let pendingBefore = new Map<string, string>();
 const lastObjective = new Map<string, string>();
 const priorIssued = new Map<string, number>();
 const free = args.includes("--free");
+/** --free: what the age's dated things bring about at the strait, said once each as it comes (the war of Syracuse on the Mamertines, their letters, the garrison in Messana, the motions on war with Carthage). */
+const strait = new Set<string>();
+function watchTheStrait(w: WorldState): void {
+  const say = (key: string, line: string): void => { if (!strait.has(key)) { strait.add(key); console.log(`  >> day ${w.instant.day} (${formatWorldDate(w.instant, definition.clock)}): ${line}`); } };
+  for (const a of w.polityAgreements) if (a.kind === "war" && [a.polityId, a.otherPolityId].includes("mamertines")) say(`war ${a.id}`, `war ${a.polityId} / ${a.otherPolityId} (${a.status})`);
+  for (const m of w.diplomacy) if (m.fromPolityId === "mamertines" && m.kind === "military_aid_request") say(`aid ${m.id}`, `the Mamertines write to ${m.toPolityId}`);
+  for (const m of w.diplomacy) if (["rome", "carthage"].includes(m.fromPolityId) && ["rome", "carthage"].includes(m.toPolityId)) say(`letter ${m.id} ${m.status} ${m.answer ?? ""}`, `${m.fromPolityId} to ${m.toPolityId}: ${m.kind} "${m.subject.slice(0, 70)}" ${m.status}${m.answer === null ? "" : ` (${m.answer})`}`);
+  for (const f of w.material.forces) if (/Messana/.test(f.name) && f.polityId === "carthage") say(`garrison ${f.id}`, `${f.name} (${fitStrengthOf(f)} men) at ${f.locationId}`);
+  for (const x of w.material.politicalProcedures) if (/carthag/i.test(x.label)) say(`motion ${x.id} ${x.outcome ?? x.stage}`, `motion "${x.label.slice(0, 80)}" => ${x.outcome ?? x.stage}`);
+  for (const a of w.polityAgreements) if (a.kind === "war" && [a.polityId, a.otherPolityId].includes("rome") && [a.polityId, a.otherPolityId].includes("carthage")) say(`war ${a.id}`, `ROME-CARTHAGE WAR (${a.status}): ${a.terms.slice(0, 100)}`);
+}
 /** --losses: the men a power's armies lost, by year and by what took them (battle, wounds, hunger, sickness, storm, desertion), read off the armies' own histories. */
 const losses = new Map<string, number>();
 const lossesSeen = new Set<string>();
@@ -87,6 +96,10 @@ for (let month = 0; month < years * 12; month += 1) {
   if (ms > worstMonth.ms) { worstMonth.ms = ms; worstMonth.month = month + 1; }
   total = combineAudits(total, auditMoney(before, world));
   if (args.includes("--losses")) tallyLosses(world, year);
+  if (free) watchTheStrait(world);
+  const snap = args.find((a) => a.startsWith("--snapshot="))?.split("=")[1];
+  const snapDay = Number(args.find((a) => a.startsWith("--snapshot-day="))?.split("=")[1] ?? "0");
+  if (snap !== undefined && snapDay > 0 && world.instant.day >= snapDay && !strait.has("snapshot")) { strait.add("snapshot"); writeFileSync(snap, JSON.stringify(world)); console.log(`  >> world written to ${snap} on day ${world.instant.day}`); }
   const trace = args.find((a) => a.startsWith("--trace="))?.split("=")[1];
   if (trace !== undefined) {
     const f = world.material.forces.find((x) => x.id === trace);

@@ -12,8 +12,8 @@ import { PUNIC_IDS } from "./punic-ids";
  * which the war score reads as a pull and never a schedule. What Rome then does -- the Senate hesitates, the consul takes the question to the
  * people (Polybius 1.11), the people vote it -- is the rules' own business (`the-appeal-goes-to-the-people.ts`).
  *
- * Days are from the opening (day 0 is the late winter of 270 BCE, the first of the clock's years): 1,995 is the summer of 265, 2,150 the early months
- * of 264. Confidence: that Hiero beat the Mamertines at the Longanus in the years about 265-264 (Polybius 1.9), high; its exact year, medium (the
+ * Days are from the opening (day 0 is 1 March 270 BCE): 1,995 is 16 August 265, 2,210 the first days of March 264 and 2,230 the first week of April 264.
+ * Confidence: that Hiero beat the Mamertines at the Longanus in the years about 265-264 (Polybius 1.9), high; its exact year, medium (the
  * lists put it in 265 or 264); that the Mamertines appealed to both powers and that the Carthaginian garrison came first, high (Polybius 1.10-11; Appian
  * and Dio say the garrison was a Carthaginian one under Hanno, put in on the invitation of one party of the Mamertines); the size of the garrison, a guess.
  */
@@ -45,10 +45,10 @@ export const MAMERTINE_DATES: readonly ScenarioHistoricalPressure[] = [
     severity: "serious",
     secret: false,
     oneShot: true,
-    when: { politiesExist: ["rome", "carthage", "mamertines"], polityHolds: [], atWar: [{ polityId: "syracuse", otherPolityId: "mamertines" }], atPeace: [], notBeforeDay: 2_130, notAfterDay: 2_900, afterPressureIds: [], forcesPresent: [] },
+    when: { politiesExist: ["rome", "carthage", "mamertines"], polityHolds: [], atWar: [{ polityId: "syracuse", otherPolityId: "mamertines" }], atPeace: [], notBeforeDay: 2_210, notAfterDay: 3_000, afterPressureIds: [], forcesPresent: [] },
     target: { polityId: "mamertines", provinceId: PUNIC_IDS.messana, otherPolityId: null },
     happens: {
-      atDay: 2_130,
+      atDay: 2_210,
       summary: "The Mamertines of Messana, hard pressed by Hiero, sent to Rome and to Carthage for help, offering the city to whichever of them would take it under its protection.",
       appeals: { polityId: "mamertines", toPolityIds: ["rome", "carthage"], terms: "The Mamertines are shut up in Messana by Hiero of Syracuse. They ask Rome, and Carthage, to take the city under their protection and to send men." },
     },
@@ -62,10 +62,10 @@ export const MAMERTINE_DATES: readonly ScenarioHistoricalPressure[] = [
     severity: "grave",
     secret: false,
     oneShot: true,
-    when: { politiesExist: ["carthage", "mamertines"], polityHolds: [], atWar: [], atPeace: [], notBeforeDay: 2_150, notAfterDay: 2_900, afterPressureIds: [], forcesPresent: [] },
+    when: { politiesExist: ["carthage", "mamertines"], polityHolds: [], atWar: [], atPeace: [], notBeforeDay: 2_230, notAfterDay: 3_000, afterPressureIds: [], forcesPresent: [] },
     target: { polityId: "carthage", provinceId: PUNIC_IDS.messana, otherPolityId: "mamertines" },
     happens: {
-      atDay: 2_150,
+      atDay: 2_230,
       summary: "A Carthaginian garrison went into the citadel of Messana, at the call of those of the Mamertines who would have Carthage for a protector, and Hiero drew off.",
       garrisonEnters: { polityId: "carthage", provinceId: PUNIC_IDS.messana, name: "Carthaginian garrison of Messana", men: 1_500, commanderCharacterId: "hannibal-gisco" },
     },
@@ -82,7 +82,7 @@ export const MAMERTINE_DATES: readonly ScenarioHistoricalPressure[] = [
     secret: false,
     oneShot: false,
     when: {
-      politiesExist: ["rome", "carthage", "mamertines"], polityHolds: [], atWar: [], atPeace: [{ polityId: "rome", otherPolityId: "carthage" }], notBeforeDay: 2_150, notAfterDay: 3_300, afterPressureIds: [],
+      politiesExist: ["rome", "carthage", "mamertines"], polityHolds: [], atWar: [], atPeace: [{ polityId: "rome", otherPolityId: "carthage" }], notBeforeDay: 2_230, notAfterDay: 3_300, afterPressureIds: [],
       forcesPresent: [{ polityIds: ["carthage"], provinceId: PUNIC_IDS.messana }],
     },
     target: { polityId: "rome", provinceId: PUNIC_IDS.messana, otherPolityId: "carthage" },

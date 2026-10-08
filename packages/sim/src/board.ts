@@ -227,6 +227,16 @@ function buildBoard(world: WorldState): Board {
       const holder = owner.get(claim.locationId);
       if (holder != null && holder !== polityId) rivals.add(holder);
     }
+    // A power whose army stands on the ground of a friend of ours (an ally, a protected people) is a rival whether or not it borders us: Carthage in
+    // Messana was Rome's to see once the Mamertines were its allies (docs/plans/war-plans.md, "War gaps closed"). Our own bloc and our friends' friends are not.
+    const friends = new Set(friendsOf(polityId));
+    const bloc = new Set(blocOf(polityId));
+    if (friends.size > 0) {
+      for (const [otherId, armies] of armiesOf) {
+        if (otherId === polityId || friends.has(otherId) || bloc.has(otherId) || !nameOf.has(otherId)) continue;
+        if (armies.some((army) => { const holder = owner.get(army.provinceId); return holder != null && friends.has(holder); })) rivals.add(otherId);
+      }
+    }
     return rivals;
   };
 

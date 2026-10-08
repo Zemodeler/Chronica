@@ -13,7 +13,7 @@ What changed, and where:
 
 | Change | File | Hook |
 | --- | --- | --- |
-| Four pressures: `hiero-beats-the-mamertines` (day 1,995), `messana-asks-rome-and-carthage` (day 2,130), `a-carthaginian-garrison-enters-messana` (day 2,150), each with `happens` (done by the rules once, on or after its day), and `carthage-in-the-strait` (the age's lean of Rome toward Carthage: weight 12, only while Carthage has men in Messana's province and the two are at peace) | `packages/db/src/punic-wars-mamertines.ts` | `punic-wars-scenario.ts`, `historicalPressures`, after `...WORLD_PRESSURES`, reads `...MAMERTINE_DATES` |
+| Four pressures: `hiero-beats-the-mamertines` (day 1,995, 16 August 265), `messana-asks-rome-and-carthage` (day 2,210, March 264), `a-carthaginian-garrison-enters-messana` (day 2,230, April 264), each with `happens` (done by the rules once, on or after its day), and `carthage-in-the-strait` (the age's lean of Rome toward Carthage: weight 12, only while Carthage has men in Messana's province and the two are at peace) | `packages/db/src/punic-wars-mamertines.ts` | `punic-wars-scenario.ts`, `historicalPressures`, after `...WORLD_PRESSURES`, reads `...MAMERTINE_DATES` |
 
 What else the version carries, though it is engine and not data (a pinned scenario saved before it keeps its old rules as the engine reads them): the schema of a pressure has an
 optional `happens` (`shared/src/world/scenario.ts`), which the rules read (`sim/src/a-dated-war.ts`) and the narrator does not offer (`narrator.ts`, `livePressures`); the armies are
@@ -22,4 +22,4 @@ army and the engine cuts the foragers and convoys of an army so shadowed (`docs/
 
 A game saved before the bump has none of the four pressures and keeps its old rules for the rest: the Mamertine war and the garrison come only where the scenario that began it carries them.
 
-Dates, from the opening (day 0, the late winter of 270 BCE): 265 BCE, summer, is about day 1,995; the early months of 264 about day 2,130 to 2,150.
+Dates, from the opening (day 0 is 1 March 270 BCE): 1,995 is 16 August 265, 2,210 the first days of March 264, 2,230 the first week of April 264.
