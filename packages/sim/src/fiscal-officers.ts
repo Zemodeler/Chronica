@@ -32,6 +32,7 @@ import {
 } from "@chronica/shared";
 import { convenersOf } from "./apply/asking";
 import { purseOfHouse } from "./merchant-houses";
+import { modelHasActedOnTheBooks } from "./played-ruler-books";
 import type { StatecraftDecision, StatecraftInput } from "./statecraft";
 
 /**
@@ -386,9 +387,9 @@ export function decideFiscal(input: Pick<StatecraftInput, "world" | "gameId" | "
     const hand = officerOf(world, polity.id, reader, ruler);
     if (hand === null) continue;
     const { officer, skill } = hand;
-    // A man the model is playing keeps his own books: the king whose own hand they are, or the officer himself. The ruler being played is
-    // another matter -- he has his wars and his letters, and the man who keeps the accounts goes on keeping them.
-    if (input.playedByModel.has(officer.id)) continue;
+    // A man the model is playing keeps his books by the rules too, as his standing business (Hiero at Syracuse is his own officer), unless the model
+    // has itself done something about the money of this power lately: its act is on the marks and stands (`played-ruler-books.ts`).
+    if (input.playedByModel.has(officer.id) && modelHasActedOnTheBooks(world, polity.id, day)) continue;
     if (!officer.alive || officer.id === input.playerCharacterId) continue;
 
     const quality = qualityOf(skill, officer);

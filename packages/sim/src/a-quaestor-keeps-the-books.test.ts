@@ -172,15 +172,18 @@ describe("a quaestor keeps the books", () => {
     expect(skimmed.world.diversions).toMatchObject([{ byCharacterId: "dion-treasurer", foundAtStep: null }]);
   });
 
-  it("leaves alone a power the player rules, and a man the model is playing", () => {
+  it("leaves alone a power the player rules, and a rate the model has just set itself", () => {
     const poor = withIncome(withChest(withWar(opening(), "carthage", "rome"), "carthage", 2_000, 90_000), "carthage", 0.1);
     for (const day of [120, 150, 180, 210]) {
       const world = atDay(poor, day);
       // The player is Carthage: the rules keep no books for it.
       expect(decideFiscal({ ...input(world, "carthage") }).some((decision) => decision.polityId === "carthage")).toBe(false);
-      // The model is playing the officer of the Accounts: his books are his own.
+      // The model is playing the officer of the Accounts: the rules go on keeping his books (`a-played-ruler-keeps-his-books.test.ts`) unless he has himself set the rate lately.
       const officer = decideFiscal(input(world)).find((decision) => decision.polityId === "carthage")?.actorCharacterId;
-      if (officer !== undefined) expect(decideFiscal({ ...input(world), playedByModel: new Set([officer]) }).some((decision) => decision.polityId === "carthage")).toBe(false);
+      if (officer !== undefined) {
+        const set = { ...world, actMarks: [...world.actMarks, { polityId: "carthage", act: "tax_rate" as const, officeId: null, byCharacterId: officer, byOfficeId: null, atStep: day - 10, sinceStep: day - 10, total: 0 }] };
+        expect(decideFiscal({ ...input(set), playedByModel: new Set([officer]) }).some((decision) => decision.polityId === "carthage")).toBe(false);
+      }
     }
     // And before the opening weeks are over nobody acts at all.
     expect(decideFiscal(input(atDay(poor, 20)))).toEqual([]);
