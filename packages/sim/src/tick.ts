@@ -90,6 +90,7 @@ import { betweenHarvests, reviewTheLand } from "./economy";
 import { payCustoms } from "./customs";
 import { keepMerchantHouses } from "./merchant-houses";
 import { keepGentes } from "./gentes";
+import { keepTheState } from "./keeping-the-state";
 import { routeOpenBps } from "./trade-flows";
 import { EMBARGO_BREACH_TRUST, endObligationsOfEndedAgreements, keepTreaties, shiftTrust } from "./treaties";
 import { keepPromises } from "./promises";
@@ -1713,9 +1714,11 @@ export function runDeterministicTick(given: TickInput): TickResult {
   const reckoned = reviewTheLand({ world: met.world, toDay: input.toDay, clock: input.clock, targets: () => withGovernment(provinceTargetsFrom(met.world), met.world, readDepartments(met.world)) });
   // What the month's trade earned each power in customs is paid into its treasury the day it is reckoned.
   // And the merchant houses look to their cargoes once the markets have moved and the customs are in (`merchant-houses.ts`).
-  const housed = keepMerchantHouses(payCustoms(reckoned.world, input.toDay, input.ids), input.toDay, input.ids);
-  const land = { ...reckoned, world: housed.world };
-  facts.push(...land.facts, ...housed.facts);
+  const housed = keepMerchantHouses(payCustoms(reckoned.world, input.toDay, input.ids), input.toDay, input.ids, input.playerCharacterId ?? null);
+  // And each power keeps its state: the upkeep of what it holds, the costs of its government, the works it lets (`keeping-the-state.ts`).
+  const theState = keepTheState({ world: housed.world, toDay: input.toDay, ids: input.ids, offices: input.government?.offices, playerCharacterId: input.playerCharacterId ?? null });
+  const land = { ...reckoned, world: theState.world };
+  facts.push(...land.facts, ...housed.facts, ...theState.facts);
   // And the noble families keep their heads, honours, rites, grudges and marriages, a month at a time (`gentes.ts`).
   const kinned = keepGentes(land.world, input.toDay);
   land.world = kinned.world;

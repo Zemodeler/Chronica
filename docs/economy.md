@@ -340,6 +340,7 @@ tithe); v49 adds goods, hubs, flows, customs and Rome's two pacts; v50 adds the 
   `coinage.ts`, `money-audit.ts`, `trade-summary.ts` (the slice's trade lines and news), `slice.ts`.
 - Readers for the treasury: `packages/shared/src/material/regions-view.ts`, `trade-view.ts`, `books.ts`.
 - Scenario data: `packages/db/src/punic-wars-scenario.ts`, `punic-wars-taxes.ts`, `punic-wars-houses.ts` (the merchant houses).
+- What it spends: `packages/sim/src/the-upkeep-of-a-state.ts` (the two bills), `keeping-the-state.ts` (the month's pass and the contracts), `public-works.ts` (which work, where), `packages/shared/src/world/keeping.ts` (what is remembered).
 - The people who manage it: `packages/sim/src/fiscal-officers.ts`, `merchant-houses.ts`, `house-voyages.ts`, `house-succession.ts`, `house-seat.ts`; the kit for their tests is `fiscal-test-kit.ts`.
 - The sanity run: `scripts/economy-sanity.mts` (`npm run sanity:economy -- 10 [--war]`) runs the real monthly tick with a
   model that never acts and checks the targets together: nothing unexplained, populations steady, grain in band,
@@ -376,7 +377,7 @@ manage it. Both are deterministic (`stableHash` only), aggregate (a handful of r
 **Fiscal officers** (`packages/sim/src/fiscal-officers.ts`). Once a month, in the world AI's pass (`statecraft.ts`, step 4,
 `decideFiscal`), every power nobody plays has the man who keeps its books read them: the head of the department that holds
 the tax roll (a quaestor of the Treasury of Saturn, an officer of the Carthaginian Accounts), else any man of it, else the
-ruler. Never for the player's own power or one he rules (`excludedPolityIds`), nor for a man the model is playing. He reads cover
+ruler. Never for the player's own power or one he rules (`excludedPolityIds`). A man the model is playing keeps his books by the rules too, as his standing business (Hiero at Syracuse and the chief of the Mamertines are their own officers), unless the model has itself set the money of that power in the last 60 days: its act is on the competence gate's marks (`ActMark`) and the rules give way until the season has run (`played-ruler-books.ts`, `a-played-ruler-keeps-his-books`). He reads cover
 (the chest over what the power pays a month), arrears, the deficit, war, grain in its hubs, the share its rate asks of what the
 land can bear (`taxBurdens`), the trade flowing in, and its coin:
 
@@ -583,6 +584,82 @@ allowed to settle it (`packages/sim/src/kept-by-the-officers.ts`):
 Appointments by rule are still to come: the ambitions `wantDepartments` lays on a ruler (to hand part of the government on, to seat a treasurer, a watch, a keeper of grain) stand
 in his portrait until the officers do it. Test: `the-model-is-left-to-its-plots`.
 
+## Where the money goes
+
+Until this section the chests of the great powers only grew: in a peace nothing spent the surplus, and the sanity run's five years left Rome at 27.8 millions and Carthage at 113.9. Three sinks now stand against it, in one monthly pass
+(`keepTheState`, `packages/sim/src/keeping-the-state.ts`, called from `tick.ts` after the merchant houses). Nothing in the pass makes money: every payment is a transfer between two accounts or a passage out through
+`the_unnamed` (the masons, carters, clerks, public slaves and criers nobody names). Tax and pay are unchanged and nothing caps a chest.
+
+**What it leaves in the chest.** A power keeps a floor, the larger of three months of what it owes by obligation and one month of what it takes in, and pays out of what is above it, in this order: the costs of government,
+the upkeep, then the contractors. The army's pay and the offices' (`tick.ts`) are paid on their own days from the same chest, before any of it.
+
+### 1. Upkeep (the general maintenance of what the power holds)
+
+`upkeepByPolity` reads the provinces once, for every power at once (no pass for a province alone): for each province held and not occupied, **roads and bridges** (`ROAD_PER_DEVELOPMENT = 620` for each whole point of
+development), **streets, drains, granaries, aqueducts, temples and halls** (`TOWN_PER_SETTLED = 92` for each unit of settled size, by `0.4 + development`, so a richer land has more to keep), **walls and watch-towers**
+(`WALL_PER_LEVEL = 780` a level of each settlement's `fortificationLevel`), **harbours** (`650 + 38 x size` for each port) and, for a maritime power, **the docks** (`DOCK_PER_HULL = 70` for each warship at dock in a port; the crew's
+pay is the army's). The month's bill is held to 15 in a hundred of what the power takes in (`UPKEEP_CAP_SHARE`): a people who owe the keeping of their land in labour and not in silver (the tribes, the allies who send men) are not
+asked for more silver than they have. At the Punic opening: Rome 46,700 a month (9.3 of a hundred of its 500,000), Carthage 185,600 (12.7 of 1,457,000), Syracuse 22,900 (11.9), the Mamertines 12,100 (22, held to 15).
+
+**Neglect.** A month in which under nine tenths of the upkeep was paid counts against the power (`StateKeeping.behindMonths`, kept in `economy.keeping`, one row a power); a month fully paid takes two back. After six months behind the
+ceiling of development of every province it holds sinks a quarter of a point a month, to six points at most (`neglectShiftBps`, read by `provinceTargetsFrom` through the standing-effects hook `developmentShiftBps`): a province above
+its ceiling sinks toward it a little each month (`ABOVE_CEILING_FALL_BPS`), so the decay is slow and it recovers the month the upkeep is paid. A year and a half behind, a wall slips a level (`fortificationLevel`, the most fortified
+place of the power, once a year), and the power is told once a year when it has lost nine months (only a power with something live in it makes news). Test: `a-state-keeps-its-roads`.
+
+### 2. The costs of the state
+
+`costsByPolity`: the **apparitores** (lictors, scribes, criers) of each magistracy seat, more for the higher rank (`RETINUE_PER_SEAT = 200 x (1 + rank/4)`); **public slaves and clerks** (1.1 of a hundred of what it takes in); the **house of
+each council and its keeper** (`800 + 70 x root of the chamber's weight`); the **games and the festivals** (`340 x root of the capital's settled size`, a half more where the power has aediles); the **rites and the priests' share**
+(`150 x root of each priesthood's seats x 2`); the **lodging and the gifts of the envoys** of other powers (640 for each who wrote in the last month, at most ten, and 130 a month for each power it has an understanding with);
+and a **king's court** with the keep of his friends (1.1 of a hundred of takings and 420 for each seat of an advisory council: Syracuse and the monarchies only). A Roman senator was unpaid, and so is none paid here: the
+Senate costs its house and its clerks, not a salary for a seat (`the-state-has-its-costs` puts three hundred more seats in it and finds nothing changed); the pay of an officer of the accounts and of a department's men stays in the departments'
+own pay (`departments.ts`) and is not counted twice. The bill is held to 6 in a hundred of takings. Rome pays about 27,000 a month (5.4 of a hundred); Carthage about 26,000 (1.7: its
+constitution names few offices); Syracuse 11,500 (5.5); the Mamertines 3,300 (6).
+
+### 3. Public works, let to the houses
+
+When the chest has cover above a reserve (eight months of what is owed on top of the floor above, a half as much again in a war), the power has begun fewer than its year's share (`worksAYear`: none under 300,000 a year of takings, one,
+two from 2.4 millions, three from 12; half as many at war), has fewer than two in hand and somebody who is not the player keeps its works (`whoLetsTheWorks`: the head or a man of the department that holds `public_works_cost` --
+the Censorship at Rome, the Office of the Accounts at Carthage, the king's steward under a king), a contract is let, no oftener than every 75 days, and costing no more than half the cover. The Senate's and the Elders' leave is the standing
+one of the budget: the rules start a work only inside a chest the treasury already holds. The player may still order any work as before: the project machinery is unchanged (a player's `project_start` is paid, overseen and completed as it was).
+
+*Which work, and where* (`planWork`, deterministic by `stableHash`, only for a power that is due): the place first, by score: the capital (+3,000), the agglomeration of big towns around it (up to +2,000), the scar of war (0.6 of it), the settled size,
+the room left to build (below development 6,000), less 1,500 for each lasting work already standing or in hand there; then the sort the place lacks and the age built there, by weight: a road (3; the Via Appia of 312 is the pattern), an aqueduct
+(2, from a town of 24; the Aqua Appia of the same year), a harbour with its docks (2, a port), walls (1, where a city, port or fortress is under level 6; more where the place is scarred), a temple (2, from a town of 10; the vow from booty is
+the capital's and the scarred places'), public granaries (2, a hub or a town of 12) and a forum with its halls (1, from a town of 30). Never two of a sort in a place (two temples may stand).
+
+*Cost.* A share of a year of what the power takes in, by the sort: a road 8.5 in a hundred, a harbour 7.5, an aqueduct 7, walls 5.5, a forum 4, a temple 3.5, granaries 3, times 0.8 to 1.3 for the place's size (the capital's a tenth more), at least 6,000;
+it takes 6 months (granaries) to 18 (an aqueduct) and is paid by instalments, one the day it is let and one a month after. Rome's opening takings of 6 millions a year make a road about 520,000.
+
+*Contractors.* The house of the power (the publicani and the banker of Neapolis at Rome; four at Carthage; two at Syracuse), chosen by `stableHash`, is paid the price (the cost and 12 in a hundred, `CONTRACTOR_GAIN_BPS`) by an ordinary transfer from the treasury and
+pays the cost out to the men who do the work (`the_unnamed`), keeping the gain; where the power has no house (the Mamertines) the whole cost goes to the men nobody names. A payment the chest cannot make in a month is made the next. A work
+whose house has gone is paid on to the men nobody names, and a contract a year past its day with something owing is forgiven, so none is carried for ever. State: `economy.works`, one row a contract (80 at most).
+
+*What stands.* On its day a structure is raised with a made thing's lasting effects (`world/standing-effects.ts`, `MADE` in `public-works.ts`): a road and a harbour lift the ceiling of development of their province by a marked 700 points, an aqueduct
+and a forum a slight 300 (with a slight calm), a temple a slight calm and a slight legitimacy once, walls a slight defence and calm (and a level of `fortificationLevel`, which makes good what neglect let slip), granaries a slight food security and supply.
+The trade flows already read development at both ends of a route (`trade-flows.ts`: a quarter dearer at no development to a quarter cheaper at the most), so a road or a harbour makes the haul cheaper by lifting the development of the hubs it serves, with
+no other input. No `upkeep` is written on the structure: its keeping is the general upkeep above. **News:** one fact when a power lets a work and one when it stands, only for a power with something live in it, in the words of the age ("The Censorship
+of Rome let the contract for ...", "... stands"); no line a province. Test: `a-censor-lets-a-contract`.
+
+### What it comes to
+
+Shares of what the power took in, by the sanity run (peace, a model that never acts, years 2 and 3; `scripts/economy-sanity.mts`): Rome upkeep 9.8, costs 5.4, works 3 to 7 (about 20 in all); Carthage upkeep 11.5, costs 1.6, works 12 to 16 (about 27);
+Syracuse upkeep 11.5, costs 5.5, works 7 to 10 (about 25); the Mamertines upkeep 16, costs 6.5, works 5 (about 28, their upkeep held to the cap). The five-year chests, before / after (millions of drachmae):
+
+| | Rome | Carthage | Syracuse | Mamertines |
+|---|---|---|---|---|
+| start | 2.79 | 18.6 | 1.61 | 0.78 |
+| year 1 | 8.1 / 6.8 | 37.4 / 32.5 | 3.6 / 2.9 | 1.2 / 1.0 |
+| year 3 | 17.9 / 14.1 | 75.7 / 59.4 | 7.6 / 5.5 | 2.1 / 1.6 |
+| year 5 | 27.8 / 22.8 | 113.9 / 86.7 | 10.3 / 8.4 | 2.8 / 2.0 |
+
+(The "before" run's Syracuse fell to 13 provinces by year 5; the "after" run's did not: that is the model-played books above and the world's own chance, not the sinks.) A peace's surplus is still large, because the sanity run raises no army and pays no
+war: a chest of 3 millions in a real game is the Republic after its armies' pay, and there the cover above the reserve is what limits the works. Money audit over the five years: nothing unexplained (`the-books-balance`, the 36-month case).
+The monthly pass costs about 3 ms on the Punic map (65 ms once, to read the map's sites, and again whenever walls are raised or slip, when the map's provinces are replaced).
+
+**Not built:** a fortification level is the only thing neglect takes besides the ceiling (no road or aqueduct falls into ruin as a made thing); a work cannot be stopped by the Senate once let; and the player's own works are not let to a house (a player's order
+is paid as it always was, through the project machinery).
+
 ## Tests that pin behaviour
 
 All under `packages/sim/src` unless noted: `the-books-balance`, `a-market-sets-a-price`, `a-market-moves-grain`,
@@ -591,4 +668,4 @@ All under `packages/sim/src` unless noted: `the-books-balance`, `a-market-sets-a
 `the-office-and-the-roll`, `a-tariff-bites`, `a-trade-pact-lowers-tariffs`, `an-embargo-cuts-trade`,
 `war-suspends-a-pact`, `a-power-hears-of-its-trade`, `a-coin-is-debased`, `a-foreign-payment-is-changed`,
 `the-treasury-reads-the-land` and `a-thousand-provinces` (the cost budget). v54: `a-quaestor-keeps-the-books`, `a-house-follows-the-gap`,
-`the-market-has-merchants`, `the-houses-stay-out-of-the-room`, `the-books-balance-with-houses` and `the-books-are-kept-in-good-time`. the model's own work: `the-model-is-left-to-its-plots`. H0: `a-treasurer-decides`, `a-consul-cannot-draw-the-treasury-alone`, `two-consuls-do-not-both-tax`, `a-tribune-stops-a-levy`, `the-senate-decrees-the-tribute`, `a-reform-changes-who-may-act`, `the-new-levers-bite` and `no-modern-words`. H0: `a-treasurer-decides`, `a-consul-cannot-draw-the-treasury-alone`, `two-consuls-do-not-both-tax`, `a-tribune-stops-a-levy`, `the-senate-decrees-the-tribute`, `a-reform-changes-who-may-act`, `the-new-levers-bite` and `no-modern-words`.
+`the-market-has-merchants`, `the-houses-stay-out-of-the-room`, `the-books-balance-with-houses` and `the-books-are-kept-in-good-time`. the model's own work: `the-model-is-left-to-its-plots`. H0: `a-treasurer-decides`, `a-consul-cannot-draw-the-treasury-alone`, `two-consuls-do-not-both-tax`, `a-tribune-stops-a-levy`, `the-senate-decrees-the-tribute`, `a-reform-changes-who-may-act`, `the-new-levers-bite` and `no-modern-words`. H0: `a-treasurer-decides`, `a-consul-cannot-draw-the-treasury-alone`, `two-consuls-do-not-both-tax`, `a-tribune-stops-a-levy`, `the-senate-decrees-the-tribute`, `a-reform-changes-who-may-act`, `the-new-levers-bite` and `no-modern-words`. Where the money goes: `a-state-keeps-its-roads`, `a-censor-lets-a-contract`, `the-state-has-its-costs`, `a-played-ruler-keeps-his-books` and the 36-month case of `the-books-balance`.
