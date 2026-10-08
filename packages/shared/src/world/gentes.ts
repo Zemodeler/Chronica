@@ -236,6 +236,36 @@ export function allianceBetween(world: GentesView, a: string | null | undefined,
 /** Offices Rome kept for patricians by birth: the king of the rites, the great flamines, the dancing priests of Mars. */
 const PATRICIAN_ONLY_OFFICE = /rex-sacrorum|rex sacrorum|flamen|salii|salian/i;
 
+/** What of the world the priestly taboos need: who sits in which seat. */
+export interface SeatsView {
+  readonly material: { readonly officeSeats: readonly { readonly officeId: string; readonly holderCharacterId: string | null; readonly status: string }[] };
+}
+
+/** The offices whose holders live under a taboo: the flamen of Jupiter, and the king of the rites. */
+const FLAMEN_DIALIS = /flamen-dialis|flamen dialis/i;
+const REX_SACRORUM = /rex-sacrorum|rex sacrorum/i;
+
+const holdsOfficeLike = (world: SeatsView, characterId: string, pattern: RegExp): boolean =>
+  world.material.officeSeats.some((seat) => seat.holderCharacterId === characterId && seat.status === "held" && pattern.test(seat.officeId));
+
+/**
+ * The taboos of the great priesthoods as eligibility, in the words the man is told; null where he is free. The flamen Dialis could hold no other
+ * office and had no command (he might not see an army under arms, nor ride; Gellius 10.15, and Livy 27.8, where a flamen was refused the praetorship
+ * and had to take his seat in the Senate by the praetor's order); the rex sacrorum could hold no magistracy (Livy 40.42, Plutarch, Roman Questions 63:
+ * he gave up his own, and was kept from the people's). `office` is the one he would take.
+ */
+export function priestlyTaboo(world: SeatsView, office: { readonly id: string; readonly kind?: string | undefined }, character: { readonly id: string; readonly name: string }): string | null {
+  if (FLAMEN_DIALIS.test(office.id) || REX_SACRORUM.test(office.id)) return null;
+  if (holdsOfficeLike(world, character.id, FLAMEN_DIALIS)) return `${character.name} is the flamen of Jupiter, and may hold no other office.`;
+  if (office.kind === "magistracy" && holdsOfficeLike(world, character.id, REX_SACRORUM)) return `${character.name} is the king of the rites, and may hold no magistracy.`;
+  return null;
+}
+
+/** Why a man may not be given an army, in the words he is told: the flamen Dialis might not see one under arms. Null where he may. */
+export function commandBar(world: SeatsView, character: { readonly id: string; readonly name: string }): string | null {
+  return holdsOfficeLike(world, character.id, FLAMEN_DIALIS) ? `${character.name} is the flamen of Jupiter, who may not see an army under arms, still less lead one.` : null;
+}
+
 /** Why a man may not take a priesthood of the old rites, in the words he is told; null where he may. */
 export function priestlyBar(office: { readonly id: string; readonly label?: string | undefined }, character: { readonly name: string; readonly ordo?: "patrician" | "plebeian" | undefined; readonly gender?: "male" | "female" | undefined }): string | null {
   if (!PATRICIAN_ONLY_OFFICE.test(`${office.id} ${office.label ?? ""}`)) return null;

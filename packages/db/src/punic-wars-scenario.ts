@@ -151,6 +151,7 @@ const ladderRequirements = [
   { id: "req-gap-aedile-10", kind: "not_held_within_years", label: "Not curule aedile within ten years (lex Genucia)", params: { officeId: "roman-aedile", years: 10 } },
   { id: "req-gap-plebeian-aedile-10", kind: "not_held_within_years", label: "Not plebeian aedile within ten years (lex Genucia)", params: { officeId: "roman-plebeian-aedile", years: 10 } },
   { id: "req-plebeian", kind: "ordo", label: "A plebeian", params: { ordo: "plebeian" } },
+  { id: "req-patrician", kind: "ordo", label: "A patrician by birth", params: { ordo: "patrician" } },
   // "No citizen may hold office before he has served ten campaigns" (Polybius
   // 6.19.4) -- the rule of Polybius' own day. In 270 the ladder was custom,
   // not law (see a-career.test.ts), so no office asks it yet; a law may.
@@ -161,6 +162,8 @@ const ladderRequirements = [
   { id: "req-campanian-polity", kind: "polity_membership", label: "Must belong to the Campanians of Rhegium", params: { polityId: "rhegium-campanians" } },
 ];
 
+/** What a priest of the old rites may do in the world: his own words and beliefs, nothing of the state's (the rites are his charge by the department, not by his powers). */
+const RITES = ["social_events", "belief_set", "character_intent_set"];
 const romanOffices = [
   office({ id: "roman-quaestor", label: "Roman quaestor", polityId: "rome", kind: "magistracy", rank: 1, seatCount: 4, termDays: 365, authorisedActionIds: MAGISTRATE, treasuryAccountId: "rome-treasury", treasuryPermissions: ["view", "propose_spending"], successionRuleId: "roman-election-tribal", eligibilityRequirementIds: [...romanReqs, "req-standing-3000"] }),
   // Elected by the plebs alone, sacrosanct, and able to forbid any magistrate's
@@ -188,6 +191,13 @@ const romanOffices = [
   // An augur who saw bad omens could stop an assembly meeting that day. Five of
   // the nine places were the plebeians' since the lex Ogulnia.
   office({ id: "roman-augur", label: "Roman augur", polityId: "rome", kind: "priesthood", seatCount: 9, ordoSeats: { plebeian: 5 }, vetoes: true, authorisedActionIds: CIVIL, successionRuleId: "roman-cooptation", eligibilityRequirementIds: romanReqs }),
+  // The old rites (scenario v58): the king of the rites and the three great flamines, each held for life by a patrician by birth, chosen by the
+  // pontifex maximus (Livy 27.8, Gellius 10.15). Their taboos are eligibility, in code (`priestlyTaboo`, `commandBar`): the flamen Dialis may hold no other
+  // office and no command, and the rex sacrorum no magistracy (Livy 40.42). Their charge is the public rites and nothing else (the department of the pontiffs).
+  office({ id: "roman-rex-sacrorum", label: "Rex sacrorum", polityId: "rome", kind: "priesthood", seatCount: 1, authorisedActionIds: RITES, successionRuleId: "roman-vestal-choice", eligibilityRequirementIds: [...romanReqs, "req-patrician"] }),
+  office({ id: "roman-flamen-dialis", label: "Flamen Dialis", polityId: "rome", kind: "priesthood", seatCount: 1, authorisedActionIds: RITES, successionRuleId: "roman-vestal-choice", eligibilityRequirementIds: [...romanReqs, "req-patrician"] }),
+  office({ id: "roman-flamen-martialis", label: "Flamen Martialis", polityId: "rome", kind: "priesthood", seatCount: 1, authorisedActionIds: RITES, successionRuleId: "roman-vestal-choice", eligibilityRequirementIds: [...romanReqs, "req-patrician"] }),
+  office({ id: "roman-flamen-quirinalis", label: "Flamen Quirinalis", polityId: "rome", kind: "priesthood", seatCount: 1, authorisedActionIds: RITES, successionRuleId: "roman-vestal-choice", eligibilityRequirementIds: [...romanReqs, "req-patrician"] }),
   office({ id: "roman-vestal", label: "Vestal", polityId: "rome", kind: "priesthood", seatCount: 6, authorisedActionIds: ["social_events", "belief_set", "character_intent_set"], successionRuleId: "roman-vestal-choice", eligibilityRequirementIds: ["req-alive", "req-roman-polity", "req-not-disqualified", "req-free-born", "req-female"] }),
 ];
 
@@ -214,7 +224,7 @@ const SEEDED_DEPARTMENTS = [
   // and the tresviri monetales are probably later than their traditional 289, so none is invented (docs/plans/government.md, "Disputed and thin evidence").
   seeded("rome-aediles", "rome", "The Aediles", ["grain", "markets"], ["roman-aedile", "roman-plebeian-aedile"]),
   seeded("rome-praetor", "rome", "The Urban Praetor's Court", ["courts"], ["roman-praetor"], { headOfficeId: "roman-praetor" }),
-  seeded("rome-pontiffs", "rome", "The College of Pontiffs", ["public_rites"], ["roman-pontiff"], { headOfficeId: "roman-pontifex-maximus" }),
+  seeded("rome-pontiffs", "rome", "The College of Pontiffs", ["public_rites"], ["roman-pontiff", "roman-rex-sacrorum", "roman-flamen-dialis", "roman-flamen-martialis", "roman-flamen-quirinalis"], { headOfficeId: "roman-pontifex-maximus" }),
   // Carthage's revenues were counted by its own officers of the accounts, and
   // spent as the elders allowed.
   // The same officers counted the harbour dues and the tribute rolls of the Libyans (L-M), and struck the coin the elders ordered, in the city's name (L-M): customs, credit,
@@ -722,7 +732,7 @@ const WRITTEN_OUT: ReadonlySet<string> = new Set(["rome", "carthage", "syracuse"
 
 const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
   schemaVersion: 3,
-  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 57, libraryVersion: 1 },
+  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 58, libraryVersion: 1 },
   elapsedStep: 0,
   instant: { day: 0, minute: 0 },
   // How the powers tax their ground, where the age said so (v48). Every other

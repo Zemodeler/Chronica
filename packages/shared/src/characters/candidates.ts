@@ -5,7 +5,7 @@ import { resolveEligibility } from "./political-authority";
 import { campaignsOf } from "../warfare/service";
 import type { PoliticalProcedure } from "../material-state";
 import type { WorldState } from "../world/world-state";
-import { nobilitasBps, nobilitasWeightBps, priestlyBar, type GentesView } from "../world/gentes";
+import { nobilitasBps, nobilitasWeightBps, priestlyBar, priestlyTaboo, type GentesView } from "../world/gentes";
 
 /**
  * Who could hold an office: the rules an election uses to find its men, kept
@@ -93,7 +93,7 @@ export function admissionRefusal(world: WorldState, office: Office, requirementI
   if (sitting) return `${character.name} already holds it.`;
   if (!character.alive) return `${character.name} is dead.`;
   // The old rites went to patricians by birth, whatever else the office asks.
-  const barred = priestlyBar(office, character);
+  const barred = priestlyBar(office, character) ?? priestlyTaboo(world, office, character);
   if (barred !== null) return barred;
   const result = resolveEligibility({ ...world, elapsedStep: toDay }, character.id, requirementIds, office.id);
   return result.eligible ? null : result.failedReasons.join(" ");

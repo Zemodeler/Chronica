@@ -79,6 +79,7 @@ import {
   seatCharacterInOffice,
   vacateOfficesOf,
   reciprocalFamilyLinkKind,
+  commandBar,
   marriageBar,
   familyLinksOf,
   stableHash,
@@ -2525,6 +2526,8 @@ function applyOne(
       const commanderId = required(delta.commanderCharacterRef, "The commander");
       const controllerId = required(delta.controllerCharacterRef, "The controller");
       if (!world.characters.some((character) => character.id === commanderId)) reject(`No character "${commanderId}" exists to command this force.${nearestTo(commanderId)}`, "reference");
+      const forbidden = commandBar(world, world.characters.find((character) => character.id === commanderId)!);
+      if (forbidden !== null) reject(forbidden);
       if (!world.map.provinces.some((province) => province.id === delta.locationId)) reject(`No province "${delta.locationId}" exists to raise this force in.`, "reference");
       const forcePolityId = required(delta.polityId, "The power this force answers to");
       if (!world.map.polities.some((polity) => polity.id === forcePolityId)) {
@@ -2794,6 +2797,8 @@ function applyOne(
       if (commanderId !== undefined && !world.characters.some((character) => character.id === commanderId)) {
         reject(`No character "${commanderId}" exists to take command.${nearestTo(commanderId)}`, "reference");
       }
+      const unfit = commanderId === undefined || commanderId === force.commanderCharacterId ? null : commandBar(world, world.characters.find((character) => character.id === commanderId)!);
+      if (unfit !== null) reject(unfit);
       const controllerId = delta.controllerCharacterRef === undefined ? undefined : required(delta.controllerCharacterRef, "The controller");
       if (controllerId !== undefined && !world.characters.some((character) => character.id === controllerId)) {
         reject(`No character "${controllerId}" exists to answer for this force.${nearestTo(controllerId)}`, "reference");

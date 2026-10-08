@@ -24,6 +24,8 @@ interface Entry {
   readonly prestige: number;
   readonly gender?: "male" | "female";
   readonly traits?: readonly string[];
+  /** Said of a man the sources do not name: why he is here, in the words of his creation reason. */
+  readonly invented?: string;
 }
 
 interface PowerRoster {
@@ -82,6 +84,13 @@ const ROME: PowerRoster = {
       { name: "Publius Decius Mus", age: 48, focus: "piety", prestige: 6_600, traits: ["dutiful"] },
       { name: "Marcus Valerius Maximus Messalla", age: 44, focus: "diplomacy", prestige: 6_400 },
     ],
+    // The old rites (v58). The sources name no holder of any of the four in the 270s, so the four men are invented (docs/plans/gentes.md): patricians of gentes
+    // that kept the old rites, of the age the offices were given at (a flamen was inaugurated young, a rex sacrorum was an old man). The flamen Dialis is a Valerius
+    // because the first flamen Dialis the sources name, in 209, was a Valerius Flaccus (Livy 27.8), from a gens already in the world.
+    "roman-rex-sacrorum": [{ name: "Marcus Papirius Maso", age: 58, focus: "piety", prestige: 6_100, traits: ["dutiful"], invented: "Invented: the sources name no rex sacrorum in 270; a patrician of the Papirii, who kept old rites (Cicero, De legibus 2.54)." }],
+    "roman-flamen-dialis": [{ name: "Publius Valerius Falto", age: 38, focus: "piety", prestige: 5_800, traits: ["dutiful"], invented: "Invented: the sources name no flamen Dialis in 270; the first they name (209) was a Valerius Flaccus (Livy 27.8)." }],
+    "roman-flamen-martialis": [{ name: "Servius Cornelius Cossus", age: 46, focus: "piety", prestige: 5_600, invented: "Invented: the sources name no flamen Martialis in 270." }],
+    "roman-flamen-quirinalis": [{ name: "Quintus Sulpicius Camerinus", age: 49, focus: "piety", prestige: 5_500, invented: "Invented: the sources name no flamen Quirinalis in 270." }],
     "roman-vestal": [
       { name: "Aemilia the Vestal", age: 37, focus: "piety", prestige: 6_400, gender: "female" },
       { name: "Licinia the Vestal", age: 33, focus: "piety", prestige: 6_000, gender: "female" },
@@ -208,7 +217,7 @@ export function rosterPeople(offices: readonly Office[], takenSeats: readonly { 
           ...(holder.gender === undefined ? {} : { gender: holder.gender }),
           officeId: magistracy ? officeId : null,
         }, 0);
-        characters.push(character);
+        characters.push(holder.invented === undefined ? character : { ...character, creationReason: holder.invented });
         accounts.push(account);
         officeSeats.push(seatFor(office, seatIndex, id, 0));
       }
