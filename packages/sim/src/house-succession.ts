@@ -56,14 +56,14 @@ import { safeLocalId } from "./safe-local-id";
  */
 
 /** The youngest a man may be to take a house. */
-const ADULT_AGE = 18;
+export const ADULT_AGE = 18;
 /** The oldest a man is chosen at: nobody takes a house to die at once of it. */
-const MAX_CHOSEN_AGE = 58;
+export const MAX_CHOSEN_AGE = 58;
 /** What a kinsman must be worth at the books, out of a hundred, and what a man from outside must be. */
 const MIN_FIT_KIN = 36;
-const MIN_FIT_ADOPTED = 48;
+export const MIN_FIT_ADOPTED = 48;
 /** The least honesty a man may have and be given a house's books. */
-const MIN_HONESTY = 28;
+export const MIN_HONESTY = 28;
 /** How far through the family graph a kinsman is looked for. */
 const KIN_DEPTH = 3;
 /** A head without an heir this long has the new-man throw. */
@@ -129,7 +129,7 @@ export function spokenFor(world: WorldState): Set<string> {
 const KIND_NEARNESS: Record<string, number> = { child: 0, sibling: 1, parent: 2, other_relative: 3, spouse_or_partner: 4 };
 
 /** The head's kin through the family graph: id and how near (the degree tens, the kind of link units; less is nearer). Spouses carry the line only to the husbands of daughters. */
-function kinOf(world: WorldState, head: Character): Map<string, number> {
+export function kinOf(world: WorldState, head: Character): Map<string, number> {
   const reached = new Map<string, number>([[head.id, 0]]);
   let frontier = [head.id];
   for (let degree = 1; degree <= KIN_DEPTH; degree += 1) {

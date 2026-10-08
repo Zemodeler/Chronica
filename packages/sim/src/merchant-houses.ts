@@ -25,6 +25,7 @@ import {
 import { keepTheSeats } from "./house-seat";
 import { foundHousesByRule } from "./house-founding";
 import { keepTheLine } from "./house-succession";
+import { keepTheTutelage } from "./house-tutelage";
 import { CREW_SHARE_BPS, dutyOnCargoBps, voyageLossBps } from "./house-voyages";
 import type { IdFactory } from "./ports";
 import { safeLocalId } from "./safe-local-id";
@@ -328,9 +329,10 @@ export function keepMerchantHouses(first: WorldState, toDay: number, ids: IdFact
   const due = new Set(economyOf(start).houses.filter((house) => house.status === "trading" && toDay - house.actedAtStep >= 30).map((house) => house.id));
   if (due.size === 0) return { world: start, facts: founded.facts };
   const line = keepTheLine(start, toDay, ids, due);
-  const seats = keepTheSeats(line.world, toDay, ids, due);
+  const tutelage = keepTheTutelage(line.world, toDay, ids, due);
+  const seats = keepTheSeats(tutelage.world, toDay, ids, due);
   const cargoes = keepTheCargoes(seats.world, toDay, ids);
-  return { world: cargoes.world, facts: [...founded.facts, ...line.facts, ...seats.facts, ...cargoes.facts] };
+  return { world: cargoes.world, facts: [...founded.facts, ...line.facts, ...tutelage.facts, ...seats.facts, ...cargoes.facts] };
 }
 
 function keepTheCargoes(world: WorldState, toDay: number, ids: IdFactory): { world: WorldState; facts: FactProposalDraft[] } {

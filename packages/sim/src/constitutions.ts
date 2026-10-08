@@ -68,7 +68,7 @@ import { safeLocalId } from "./safe-local-id";
 // What an office may do, in the world's own ops -- the scenario's four grades.
 const CIVIL = ["social_events", "belief_set", "character_intent_set", "political_procedure_open", "political_support_set"];
 const MAGISTRATE = [...CIVIL, "project_create", "project_milestone_update", "generic_entity_create", "generic_entity_update", "province_material_shift", "legitimacy_shift"];
-const IMPERIUM = [...MAGISTRATE, "force_create", "force_modify", "force_engage", "political_procedure_resolve", "authority_grant_upsert", "character_create", "polity_stance_shift"];
+const IMPERIUM = [...MAGISTRATE, "force_create", "force_modify", "force_engage", "political_procedure_resolve", "authority_grant_upsert", "character_create", "polity_stance_shift", "war_plan_set", "campaign_plan_set"];
 const RULER = [...IMPERIUM, "capital_set"];
 const GRADES = { civil: CIVIL, magistrate: MAGISTRATE, imperium: IMPERIUM, ruler: RULER } as const;
 
@@ -105,6 +105,8 @@ interface OfficeSpec {
   readonly key: string;
   readonly label: string;
   readonly kind: "magistracy" | "membership" | "priesthood";
+  /** For a membership office: the chamber (by template key) its holders sit in. */
+  readonly seatChamberKey?: string;
   readonly grade: keyof typeof GRADES;
   readonly rank?: number;
   readonly seatCount?: number;
@@ -275,7 +277,7 @@ export function templateFor(polity: Polity, form: GovernmentForm): ConstitutionT
         chambers: keepsAssembly ? [council, assembly] : [council],
         offices: [
           { key: "ruler", label: `${title} ${of}`, kind: "magistracy", grade: "ruler", rank: 3, treasury: true, succession: { kind: "primogeniture", chamberKey: null, label: "Hereditary succession" } },
-          { key: "councillor", label: `${court?.friends ?? "Councillor"} ${of}`, kind: "membership", grade: "civil", seatCount: between(s("councillors"), 10, 30), succession: { kind: "appointment", chamberKey: null, label: "Named by the ruler" } },
+          { key: "councillor", label: `${court?.friends ?? "Councillor"} ${of}`, kind: "membership", seatChamberKey: "council", grade: "civil", seatCount: between(s("councillors"), 10, 30), succession: { kind: "appointment", chamberKey: null, label: "Named by the ruler" } },
           { key: "general", label: `General ${of}`, kind: "magistracy", grade: "imperium", rank: 2, seatCount: between(s("generals"), 1, 3), charge: KINGS_GENERAL, succession: { kind: "appointment", chamberKey: null, label: "Named by the ruler" } },
           ...finance.map((officer): OfficeSpec => ({
             key: officer.key, label: `${officer.label} ${of}`, kind: "magistracy", grade: "magistrate", rank: 1, seatCount: officer.seats, treasury: true, allowance: true, charge: officer.charge,
@@ -309,7 +311,7 @@ export function templateFor(polity: Polity, form: GovernmentForm): ConstitutionT
         offices: [
           { key: "magistrate", label: `${pick(s("magistrate"), ["Chief magistrate", "Archon", "Prytanis"])} ${of}`, kind: "magistracy", grade: "imperium", rank: 2, seatCount: pair ? 2 : 1, termDays: 365, treasury: true, charge: HOUSES_MAGISTRATE, succession: { kind: "elective", chamberKey: "assembly", label: "Elected by the citizens" } },
           { key: "treasurer", label: `Treasurer ${of}`, kind: "magistracy", grade: "magistrate", rank: 1, seatCount: between(s("treasurers"), 1, 4), termDays: 365, treasury: true, allowance: true, charge: TREASURER, succession: { kind: "elective", chamberKey: "assembly", label: "Elected by the citizens" } },
-          { key: "councillor", label: `Elder ${of}`, kind: "membership", grade: "civil", seatCount: between(s("elders"), 30, 120), enrolsFormerMagistrates: true, succession: { kind: "elective", chamberKey: "council", label: "Chosen by the council" } },
+          { key: "councillor", label: `Elder ${of}`, kind: "membership", seatChamberKey: "council", grade: "civil", seatCount: between(s("elders"), 30, 120), enrolsFormerMagistrates: true, succession: { kind: "elective", chamberKey: "council", label: "Chosen by the council" } },
           priest({ kind: "elective", chamberKey: "council", label: "Chosen by the council" }),
         ],
       };
@@ -335,7 +337,7 @@ export function templateFor(polity: Polity, form: GovernmentForm): ConstitutionT
         offices: [
           { key: "general", label: `${pick(s("general"), ["General", "Strategos"])} ${of}`, kind: "magistracy", grade: "imperium", rank: 2, seatCount: generals, termDays: 365, treasury: true, charge: PEOPLES_GENERAL, succession: { kind: "elective", chamberKey: "assembly", label: "Elected by the people" } },
           { key: "magistrate", label: `Magistrate ${of}`, kind: "magistracy", grade: "magistrate", rank: 1, seatCount: between(s("magistrates"), 3, 9), termDays: 365, succession: { kind: "elective", chamberKey: "assembly", label: "Elected by the people" } },
-          { key: "councillor", label: `Councillor ${of}`, kind: "membership", grade: "civil", seatCount: between(s("council-size"), 50, 500), termDays: 365, succession: { kind: "elective", chamberKey: "assembly", label: "Chosen by lot from the citizens" } },
+          { key: "councillor", label: `Councillor ${of}`, kind: "membership", seatChamberKey: "council", grade: "civil", seatCount: between(s("council-size"), 50, 500), termDays: 365, succession: { kind: "elective", chamberKey: "assembly", label: "Chosen by lot from the citizens" } },
           priest({ kind: "elective", chamberKey: "assembly", label: "Elected by the people" }),
         ],
       };
@@ -361,7 +363,7 @@ export function templateFor(polity: Polity, form: GovernmentForm): ConstitutionT
         chambers: warriors ? [gathering, host] : [gathering],
         offices: [
           { key: "ruler", label: `${pick(s("title"), ["High chieftain", "War-king", "First chief"])} ${of}`, kind: "magistracy", grade: "ruler", rank: 2, ...(forLife ? {} : { termDays: 365 }), treasury: true, charge: TRIBAL_CHIEF, succession: { kind: "elective", chamberKey: "gathering", label: "Chosen by the chiefs" } },
-          { key: "councillor", label: `Chief ${of}`, kind: "membership", grade: "civil", seatCount: between(s("chiefs"), 8, 40), succession: { kind: "seniority", chamberKey: null, label: "The eldest of his house" } },
+          { key: "councillor", label: `Chief ${of}`, kind: "membership", seatChamberKey: "gathering", grade: "civil", seatCount: between(s("chiefs"), 8, 40), succession: { kind: "seniority", chamberKey: null, label: "The eldest of his house" } },
           priest({ kind: "seniority", chamberKey: null, label: "The eldest of the order" }),
         ],
       };
@@ -386,7 +388,7 @@ export function templateFor(polity: Polity, form: GovernmentForm): ConstitutionT
         ],
         offices: [
           { key: "ruler", label: `${pick(s("title"), ["Leader", "Meddix", "Captain-general"])} ${of}`, kind: "magistracy", grade: "ruler", rank: 2, ...(annual ? { termDays: 365 } : {}), treasury: true, succession: { kind: "elective", chamberKey: "assembly", label: "Acclaimed by the soldiers" } },
-          { key: "councillor", label: `Captain ${of}`, kind: "membership", grade: "civil", seatCount: between(s("captains"), 8, 20), succession: { kind: "elective", chamberKey: "assembly", label: "Acclaimed by the soldiers" } },
+          { key: "councillor", label: `Captain ${of}`, kind: "membership", seatChamberKey: "council", grade: "civil", seatCount: between(s("captains"), 8, 20), succession: { kind: "elective", chamberKey: "assembly", label: "Acclaimed by the soldiers" } },
           priest({ kind: "appointment", chamberKey: null, label: "Named by the leader" }),
         ],
       };
@@ -412,7 +414,7 @@ export function templateFor(polity: Polity, form: GovernmentForm): ConstitutionT
         offices: [
           { key: "ruler", label: `${pick(s("title"), ["Strategos", "President", "Meddix tuticus"])} ${of}`, kind: "magistracy", grade: "imperium", rank: 2, termDays: twoYears ? 730 : 365, treasury: true, charge: LEAGUE_STRATEGOS, succession: { kind: "elective", chamberKey: "synod", label: "Elected by the league" } },
           { key: "hipparch", label: `Commander of horse ${of}`, kind: "magistracy", grade: "imperium", rank: 1, termDays: 365, succession: { kind: "elective", chamberKey: "synod", label: "Elected by the league" } },
-          { key: "councillor", label: `Delegate ${of}`, kind: "membership", grade: "civil", seatCount: between(s("delegates"), 20, 60), succession: { kind: "appointment", chamberKey: null, label: "Sent by his city" } },
+          { key: "councillor", label: `Delegate ${of}`, kind: "membership", seatChamberKey: "synod", grade: "civil", seatCount: between(s("delegates"), 20, 60), succession: { kind: "appointment", chamberKey: null, label: "Sent by his city" } },
           priest({ kind: "elective", chamberKey: "synod", label: "Elected by the league" }),
         ],
       };
@@ -572,6 +574,7 @@ function build(polity: Polity, template: ConstitutionTemplate, treasuryAccountId
       successionRuleId: ruleId,
       eligibilityRequirementIds: [...requirementIds],
       kind: spec.kind,
+      ...(spec.seatChamberKey === undefined ? {} : { chamberId: chamberId(polity.id, spec.seatChamberKey) }),
       ...(spec.rank === undefined ? {} : { rank: spec.rank }),
       ...(spec.seatCount === undefined ? {} : { seatCount: spec.seatCount }),
       ...(spec.termDays === undefined ? {} : { termDays: spec.termDays }),

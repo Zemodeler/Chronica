@@ -7,6 +7,7 @@ import {
   allOffices,
   boundedId,
   createPressure,
+  currentAgeYears,
   isNavalForce,
   type BlocInterest,
   type Character,
@@ -737,7 +738,10 @@ function officesByNeed(world: WorldState, government: GovernmentRules, warfare: 
     const ships = next.material.forces.filter((force) => force.polityId === polity.id && isNavalForce(force, warfare)).reduce((sum, force) => sum + menIn(force), 0);
     if (ships >= 20 && !has(/\b(fleet|fleets|navy|naval|admiral|nauarch)\b/iu)) make("admiral", `Admiral of the fleet of ${polityPhrase(polity.name)}`, 1, "it has ships and nobody to command them");
     const taken = next.map.provinces.filter((province) => province.controllerPolityId === polity.id && native.has(province.id) && native.get(province.id) !== polity.id).length;
-    if (taken >= 2 && !has(/\b(governor|governors|satrap|prefect|praefectus|praefect|proconsul)\b/iu)) make("governor", `Governor of the conquered lands of ${polityPhrase(polity.name)}`, Math.min(12, taken), "it holds conquered provinces and nobody to govern them");
+    // One post, named by the ruler to the ablest man he has (`fillAppointments`): a college with a seat count is never filled by rule, and a post made with no man to hold it would only stand empty till it lapsed.
+    const ruler = rulerOf(next, polity.id, government);
+    const hasAMan = next.characters.some((character) => character.alive && character.polityId === polity.id && character.id !== ruler?.id && currentAgeYears(character, toDay) >= 25);
+    if (taken >= 2 && hasAMan && !has(/\b(governor|governors|satrap|prefect|praefectus|praefect|proconsul)\b/iu)) make("governor", `Governor of the conquered lands of ${polityPhrase(polity.name)}`, 1, "it holds conquered provinces and nobody to govern them");
   }
 
   // Idle offices: remembered from the month they fell idle, and lapsing after three years.

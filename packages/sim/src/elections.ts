@@ -25,6 +25,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { newsReach, powersNearThePlayer } from "./far-powers";
+import { summariseTheFarCalendar } from "./far-calendar";
 import { isNoted } from "./nota";
 import { remember } from "./grievances";
 import type { IdFactory } from "./ports";
@@ -607,7 +608,7 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
     if (fact.visibility !== "public" || newsReach(near, polityId) === "public") return fact;
     return { ...fact, visibility: "polity" as const, discoveryState: "polity" as const };
   });
-  return { world, facts: told };
+  return { world, facts: [...told, ...summariseTheFarCalendar(world, told, player)] };
 }
 
 /**
