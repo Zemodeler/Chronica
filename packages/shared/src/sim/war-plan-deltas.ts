@@ -38,3 +38,36 @@ export const CampaignPlanSetSchema = z.object({
   theatreId: z.string().trim().min(1).max(60).nullable().default(null),
   reason: Reason,
 }).strict();
+
+/** The two acts, by name: the orchestrator is not shown them (the player's armies ignore plans), and a person is shown them compactly. */
+export const WAR_PLAN_OPS: ReadonlySet<string> = new Set(["war_plan_set", "campaign_plan_set"]);
+
+/**
+ * What a person is shown of these two acts: the fields a man writes, and none of what the rules alone fill in (the theatres and the
+ * allotment of armies, the sea plan, the base and the fallback, the theatre named). The parser still reads the whole.
+ */
+export function shownWarPlanVariant<T extends Record<string, unknown>>(variant: T): T | Record<string, unknown> {
+  const op = ((variant.properties as Record<string, { const?: unknown }> | undefined)?.op)?.const;
+  if (op === "war_plan_set") {
+    return {
+      type: "object",
+      properties: {
+        op: { const: "war_plan_set" }, polityId: { $ref: "#/$defs/Ref" }, enemyPolityId: { $ref: "#/$defs/Ref" },
+        aims: { type: "array", items: { type: "object", properties: { kind: { enum: ["hold_province", "take_province", "break_army", "sue_for_peace", "raid", "blockade"] }, provinceId: { $ref: "#/$defs/Id" } }, required: ["kind"] } },
+        posture: { enum: ["attrition", "decisive", "defend"] }, reason: { type: "string" },
+      },
+      required: ["op", "polityId", "enemyPolityId", "aims", "posture", "reason"],
+    };
+  }
+  if (op === "campaign_plan_set") {
+    return {
+      type: "object",
+      properties: {
+        op: { const: "campaign_plan_set" }, forceRef: { $ref: "#/$defs/Ref" }, mode: { enum: ["seek_battle", "refuse", "siege", "raid", "garrison", "winter"] },
+        objectiveProvinceId: { $ref: "#/$defs/Id" }, objectiveForceRef: { $ref: "#/$defs/Ref" }, days: { type: "integer", maximum: 240 }, reason: { type: "string" },
+      },
+      required: ["op", "forceRef", "mode", "reason"],
+    };
+  }
+  return variant;
+}

@@ -56,6 +56,18 @@ export interface StrategyContext {
   readonly warfare: ScenarioWarfareRules | undefined;
   readonly clock: ScenarioClock | undefined;
   readonly provinces: ReadonlyMap<string, WorldState["map"]["provinces"][number]>;
+  /** Distances worked out this month, by where from, how far and by what roads: the same province is asked about by many armies. */
+  readonly reaches?: Map<string, Map<string, number>>;
+}
+
+/** The distances from a province, by land alone or by sea too, kept for the month. */
+export function reachOf(ctx: Pick<StrategyContext, "world" | "reaches">, from: string, budgetKm: number, landOnly: boolean): Map<string, number> {
+  const key = `${from}|${budgetKm}|${landOnly ? "l" : "s"}`;
+  const kept = ctx.reaches?.get(key);
+  if (kept !== undefined) return kept;
+  const found = kmFrom(ctx.world, from, { budgetKm, ...(landOnly ? BY_LAND : {}) });
+  ctx.reaches?.set(key, found);
+  return found;
 }
 
 export const monthOf = (ctx: Pick<StrategyContext, "clock">, day: number): number | null => (ctx.clock === undefined ? null : monthOfDay(day, ctx.clock));
@@ -104,7 +116,7 @@ export function shiftTriggers(ctx: StrategyContext, existing: WarPlan, war: Poli
   if ((war?.battles ?? []).some((battle) => battle.atStep > since && (battle.winnerPolityId === polityId || battle.loserPolityId === polityId))) why.push("a battle has been fought");
   const capital = capitalProvinceOf(ctx, polityId);
   if (capital !== null) {
-    const near = kmFrom(world, capital, { budgetKm: CAPITAL_ALARM_KM, ...BY_LAND });
+    const near = reachOf(ctx, capital, CAPITAL_ALARM_KM, true);
     if (enemyArmies(ctx).some((force) => near.has(force.locationId)) && !existing.aims.some((aim) => aim.kind === "hold_province" && aim.provinceId === capital)) why.push("an army stands near the capital");
   }
   if (!existing.aims.some((aim) => aim.kind === "sue_for_peace") && warWeariness(world, polityId, existing.enemyPolityId).score >= 60) why.push("the people are weary of the war");
@@ -165,7 +177,7 @@ function aimsFor(ctx: StrategyContext, mine: readonly Force[], enemy: string, po
     add({ kind: "hold_province", provinceId: province.id }, 45 + (province.id === capital ? 30 : 0), 0);
   }
   if (capital !== null) {
-    const near = kmFrom(world, capital, { budgetKm: CAPITAL_ALARM_KM, ...BY_LAND });
+    const near = reachOf(ctx, capital, CAPITAL_ALARM_KM, true);
     if (armies.some((force) => near.has(force.locationId))) add({ kind: "hold_province", provinceId: capital }, 90, 0);
   }
   // An army to break: the largest of theirs within reach that we could beat, if we mean to fight.
@@ -189,7 +201,7 @@ function theatresFor(ctx: StrategyContext, aims: readonly ScoredAim[], mine: rea
     if (aim.provinceId === undefined) continue;
     let cluster = clusters.find((candidate) => candidate.km.has(aim.provinceId!) && (candidate.km.get(aim.provinceId!) ?? Infinity) <= THEATRE_KM);
     if (cluster === undefined && clusters.length < MAX_THEATRES) {
-      cluster = { id: `th-${aim.provinceId}`.slice(0, 60), anchor: aim.provinceId, provinceIds: [], value: 0, km: kmFrom(ctx.world, aim.provinceId, { budgetKm: AIM_REACH_KM + 300, ...(havePassage ? {} : BY_LAND) }) };
+      cluster = { id: `th-${aim.provinceId}`.slice(0, 60), anchor: aim.provinceId, provinceIds: [], value: 0, km: reachOf(ctx, aim.provinceId, AIM_REACH_KM, !havePassage) };
       clusters.push(cluster);
     }
     cluster ??= clusters[0];
@@ -252,6 +264,12 @@ function allot(ctx: StrategyContext, theatres: WarTheatre[], reach: ReadonlyMap<
   });
 }
 
+/** The theatres and the allotment of armies for aims already chosen: what the rules do for a plan a man laid down without them. */
+export function theatresForAims(ctx: StrategyContext, aims: readonly WarAim[], mine: readonly Force[], before: readonly WarTheatre[], campaigns: readonly { forceId: string; theatreId: string | null; issuedStep: number }[]): WarTheatre[] {
+  const { theatres, reach } = theatresFor(ctx, aims.map((aim) => ({ aim, value: aim.provinceId === undefined ? 30 : worthOf(ctx, aim.provinceId) + (aim.kind === "hold_province" ? 45 : 0), score: 0 })), mine, before);
+  return allot(ctx, theatres, reach, mine, campaigns);
+}
+
 export interface PlannedWar {
   readonly plan: WarPlan;
   readonly changed: boolean;
@@ -308,7 +326,7 @@ export function planTheWar(ctx: StrategyContext, enemy: string, war: PolityAgree
   const sameAims = existing !== undefined && sameAimSet(existing.aims, aims);
   const plan: WarPlan = {
     warId: war?.id ?? existing?.warId ?? "no-war", polityId, enemyPolityId: enemy, aims: aims.length === 0 ? existing?.aims ?? [] : aims, theatres: allotted,
-    posture: posture.posture, reviewedAtStep: day, aimsSetAtStep: day, aimsChangedAtStep: sameAims ? existing!.aimsChangedAtStep : day,
+    posture: posture.posture, reviewedAtStep: day, aimsSetAtStep: day, aimsChangedAtStep: sameAims && existing!.posture === posture.posture ? existing!.aimsChangedAtStep : day,
     issuedByCharacterId: ctx.ruler.id,
     ...(existing?.navalPlan === undefined ? {} : { navalPlan: existing.navalPlan }),
   };

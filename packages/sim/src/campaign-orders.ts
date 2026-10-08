@@ -19,7 +19,7 @@ import {
 } from "@chronica/shared";
 import { roughMen } from "./board";
 import { chooseBattlePlan, chooseManoeuvre, temperOf } from "./battle-plan";
-import { enemyArmies, monthOf, worthOf, type StrategyContext } from "./grand-strategy";
+import { enemyArmies, monthOf, reachOf, worthOf, type StrategyContext } from "./grand-strategy";
 import { SIEGE_NEEDED_AT } from "./occupation";
 import type { StatecraftDecision } from "./statecraft";
 
@@ -40,6 +40,8 @@ const RETREAT_ODDS = 1.6;
 /** How far an army looks for a quarter, an enemy to meet, or ground to feed on. */
 const QUARTERS_KM = 350;
 const SIGHT_KM = 600;
+/** How far the roads are worked out from an army, for what it may be sent to. */
+export const REACH_KM = 900;
 const ALARM_KM = 250;
 /** The days an order is given for. */
 const ORDER_DAYS = 150;
@@ -149,6 +151,8 @@ export function campaignStillGood(ctx: StrategyContext, force: Force, cp: Campai
   if (plan.aimsChangedAtStep > cp.issuedStep) return false;
   if ((cp.mode === "seek_battle" || cp.mode === "raid" || cp.mode === "siege") && superiorNear(ctx, force, reach) !== null && !ownGround(ctx, here)) return false;
   if (cp.mode === "seek_battle" && superiorNear(ctx, force, reach) !== null) return false;
+  // An order to refuse battle was given for an enemy who was too strong: when he is gone it is done.
+  if (cp.mode === "refuse" && superiorNear(ctx, force, reach) === null) return false;
   return true;
 }
 
@@ -165,8 +169,8 @@ export function issueCampaign(ctx: StrategyContext, force: Force, plan: WarPlan,
   const odds = oddsOf(commander);
   const men = fitStrengthOf(force);
   const havePassage = world.material.forces.some((other) => other.polityId === polityId && isNavalForce(other, ctx.warfare) && fitStrengthOf(other) > 0);
-  const reach = kmFrom(world, force.locationId, { budgetKm: 1_200, ...BY_LAND });
-  const sea = kmFrom(world, force.locationId, { budgetKm: 1_200 });
+  const reach = reachOf(ctx, force.locationId, REACH_KM, true);
+  const sea = havePassage ? reachOf(ctx, force.locationId, REACH_KM, false) : reach;
   const canGet = (provinceId: string): boolean => reach.has(provinceId) || (havePassage && sea.has(provinceId) && passagePlanFor(world, force, provinceId, ctx.warfare, month) !== null);
   const kmTo = (provinceId: string): number => reach.get(provinceId) ?? sea.get(provinceId) ?? 1_500;
   const hereProvince = ctx.provinces.get(force.locationId);
@@ -204,8 +208,9 @@ export function issueCampaign(ctx: StrategyContext, force: Force, plan: WarPlan,
   const mustHold = plan.posture === "defend" || (nearEnemy !== null && (careful || plan.posture === "attrition"));
   if (mustHold || (careful && plan.posture !== "decisive" && holds.length > 0)) {
     const near = nearEnemy ?? enemies.filter((other) => kmTo(other.locationId) <= SIGHT_KM).sort((a, b) => kmTo(a.locationId) - kmTo(b.locationId))[0];
+    const fromEnemy = near === undefined ? undefined : reachOf(ctx, near.locationId, REACH_KM, true);
     const place = holds.sort((a, b) => kmTo(a.provinceId!) - kmTo(b.provinceId!))[0]?.provinceId
-      ?? (near === undefined ? null : [...reach].filter(([id]) => ownGround(ctx, id) && (ctx.provinces.get(id)?.settlements.length ?? 0) > 0).sort((a, b) => kmTo(near.locationId) - kmTo(near.locationId) || a[1] - b[1])[0]?.[0] ?? null)
+      ?? (fromEnemy === undefined ? null : [...reach].filter(([id]) => ownGround(ctx, id) && (ctx.provinces.get(id)?.settlements.length ?? 0) > 0).sort((a, b) => (fromEnemy.get(a[0]) ?? 9_999) - (fromEnemy.get(b[0]) ?? 9_999) || a[1] - b[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? null)
       ?? quarters;
     if (place !== null && ownGround(ctx, place)) {
       return make(nearEnemy !== null && plan.posture !== "defend" ? "refuse" : "garrison", { kind: "province", provinceId: place }, ORDER_DAYS, `${nearEnemy !== null ? "the enemy is too strong to meet" : "the plan is to stand on the defence"}, and he keeps to ${placeName(ctx, place)}`);
@@ -283,8 +288,9 @@ export function conductByPlan(ctx: ConductContext, force: Force, cp: CampaignPla
   const enemies = enemyArmies(ctx);
   const menAt = (provinceId: string): number => enemies.filter((other) => other.locationId === provinceId).reduce((sum, other) => sum + fitStrengthOf(other), 0);
   const month = monthOf(ctx, world.instant.day);
-  const reach = kmFrom(world, here, { budgetKm: 1_200, ...BY_LAND });
-  const unhold: WorldDelta[] = force.hold === true && cp.mode !== "refuse" && cp.mode !== "garrison" ? [wd({ op: "force_modify", forceRef: force.id, hold: false, reason: `${force.name} takes the field again.` })] : [];
+  const reach = reachOf(ctx, here, REACH_KM, true);
+  // A hold the plan laid is lifted when the army is to act: an army on hold starts no battle, and the engine refuses it.
+  const unhold: WorldDelta[] = force.hold === true ? [wd({ op: "force_modify", forceRef: force.id, hold: false, reason: `${force.name} takes the field again.` })] : [];
   const modeWants = cp.mode === "seek_battle" ? 0.9 : cp.mode === "refuse" || cp.mode === "garrison" || cp.mode === "winter" ? 1.4 : 1.1;
 
   // The enemy is here: give battle, or give way, or keep the town.
@@ -359,7 +365,7 @@ export function conductByPlan(ctx: ConductContext, force: Force, cp: CampaignPla
   const month2 = month;
   const reachable = reach.has(objective) || passagePlanFor(world, force, objective, ctx.warfare, month2) !== null;
   if (!reachable) return null;
-  const kmAway = reach.get(objective) ?? kmFrom(world, here, { budgetKm: 2_000 }).get(objective) ?? 0;
+  const kmAway = reach.get(objective) ?? reachOf(ctx, here, 1_500, false).get(objective) ?? 0;
   const why = cp.objective.kind === "army"
     ? `${roughMen(menAt(objective))} of the enemy are at ${placeName(ctx, objective)}, ${Math.round(kmAway)} km off, and we are the stronger`
     : cp.mode === "winter" ? `to quarters at ${placeName(ctx, objective)}` : cp.mode === "garrison" || cp.mode === "refuse" ? `to keep ${placeName(ctx, objective)}` : `${placeName(ctx, objective)} is ${Math.round(kmAway)} km off, by the orders given`;
@@ -381,7 +387,7 @@ export function besiegerOrder(ctx: StrategyContext, force: Force): StatecraftDec
   const temper = temperOf(commander);
   const men = fitStrengthOf(force);
   const garrison = world.material.forces.filter((other) => other.locationId === siege.provinceId && other.polityId === siege.defenderPolityId && fitStrengthOf(other) > 0).reduce((sum, other) => sum + fitStrengthOf(other), 0);
-  const near = kmFrom(world, siege.provinceId, { budgetKm: 300, ...BY_LAND });
+  const near = reachOf(ctx, siege.provinceId, 300, true);
   const reliefMen = enemyArmies(ctx).filter((other) => other.locationId !== siege.provinceId && near.has(other.locationId)).reduce((sum, other) => sum + fitStrengthOf(other), 0);
   const day = world.instant.day;
   const starving = force.provisionStatus === "critical";
@@ -391,7 +397,7 @@ export function besiegerOrder(ctx: StrategyContext, force: Force): StatecraftDec
   // Leave it: a relief that will crush the lines, or no bread and no hope of the walls.
   if (reliefMen >= men * 1.5 || (starving && siege.pressureBps < 8_000)) {
     if (temper.careful >= 40 || starving) {
-      const home = [...kmFrom(world, siege.provinceId, { budgetKm: 600, ...BY_LAND })].filter(([id]) => ctx.provinces.get(id)?.controllerPolityId === ctx.polityId).sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? null;
+      const home = [...reachOf(ctx, siege.provinceId, 600, true)].filter(([id]) => ctx.provinces.get(id)?.controllerPolityId === ctx.polityId).sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? null;
       return decide(ctx, force, "fall_back", siege.defenderPolityId, `${starving ? "the bread is gone" : `${roughMen(reliefMen)} are coming to the relief`}: he raises the siege of ${place} rather than be caught between`, [
         wd({ op: "siege_lift", siegeRef: siege.id, reason: `${force.name} raises the siege of ${place} before ${starving ? "hunger takes the lines" : "the relief comes up"}.` }),
         ...(home === null ? [] : [wd({ op: "force_modify", forceRef: force.id, locationId: home, reason: `${force.name} draws off.` })]),

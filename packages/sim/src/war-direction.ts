@@ -16,9 +16,9 @@ import {
   type WorldDelta,
   type WorldState,
 } from "@chronica/shared";
-import { besiegerOrder, campaignStillGood, conductByPlan, issueCampaign, type OrderSets } from "./campaign-orders";
+import { REACH_KM, besiegerOrder, campaignStillGood, conductByPlan, issueCampaign, type OrderSets } from "./campaign-orders";
 import { commandTenureOf } from "./constitutions";
-import { landForcesOf, planTheWar, type StrategyContext } from "./grand-strategy";
+import { landForcesOf, planTheWar, reachOf, theatresForAims, type StrategyContext } from "./grand-strategy";
 import { fleetOrder, navalForces, navalPlanFor } from "./naval-orders";
 import type { StatecraftDecision } from "./statecraft";
 
@@ -59,7 +59,7 @@ const isModels = (input: DirectInput, force: WorldState["material"]["forces"][nu
 export function directTheWar(input: DirectInput): StatecraftDecision[] {
   const { world, polityId, ruler } = input;
   const provinces = new Map(world.map.provinces.map((province) => [province.id, province] as const));
-  const ctx: StrategyContext = { world, gameId: input.gameId, polityId, ruler, enemies: input.enemies, warfare: input.warfare, clock: input.clock, provinces };
+  const ctx: StrategyContext = { world, gameId: input.gameId, polityId, ruler, enemies: input.enemies, warfare: input.warfare, clock: input.clock, provinces, reaches: new Map() };
   const day = world.instant.day;
   const decisions: StatecraftDecision[] = [];
   const mine = landForcesOf(world, polityId, input.warfare).filter((force) => !isHis(input, force) && force.private !== true);
@@ -84,10 +84,12 @@ export function directTheWar(input: DirectInput): StatecraftDecision[] {
     // A plan the model's man laid down stands for a while; the rules do not unwrite what he wrote.
     const modelMade = existing !== undefined && existing.issuedByCharacterId !== null && input.playedByModel.has(existing.issuedByCharacterId) && day - existing.aimsSetAtStep < MODEL_PLAN_DAYS;
     const free = mine.filter((force) => !claimed.has(force.id));
-    const planned = modelMade ? { plan: existing, changed: false, rebuilt: false, why: "" } : planTheWar(wctx, enemy, war, existing, free, campaigns);
+    const planned = modelMade
+      ? { plan: existing.theatres.length > 0 ? existing : { ...existing, theatres: theatresForAims(wctx, existing.aims, free, [], campaigns) }, changed: false, rebuilt: false, why: "" }
+      : planTheWar(wctx, enemy, war, existing, free, campaigns);
     // The sea part of the plan: what the fleets are for. Armies that no road reaches want ships.
     const unreachable = planned.plan.aims.filter((aim) => aim.provinceId !== undefined && aim.kind !== "hold_province"
-      && free.length > 0 && !kmFrom(world, free[0]!.locationId, { budgetKm: 1_500, passable: (edge) => edge.crossing !== "sea_lane" && edge.crossing !== "strait" }).has(aim.provinceId)).map((aim) => aim.provinceId!);
+      && free.length > 0 && !reachOf(ctx, free[0]!.locationId, REACH_KM, true).has(aim.provinceId)).map((aim) => aim.provinceId!);
     const naval = modelMade ? existing.navalPlan : navalPlanFor(wctx, planned.plan, unreachable);
     const plan: WarPlan = { ...planned.plan, ...(naval === undefined ? {} : { navalPlan: naval }) };
     if (naval === undefined && "navalPlan" in plan) delete (plan as { navalPlan?: unknown }).navalPlan;
@@ -121,7 +123,7 @@ export function directTheWar(input: DirectInput): StatecraftDecision[] {
     const issuer = tenure === "indefinite_answerable" && lead !== null && lead !== force.commanderCharacterId ? lead
       : tenure === "annual_prorogable" || tenure === "annual_no_iteration" ? (force.controllerCharacterId ?? force.commanderCharacterId)
       : ruler.id;
-    const reach = kmFrom(world, force.locationId, { budgetKm: 1_200, passable: (edge) => edge.crossing !== "sea_lane" && edge.crossing !== "strait" });
+    const reach = reachOf(ctx, force.locationId, REACH_KM, true);
     let cp: CampaignPlan | undefined = existing;
     const good = existing !== undefined && campaignStillGood(wctx, force, existing, plan, theatre, input.playedByModel, reach);
     if (!good) {
@@ -143,11 +145,8 @@ export function directTheWar(input: DirectInput): StatecraftDecision[] {
       if (order !== null) decisions.push(order);
       continue;
     }
-    const heldByPlan = force.hold === true && cp !== undefined && (cp.mode === "refuse" || cp.mode === "garrison");
-    if (force.hold === true && !heldByPlan && !(cp !== undefined && cp.mode === "winter")) {
-      // Held by somebody's order and not by the plan: not ours to lift.
-      continue;
-    }
+    // An army on hold with no orders is held by somebody's word, and is not ours to lift; with orders, the hold is the plan's own (it is laid to refuse battle in a town and lifted when the army is to act).
+    if (force.hold === true && cp === undefined) continue;
     const order = cp === undefined ? input.legacy(force) : conductByPlan({ ...wctx, sets: input.sets }, force, cp, input.gameId);
     if (order !== null) decisions.push(order);
   }
@@ -196,11 +195,10 @@ function directFollower(input: DirectInput, ctx: StrategyContext, mine: readonly
   const orders = (world.campaigns ?? []).filter((entry) => entry.polityId === leader && entry.expiresStep > day && (entry.mode === "seek_battle" || entry.mode === "siege" || entry.mode === "raid"))
     .sort((a, b) => Number(b.theatreId === main) - Number(a.theatreId === main) || a.forceId.localeCompare(b.forceId));
   const decisions: StatecraftDecision[] = [];
-  const passable = { passable: (edge: { readonly crossing: string }) => edge.crossing !== "sea_lane" && edge.crossing !== "strait" };
   for (const force of mine) {
     if (isModels(input, force)) continue;
     const kept = campaignOf(world, force.id);
-    const reach = kmFrom(world, force.locationId, { budgetKm: 1_200, ...passable });
+    const reach = reachOf(ctx, force.locationId, REACH_KM, true);
     const good = kept !== undefined && leaderPlan !== undefined && kept.warId === leaderPlan.warId && campaignStillGood(ctx, force, kept, leaderPlan, undefined, input.playedByModel, reach);
     let cp: CampaignPlan | undefined = good ? kept : undefined;
     const given = orders[0];
@@ -208,12 +206,14 @@ function directFollower(input: DirectInput, ctx: StrategyContext, mine: readonly
       cp = { ...given, forceId: force.id, polityId, theatreId: null, issuedByCharacterId: given.issuedByCharacterId, issuedStep: day, expiresStep: day + 120 };
       decisions.push(campaignDecision(input, given.issuedByCharacterId, force, cp, "bidden to serve with the leader's army", leaderPlan.enemyPolityId));
     }
-    if (input.sets.marching.has(force.id) || input.sets.fighting.has(force.id) || force.hold === true) continue;
+    if (input.sets.marching.has(force.id) || input.sets.fighting.has(force.id) || (force.hold === true && cp === undefined)) continue;
     if (input.sets.besieging.has(force.id)) {
       const order = besiegerOrder(ctx, force);
       if (order !== null) decisions.push(order);
       continue;
     }
+    // In winter the leader's army is in quarters and so are his allies: with nothing to follow they stay.
+    if (cp === undefined && (world.campaigns ?? []).some((entry) => entry.polityId === leader && entry.mode === "winter" && entry.expiresStep > day)) continue;
     const order = cp === undefined ? input.legacy(force) : conductByPlan({ ...ctx, sets: input.sets }, force, cp, input.gameId);
     if (order !== null) decisions.push(order);
   }

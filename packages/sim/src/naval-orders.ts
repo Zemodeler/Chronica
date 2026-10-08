@@ -13,7 +13,7 @@ import {
 } from "@chronica/shared";
 import { roughMen } from "./board";
 import { chooseBattlePlan, temperOf } from "./battle-plan";
-import { monthOf, type StrategyContext } from "./grand-strategy";
+import { monthOf, reachOf, type StrategyContext } from "./grand-strategy";
 import type { OrderSets } from "./campaign-orders";
 import type { StatecraftDecision } from "./statecraft";
 
@@ -43,7 +43,7 @@ export function navalPlanFor(ctx: StrategyContext, plan: WarPlan, landUnreachabl
   if (mine.length === 0) return undefined;
   const ours = mine.reduce((sum, force) => sum + fitStrengthOf(force), 0);
   const theirs = ctx.world.material.forces.filter((force) => ctx.enemies.has(force.polityId) && force.outlaw !== true && fitStrengthOf(force) > 0 && isNavalForce(force, ctx.warfare));
-  const reach = kmFrom(ctx.world, mine[0]!.locationId, { budgetKm: SEA_SIGHT_KM * 1.5 });
+  const reach = reachOf(ctx, mine[0]!.locationId, SEA_SIGHT_KM * 1.5, false);
   const near = theirs.filter((force) => reach.has(force.locationId));
   const nearMen = near.reduce((sum, force) => sum + fitStrengthOf(force), 0);
   const temper = temperOf(ctx.world.characters.find((character) => character.id === mine[0]!.commanderCharacterId));
@@ -55,7 +55,7 @@ export function navalPlanFor(ctx: StrategyContext, plan: WarPlan, landUnreachabl
     const province = ctx.provinces.get(id);
     return province !== undefined && province.controllerPolityId !== null && ctx.enemies.has(province.controllerPolityId) && isPortProvince(ctx, id);
   }).sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0])).slice(0, 3).map(([id]) => id);
-  if (ports.length > 0 && plan.posture !== "defend") return { kind: "blockade", seaProvinceIds: ports };
+  if (ports.length > 0 && (plan.posture !== "defend" || near.length === 0)) return { kind: "blockade", seaProvinceIds: ports };
   return undefined;
 }
 
@@ -73,7 +73,7 @@ export function fleetOrder(ctx: StrategyContext, force: Force, plan: WarPlan | u
   const here = force.locationId;
   const season = sailingSeason(month);
   const enemyFleets = world.material.forces.filter((other) => ctx.enemies.has(other.polityId) && other.outlaw !== true && fitStrengthOf(other) > 0 && isNavalForce(other, ctx.warfare));
-  const reach = kmFrom(world, here, { budgetKm: SEA_SIGHT_KM });
+  const reach = reachOf(ctx, here, SEA_SIGHT_KM, false);
   const harbour = (): string | null => [...reach].filter(([id]) => id !== here && ctx.provinces.get(id)?.controllerPolityId === ctx.polityId && isPortProvince(ctx, id)).sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? null;
 
   // An enemy fleet on the same water: fight it if we are the stronger, or draw off to a harbour.

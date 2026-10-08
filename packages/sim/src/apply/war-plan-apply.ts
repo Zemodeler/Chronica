@@ -62,11 +62,11 @@ export function applyWarPlanSet(world: WorldState, delta: WarPlanSet, handles: H
   const aimsKey = (aims: readonly WarPlan["aims"][number][]): string => JSON.stringify(aims.map((aim) => `${aim.kind}:${aim.provinceId ?? ""}:${aim.polityId ?? ""}`).sort());
   const atStep = world.elapsedStep;
   const plan: WarPlan = {
-    warId: war!.id, polityId, enemyPolityId: enemyId, aims: delta.aims, theatres, posture: delta.posture,
+    warId: war!.id, polityId, enemyPolityId: enemyId, aims: delta.aims.map((aim) => (aim.polityId === undefined && (aim.kind === "sue_for_peace" || aim.kind === "break_army") ? { ...aim, polityId: enemyId } : aim)), theatres, posture: delta.posture,
     ...(delta.navalPlan === undefined ? {} : { navalPlan: { ...delta.navalPlan, seaProvinceIds: delta.navalPlan.seaProvinceIds.filter((id) => known.has(id)) } }),
     reviewedAtStep: atStep,
     aimsSetAtStep: atStep,
-    aimsChangedAtStep: before !== undefined && aimsKey(before.aims) === aimsKey(delta.aims) ? before.aimsChangedAtStep : atStep,
+    aimsChangedAtStep: before !== undefined && aimsKey(before.aims) === aimsKey(delta.aims) && before.posture === delta.posture ? before.aimsChangedAtStep : atStep,
     issuedByCharacterId: handles.actorId,
   };
   const main = theatres.find((theatre) => theatre.mainEffort);

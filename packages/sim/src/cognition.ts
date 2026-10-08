@@ -2,6 +2,7 @@ import { LARGE_MATTERS, adviceOnALetter, letterVerdict } from "./letter-verdict"
 import { conductInWords } from "./nature";
 import { z } from "zod";
 import {
+  shownWarPlanVariant,
   CognitionOutputSchema,
   ORDER_PART_STATUS_LABEL,
   orderPartStatus,
@@ -91,7 +92,7 @@ function shownSchema(): string {
   // terms of a trade pact or the offer of a loan to a state. The parser above still reads them, and the engine sets them aside.
   const defs = (schema.$defs as { WorldDelta?: { oneOf?: Record<string, unknown>[] } } | undefined)?.WorldDelta;
   if (defs?.oneOf !== undefined) {
-    defs.oneOf = defs.oneOf.filter((variant) => !ROUTINE_OPS.has(String(((variant.properties as Record<string, { const?: unknown }> | undefined)?.op)?.const)));
+    defs.oneOf = defs.oneOf.filter((variant) => !ROUTINE_OPS.has(String(((variant.properties as Record<string, { const?: unknown }> | undefined)?.op)?.const))).map((variant) => shownWarPlanVariant(variant) as Record<string, unknown>);
     for (const variant of defs.oneOf) {
       const fields = variant.properties as Record<string, { const?: unknown }> | undefined;
       if (fields?.op?.const === "agreement_open") delete fields.trade;
@@ -227,8 +228,7 @@ Keep answers compact: write the decision and its meaningful consequences, not a
 review of the supplied context. For each person write "reasoning": one sentence,
 under 35 words, saying why they chose as they did, in plain words -- the
 Chronicle tells it as their reason. Do not write narrativeSummary.
-Usually one concise fact records one distinct event; do not restate the same
-event as several facts. Preserve motives that explain a choice, important spoken
+One fact records one event. Preserve motives that explain a choice, important spoken
 words, secrecy, affected people and consequences: these feed the Chronicle.
 Leave empty optional collections empty. Never shorten an answer by dropping a
 necessary act, treaty term, dependency or consequence.
@@ -244,20 +244,7 @@ For each person, decide what they actually do now. Nobody is here by accident, a
 their business truly waits. Where a section says what lies open to them, take one,
 do better, or decline it knowing what they decline. Play people as they are: the ambitious reach, the cruel are cruel.
 
-That is also an answer for someone whose business is waiting on a real dependency.
-Do not invent activity to fill a round. It is otherwise rarely the answer for
-someone whose section says nobody has brought them news: they are in the batch
-because they have a war to press, a promise to keep, a city to hold or a rival to
-manage, and a month of their own is not nothing. Move their business on by a step
-they could actually take from where they stand -- an act the world takes: an
-army moved or engaged, a letter sent, money spent, a man hired, a question put
-to a chamber -- with the fact that says it happened beside it. Reviewing, maintaining and reaffirming change nothing; an answer of only those is "nothing". Waiting on a courier,
-reply or vote is legitimate: leave the actor out until it arrives or its deadline
-expires, and make the plan depend on that exact letter ("letter_answered", with
-"messageId") or question, with "afterConditionDays" for the time to act after
-the reply arrives. Never count another version of an outstanding request
-as progress. Each actor carries their own responsibility forward: a negotiator
-settles terms, a commander prepares or moves troops. Shared government aims do not require everyone to negotiate them. They do not know what the ruler is doing. Business that will take months is a plan: give it in
+That is also an answer for someone whose business waits on a real dependency; do not invent activity to fill a round. Otherwise it is rarely the answer for someone with a war to press, a promise to keep, a city to hold or a rival to manage: move their business on by a step they could take from where they stand -- an army moved or engaged, a letter sent, money spent, a man hired, a question put to a chamber -- with the fact that says it happened beside it. Reviewing, maintaining and reaffirming change nothing. Waiting on a courier, reply or vote is legitimate: leave the actor out until it arrives or its deadline expires, and make the plan depend on that exact letter ("letter_answered", with "messageId") or question, with "afterConditionDays" for the time to act after the reply. Never count another version of an outstanding request as progress. Each actor carries their own responsibility forward: a negotiator settles terms, a commander moves troops; they do not know what the ruler is doing. Business that will take months is a plan: give it in
 "plan" as up to four steps in order, each an act of that kind, with the days
 by which it should be done and, if it must wait for something, "when". What an act
 is for goes in "serves": the step's, order's or promise's id, and the act's place in "deltas"; only
@@ -268,11 +255,10 @@ and if it is theirs -- their office, their army -- it is their plan.
 For a step whose work is already approved and running as a project, name that
 project in routineProjectRef (an existing id, or local:handle of a project made
 in this answer). The engine carries its stages, payments and travel through and
-marks the step done when the project completes; do not redo the work. Only use
-this for a step with no further dependency (when: null). Use null
-for steps that still need a decision. Failed or overdue projects need a decision.
+marks the step done when the project completes; do not redo the work. Use it only
+for a step with no further dependency (when: null); failed or overdue projects need a decision.
 
-Someone may act within their authority, beyond it, or against it: a general may march without orders, an official quietly divert funds, a senator oppose the policy he was told to support. None is invalid; it is what makes the world political. Do it anyway and record it honestly as a fact.
+Someone may act within their authority, beyond it, or against it -- a general may march without orders, an official divert funds, a senator oppose his party's policy. None is invalid: do it, and record it honestly as a fact.
 
 The same engine rules apply as elsewhere:
 
@@ -345,17 +331,8 @@ The same engine rules apply as elsewhere:
   entry per direction that changed, scored -20 to 20 with the dimensions it
   moves (trust, respect, fear, affection, obligation). A season in which
   nobody's opinion of anybody moved is a season nobody lived through.
-- And where somebody has now seen enough of another person to say what they
-  are like, put it in that same event's "observedTraits": the person judged,
-  the person judging, and one of cautious, bold, ambitious, dutiful, vengeful,
-  sociable, disciplined, deceitful, compassionate, cruel -- those ten words
-  and no others. Say only what this person actually saw. It takes two different people to make it true.
-- Something they have found out that somebody did without the authority to do
-  it is theirs to make of what they will. They may sit on it, tell somebody
-  ("belief_set"), demand an accounting, or put it to the body that can judge it
-  ("political_procedure_open"). Whatever they do, write what *they* did as a
-  fact in their own words: the ledger entry that caught it is not the event, and
-  a man saying so is.
+- Where somebody has seen enough of another to say what they are like, put it in that event's "observedTraits": the person judged, the person judging, and one of cautious, bold, ambitious, dutiful, vengeful, sociable, disciplined, deceitful, compassionate, cruel -- no other word. Say only what they actually saw.
+- Something they have found out that somebody did without authority is theirs to make of what they will: sit on it, tell somebody ("belief_set"), demand an accounting, or put it to the body that can judge it ("political_procedure_open"). Write what *they* did as a fact in their own words; the ledger entry that caught it is not the event.
 - An order or a request put to them is theirs to answer: "order_attempt_decide",
   naming it and saying why in their own words. "accept" means they do it -- so
   actually do it, in the same answer, with the deltas it takes. "refuse",
@@ -364,15 +341,7 @@ The same engine rules apply as elsewhere:
   refusing. "subvert" is appearing to comply and doing otherwise. Answer every
   one of them: an order left unanswered is simply put to them again next time.
   A refusal is an event the giver hears of.
-- A letter put to them is theirs to answer: "diplomatic_message_answer", naming
-  the letter, accepting, refusing or countering it, and saying why in their own
-  words. Answer it as the person who received it, weighing what it would cost
-  them -- not as the power that sent it would like. Accepting an offer makes
-  the agreement it offered; where it offered more than one, name the one taken
-  in "agreementKind". To counter, answer
-  "countered" and send a letter back with "diplomatic_message_send" in the same
-  breath, naming the original in "inReplyToRef". They may also write first, to
-  anyone they have reason to.
+- A letter put to them is theirs to answer: "diplomatic_message_answer", naming it, accepting, refusing or countering, and saying why in their own words -- as the person who received it, weighing what it would cost them, not as the sending power would like. Accepting makes the agreement offered; where it offered more than one, name the one taken in "agreementKind". To counter, answer "countered" and send a letter back with "diplomatic_message_send" in the same breath, naming the original in "inReplyToRef". They may also write first, to anyone they have reason to.
 
 Answer with a single JSON object and nothing else, matching this schema:
 

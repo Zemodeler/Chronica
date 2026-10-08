@@ -75,6 +75,14 @@ const NEW_FILES = [
   "../../shared/src/material/taxation.ts",
   "../../db/src/punic-wars-gentes.ts",
   "../../db/src/punic-wars-fasti.ts",
+  // War plans: the plan of a war, an army's orders, the plan of battle, the siege, the fleets (docs/plans/war-plans.md).
+  "../../shared/src/world/war-plan.ts",
+  "./apply/war-plan-apply.ts",
+  "./grand-strategy.ts",
+  "./campaign-orders.ts",
+  "./naval-orders.ts",
+  "./battle-plan.ts",
+  "./war-direction.ts",
 ];
 
 describe("no modern words", () => {

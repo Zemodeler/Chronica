@@ -44,8 +44,7 @@ The engine owns arithmetic, dates, identity and persistence. So:
 - Say what sort of person they are in "standing" -- "a merchant of Ostia", "a
   common soldier", "senatorial" -- and what they are worth in "wealth". The first bounds the second: a ranker has no senator's fortune, and a lender you invent must have something to lend.
 
-How to answer well. Twelve principles say how to use the fields. Where a case is not named here, apply the
-principle it falls under.
+How to answer well. Twelve principles say how to use the fields; a case not named falls under one.
 
 1. Read intent, then do it.
    Preserve an explicit decision to break a treaty: arrange contact, lift hold
@@ -71,7 +70,7 @@ principle it falls under.
    "whenForceExists" (a future force name), with its actions in "deferredActs"
    instead of immediate "deltas". Routine officers handle it when ready.
    Never refuse a possible act because it starts a war, breaks a treaty or goes
-   against usual policy: the person ordering sets policy. A part's "stance" is "declare" where the player says he does it ("I declare war", "I order") and "propose" where he moves it ("propose", "ask the Senate"); omit it where the words say neither. Do the steps it needs
+   against usual policy: the person ordering sets policy. A part's "stance" is "declare" where the player says he does it ("I declare war") and "propose" where he moves it ("propose", "ask the Senate"); else omit it. Do the steps it needs
    (declare war, break peace, lift a hold), then the act. An impossible or
    absurd part gets a plain "whyNot" and no acts, never another part's acts;
    difficulty or delay is no "whyNot": act now, time does the rest.
@@ -91,7 +90,7 @@ principle it falls under.
    Men, money and ground answer to whoever commands them: an order to an army,
    a treasury or a province that is somebody else's is carried out only if the
    one it depends on would do it anyway -- kin, a friend, a man who wanted it
-   already -- and the engine decides that; otherwise it is refused openly. An instruction to a person is a "delegation", naming its "part":
+   already -- and the engine decides that; otherwise it is refused openly. An instruction to a person is a "delegation", naming its "part"; bread for an army is one with ask {"kind":"supply","ref":the army,"amount":days}, never also "force_provision":
    they answer in their own turn, and you never write their compliance. A
    person's own words, letters, opinions and what he pays for himself are his
    own business; a seat is taken only by whoever may fill it, or
@@ -209,13 +208,11 @@ principle it falls under.
    in the next battle is "force_membership_set" "conduct". A city is not its province: it can be taken
    or held under siege on its own, and is "sacked" only if stormed. A man hired
    -- a captain and his "company", a physician, an envoy, a tax farmer -- is
-   "service_contract_open": the engine pays him. Pirates and brigands answer to no power:
-   "outlaw", privately paid.
+   "service_contract_open": the engine pays him.
 
 12. The world moves on its own. THE WORLD STIRS is the world acting beside
    the order: carry each seed out as deltas, give it facts that name who and
-   where it touches (never the player as its author, and apart from the order's
-   own facts), and open its thread with "storyline_open" and the seedKey shown. DUE NOW is the world's own promise
+   where it touches (never naming the player its author), and open its thread with "storyline_open" and the seedKey shown. DUE NOW is the world's own promise
    falling due: carry it out. All of this, and every other power's own
    business, goes in "worldDeltas", never "deltas". OPEN THREADS advance with "storyline_advance"
    and close when over -- one thread per matter, never one for the order

@@ -178,6 +178,10 @@ const FIXTURES: Readonly<Record<string, Record<string, unknown>>> = {
     op: "character_state_set", characterRef: "mamertine-spokesman", polityId: HANDLE,
     reason: "The spokesman throws in his lot with the city.",
   },
+  "war_plan_set.polityId": {
+    op: "war_plan_set", polityId: HANDLE, enemyPolityId: "syracuse", aims: [{ kind: "sue_for_peace" }], posture: "defend",
+    reason: "The city means to stand, and to ask for peace.",
+  },
   "polity_create.breaksFromPolityId": {
     op: "polity_create", localId: "a_further_rising", name: "The Sons of Messana",
     breaksFromPolityId: HANDLE, provinceIds: [MESSANA], capitalSettlementId: null,
@@ -232,7 +236,7 @@ describe("what the engine can make, the same answer can name", () => {
       expect(unsayable).toBeNull();
       // The refusal this is really about is "no such power exists" for a power
       // that was made four lines earlier.
-      expect(refusals).toEqual([]);
+      expect(refusals.filter((reason) => !/there is no war to plan/.test(reason))).toEqual([]);
     });
   }
 });

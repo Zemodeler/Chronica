@@ -110,6 +110,14 @@ for (let month = 0; month < years * 12; month += 1) {
   if ((month + 1) % 12 === 0) {
     const r = perYear[year]!;
     const army = world.material.forces.filter((f) => !isNavalForce(f, definition.warfare) && fitStrengthOf(f) > 0).length;
+    if (args.includes("--armies")) {
+      const campaigns = (world as unknown as { campaigns?: { forceId: string; mode: string; objective: { kind: string; provinceId?: string; forceId?: string }; expiresStep: number }[] }).campaigns ?? [];
+      const atWarWith = new Set(world.polityAgreements.filter((agreement) => agreement.kind === "war" && agreement.status === "active").flatMap((agreement) => [agreement.polityId, agreement.otherPolityId]));
+      for (const force of world.material.forces.filter((f) => atWarWith.has(f.polityId) && !isNavalForce(f, definition.warfare) && fitStrengthOf(f) > 0).slice(0, 40)) {
+        const cp = campaigns.find((c) => c.forceId === force.id);
+        console.log(`    ${force.polityId.padEnd(22)} ${force.name.slice(0, 30).padEnd(30)} ${String(fitStrengthOf(force)).padStart(6)} at ${force.locationId} ${cp === undefined ? "no orders" : `${cp.mode} ${cp.objective.provinceId ?? cp.objective.forceId} (to ${cp.expiresStep})`}${force.hold === true ? " HOLD" : ""}`);
+      }
+    }
     console.log(`${formatWorldDate(world.instant, definition.clock)}: wars ${r.wars}, battles (cum) ${r.battles}, engagements opened ${r.engagements}, sieges laid ${r.sieges}, march orders ${r.orders} (flips ${r.flips}), plan shifts ${r.planShifts}, objective changes ${r.retargets}, modes ${modeCount()}, naval moves ${r.naval}, men under arms ${r.men}, armies ${army}, cpu/month ${(r.cpu / 12).toFixed(0)} ms`);
   }
 }
