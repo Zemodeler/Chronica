@@ -180,6 +180,26 @@ export function emitFacts(drafts: readonly FactDraft[], idFactory: () => string)
   return drafts.map((draft) => FactSchema.parse({ ...draft, id: idFactory() }));
 }
 
+/** The calendar's own facts: terms run out, elections called and held, seats filled, harvests, the census. */
+export const ROUTINE_NEWS_KINDS: ReadonlySet<string> = new Set([
+  "office_term_ended", "election_called", "election_held", "election_failed", "office_filled", "office_taken_up", "office_lapsed",
+  "harvest", "harvest_failed", "lustrum", "census", "census_taken",
+]);
+
+/**
+ * Whether a fact is the routine calendar of a power the observer has no part in: none of what it names is his, his polity or a man who answers to him, and he did not
+ * himself find it out. Only news near him, or touching his charge, his army or his purse, surfaces.
+ */
+export function isFarRoutine(fact: Fact, observer: OrderPartyRef, observerPolityId: string | null, world?: NewsWorld): boolean {
+  if (!ROUTINE_NEWS_KINDS.has(fact.kind) || observerPolityId === null) return false;
+  // Where nobody can say whose a man named in it is, it is not judged far.
+  if (world === undefined) return false;
+  // A man named in it who is of the observer's own power makes it his city's calendar.
+  if (fact.affectedEntities.some((entity) => entity.kind === "character" && world.characters.some((person) => person.id === entity.id && person.polityId === observerPolityId))) return false;
+  if (fact.discovery.discoveredBy.some((found) => found.observerRef.kind === observer.kind && found.observerRef.id === observer.id)) return false;
+  return !fact.affectedEntities.some((entity) => (entity.kind === "polity" && entity.id === observerPolityId) || (entity.kind === observer.kind && entity.id === observer.id));
+}
+
 /**
  * What an observer knows, including what their own polity knows.
  *
@@ -205,6 +225,8 @@ export function factsKnownTo(
 ): Fact[] {
   const alreadyVisible = new Set<Fact>(factsVisibleTo(facts, observer, atInstant, world));
   return facts.filter((fact) => {
+    // The calendar's business of powers that are not his (a far people's yearly election, a harvest, a census) is not news to him: a turn was 100 to 600 of them.
+    if (isFarRoutine(fact, observer, observerPolityId, world)) return false;
     if (alreadyVisible.has(fact)) return true;
     if (fact.visibility !== "polity") return false;
     const ours = fact.affectedEntities.some(

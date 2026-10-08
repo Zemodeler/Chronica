@@ -42,6 +42,11 @@ const NEW_FILES = [
   "./close-of-office.ts",
   // H6: the lectio and the censors' mark, the Senate's provinces, the quorum of a chamber, the friends of a king and their envy.
   "./the-lectio.ts",
+  // Playtest fixes (batch 1).
+  "./safe-local-id.ts",
+  "./clip-overlong.ts",
+  "./order-lines.ts",
+  "../../shared/src/characters/declared-kin.ts",
   "./nota.ts",
   "./the-provinces.ts",
   "./quorum.ts",

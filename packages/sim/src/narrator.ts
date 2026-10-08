@@ -803,7 +803,8 @@ export function readPersonalTension(world: WorldState, playerCharacterId: string
   const obligations = world.material.obligations.filter((obligation) => obligation.active && obligation.payerAccountId === purse?.id);
   const monthly = obligations.reduce((sum, obligation) => sum + (obligation.cadenceSteps <= 0 ? 0 : obligation.amount / obligation.cadenceSteps) * 30, 0);
   const balance = purse?.balance ?? 0;
-  const runwayMonths = monthly <= 0 ? (balance > 0 ? 6 : 0) : balance / monthly;
+  // With nothing owed, a purse is as full as it is: seven hundred drachmae of a condemned man was "full" for want of a bill to measure it by.
+  const runwayMonths = monthly <= 0 ? (balance >= 3_000 ? 6 : balance >= 500 ? 3 : 0) : balance / monthly;
   const treasury = clamp01(runwayMonths / 6);
   const missed = obligations.filter((obligation) => obligation.missedPeriods > 0).length
     + world.material.loans.filter((loan) => loan.borrowerAccountId === purse?.id && loan.status === "defaulted").length;
