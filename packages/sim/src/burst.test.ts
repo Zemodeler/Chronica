@@ -3,6 +3,7 @@ import { firstPunicWarScenario, FIRST_PUNIC_IDS } from "@chronica/db";
 import { FactSchema, ScenarioDefinitionSchema, WorldStateSchema, answerDueOf, factsKnownTo, factsVisibleTo, type Office, type ScenarioClock, type WorldState } from "@chronica/shared";
 import { DEFAULT_BUDGET, runSimulationBurst, type BurstInput, type WindowSnapshot } from "./burst";
 import { NEVER_PUBLISHED, composeChronicle } from "./chronicle";
+import { withPlans } from "./askable-test-kit";
 import type { SimModelPort, SimOperation } from "./ports";
 
 const definition = ScenarioDefinitionSchema.parse(firstPunicWarScenario.definition);
@@ -1023,10 +1024,11 @@ describe("the burst hands out its windows as the clock leaves them", () => {
 describe("calls the burst decides not to make", () => {
   it("does not ask a cast of nobody pressing past the rounds it pays for, and says so", async () => {
     const port = scriptedPort({ simulate_orchestrate: [QUIET], simulate_cognition: [QUIET, QUIET, QUIET, QUIET] });
-    const result = await runSimulationBurst(input(port, { budget: { ...DEFAULT_BUDGET, maxAmbientOnlyRounds: 0 } }));
+    // Four men near the consul have a plan of their own, none of its steps due: askable on their own business, and none of them pressing.
+    const result = await runSimulationBurst(input(port, { world: withPlans(world(), "marcus-atilius"), spanDays: 5, budget: { ...DEFAULT_BUDGET, maxAmbientOnlyRounds: 0 } }));
     expect(port.calls.filter((call) => call === "simulate_cognition")).toHaveLength(0);
     expect(result.skipped.some((skip) => skip.stage === "cognition" && skip.reason.includes("nobody pressing"))).toBe(true);
-    expect(result.stopReason).toBe("no_due_events");
+    expect(result.stopReason).toBe("max_span");
   });
 
   it("still asks when somebody is pressing, however many quiet rounds went before", async () => {

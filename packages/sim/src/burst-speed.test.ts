@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { punicWarsScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial } from "@chronica/shared";
 import { DEFAULT_BUDGET, runSimulationBurst } from "./burst";
+import { withACast } from "./askable-test-kit";
 import type { SimModelPort } from "./ports";
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
@@ -25,7 +26,7 @@ describe("parallel requests do not spend later decisions' allowance", () => {
           throw new Error(`Unexpected ${operation}`);
         },
       };
-      const result = await runSimulationBurst({ world: ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0),
+      const result = await runSimulationBurst({ world: withACast(ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0), "gaius-genucius", 12),
         clock: definition.clock, offices: definition.government.offices, warfare: definition.warfare,
         burstId: "parallel-budget", gameId: "parallel-budget", actorRef: { kind: "character", id: "gaius-genucius" }, actorPolityId: "rome",
         orderText: "Wait for events.", spanDays: 14, knownFacts: [], queue: [], port, narratorSeeds: [],

@@ -12,7 +12,7 @@ import { ElapsedStepSchema, EntityIdSchema } from "../material-state";
  * the line -- so a man does not flicker in and out of the story.
  */
 
-export const CastSeatSchema = z.enum(["nemesis", "chain", "world", "open"]);
+export const CastSeatSchema = z.enum(["nemesis", "chain", "friend", "world", "open"]);
 export type CastSeat = z.infer<typeof CastSeatSchema>;
 
 export const CastMemberSchema = z

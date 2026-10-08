@@ -97,6 +97,23 @@ export function lettersOwed(world: WorldState, clock: ScenarioClock, excludeIds:
   return owed;
 }
 
+/**
+ * A letter that has reached a man the model is never asked about (he is far from the player, of no cast, with no plot of his own) is read by the rules on the day it
+ * comes: `answerByRule` answers it where there is a verdict to give, and past its term his silence is his own (`tick.ts`). Left unread it waited for ever for a turn
+ * that would not come, or woke a far man round after round (the user's rule: far people are never asked). Marked as put to him, once.
+ */
+export function readByTheRules(world: WorldState, detailOf: (characterId: string) => "personal" | "regional" | "background"): WorldState {
+  const today = world.instant.day;
+  let changed = false;
+  const diplomacy = world.diplomacy.map((message) => {
+    if (message.status !== "awaiting_reply" || message.putToRecipientOnDay != null || message.heldAnswer !== undefined || message.toCharacterId === null) return message;
+    if (!isDelivered(message, today) || detailOf(message.toCharacterId) !== "background") return message;
+    changed = true;
+    return { ...message, putToRecipientOnDay: today };
+  });
+  return changed ? { ...world, diplomacy } : world;
+}
+
 /** Every unanswered letter in front of someone in this round's cast, marked as read today. */
 export function markLettersPut(world: WorldState, castIds: ReadonlySet<string>): WorldState {
   const cast = world.characters.filter((character) => castIds.has(character.id));

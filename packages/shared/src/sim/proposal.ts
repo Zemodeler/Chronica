@@ -275,6 +275,8 @@ export const OrchestratorOutputSchema = ProposalSchema.extend({
         spend: z.object({ payerAccountRef: RefSchema, cap: z.number().positive() }).strict().nullable().default(null),
         factLocalIds: z.array(z.string().trim().min(1).max(80)).max(6).default([]),
         whyNot: z.string().trim().min(1).max(300).nullable().default(null),
+        /** "declare" where the player said he does it ("I declare war"); "propose" where he moves it ("propose war", "ask the Senate"). Absent where the words are neither. */
+        stance: z.enum(["propose", "declare"]).optional(),
       }).strict()).max(10).default([]),
     })
     .strict(),

@@ -114,6 +114,11 @@ export interface AttentionInput {
    * king reading the same dispatch (L17).
    */
   readonly firstCharacterIds?: ReadonlySet<string> | undefined;
+  /**
+   * The people the model plays (the standing cast, the nemesis, the player's friends). When given, an order of the player's put to anybody else is
+   * answered by the rules (`order-by-rule.ts`), so it buys him no place in front of the model; absent, every holder of an order is asked as before.
+   */
+  readonly castIds?: ReadonlySet<string> | undefined;
 }
 
 /**
@@ -262,7 +267,7 @@ export function routeAttention(input: AttentionInput): AttentionResult {
       score += 8 * commitments.length;
       reasons.push(`${commitments.length} open commitment(s)`);
     }
-    if (world.orderAttempts.some((attempt) => attempt.recipientRef.id === character.id && (attempt.status === "issued" || attempt.status === "received"))) {
+    if ((input.castIds === undefined || input.castIds.has(character.id)) && world.orderAttempts.some((attempt) => attempt.recipientRef.id === character.id && (attempt.status === "issued" || attempt.status === "received"))) {
       score += 35;
       reasons.push("owes an answer to an order");
     }
@@ -394,6 +399,8 @@ export interface AmbientInput {
    * above `max`: the cast is what the model is spent on, once a burst.
    */
   readonly castMembers?: ReadonlyMap<string, { readonly why: string; readonly dossier?: string | undefined }> | undefined;
+  /** As `AttentionInput.castIds`: the people the model plays, whether or not already asked this burst. */
+  readonly castIds?: ReadonlySet<string> | undefined;
 }
 
 /**
@@ -508,7 +515,7 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
     // quartermaster who had just been given an order scored nothing in either
     // router and could never answer it -- which made "an order is always
     // answered" unreachable for exactly the people orders are given to.
-    if (world.orderAttempts.some(
+    if ((input.castIds === undefined || input.castIds.has(character.id)) && world.orderAttempts.some(
       (attempt) => attempt.recipientRef.id === character.id
         && (attempt.status === "issued" || attempt.status === "received" || attempt.status === "delayed"),
     )) {

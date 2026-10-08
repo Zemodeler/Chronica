@@ -82,6 +82,11 @@ export interface ApplyContext {
    */
   readonly orderDeltas?: ReadonlySet<WorldDelta> | undefined;
   /**
+   * Of the order's acts, the ones the player said he does ("I declare war") rather than moves: done at once where his own office leaves them to a body, as a
+   * usurpation he answers for (`usurpation.ts`); the rest are moved in the body as before.
+   */
+  readonly declaredDeltas?: ReadonlySet<WorldDelta> | undefined;
+  /**
    * Set while one act of `orderDeltas` is applied. The act a handler sees has
    * often been rewritten -- references put right -- and is no longer the one
    * in the set, so a handler that must know whose act it is asks this.

@@ -102,6 +102,7 @@ import { DECISION_EVENTS, createCognitionPolicy, marchingCommanders, playerInter
 import { materializeFacts } from "./facts";
 import { answerByTemper } from "./insubordination";
 import { answerForTheSilent } from "./requests";
+import { stanceOfPart } from "./stance";
 import { recordActiveIntents } from "./intents";
 import { decideNarratorSeeds, engineWork, recordSeedsOffered, seedParticipants, seedWasTaken, type NarratorSeed } from "./narrator";
 import { chooseNemesis, conductInWords, nemesisStance, recordNemesis, retireNemesis, shouldRetire, stanceInWords, stationOf } from "./nemesis";
@@ -127,7 +128,7 @@ import { readableRefsFor } from "./mechanics/refs";
 import { runMechanics } from "./mechanics/run-mechanics";
 import { validateMechanic } from "./mechanics/validate-mechanic";
 import { writeMechanic } from "./mechanics/write-mechanic";
-import { aLetterWaitsOnItsReader, addressWaitingLetters, heldAnswersDue, lettersOwed, markLettersPut, nextReplyDueKey, withoutHeldAnswer } from "./letters";
+import { aLetterWaitsOnItsReader, addressWaitingLetters, heldAnswersDue, lettersOwed, markLettersPut, nextReplyDueKey, readByTheRules, withoutHeldAnswer } from "./letters";
 import { dueSteps, emptyPlanTally, layPlan, markWoken, nextPlanDay, settleOverdueSteps, settleRoutineSteps, takeSteps, type PlanTally } from "./plans";
 import { claimPromisesKept } from "./promises";
 import { goalsOfAct, mergeGoals, refResolver, resolveGoal } from "./order-goals";
@@ -1695,6 +1696,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     for (const delta of misfiled) {
       audit.push({ actorRef, op: delta.op, kind: "refiled", ofTheOrder: false, attempt: "first", reason: whyMisfiled(delta), delta });
     }
+    // The acts the player said he does rather than moves (`stance.ts`): the order's own words decide, the orchestrator's reading standing where they are plain neither way.
+    const declaredDeltas = orderDeltas === undefined || input.actorRef.kind !== "character" ? undefined
+      : new Set<WorldDelta>(intentParts.flatMap((part) => (stanceOfPart(input.orderText, part.said, part.stance) === "declare"
+        ? part.acts.map((at) => proposal.deltas[at]).filter((delta): delta is WorldDelta => delta !== undefined && orderDeltas.has(delta)) : [])));
     const worldAtStart = world;
     const aliveBefore = new Set(world.characters.filter((character) => character.alive).map((character) => character.id));
     const stoodBefore = new Map(world.material.forces.map((force) => [force.id, force.locationId]));
@@ -1713,6 +1718,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       atomicGroups: intentParts.filter((part) => part.acts.some((at) => proposal.deltas[at]?.op === "service_contract_open")).map((part) => part.acts.map((at) => proposal.deltas[at]).filter((delta): delta is WorldDelta => delta !== undefined)),
       playerCharacterId: input.actorRef.kind === "character" ? input.actorRef.id : null,
       ...(order === undefined ? {} : { orderDeltas: order }),
+      ...(declaredDeltas === undefined || declaredDeltas.size === 0 ? {} : { declaredDeltas }),
       ...(assignedIds === undefined ? {} : { assignedIds }),
       ...(pass.sanctioned === undefined ? {} : { sanctionedDeltas: pass.sanctioned }),
     });
@@ -3675,6 +3681,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       warfare: input.warfare,
       appetiteAgainstPlayer: difficultyRules(world.difficulty).appetiteAgainstPlayer,
       offices: input.offices,
+      clock: input.clock,
     };
   };
 
@@ -3942,6 +3949,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     const orderPeople = new Set(world.orderAttempts
       .filter((attempt) => attempt.issuerRef.id === input.actorRef.id && ["issued", "received", "delayed", "accepted"].includes(attempt.status))
       .map((attempt) => attempt.recipientRef.id));
+    // A letter come to a man the model is never asked about is read by the rules (`readByTheRules`).
+    if (playerId !== null) world = readByTheRules(world, playerInterests(world, playerId, input.offices).detailOf);
     const interests = playerInterests(world, playerId, input.offices);
     const attention = routeAttention({
       world,

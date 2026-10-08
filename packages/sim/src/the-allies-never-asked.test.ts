@@ -89,10 +89,14 @@ describe("letters to Rome's allies", { timeout: 60_000 }, () => {
   it("are put to every reader before their term runs out", async () => {
     const asked = new Map<string, string>();
     const result = await burst(asked, DEFAULT_BUDGET);
-    for (const [, readerId] of READERS) expect(asked.has(readerId), readerId).toBe(true);
-    for (const [polityId] of READERS) {
-      expect(result.world.diplomacy.find((message) => message.id === `aid-${polityId}`)?.putToRecipientOnDay).not.toBeNull();
+    // Every letter is put to its reader before its term runs out: by the model for those of the cast and the near, and by the rules (`readByTheRules`) for those
+    // far from the player, whom the model is never asked about -- the rules answer their letters, and their silence after is their own.
+    for (const [polityId, readerId] of READERS) {
+      const message = result.world.diplomacy.find((candidate) => candidate.id === `aid-${polityId}`)!;
+      expect(asked.has(readerId) || (message.putToRecipientOnDay != null && message.putToRecipientOnDay <= DUE), readerId).toBe(true);
     }
+    // Hieron holds the Messana crisis in his hands: he is of the cast, and is asked.
+    expect(asked.has("hieron-ii")).toBe(true);
   });
 
   it("are refused by silence on the day they fall due, not when the calendar next comes round", async () => {

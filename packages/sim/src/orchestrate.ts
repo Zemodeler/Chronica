@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { OrchestratorOutputSchema, abortsTheTurn, isTimeout, type OrchestratorOutput } from "@chronica/shared";
+import { OrchestratorOutputSchema, WAR_PLAN_OPS, abortsTheTurn, isTimeout, type OrchestratorOutput } from "@chronica/shared";
 import { dropMalformedEntries, extractJson } from "./json";
 import { readLeniently, type KindOf } from "./bare-refs";
 import type { SimModelPort } from "./ports";
@@ -20,7 +20,8 @@ import { verifyPart } from "./order-verifier";
 
 // Defaults are applied by the parser; repeating them in the prompt adds no
 // requirement and crowds out the instructions that preserve player intent.
-const OUTPUT_JSON_SCHEMA = JSON.stringify(z.toJSONSchema(OrchestratorOutputSchema, { io: "input" }), (key, value: unknown) => key === "default" ? undefined : value);
+// The plan of a war and an army's orders are not the player's to write (his armies ignore plans): they are not shown here (`war-plan-deltas.ts`).
+const OUTPUT_JSON_SCHEMA = JSON.stringify(z.toJSONSchema(OrchestratorOutputSchema, { io: "input" }), (key, value: unknown) => key === "default" ? undefined : key === "oneOf" && Array.isArray(value) ? value.filter((variant: { properties?: { op?: { const?: unknown } } }) => !WAR_PLAN_OPS.has(String(variant?.properties?.op?.const))) : value);
 
 export const ORCHESTRATOR_SYSTEM_PROMPT = `You are the world of a historical grand-strategy simulation.
 
@@ -70,7 +71,7 @@ principle it falls under.
    "whenForceExists" (a future force name), with its actions in "deferredActs"
    instead of immediate "deltas". Routine officers handle it when ready.
    Never refuse a possible act because it starts a war, breaks a treaty or goes
-   against usual policy: the person ordering sets policy. Do the steps it needs
+   against usual policy: the person ordering sets policy. A part's "stance" is "declare" where the player says he does it ("I declare war", "I order") and "propose" where he moves it ("propose", "ask the Senate"); omit it where the words say neither. Do the steps it needs
    (declare war, break peace, lift a hold), then the act. An impossible or
    absurd part gets a plain "whyNot" and no acts, never another part's acts;
    difficulty or delay is no "whyNot": act now, time does the rest.
@@ -120,8 +121,7 @@ principle it falls under.
    product is that it happened, and it finishes silently. Anything that can be
    done now is done now: an army moves one bordering province with
    "force_modify" and a person with "moveToProvinceId"; anything further is a
-   journey, as long as the road really is. Saying someone arrived does not put
-   them there.
+   journey, as long as the road really is.
 
 7. Facts are what happened, not what obtains or is expected. A posture, a
    plan, a process or a thing not done is not a fact; where nothing happened, write
@@ -133,7 +133,7 @@ principle it falls under.
    next step stays private with the same knownToRefs. News that travels is
    "delayed" or "rumoured" with "knowableInDays". Something already on record
    that somebody learns is a "discoveries" entry; something nobody wrote down
-   that somebody now believes, true or not, is "belief_set". A mission reports what it found, or has not finished.
+   that somebody now believes, true or not, is "belief_set".
    "significance" runs from a routine payment near 0 to a battle or death 90+.
 
 8. Everything costs. POLITICAL STANDING, THE COUNCIL and THE COUNTRY are real
@@ -156,7 +156,6 @@ principle it falls under.
    and does it only if carried.
    Include BOTH parties' duties and deadlines in "clauses", even in a plain letter offering terms. Undertakings' "completionGoals" track
    restoration, movement and safe passage; nearby armies prove none of these.
-   Existing peace closes earlier talks: address implementation or a breach.
    A treaty's "clauses" are what it makes happen and all it binds -- a promise left in
    a letter's prose binds nobody. One power speaks to another by
    letter, and the answer belongs to the power it was put to; a letter that
@@ -202,8 +201,7 @@ principle it falls under.
    chest. Ordinary changes to an army -- name, commander, controller,
    allegiance, rations, "drilling" -- are "force_modify"; men joining are
    "force_reinforce", keeping their own kind, and the engine draws them up in
-   their power's legions, alae or phalanx; "authorizedStrengthDelta" is
-   paper and puts no men anywhere. A new way of fighting is a "doctrine": one
+   their power's legions, alae or phalanx. A new way of fighting is a "doctrine": one
    army's on its commander's word ("force_modify"), a power's by law
    ("enacts.military": recruits, kit, service, discharge, a body redrawn);
    its effects are levers in bands, and the engine prices every gain. An

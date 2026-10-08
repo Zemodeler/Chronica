@@ -25,6 +25,7 @@ import {
 import { grainPrice } from "../grain";
 import type { ApplyContext } from "./context";
 import { SOVEREIGN_AGREEMENTS } from "./nobody-listens";
+import { gravityOf, usurpedLately, type UsurpedAct } from "../usurpation";
 
 /**
  * Who may do this act, asked of the constitution (docs/plans/government.md, "H0 as built").
@@ -52,7 +53,7 @@ export type Gate =
   | { readonly kind: "authorize"; readonly authority: AuthorityCheckResult }
   | { readonly kind: "refuse"; readonly reason: string }
   /** Laid before the chamber: the motion is built here for a tax, a coin, a loan or a draw, and by `layBeforeTheChamber` for a treaty (null). */
-  | { readonly kind: "refer"; readonly reason: string; readonly motion: WorldDelta | null };
+  | { readonly kind: "refer"; readonly reason: string; readonly motion: WorldDelta | null; readonly usurp: UsurpedAct };
 
 /** An act of the delta's, as the constitution has it: what it is, whose power's, and how large. */
 interface Gated {
@@ -254,6 +255,10 @@ export function competenceGate(input: GateInput): Gate | null {
   const may = standingFor(world, actor.id, gated, offices);
   if (may === null) return null;
   const deed = ACT_WORDS[gated.act];
+  // The chamber that was not asked votes him nothing: what he draws on the public chest after doing a great act without its leave is refused (`usurpation.ts`).
+  if (spend && usurpedLately(world, actor.id)) {
+    return { kind: "refuse", reason: `The ${world.material.institutions.find((institution) => institution.polityId === gated.polityId && institution.advisory !== true)?.name ?? "chamber"} will not open the public chest to ${actor.name}, who did what it had not allowed: the money is not his to draw until it has forgiven him.` };
+  }
 
   switch (may.grade) {
     case "forbidden":
@@ -266,7 +271,7 @@ export function competenceGate(input: GateInput): Gate | null {
       const treaty = delta.op === "agreement_open" || delta.op === "agreement_close";
       if (treaty && !authority.authorized) return null;
       const motion = treaty ? null : motionFor(world, actor.id, gated, body.id, `${actor.name} may not decide it alone, and moved it in the ${body.name}.`);
-      return { kind: "refer", reason: may.why, motion };
+      return { kind: "refer", reason: may.why, motion, usurp: { act: gated.act, polityId: gated.polityId, label: gated.label, gravity: gravityOf(gated.act, delta), officeId: may.officeId, officeLabel: may.officeLabel, bodyId: body.id } };
     }
     case "alone":
     case "with_colleague": {

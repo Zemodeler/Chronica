@@ -56,7 +56,7 @@ export const AnswerableSchema = z
   .object({
     characterId: EntityIdSchema,
     polityId: EntityIdSchema,
-    kind: z.enum(["defeat", "breach"]),
+    kind: z.enum(["defeat", "breach", "usurpation"]),
     label: z.string().trim().min(1).max(240),
     atStep: ElapsedStepSchema,
     /** How heavily it weighs: a skirmish lost is 1, an army or a fleet lost is 5. */

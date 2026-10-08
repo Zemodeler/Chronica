@@ -179,6 +179,7 @@ const brokenPactNote = (world: WorldState, a: string, b: string): string =>
 import { trespassOf } from "../trespass";
 import { SOVEREIGN_AGREEMENTS, chamberThatDecides, fleesHisMaster, listensAnyway, nobodyListens, nobodyRises, notHisToSpend } from "./nobody-listens";
 import { competenceGate, noteTheAct } from "./competence-gate";
+import { consequencesOfUsurping, stoppedBefore, type UsurpedAct } from "../usurpation";
 import { creditRateBps, mintFactor } from "../levers";
 import { isOwnBusiness } from "./own-business";
 import { asGarrison, isGarrison, proportionalDraw } from "./detachments";
@@ -1146,8 +1147,19 @@ function applyUngroupedDeltas(world: WorldState, deltas: readonly WorldDelta[], 
       }
       // Who may do it, read from the constitution (`competence-gate.ts`): his own to do, a colleague's to stop, the chamber's to decide.
       const gate = answerable && context.actorRef.kind === "character" ? competenceGate({ delta, written, world: current, context, resolve, authority, ofTheOrder }) : null;
+      // He said he does it, and it is his own office's to leave to a body: it is done on his word, as a usurpation, unless a colleague or a tribune stops him first (`usurpation.ts`).
+      const declaredNow = ofTheOrder && context.declaredDeltas?.has(written) === true;
+      let usurping: UsurpedAct | null = null;
       if (gate?.kind === "authorize") authority = gate.authority;
-      else if (gate !== null) {
+      else if (gate !== null && gate.kind === "refer" && declaredNow) {
+        const stopped = stoppedBefore(current, context.actorRef.id, gate.usurp, context.offices);
+        if (stopped !== null) {
+          rejected.push({ delta, written, reason: stopped, kind: "ignored", ofTheOrder });
+          continue;
+        }
+        usurping = gate.usurp;
+        authority = { authorized: false, grant: null, standing: null, reason: gate.reason };
+      } else if (gate !== null) {
         const motion = gate.kind === "refer" && ofTheOrder ? gate.motion ?? layBeforeTheChamber(delta, current, context.actorRef.id, resolve) : null;
         let declined = "";
         if (motion !== null) {
@@ -1171,7 +1183,7 @@ function applyUngroupedDeltas(world: WorldState, deltas: readonly WorldDelta[], 
       if (context.actorRef.kind === "character") {
         const unheard = delta.op === "polity_create"
           ? nobodyRises(delta, current, context.actorRef.id)
-          : (answerable || reachesAbroad) && !authority.authorized
+          : (answerable || reachesAbroad) && !authority.authorized && usurping === null
             ? nobodyListens(delta, current, context.actorRef.id, resolve, new Set(assignedIds.values()), context.offices, reachesAbroad)
             : null;
         // Nobody had to -- but somebody might, for the man's sake or their own.
@@ -1180,7 +1192,14 @@ function applyUngroupedDeltas(world: WorldState, deltas: readonly WorldDelta[], 
           // War and peace not his to make are put to the chamber that makes
           // them, with him moving it. The act waits on the vote and is done
           // the day it carries (`advanceStages`, `sanctionedDeltas`).
-          const motion = ofTheOrder && context.actorRef.kind === "character" ? layBeforeTheChamber(delta, current, context.actorRef.id, resolve) : null;
+          // A man with no office that makes it who `declares` it has said words nobody follows: no motion is moved for him, and the city notes it.
+          const motion = ofTheOrder && !declaredNow && context.actorRef.kind === "character" ? layBeforeTheChamber(delta, current, context.actorRef.id, resolve) : null;
+          if (declaredNow) {
+            factProposals.push({
+              localId: `nobody_follows_${context.actorRef.id}_${delta.op}`.slice(0, 60), kind: "nobody_follows", summary: unheard.slice(0, 600),
+              affectedRefs: [{ kind: "character", id: context.actorRef.id }], visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 35,
+            });
+          }
           let declined = "";
           if (motion !== null) {
             // Put by him, or by a magistrate he asks who agrees to put it (`whoseToGive`).
@@ -1216,6 +1235,11 @@ function applyUngroupedDeltas(world: WorldState, deltas: readonly WorldDelta[], 
       current = recordUnrecordedMoney(beforeAct, applyOne(current, delta, ofTheOrder ? { ...context, forTheOrder: true } : context, assignedIds, resolve, emitFact, emitAccount), delta, context);
       current = chargeVotedBudget(beforeAct, current, authority, delta);
       current = noteTheAct(beforeAct, current, delta, context, resolve);
+      if (usurping !== null && current !== beforeAct) {
+        const answered = consequencesOfUsurping(current, context.actorRef.id, usurping, context.offices);
+        current = answered.world;
+        emitted.push(...answered.facts);
+      }
       current = reconcileCapitals(current);
       // A tribune's person is sacrosanct.
       const sacrilege = context.actorRef.kind === "character" ? sacrilegeOf(delta, beforeAct, current, context.actorRef.id, context.offices, () => context.ids.next("cause")) : null;

@@ -4,6 +4,7 @@ import {
   CAST_SIZE_DEFAULT,
   CAST_STAY_AT,
   CAST_WORLD_FLOOR,
+  computeOpinion,
   difficultyRules,
   kmFromAny,
   openStorylines,
@@ -34,7 +35,7 @@ import { powersDealtWith } from "./far-powers";
  * which is the sum of his plots -- and the cast is reviewed: those at
  * `CAST_ENTER_AT` or more are promoted, those below `CAST_STAY_AT` for two
  * reviews step down once they have served `CAST_MIN_STAY`, and the seats are
- * held: one for the nemesis, up to three for the player's own chain (his
+ * held: one for the nemesis, one for a friend of his with a plot, up to three for the player's own chain (his
  * superior, those he commands, his rivals, his kin, those he writes to), two
  * for the wider world's rulers, so the cast is never all Roman, and the rest
  * open. Each member is asked once a burst, handed what the rules had him
@@ -67,6 +68,11 @@ interface SalienceContext {
   /** The provinces within the player's reach: round the places he stands in and holds. */
   readonly nearby: ReadonlySet<string>;
 }
+
+/** A friend: a person whose opinion of the player is at least this (the cast's `friend` seat, for a plot of his). */
+export const FRIEND_OPINION = 25;
+/** What being the player's friend adds to a plot of his: it sharpens, it does not make one. */
+export const FRIEND_POINTS = 22;
 
 /** How far from the player's own places a person is still in the player's area, in the map's kilometres. */
 export const NEAR_THE_PLAYER_KM = 300;
@@ -169,7 +175,15 @@ export function plotsOf(world: WorldState, character: Character, playerId: strin
     if (against(character, playerId) <= -20 || against(player, character.id) <= -20) plots.push({ kind: "scheme", points: 15, why: "the player's rival", earns: "chain" });
     if (world.familyLinks.some((link) => (link.characterId === character.id && link.relatedCharacterId === playerId) || (link.characterId === playerId && link.relatedCharacterId === character.id))) plots.push({ kind: "scheme", points: 10, why: "the player's kin", earns: "chain" });
   }
+  if (plots.length > 0 && computeOpinion(character, playerId) >= FRIEND_OPINION) {
+    plots.push({ kind: "scheme", points: FRIEND_POINTS, why: "the player's friend", earns: "friend" });
+  }
   return plots;
+}
+
+/** The reading a review makes once and every person is scored against (`salienceOf`). */
+export function salienceContextOf(world: WorldState, playerId: string): SalienceContext {
+  return { board: readBoard(world), rulers: readDepartments(world), dealt: powersDealtWith(world, playerId), nearby: nearThePlayer(world, world.characters.find((candidate) => candidate.id === playerId)) };
 }
 
 /** How much a person matters to the player's story now, and which seat that earns: the sum of his plots, if he is in the player's area. */
@@ -202,7 +216,8 @@ function commandsMainArmy(world: WorldState, characterId: string, polityId: stri
 function seatsFor(size: number): Record<CastSeat, number> {
   const chain = Math.min(3, Math.max(1, Math.floor(size / 3)));
   const world = Math.min(2, Math.max(1, Math.floor(size / 4)));
-  return { nemesis: 1, chain, world, open: Math.max(0, size - 1 - chain - world) };
+  const friend = size >= 6 ? 1 : 0;
+  return { nemesis: 1, chain, friend, world, open: Math.max(0, size - 1 - chain - world - friend) };
 }
 
 /**
@@ -214,10 +229,7 @@ function seatsFor(size: number): Record<CastSeat, number> {
 export function reviewCast(world: WorldState, playerId: string | null, size = CAST_SIZE_DEFAULT): WorldState {
   if (playerId === null) return world;
   const scored = new Map<string, Salience>();
-  const context: SalienceContext = {
-    board: readBoard(world), rulers: readDepartments(world), dealt: powersDealtWith(world, playerId),
-    nearby: nearThePlayer(world, world.characters.find((candidate) => candidate.id === playerId)),
-  };
+  const context = salienceContextOf(world, playerId);
   for (const character of world.characters) {
     if (!character.alive || character.id === playerId) continue;
     scored.set(character.id, salienceOf(world, character, playerId, context));

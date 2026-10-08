@@ -3,6 +3,7 @@ import { punicWarsScenario } from "@chronica/db";
 import { OrderRecordSchema, ProjectSchema, ScenarioDefinitionSchema, WorldStateSchema, emitFacts, type Fact, type WorldState } from "@chronica/shared";
 import type { RoutedActor } from "./attention";
 import { routeAmbientActors, routeAttention } from "./attention";
+import { plotsOf, salienceContextOf } from "./cast";
 import { createCognitionPolicy, playerInterests } from "./cognition-policy";
 import { DEFAULT_BUDGET, runSimulationBurst } from "./burst";
 import { layPlan } from "./plans";
@@ -25,15 +26,20 @@ function news(world: WorldState, actor: RoutedActor, kind: string): Fact {
 }
 
 describe("the player's changing interests", () => {
-  it("promotes a distant objective when ordered and releases it when the order closes", () => {
-    const world = seed();
-    const before = playerInterests(world, playerId, offices);
-    const distant = world.characters.find((person) => person.alive && before.detailOf(person.id) === "background")!;
+  it("brings in the man at an ordered place only if he has a plan of his own, and releases him when the order closes", () => {
+    const base = seed();
+    const planned = (id: string): WorldState => layPlan(base, id, { ambition: "Hold the province", kind: "office", steps: [{ act: "Look to the walls", inDays: 10, when: null }] }, createIdFactory("order-plan")).world;
+    // A man far from the player, who has a plan due and is still not asked: ordering his province is what changes it.
+    const plotless = (world: WorldState, id: string): boolean => plotsOf(world, world.characters.find((person) => person.id === id)!, playerId, salienceContextOf(world, playerId)).length === 0;
+    const distant = base.characters.find((person) => person.alive && plotless(base, person.id) && playerInterests(planned(person.id), playerId, offices).detailOf(person.id) === "background")!;
     expect(distant).toBeDefined();
     const order = OrderRecordSchema.parse({ id: "far-campaign", actorCharacterId: playerId, text: "Take this province.", givenAtStep: 0,
       parts: [{ said: "Take the province", goals: [{ kind: "control", provinceId: distant.locationProvinceId, polityId: "rome" }] }] });
+    const world = planned(distant.id);
     const involved = { ...world, orders: [...world.orders, order] };
     expect(playerInterests(involved, playerId, offices).detailOf(distant.id)).toBe("personal");
+    // The order alone, with no plan of his, asks nobody there.
+    expect(playerInterests({ ...base, orders: [...base.orders, order] }, playerId, offices).detailOf(distant.id)).toBe("background");
     const closed = { ...world, orders: [{ ...order, parts: order.parts.map((part) => ({ ...part, closedAtStep: 1 })) }] };
     expect(playerInterests(closed, playerId, offices).detailOf(distant.id)).toBe("background");
   });
@@ -54,12 +60,13 @@ describe("the player's changing interests", () => {
 
   it("completes a distant approved project and its plan without asking its owner", async () => {
     let world = seed();
-    const interests = playerInterests(world, playerId, offices);
-    const distant = world.characters.find((person) => person.alive && interests.detailOf(person.id) === "background")!;
+    // Far off, in another power's country: with a plan of his own due, he is still not asked.
+    const withPlan = (id: string): WorldState => layPlan(world, id, { ambition: "Ready distant stores", kind: "office", steps: [{ act: "Prepare the stores", inDays: 14, when: null, routineProjectRef: "far-stores" }] }, createIdFactory("far-plan")).world;
+    const distant = world.characters.find((person) => person.alive && person.officeId === null && plotsOf(world, person, playerId, salienceContextOf(world, playerId)).length === 0 && playerInterests(withPlan(person.id), playerId, offices).detailOf(person.id) === "background")!;
     world = { ...world, projects: [...world.projects, ProjectSchema.parse({ id: "far-stores", kind: "construction",
       sponsorEntityRef: { kind: "character", id: distant.id }, label: "Prepare the stores", status: "in_progress", startedAtStep: 0,
       targetCompletionStep: 7, milestones: [{ id: "far-stage", label: "Stores ready", requiredAtElapsedOffset: 7, costAmount: 0, status: "pending" }] })] };
-    world = layPlan(world, distant.id, { ambition: "Ready distant stores", kind: "office", steps: [{ act: "Prepare the stores", inDays: 14, when: null, routineProjectRef: "far-stores" }] }, createIdFactory("far-plan")).world;
+    world = withPlan(distant.id);
     const asked: string[] = [];
     const port: SimModelPort = { complete(operation, _system, user) {
       if (operation === "simulate_cognition") { asked.push(...[...user.matchAll(/^## .+ \[([^\]]+)\]$/gm)].map((match) => match[1]!)); return Promise.resolve('{"actors":[]}'); }
@@ -79,7 +86,9 @@ describe("paying only for a new decision", () => {
     let world = seed();
     const player = world.characters.find((person) => person.id === playerId)!;
     const person = world.characters.find((candidate) => candidate.id !== playerId && candidate.alive)!;
-    world = { ...world, diplomacy: [], orderAttempts: [],
+    // He sits in the cast: a man is asked only on a plot near the player, or for the cast (`far-people-are-never-asked.test.ts`).
+    world = { ...world, cast: { ...world.cast, members: [{ characterId: person.id, seat: "open" as const, sinceStep: 0, salience: 50, why: "a plot of his own", belowFor: 0, reviews: 0 }] },
+      diplomacy: [], orderAttempts: [],
       material: { ...world.material, politicalProcedures: [] },
       characters: world.characters.map((candidate) => candidate.id === person.id
         ? { ...candidate, officeId: offices[0]!.id, locationProvinceId: player.locationProvinceId, ambitions: [] } : candidate) };

@@ -1,16 +1,29 @@
-import { answerDueOf, buildStation, findOrderPart, holdsPolityStanding, kmFromAny, openStorylines, orderPartStatus, type Office, type WorldState } from "@chronica/shared";
+import { REFERENCE_PROVINCE_KM, answerDueOf, buildStation, findOrderPart, holdsPolityStanding, kmFromAny, openStorylines, orderPartStatus, type Office, type WorldState } from "@chronica/shared";
 import type { RoutedActor } from "./attention";
 import { newsRelations } from "./far-powers";
 import { readBoard } from "./board";
 import { houseFolkOf } from "./merchant-houses";
+import { plotsOf, salienceContextOf } from "./cast";
 import type { DueStep } from "./plans";
 
+/**
+ * Whom the model may be asked about (the user's rule: model calls are for the plots and plans of people near the player, and the rotating cast).
+ * "personal" may be asked; "background" never is. ("regional" was a whole power's people; it is no longer given.)
+ */
 export type SimulationDetail = "personal" | "regional" | "background";
+
+/**
+ * How far from the places the player holds and stands in a man must be to be asked on a plot or plan of his own: two provinces' ride
+ * (the reference province is about 85 km). Further off, only the cast, the nemesis, a kept relation, an order or a storyline of the player's bring a man in.
+ */
+export const ASK_REACH_KM = 2 * REFERENCE_PROVINCE_KM;
 export interface PlayerInterests {
   readonly entities: ReadonlySet<string>;
   readonly people: ReadonlySet<string>;
   readonly polities: ReadonlySet<string>;
   readonly eligibleCharacterIds: ReadonlySet<string>;
+  /** The provinces within `ASK_REACH_KM` of the places the player stands in, holds and leads armies in: where a man with a plot or plan of his own may be asked. */
+  readonly nearPlaces: ReadonlySet<string>;
   readonly detailOf: (characterId: string) => SimulationDetail;
 }
 
@@ -26,8 +39,24 @@ function references(value: unknown, into: Set<string>): void {
 
 /** Recomputed as orders, contact and ownership change. Background state is never erased. */
 export function playerInterests(world: WorldState, playerId: string | null, offices: readonly Office[]): PlayerInterests {
+  let byPlayer = cache.get(world);
+  if (byPlayer === undefined) { byPlayer = new Map(); cache.set(world, byPlayer); }
+  const key = `${playerId ?? ""}`;
+  const kept = byPlayer.get(key);
+  if (kept !== undefined && kept.offices === offices) return kept.interests;
+  const interests = readInterests(world, playerId, offices);
+  byPlayer.set(key, { offices, interests });
+  return interests;
+}
+
+/** What was read for a world, so the three calls a round make one reading (the answer is a pure function of the world). */
+const cache = new WeakMap<WorldState, Map<string, { readonly offices: readonly Office[]; readonly interests: PlayerInterests }>>();
+
+function readInterests(world: WorldState, playerId: string | null, offices: readonly Office[]): PlayerInterests {
   const entities = new Set<string>();
   const people = new Set<string>();
+  /** Askable only if near the player and in a plot of their own, or already in his circle: letters he is party to, and decisions owed. */
+  const deferred = new Set<string>();
   const polities = new Set<string>();
   const player = world.characters.find((person) => person.id === playerId);
   if (player !== undefined) {
@@ -37,9 +66,11 @@ export function playerInterests(world: WorldState, playerId: string | null, offi
     for (const id of [...station.forceIds, ...station.accountIds, ...station.holdingIds, ...station.procedureIds]) entities.add(id);
     // A relationship with a kept cause, rather than an empty acquaintance.
     for (const relation of player.relations) if (relation.causes.length > 0) people.add(relation.subjectCharacterId);
-    for (const member of world.cast.members) if (member.seat === "chain" || member.seat === "nemesis") people.add(member.characterId);
-    // Honour a decision deferred by an earlier burst before lowering its detail.
-    for (const owed of world.owed) people.add(owed.characterId);
+    // The cast is askable by its own rule (every seat: a seated person entered for a plot near the player), and so is whoever is set against him.
+    for (const member of world.cast.members) people.add(member.characterId);
+    for (const nemesis of world.nemeses) if (nemesis.targetCharacterId === player.id && nemesis.retiredAtStep === null) people.add(nemesis.characterId);
+    // Honour a decision deferred by an earlier burst, if the man is still one the player's circle reaches (below).
+    for (const owed of world.owed) deferred.add(owed.characterId);
     for (const order of world.orders) {
       if (order.actorCharacterId !== player.id) continue;
       for (const part of order.parts) if (part.closedAtStep === null) {
@@ -61,8 +92,9 @@ export function playerInterests(world: WorldState, playerId: string | null, offi
       if (message.status !== "awaiting_reply") continue;
       if (message.fromCharacterId === player.id || message.toCharacterId === player.id
         || (holdsPolityStanding(station) && (message.fromPolityId === player.polityId || message.toPolityId === player.polityId))) {
-        if (message.fromCharacterId !== null) people.add(message.fromCharacterId);
-        if (message.toCharacterId !== null) people.add(message.toCharacterId);
+        // A letter is answered at send time (`answerALetterNow`); afterwards a far reader is not woken for it again, he answers by rule.
+        if (message.fromCharacterId !== null) deferred.add(message.fromCharacterId);
+        if (message.toCharacterId !== null) deferred.add(message.toCharacterId);
         polities.add(message.fromPolityId); polities.add(message.toPolityId);
       }
     }
@@ -76,9 +108,17 @@ export function playerInterests(world: WorldState, playerId: string | null, offi
       for (const neighbour of readBoard(world).get(player.polityId)?.neighbours ?? []) polities.add(neighbour.polityId);
     }
   }
+  // The places the player's own concerns lie in, before the cast's far seats (a foreign ruler, his army) lend theirs: nearness is measured from these.
+  const anchors = new Set(entities);
   for (const id of people) entities.add(id);
+  const ownForces = new Set(player === undefined ? [] : buildStation({ world, characterId: player.id, offices }).forceIds);
+  for (const force of world.material.forces) {
+    if (ownForces.has(force.id) || force.controllerCharacterId === playerId || force.memberCharacterIds.includes(playerId ?? "") || anchors.has(force.id)) anchors.add(force.locationId);
+  }
   for (const force of world.material.forces) if (entities.has(force.id) || people.has(force.commanderCharacterId) || people.has(force.controllerCharacterId) || force.memberCharacterIds.includes(playerId ?? "")) {
-    entities.add(force.id); entities.add(force.locationId); people.add(force.commanderCharacterId);
+    entities.add(force.id); entities.add(force.locationId);
+    // The man at the head of the player's own army is his; the head of any other is asked only as a near man with a plot of his own (below).
+    if (ownForces.has(force.id) || force.controllerCharacterId === playerId || force.memberCharacterIds.includes(playerId ?? "") || people.has(force.commanderCharacterId)) people.add(force.commanderCharacterId);
   }
   for (const project of world.projects) if (entities.has(project.id)) {
     if (project.overseerCharacterId != null) people.add(project.overseerCharacterId);
@@ -99,15 +139,37 @@ export function playerInterests(world: WorldState, playerId: string | null, offi
   // The merchant houses' heads and heirs run on rules (`merchant-houses.ts`): the model is not asked about them unless the player's own
   // circle touches them -- a letter, a kinsman, a loan he asked for -- whatever province they happen to live in.
   const houseFolk = houseFolkOf(world);
+  // Near the places the player stands in and holds: a man in one of these, with a plot or a plan of his own, may be asked; a man further off may not.
+  const nearPlaces = player === undefined ? new Set<string>()
+    : new Set(kmFromAny(world, world.map.provinces.filter((province) => anchors.has(province.id)).map((province) => province.id), { budgetKm: ASK_REACH_KM }).keys());
+  let salience: ReturnType<typeof salienceContextOf> | undefined;
+  const askedOn = new Map<string, boolean>();
+  /** Whether a man has a plot of the cast's kind, or a step of his own plan coming due. */
+  const hasAPlotOrPlan = (id: string): boolean => {
+    const known = askedOn.get(id);
+    if (known !== undefined) return known;
+    const person = personById.get(id);
+    let live = false;
+    if (person !== undefined && person.alive && player !== undefined) {
+      live = person.ambitions.some((ambition) => ambition.status === "active" && ambition.steps.some((step) => step.status === "pending" && step.dueDay <= world.instant.day + 30));
+      if (!live) { salience ??= salienceContextOf(world, player.id); live = plotsOf(world, person, player.id, salience).length > 0; }
+    }
+    askedOn.set(id, live);
+    return live;
+  };
+  for (const id of deferred) {
+    const person = personById.get(id);
+    if (person !== undefined && nearPlaces.has(person.locationProvinceId) && hasAPlotOrPlan(id)) people.add(id);
+  }
   const detailOf = (id: string): SimulationDetail => {
     if (player === undefined) return "personal"; // Headless/world simulations have no player horizon.
     const person = personById.get(id);
     if (people.has(id)) return "personal";
     if (houseFolk.has(id)) return "background";
-    if (person !== undefined && entities.has(person.locationProvinceId)) return "personal";
-    return person?.polityId != null && polities.has(person.polityId) ? "regional" : "background";
+    // Near him and in a plot or plan of his own: or never asked. A whole power's generals and councillors are the rules' to play.
+    return person !== undefined && nearPlaces.has(person.locationProvinceId) && hasAPlotOrPlan(id) ? "personal" : "background";
   };
-  return { entities, people, polities, detailOf, eligibleCharacterIds: new Set(world.characters.filter((person) => detailOf(person.id) !== "background").map((person) => person.id)) };
+  return { entities, people, polities, nearPlaces, detailOf, eligibleCharacterIds: new Set(world.characters.filter((person) => detailOf(person.id) !== "background").map((person) => person.id)) };
 }
 
 /** Changes that can require a new choice immediately. Daily progress is intentionally absent. */
