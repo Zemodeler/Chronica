@@ -1,4 +1,4 @@
-import { inferredGovernmentForm, provinceTaxCapacity, type WorldState } from "@chronica/shared";
+import { inferredGovernmentForm, provinceTaxCapacity, stableHash, type WorldState } from "@chronica/shared";
 
 /**
  * A chest for every power that keeps one (scenario notes: docs/plans/scenario-notes-offices.md).
@@ -26,6 +26,12 @@ import { inferredGovernmentForm, provinceTaxCapacity, type WorldState } from "@c
 export const STANDING_TAX_SHARE = 0.02;
 export const STANDING_TAX_FLOOR = 500;
 export const STANDING_TAX_CEILING = 2_400_000;
+/**
+ * The standing tax and the upkeep are reckoned a quarter at a time, each power on its own day of the quarter (the harvest and the collectors' rounds did not fall on one day
+ * for every state): the ledger keeps a bounded number of lines, and fifty powers paying and receiving every month would push the books of a long span out of it. The
+ * amounts are a quarter's (three months of the monthly figures below); the army pay stays monthly, as soldiers' pay was.
+ */
+const QUARTER = 90;
 /** Egypt's, by hand (see above). */
 export const EGYPT_MONTHLY_REVENUE = 2_100_000;
 const HAND_SET: Readonly<Record<string, number>> = { "ptolemaic-egypt": EGYPT_MONTHLY_REVENUE };
@@ -60,8 +66,9 @@ export function withEveryTreasury(world: WorldState): WorldState {
   for (const polityId of wanting) {
     const capacity = world.map.provinces.filter((province) => province.controllerPolityId === polityId).reduce((sum, province) => sum + (provinceTaxCapacity(world, province.id) ?? 0), 0);
     const monthly = HAND_SET[polityId] ?? Math.round(Math.min(STANDING_TAX_CEILING, Math.max(STANDING_TAX_FLOOR, capacity * STANDING_TAX_SHARE)) / 100) * 100;
+    const dueDay = 30 + (stableHash([polityId, "standing-tax"]) % 60);
     accounts.push({ id: `${polityId}-treasury`, owner: { kind: "polity", id: polityId }, currencyId: "drachma", balance: 4 * monthly, status: "active", visibility: "polity" });
-    incomeSources.push({ id: `${polityId}-standing-tax`, kind: "tax", label: "The standing tax of the state", beneficiaryAccountId: `${polityId}-treasury`, originKind: "polity", originId: polityId, amount: monthly, collectionRateBps: 10_000, counterpartyPolityId: null, cadenceSteps: 30, nextDueStep: 30, active: true });
+    incomeSources.push({ id: `${polityId}-standing-tax`, kind: "tax", label: "The standing tax of the state", beneficiaryAccountId: `${polityId}-treasury`, originKind: "polity", originId: polityId, amount: 3 * monthly, collectionRateBps: 10_000, counterpartyPolityId: null, cadenceSteps: QUARTER, nextDueStep: dueDay, active: true });
     // Its armies and fleets are paid out of it (a force with a treasury behind it and no pay could never fall into arrears): at the rate of the age, within what the revenue bears.
     const forces = world.material.forces.filter((force) => force.polityId === polityId);
     const wanted = forces.map((force) => ({ force, pay: force.personnel.reduce((sum, category) => sum + category.fit * (category.categoryId === "warship" ? PAY_PER_SHIP : PAY_PER_MAN), 0) }));
@@ -75,7 +82,7 @@ export function withEveryTreasury(world: WorldState): WorldState {
       payIds.set(force.id, `${force.id}-pay`);
       obligations.push({ id: `${force.id}-pay`, kind: "army_pay", label: `Pay of the ${force.name}`.slice(0, 120), payerAccountId: `${polityId}-treasury`, amount, cadenceSteps: 30, nextDueStep: 30, priority: 900, arrears: 0, missedPeriods: 0, active: true });
     }
-    obligations.push({ id: `${polityId}-upkeep`, kind: "salary", label: "The magistracies, garrisons and works of the state", payerAccountId: `${polityId}-treasury`, amount: Math.max(Math.round(monthly * 0.1), Math.round(monthly * 0.8) - paid), cadenceSteps: 30, nextDueStep: 30, priority: 500, arrears: 0, missedPeriods: 0, active: true });
+    obligations.push({ id: `${polityId}-upkeep`, kind: "salary", label: "The magistracies, garrisons and works of the state", payerAccountId: `${polityId}-treasury`, amount: 3 * Math.max(Math.round(monthly * 0.1), Math.round(monthly * 0.8) - paid), cadenceSteps: QUARTER, nextDueStep: dueDay, priority: 500, arrears: 0, missedPeriods: 0, active: true });
   }
   return {
     ...world,
