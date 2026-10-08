@@ -89,10 +89,10 @@ Polybius 1.22): it is a way of war a rule-led Rome puts to the Senate once it ha
 Rome had the hulls of its allies (`socii-navales.ts`) and no fleet. A power by rule that is at war with a sea power (a war of ninety days or more, the enemy holding forty
 warships or more) and has no warship of its own and no shipbuilding work begun lays a motion before the chamber that holds the purse (`weigh`, as the books' motions are
 laid): "that a fleet of a hundred quinqueremes and twenty triremes be built" (Polybius 1.20). The motion carries the work with it (`enacts.project`), which begins the day it
-carries: three stages (timber and keels, 60 days; hulls, 50; rowers trained on benches, 40), 12,000 a hull out of the chest, never more than three-fifths of the chest in a
-season (a poor power builds fewer hulls and says so), the hulls raised out of the country's men on launching (`tick.ts`, `raiseLevy`) and paid by a standing obligation. The consul
+carries: three stages, due 60, 110 and 150 days after it begins (timber and keels; hulls; rowers trained on benches), 12,000 a hull out of the chest, never more than three-fifths of the chest in a
+season (a poor power builds fewer hulls and says so), the hulls raised out of the country's men on launching (`tick.ts`, `raiseLevy`) and paid by a standing obligation. The Senate's lean on a fleet is helped by the war's need (`the-sea-is-lost.ts`, +35 on every bloc where the enemy holds the sea): without it the sanity run saw the motion rejected at every asking for a year, with it carried the month after it was moved. The consul
 may carry it alone only within two months of the year's takings (his charge, `mayAct`); 120 hulls are more. A king builds at once. Once there are ships, and the war goes on against a
-sea power, the corvus is moved the same way, with the reform it enacts (`THE_CORVUS`: boarding up a band, the ships' speed down a band, for warships), which the military-reform machinery carries out and
+sea power, the corvus is moved the same way, and only by a power whose enemy has the better seamen (the Carthaginians, whose crews raise what drill can come to), with the reform it enacts (`THE_CORVUS`: boarding up a band, the ships' speed down a band, for warships), which the military-reform machinery carries out and
 refits over months. The player's own "build a fleet" or "build sixty ships" is a template (`fleet`, `order-templates.ts`) read as the same work, which the competence gate puts to the Senate where
 the chest is not his to open. Tests: `rome-builds-a-fleet-by-decree`, `the-corvus-makes-boarding`.
 
