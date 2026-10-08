@@ -65,6 +65,8 @@ const ACT_WORDS: Readonly<Record<WorldDeltaOp, string>> = {
   audit_open: "audit those who handle money",
   siege_lay: "lay siege to a town",
   siege_lift: "raise a siege",
+  war_plan_set: "lay down the plan of a war",
+  campaign_plan_set: "give an army its orders",
   force_provision: "feed and supply forces",
   force_raid: "raid enemy country",
   family_tie_set: "arrange marriages",

@@ -161,6 +161,8 @@ export const DOMAIN_POWER_BY_ACTION: Readonly<Record<string, AuthorityPower>> = 
   siege_lay: "command",
   force_provision: "command",
   siege_lift: "command",
+  war_plan_set: "command",
+  campaign_plan_set: "command",
   contingency_disarm: "command",
   audit_open: "propose",
   family_tie_set: "propose",

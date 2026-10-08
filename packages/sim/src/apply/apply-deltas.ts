@@ -161,6 +161,7 @@ import { dutyGoals, impliedUndertakings, offerMetadata } from "../treaty-duties"
 import { findInvariantViolations } from "../invariants";
 import { resolveEngagement, type BattleAccount } from "../battle";
 import { assaultSiege } from "../siege-decisions";
+import { applyCampaignPlanSet, applyWarPlanSet } from "./war-plan-apply";
 import { fightRound, openEngagement } from "../engagements";
 import { GrainRefused, breadWhereItStands, sendConvoy } from "../grain";
 import { openVictualling } from "../army-victualling";
@@ -336,6 +337,10 @@ function scopeOf(delta: WorldDelta, world: WorldState, resolve: (ref: string) =>
     case "force_provision":
       return delta.payAccountRef === null ? { kind: "force", id: resolve(delta.forceRef) ?? delta.forceRef } : { kind: "account", id: resolve(delta.payAccountRef) ?? delta.payAccountRef };
     // Raising a siege is the besieging army's act, whoever writes it.
+    case "war_plan_set":
+      return { kind: "polity", id: resolve(delta.polityId) ?? delta.polityId };
+    case "campaign_plan_set":
+      return { kind: "force", id: resolve(delta.forceRef) ?? delta.forceRef };
     case "siege_lift": {
       const siegeId = resolve(delta.siegeRef) ?? delta.siegeRef;
       const forceId = world.sieges.find((siege) => siege.id === siegeId)?.forceId;
@@ -651,6 +656,8 @@ const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   contingency_arm: "command",
   siege_lay: "command",
   siege_lift: "command",
+  war_plan_set: "command",
+  campaign_plan_set: "command",
   contingency_disarm: "command",
   audit_open: "propose",
   polity_create: "override",
@@ -6191,6 +6198,11 @@ function applyOne(
       for (const fact of got.facts) emitFact(fact);
       return fed;
     }
+
+    case "war_plan_set":
+      return applyWarPlanSet(world, delta, { resolve, reject, emitFact, actorId: context.actorRef.kind === "character" ? context.actorRef.id : null });
+    case "campaign_plan_set":
+      return applyCampaignPlanSet(world, delta, { resolve, reject, emitFact, actorId: context.actorRef.kind === "character" ? context.actorRef.id : null });
 
     case "siege_lift": {
       const siegeId = required(delta.siegeRef, "The siege");

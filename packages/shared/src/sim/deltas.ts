@@ -44,6 +44,7 @@ import { DiplomaticAnswerSchema, DiplomaticMessageKindSchema, NegotiationProposa
 import { OrderPartyRefSchema } from "../world/party-ref";
 import { StorylinePhaseSchema } from "../world/storylines";
 import { LocalIdSchema, MaybeRefSchema, RefSchema } from "./refs";
+import { CampaignPlanSetSchema, WarPlanSetSchema } from "./war-plan-deltas";
 import { ChamberPowerSchema, CommandTenureSchema, FranchiseSchema, GovernmentFormSchema, QuestionConcernSchema } from "../political-parts";
 
 /**
@@ -2146,6 +2147,8 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   AuditOpenSchema,
   SiegeLaySchema,
   SiegeLiftSchema,
+  WarPlanSetSchema,
+  CampaignPlanSetSchema,
   ForceProvisionSchema,
   FamilyTieSetSchema,
   AdoptSchema,
@@ -2217,6 +2220,8 @@ export const WORLD_DELTA_OPS = [
   "audit_open",
   "siege_lay",
   "siege_lift",
+  "war_plan_set",
+  "campaign_plan_set",
   "force_provision",
   "force_raid",
   "family_tie_set",
@@ -2301,6 +2306,8 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   // A siege is an army's work, judged as ordering the army would be.
   siege_lay: "military",
   siege_lift: "military",
+  war_plan_set: "military",
+  campaign_plan_set: "military",
   // Feeding an army is its commander's business, and whoever pays for the bread.
   force_provision: "military",
   // Marrying and adopting are a family's business, and its head's.

@@ -14,6 +14,7 @@ export * from "./map";
 export * from "./capitals";
 export * from "./map-bindings";
 export * from "./agreements";
+export * from "./war-plan";
 export * from "./statecraft";
 export * from "./occupation";
 export * from "./cast";

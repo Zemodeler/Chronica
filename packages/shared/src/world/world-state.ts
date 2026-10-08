@@ -20,6 +20,7 @@ import { TroopCategoryDefinitionSchema } from "../warfare/battle";
 import { DoctrineSchema, EstablishmentSchema } from "../warfare/establishment";
 import { ContingencySchema } from "./contingency";
 import { SiegeSchema } from "./siege";
+import { CampaignPlanSchema, WarPlanSchema } from "./war-plan";
 import { EnactmentSchema } from "./enactment";
 import { CovertPlotSchema } from "./covert-plot";
 import { CognitionReviewSchema, OrderRecordSchema, OwedTurnSchema } from "./orders";
@@ -337,6 +338,9 @@ export const WorldStateSchema = z
     contingencies: z.array(ContingencySchema).default([]),
     /** Cities held under siege (`siege.ts`), kept until they fall or the siege is lifted. */
     sieges: z.array(SiegeSchema).default([]),
+    /** What each power at war means to do by it, and what each army is sent to do (`war-plan.ts`). */
+    warPlans: z.array(WarPlanSchema).max(60).default([]),
+    campaigns: z.array(CampaignPlanSchema).max(120).default([]),
     /** Fights begun by an order and not yet decided, fought a round a day (`world/engagement.ts`). */
     engagements: z.array(EngagementSchema).default([]),
     /** Bread on the road to armies (`world/engagement.ts`). */
