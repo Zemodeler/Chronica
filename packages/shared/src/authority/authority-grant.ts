@@ -164,6 +164,7 @@ export const DOMAIN_POWER_BY_ACTION: Readonly<Record<string, AuthorityPower>> = 
   contingency_disarm: "command",
   audit_open: "propose",
   family_tie_set: "propose",
+  adopt: "propose",
   // A government that really does give its magistrates the power of life and
   // death says so by listing this; everybody else breaches when they use it.
   character_death: "punish",

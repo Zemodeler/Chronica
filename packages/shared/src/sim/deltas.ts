@@ -1542,6 +1542,19 @@ const FamilyTieSetSchema = z.object({
 }).strict();
 
 /**
+ * A man adopts an heir out of another gens (adoptio; adrogatio where the son is his own master): he takes the adopter's praenomen,
+ * nomen and cognomen with his old nomen as an -ianus cognomen, his order, his gens, its rites and images, and the estate as a son.
+ * The engine judges the Roman rules: the adopter old enough and without a son, the adoptee a free man and willing, the father's
+ * leave, a patrician adopter's curiate law before the pontifices. A plebeian may become a patrician only so; nobody goes over to the plebs.
+ */
+const AdoptSchema = z.object({
+  op: z.literal("adopt"),
+  adopterRef: RefSchema,
+  adopteeRef: RefSchema,
+  reason: ReasonSchema,
+}).strict();
+
+/**
  * A man hired for work (roles plan phase 5; `material-state.ts`
  * `ServiceContractSchema`).
  *
@@ -2135,6 +2148,7 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   SiegeLiftSchema,
   ForceProvisionSchema,
   FamilyTieSetSchema,
+  AdoptSchema,
   CharacterDeathSchema,
   LegalStatusSetSchema,
   ServiceContractOpenSchema,
@@ -2206,6 +2220,7 @@ export const WORLD_DELTA_OPS = [
   "force_provision",
   "force_raid",
   "family_tie_set",
+  "adopt",
   "character_death",
   "legal_status_set",
   "service_contract_open",
@@ -2290,6 +2305,7 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   force_provision: "military",
   // Marrying and adopting are a family's business, and its head's.
   family_tie_set: "social",
+  adopt: "social",
   // Putting a man to death is the judicial power at its plainest; a duel or a
   // suicide is nobody's office, and is judged as the act of whoever gave it.
   character_death: "judicial",

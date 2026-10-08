@@ -7,7 +7,7 @@ import { named, opening, withDay } from "./gentes-test-kit";
 
 /**
  * Publius Cornelius Scipio Aemilianus was born an Aemilius. An adoption gives a man the adopter's names, his gens, his rites and his
- * images, and an estate as a son's; it is refused where Rome refused it (a plebeian into a patrician gens, a man who has a son).
+ * images, and an estate as a son's; it is refused where Rome refused it (a patrician into a plebeian gens, a man who has a son).
  */
 describe("an adoption carries the name", () => {
   const start = opening();
@@ -53,8 +53,8 @@ describe("an adoption carries the name", () => {
   });
 
   it("is refused where Rome refused it", () => {
-    // A patrician gens does not take a plebeian.
-    expect(adoptionBar(start, lepidus, named(start, "Gaius Aquillius Florus"), 100)).toMatch(/does not take a plebeian/);
+    // A patrician gens may take a plebeian, who becomes a patrician by it (a-man-adopts-an-heir.test.ts): the one road to the patriciate.
+    expect(adoptionBar(start, lepidus, named(start, "Gaius Aquillius Florus"), 100)).toBeNull();
     // A plebeian gens does not take a patrician, who does not go over to the plebs by adoption.
     expect(adoptionBar(start, named(start, "Gaius Junius Bubulcus Brutus"), flaccus, 100)).toMatch(/does not take a patrician/);
     // A man with a son of his own does not adopt.

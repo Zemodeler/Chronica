@@ -35,7 +35,7 @@ export const ROUTINE_OPS: ReadonlySet<string> = new Set([
  * What a person is told of it, in the same words wherever it is said. Short, and in the words of the age.
  */
 export const KEPT_BY_THE_OFFICERS =
-  "The routine government of every state -- the tribute and the customs, bread for the markets, the mint, the upkeep of walls and roads, the merchant houses, loans and trade pacts between states -- is kept by the officers, by rule; nothing here is for them to settle, and an act of it written here is set aside (save what an order put to them names). Their own work is ambition and rivalry, plots and schemes, marriages, patronage, factions, oaths and treachery, counsels of war, letters and speeches, love and grudges.";
+  "The routine government of every state (tribute, customs, bread, the mint, walls and roads, the merchant houses, loans, trade pacts) is kept by the officers, by rule: an act of it written here is set aside, save what an order put to them names. Their own work is ambition and rivalry, plots and schemes, marriages, adoptions of heirs, patronage, factions, oaths and treachery, counsels of war, letters and speeches, love and grudges.";
 
 /** Setting aside, as the log keeps it. */
 export const KEPT_STAGE = "officers" as const;

@@ -28,7 +28,8 @@ describe("the system prompts stay the size they are", () => {
     // Raised 63k -> 73k (2026-10-03), for the same schema as the orchestrator's.
     // Lowered 85k -> 74.5k (2026-10-08): the routine acts (tax, coin, estates, ventures, state loans) left the menu a person is shown
     // (`kept-by-the-officers.ts`); it measured 73.9k with the paragraph that says so. Raise it only for a real new capability.
-    expect(COGNITION_SYSTEM_PROMPT.length).toBeLessThan(74_500);
+    // Raised 74.5k -> 74.9k (2026-10-08): the "adopt" delta (a man takes an heir out of another gens), 260 characters of the generated schema, after trimming the prose beside it; it measures 74.7k.
+    expect(COGNITION_SYSTEM_PROMPT.length).toBeLessThan(74_900);
   });
 
   it("the historian, the repairer and the reconciler: prose only", () => {

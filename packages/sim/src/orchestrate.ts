@@ -139,12 +139,11 @@ principle it falls under.
 8. Everything costs. POLITICAL STANDING, THE COUNCIL and THE COUNTRY are real
    numbers: a measure that angers people moves them ("legitimacy_shift",
    "political_support_set"), and a deed that makes or breaks a name moves
-   "standingDeltaBps", naming its "standingCause". People change: a slave freed, sold or a captive enslaved ("legal_status_set"), a defector's new "polityId", a skill
-   learned or lost, an ambition taken up or given up. What no other act fits is an arrangement; it persists under
+   "standingDeltaBps", naming its "standingCause". People change: a slave freed or sold, a captive enslaved ("legal_status_set"), a defector's "polityId", skills, ambitions; an heir taken out of another gens is "adopt". What no other act fits is an arrangement; it persists under
    STANDING ARRANGEMENTS, and so does a building: say what either does in
    "effects" and who keeps it in "upkeep"; the engine applies it monthly
    until repealed or unpaid. A man's land is a
-   holding ("holding_create", "holding_improve"); his trade a venture ("trade_venture_open"); men or a ship he pays himself are his to command; a province's tax is "tax_policy_set" and its coin "coinage_debase" (less silver: a gain now, dearer bread later). A "trade_pact" ("trade": customs cap, goods free) is held by war; an "embargo" (laid by the first-named power) shuts trade. Another state's routine government (taxes, mint, markets, houses, pacts, upkeep) is kept by its officers, by rule, and is never a "worldDeltas" act. A man in an
+   holding ("holding_create", "holding_improve"); his trade a venture ("trade_venture_open"); men or a ship he pays himself are his to command; a province's tax is "tax_policy_set" and its coin "coinage_debase". A "trade_pact" ("trade": customs cap, goods free) is held by war; an "embargo" (laid by the first-named power) shuts trade. Another state's routine government (taxes, mint, markets, houses, pacts, upkeep) is kept by its officers, by rule, and is never a "worldDeltas" act. A man in an
    army's ranks is not its commander: "force_membership_set" enlists, discharges or records a desertion. Money comes from somewhere: a government short of it borrows from
    a named lender with "loan_open", revenue from another power names that
    power, and nothing is banked before the body that grants it has granted it.
@@ -494,6 +493,7 @@ const POLICY_REFUSAL = /((outside|beyond|exceeds?|lacks?|without|not within|no) 
 const CAPABILITIES: readonly { readonly when: RegExp; readonly can: string }[] = [
   { when: /\b(travel|journey|go to|goes to|visit|sail to|ride to|set out for|send\b.*\bto (the court|alexandria|egypt|carthage|syracuse|rome))/i, can: "A person sent somewhere -- to a court, to scout, to carry a proposal -- is a service_contract_open with role \"envoy\" or \"agent\", the person as employee and provinceId where he goes; the journey takes days and he arrives on his own." },
   { when: /\b(marry|marriage|wife|husband|betroth|bride)\b/i, can: "A marriage is proposed by a letter (diplomatic_message_send) carried by an envoy, and is recorded with family_tie_set (relation spouse, change form) once it is agreed or the person is the actor's own." },
+  { when: /\b(adopt|adoption|adopts|adopted|an heir|heir of my own)\b/i, can: "A man with no son takes one out of another gens with the adopt delta (adopterRef the man, adopteeRef the son): he takes the name, the rites and the estate. A patrician's adoption goes before the pontifices and the curiae; a man whose father lives needs the father's leave." },
   { when: /\b(run for|running for|campaign|candidate|stand for|election|elected|tribune|consul|praetor|aedile|censor|term as)\b/i, can: "Standing for office is political_procedure_open (an election or candidacy for that office, sponsorCharacterRef the man) with political_support_set for the backing he uses; he needs nobody's leave to stand." },
   { when: /\b(rally|raise|levy|recruit|muster|enlist|volunteers|conscript)\b/i, can: "A new army is force_create (commander, strength, place); more men for an existing one is force_reinforce. Men of another power are asked by letter or won by covert_plot_open unless the actor commands them." },
   { when: /\b(scout|spy|map|informant|herders|guides?|intelligence|reconnoitre|reconnaissance)\b/i, can: "Local people are hired with service_contract_open (role \"agent\" or \"guide\"); a detachment is posted with force_modify; a person is watched with covert_plot_open." },

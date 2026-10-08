@@ -175,7 +175,8 @@ describe("orchestrator prompt", () => {
     // with less silver, or more) in the generated schema, and one clause of how it works.
     // Raised 80.8k -> 81.5k (2026-10-07): the merge of the economy rework with the work on letters,
     // dispatches and moods, each of which added its own lines to the generated schema.
-    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(81_500);
+    // Raised 81.5k -> 82.0k (2026-10-08): the "adopt" delta (260 characters of the generated schema) and the line saying what it is, after trimming prose elsewhere in the prompt; it measures 81.7k.
+    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(82_000);
   });
 });
 

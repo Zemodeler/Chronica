@@ -25,8 +25,10 @@ import {
  *
  * - the adopter is a man of Rome, grown, with no living son of his own, and at least eighteen years older than the adoptee (the
  *   pontifices asked that an adopter be too old to have a son of his own; Gellius 5.19);
- * - the adoptee is a free man of Rome, and of the adopter's order: a patrician gens takes a patrician, a plebeian gens a plebeian. The
- *   road from the plebs to the patriciate by adoption is not open in this age, and a patrician does not go over to the plebs by it;
+ * - the adoptee is a free man of Rome, willing (he does not hate the adopter). A patrician gens may take a plebeian, who becomes a
+ *   patrician by it: it is the one road from the plebs to the patriciate, and it needs the curiate law before the pontifices (an
+ *   adoption by a patrician, of any man, goes to the curiae). A plebeian gens does not take a patrician: nobody goes over to the plebs
+ *   by adoption in this age (Clodius did, in 59, and it was a scandal);
  * - a man whose father lives needs him to give him up, which he will not do for a man he hates;
  * - an adrogation needs a pontiff alive to inquire into it, where the world has pontiffs at all (the competence layer's say over the
  *   assembly is not asked: this is the pontifical gate by rule).
@@ -73,11 +75,10 @@ export function adoptionBar(world: WorldState, adopter: Character, adoptee: Char
   if (adopterAge - adopteeAge < ADOPTER_AT_LEAST_YEARS_OLDER) return `${adopter.name} is less than ${ADOPTER_AT_LEAST_YEARS_OLDER} years older than ${adoptee.name}: he could have been his father by birth only if the pontifices allowed it, and they do not`;
   const order = adopter.ordo ?? ordoOfRomanName(adopter.name);
   const adopteeOrder = adoptee.ordo ?? ordoOfRomanName(adoptee.name);
-  if (order !== adopteeOrder) {
-    return order === "patrician"
-      ? `a patrician gens does not take a plebeian: the road from the plebs to the patriciate by adoption is not open`
-      : `a plebeian gens does not take a patrician: a patrician does not go over to the plebs by adoption`;
-  }
+  if (order !== adopteeOrder && order !== "patrician") return `a plebeian gens does not take a patrician: a patrician does not go over to the plebs by adoption`;
+  // The adoptee must be willing: a man does not take the name of one he hates.
+  const dislike = adoptee.relations.find((relation) => relation.subjectCharacterId === adopter.id)?.causes.reduce((sum, cause) => sum + cause.score, 0) ?? 0;
+  if (dislike < -10) return `${adoptee.name} will not take ${adopter.name}'s name`;
   if (livingSons(world, adopter).length > 0) return `${adopter.name} has a son of his own`;
   const father = familyLinksOf(world, adoptee.id, atStep)
     .filter((view) => view.kind === "child")
@@ -87,6 +88,9 @@ export function adoptionBar(world: WorldState, adopter: Character, adoptee: Char
     const feeling = father.relations.find((relation) => relation.subjectCharacterId === adopter.id)?.causes.reduce((sum, cause) => sum + cause.score, 0) ?? 0;
     if (feeling < -10) return `${father.name} will not give his son to ${adopter.name}`;
   } else if (!pontiffAlive(world)) return "there is no pontiff to inquire into an adrogation";
+  // A patrician's adoption goes before the curiae, the pontifices presiding (the curiate law; Gellius 5.19, Cicero, De domo 34-38): it needs a pontiff
+  // alive whether the son's father is living or not, and is by rule a formality of the age, passed when the pontifex inquires.
+  if (order === "patrician" && !pontiffAlive(world)) return "there is no pontiff to lay a patrician's adoption before the curiae";
   return null;
 }
 

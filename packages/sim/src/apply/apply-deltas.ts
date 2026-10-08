@@ -1,4 +1,5 @@
 import { hiringGroups } from "./action-groups";
+import { adoptIntoGens } from "../adoption";
 import {
   serveInArmy,
   bestGapGood,
@@ -654,6 +655,7 @@ const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   office_seat_set: "appoint",
   // A family's own business: nobody's office grants it, and nobody's is needed.
   family_tie_set: "propose",
+  adopt: "propose",
   // The power a court exercises, and the one a man with no court usurps.
   character_death: "punish",
   // Taking a man's freedom is the power of a court or a conqueror; giving it
@@ -768,7 +770,7 @@ function actorIsAnswerableFor(delta: WorldDelta, scope: AuthorityScope, world: W
   // which is the ninth way this check has found to manufacture it.
   if (delta.op === "character_state_set") return false;
   // A marriage or an adoption is two families' business, and nobody's office.
-  if (delta.op === "family_tie_set") return false;
+  if (delta.op === "family_tie_set" || delta.op === "adopt") return false;
   // A duel or a suicide exercises no power over anyone. An execution does,
   // unless a court has already condemned the man: a question about him that
   // passed is the lawful form, and without one it is a killing the record
@@ -4985,6 +4987,22 @@ function applyOne(
           provenanceEventId: null,
         }],
       };
+    }
+
+    // A man adopts an heir (adoption.ts): the Roman rules are the engine's, and the act is his household's.
+    case "adopt": {
+      const adopterId = required(delta.adopterRef, "The man who adopts");
+      const adopteeId = required(delta.adopteeRef, "The man adopted");
+      if (!world.characters.some((character) => character.id === adopterId)) reject(`No character "${adopterId}" exists.${nearestTo(adopterId)}`, "reference");
+      if (!world.characters.some((character) => character.id === adopteeId)) reject(`No character "${adopteeId}" exists.${nearestTo(adopteeId)}`, "reference");
+      // A man adopts for himself, and a man may be adopted at his own asking; the world may write it for a house it is keeping.
+      if (context.actsForTheWorld !== true && context.actorRef.kind === "character" && context.actorRef.id !== adopterId && context.actorRef.id !== adopteeId) {
+        reject("Only the man who adopts, or the man who is to be adopted, can write an adoption.");
+      }
+      const done = adoptIntoGens(world, adopterId, adopteeId, atStep);
+      if ("bar" in done) reject(`The adoption cannot be made: ${done.bar}.`);
+      for (const fact of done.facts) emitFact(fact);
+      return done.world;
     }
 
     case "service_contract_open": {

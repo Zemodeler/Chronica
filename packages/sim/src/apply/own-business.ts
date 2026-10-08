@@ -82,6 +82,8 @@ export function isOwnBusiness(
       const payer = world.material.accounts.find((account) => account.id === contract.employerAccountId);
       return contract.employeeCharacterId === actorId || (payer?.owner.kind === "character" && payer.owner.id === actorId);
     }
+    // Taking an heir into his own gens, or being taken: a household's business.
+    case "adopt": return isActor(delta.adopterRef) || isActor(delta.adopteeRef);
     // Freeing, selling or indulging his own slave is his household's business.
     case "legal_status_set": {
       const person = world.characters.find((candidate) => candidate.id === id(delta.characterRef));
