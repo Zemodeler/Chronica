@@ -115,9 +115,9 @@ describe("paying an army out of what it takes", () => {
     const ordered = applyDeltas(atRhegium(), THE_ORDER, context(atRhegium())).world;
     expect(balance(ordered, CHEST)).toBe(40_000);
 
-    // 40 000 in the chest against 30 000 a month: one month paid, the next not.
+    // 40 000 in the chest against 30 000 a month, a third of it stopped for the men's arms and kept in the chest (`equipment.ts`): one month paid, the next not.
     const first = months(ordered, 1);
-    expect(balance(first, CHEST)).toBe(10_000);
+    expect(balance(first, CHEST)).toBe(20_000);
     expect(first.material.obligations.find((o) => o.id === army(first).payObligationId)!.missedPeriods).toBe(0);
 
     const second = months(first, 1);
@@ -154,8 +154,8 @@ describe("paying an army out of what it takes", () => {
 
     // Rich for a while on what Rhegium had, and then not. Nothing else is
     // paying them: this is the whole of the arrangement the player chose.
-    // (what Rhegium had is counted in the talents now: it lasts as many months as it is worth wages, and then a few more.)
-    const after = months(plundered, Math.ceil(balance(plundered, CHEST) / 30_000) + 4);
+    // (what Rhegium had is counted in the talents now: it lasts as many months as it is worth wages less the stoppage kept for their arms, and then a few more.)
+    const after = months(plundered, Math.ceil(balance(plundered, CHEST) / 20_000) + 4);
     expect(after.material.obligations.find((o) => o.id === army(after).payObligationId)!.missedPeriods).toBeGreaterThan(0);
     expect(army(after).payArrearsPeriods).toBeGreaterThan(0);
     expect(army(after).moraleBps).toBeLessThan(army(plundered).moraleBps);
@@ -165,5 +165,5 @@ describe("paying an army out of what it takes", () => {
 
     // And Rome's treasury was never touched, because Rome was never paying.
     expect(balance(after, "rome-treasury")).toBeGreaterThan(balance(plundered, "rome-treasury"));
-  });
+  }, 180_000);
 });

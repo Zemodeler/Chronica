@@ -93,12 +93,15 @@ import { payCustoms } from "./customs";
 import { keepMerchantHouses } from "./merchant-houses";
 import { keepGentes } from "./gentes";
 import { keepTheState } from "./keeping-the-state";
+import { keepTheKit, stoppageOf } from "./equipment";
+import { refillTheLegions } from "./legion-refill";
 import { routeOpenBps } from "./trade-flows";
 import { EMBARGO_BREACH_TRUST, endObligationsOfEndedAgreements, keepTreaties, shiftTrust } from "./treaties";
 import { keepPromises } from "./promises";
 import { workOnTreatyDuties } from "./treaty-duties";
 import { continueMissions } from "./mission-fieldwork";
 import { answerRequests } from "./requests";
+import { carriedMotionsAreDone } from "./decrees-by-rule";
 import { settleDebts, termTheLoans } from "./debts";
 import { keepPatronage, soldierPayShares } from "./money";
 import { landCargoes } from "./cargoes";
@@ -120,6 +123,7 @@ import { keepTheRoll } from "./the-lectio";
 import { keepDepartments } from "./departments";
 import { assignOverseers, polityOfWork } from "./overseers";
 import { fillAppointments } from "./appointments";
+import { summariseTheFarCalendar } from "./far-calendar";
 import { appointByRule } from "./appointed-by-rule";
 import { reviewSkills } from "./skill-decline";
 import { sweepThreadsOverTheCap } from "./storyline-cap";
@@ -524,7 +528,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
   for (const obligation of byPriority) {
     if (!obligation.active) continue;
     // A hired company asks for the silver its employer's coin was struck to hold, and for the wait (`mercenary-pay.ts`).
-    const hiredBy = obligation.kind === "salary" ? mercenaryContractPaidBy(input.world, obligation.id) : undefined;
+    const hiredBy = obligation.kind === "salary" || obligation.kind === "army_upkeep" ? mercenaryContractPaidBy(input.world, obligation.id) : undefined;
     const amount = hiredBy === undefined
       ? obligationAmountNow(input.world, obligation)
       : Math.round((obligationAmountNow(input.world, obligation) * mercenaryWageBps(input.world, hiredBy, obligation.missedPeriods)) / 10_000);
@@ -544,7 +548,9 @@ export function runDeterministicTick(given: TickInput): TickResult {
         const crossed = obligation.recipientAccountId === undefined || obligation.recipientAccountId === obligation.payerAccountId
           ? { received: owed, cut: 0 }
           : convertSilver(input.world, obligation.payerAccountId, obligation.recipientAccountId, owed);
-        credit(obligation.payerAccountId, -owed);
+        // The stoppage of an army's pay stays in the chest: the quartermaster buys its kit with it (`equipment.ts`; Polybius 6.39).
+        const stopped = stoppageOf(input.world, obligation, owed);
+        credit(obligation.payerAccountId, -(owed - stopped));
         if (obligation.recipientAccountId !== undefined) credit(obligation.recipientAccountId, crossed.received);
         paid += owed;
         // The named men's pay reaches their purses, out of what the treasury
@@ -563,7 +569,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
             cause: { kind: "obligation", id: obligation.id, explanation: `${obligation.label}: the money-changers' cut of a soldier's pay`.slice(0, 240) }, visibility: "polity",
           });
         }
-        const toTheRanks = owed - shares.reduce((sum, share) => sum + share.amount, 0);
+        const toTheRanks = Math.max(0, owed - stopped - shares.reduce((sum, share) => sum + share.amount, 0));
         if (crossed.cut > 0) transactions.push({
           id: input.ids.next("txn"), atStep: due, kind: "transfer", amount: crossed.cut, external: "abroad", sourceAccountId: obligation.payerAccountId,
           cause: { kind: "obligation", id: obligation.id, explanation: `${obligation.label}: the money-changers' cut`.slice(0, 240) }, visibility: "polity",
@@ -890,7 +896,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
       // The men come out of the country, paid for already, milestone by
       // milestone (`levies.ts`). A country with none left to give produces
       // fewer, and says so.
-      const levy = raiseLevy(leviedWorld ?? input.world, { polityId, provinceId, men: Math.max(1, outcome.amount), payerAccountId: null, pays: false, atStep: input.toDay, cause: project.id, ids: input.ids });
+      const levy = raiseLevy(leviedWorld ?? input.world, { polityId, provinceId, men: Math.max(1, outcome.amount), payerAccountId: null, pays: false, atStep: input.toDay, cause: project.id, ids: input.ids, categoryId: outcome.categoryId });
       if (levy.men <= 0) {
         unproduced.set(project.id, levy.short ?? "No men could be found.");
         return null;
@@ -1576,6 +1582,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
   // A far power's calendar is its own people's news, not Rome's (`far-powers.ts`).
   const near = expiredSeats.length === 0 ? null : powersNearThePlayer(recovered, input.playerCharacterId);
   const officesNow = allOffices(recovered, input.government?.offices ?? []);
+  const termFactsFrom = facts.length;
   for (const seat of expiredSeats) {
     if (seat.holderCharacterId === null) continue;
     const who = recovered.characters.find((character) => character.id === seat.holderCharacterId)?.name ?? seat.holderCharacterId;
@@ -1594,6 +1601,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
       significance: 20,
     });
   }
+  if (expiredSeats.length > 0) facts.push(...summariseTheFarCalendar(recovered, facts.slice(termFactsFrom), input.playerCharacterId));
 
   // A truce with a term ends the day its term does, whether or not anybody
   // remembers it. One that ends only when somebody says so is a peace.
@@ -1733,6 +1741,11 @@ export function runDeterministicTick(given: TickInput): TickResult {
   const land = { ...reckoned, world: theState.world };
   facts.push(...land.facts, ...housed.facts, ...theState.facts);
   // And the noble families keep their heads, honours, rites, grudges and marriages, a month at a time (`gentes.ts`).
+  // And each army's quartermaster spends the stoppage on its kit, at the markets behind it; a power at war fills its thinned legions from the levy (`equipment.ts`, `legion-refill.ts`).
+  const kitted = keepTheKit({ world: land.world, toDay: input.toDay, ids: input.ids });
+  const refilled = refillTheLegions({ world: kitted.world, toDay: input.toDay, ids: input.ids, offices: input.government?.offices });
+  land.world = refilled.world;
+  facts.push(...kitted.facts, ...refilled.facts);
   const kinned = keepGentes(land.world, input.toDay);
   land.world = kinned.world;
   facts.push(...kinned.facts);
@@ -1745,9 +1758,14 @@ export function runDeterministicTick(given: TickInput): TickResult {
   const asked = answerRequests({ world: debts.world, toDay: input.toDay, offices: input.government?.offices ?? [], ids: input.ids, playerCharacterId: input.playerCharacterId ?? null,
     ...(input.warfare === undefined ? {} : { rules: { warfare: input.warfare, gameId: "tick" } }) });
   facts.push(...asked.facts);
+  // What a chamber carried that names an act -- a fleet, an army sent, men levied, the tribute at a rate -- is done the month after, by the man who put it (`decrees-by-rule.ts`).
+  const decreed = input.warfare === undefined ? { world: asked.world, facts: [] as FactProposalDraft[] }
+    : carriedMotionsAreDone({ world: asked.world, toDay: input.toDay, offices: input.government?.offices ?? [], ids: input.ids, playerCharacterId: input.playerCharacterId ?? null,
+      rules: { warfare: input.warfare, successionRules: input.government?.successionRules, gameId: "tick" } });
+  facts.push(...decreed.facts);
   // Promises between people, settled on their day by what was done (`promises.ts`).
   // What a treaty bound a power nobody plays to do on the ground, begun or done (`treaty-duties.ts`).
-  const dutiful = workOnTreatyDuties({ world: asked.world, toDay: input.toDay, ids: input.ids, playerPolityId });
+  const dutiful = workOnTreatyDuties({ world: decreed.world, toDay: input.toDay, ids: input.ids, playerPolityId });
   facts.push(...dutiful.facts);
   // Orders that want ground taken go on being worked at: the detachment, its march, the siege (`mission-fieldwork.ts`).
   const afield = continueMissions({ world: dutiful.world, toDay: input.toDay, ids: input.ids, warfare: input.warfare, government: input.government, clock: input.clock, playerCharacterId: input.playerCharacterId ?? null });

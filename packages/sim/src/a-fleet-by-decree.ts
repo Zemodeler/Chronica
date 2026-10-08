@@ -1,7 +1,11 @@
 import {
   WorldDeltaSchema,
   nearestShore,
+  HULL_METAL_BARS,
+  HULL_TIMBER_LOADS,
   fitStrengthOf,
+  goodSpec,
+  marketPriceBps,
   monthlyTakings,
   warsOf,
   type Character,
@@ -31,6 +35,17 @@ import type { StatecraftDecision, StatecraftInput } from "./statecraft";
 export const FLEET_HULLS = 120;
 /** What a hull costs the chest, building and fitting, in the scenario's drachmae: a quinquereme was some two talents of timber, iron and labour in the age, six thousand drachmae to the talent. */
 export const HULL_COST = 12_000;
+
+/**
+ * What a hull costs in this year's markets: the base price, less what timber and metal come to at the base prices, and those two at what they cost at the yard's hub now. A fleet laid down when
+ * timber is twice its price costs a ninth dearer for the timber (and a good deal more again when a war has made the metal dear).
+ */
+export function hullCostAt(world: WorldState, yardProvinceId: string): number {
+  const timber = HULL_TIMBER_LOADS * goodSpec("timber").basePrice;
+  const metals = HULL_METAL_BARS * goodSpec("metals").basePrice;
+  const dear = (timber * marketPriceBps(world, yardProvinceId, "timber") + metals * marketPriceBps(world, yardProvinceId, "metals")) / 10_000;
+  return Math.round(HULL_COST - timber - metals + dear);
+}
 /** The least a fleet's yard takes: timber to fell and season, then the building, then the benches. */
 /** Each stage falls due this many days after the work begins: sixty, a hundred and ten, a hundred and fifty. */
 const STAGES: readonly { readonly label: string; readonly days: number; readonly share: number }[] = [
@@ -101,9 +116,10 @@ export function fleetWork(world: WorldState, polityId: string, commanderId: stri
   const yard = yardOf(world, polityId);
   if (chest === null || yard === null) return null;
   const balance = world.material.accounts.find((account) => account.id === chest)?.balance ?? 0;
-  const hulls = Math.max(0, Math.min(wanted, Math.floor((balance * 0.6) / HULL_COST)));
+  const hullCost = hullCostAt(world, yard);
+  const hulls = Math.max(0, Math.min(wanted, Math.floor((balance * 0.6) / hullCost)));
   if (hulls < 10) return null;
-  const total = hulls * HULL_COST;
+  const total = hulls * hullCost;
   const polity = world.map.polities.find((candidate) => candidate.id === polityId)?.name ?? polityId;
   const milestones = STAGES.map((stage, index) => ({ label: stage.label, dueInDays: stage.days, costAmount: index === STAGES.length - 1 ? total - STAGES.slice(0, -1).reduce((sum, earlier) => sum + Math.round(total * earlier.share), 0) : Math.round(total * stage.share) }));
   const label = `The new fleet of ${polity}`.slice(0, 120);

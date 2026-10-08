@@ -19,6 +19,7 @@ import { aptitude, skillShare } from "../characters/aptitude";
 import type { Force, ProvinceMaterial } from "../material-state";
 import type { Province } from "../world/map";
 import { resolveForcePosition } from "./position";
+import { equipmentModifierBps } from "./equipment";
 import type { TacticalModifierProposal } from "./tactical-modifier";
 import type { Structure } from "../world/structure";
 import { ENGAGEMENT_EXPOSURE, pursuitExposure, readFormation, type FormationReading, type WarfareRules } from "./formation";
@@ -378,6 +379,7 @@ function computeForceContribution(
     + garrisonOvercrowdingBps(participant, province, structures)
     + supplyModifierBps(force, provinceMaterial, province.id, adjacentProvinceIds, structures)
     + commanderModifierBps(participant.commander)
+    + equipmentModifierBps(force)
     + postureBps
     + varianceBps
     + tacticBps;

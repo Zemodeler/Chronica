@@ -44,7 +44,8 @@ function aMonthWith(men: number) {
   const chest = (world: WorldState): number => world.material.accounts.find((account) => account.id === "rome-treasury")!.balance;
   const pay = before.material.obligations.find((obligation) => obligation.id === "rome-legion-pay")!.amount;
   const after = runDeterministicTick({ world: before, toDay: 30, ids: createIdFactory(`army-${men}`), warfare: definition.warfare }).world;
-  return { pay, income: chest(after) - chest(before) + pay + keepingSpent(before, after, "rome"), chest: chest(after), opened: chest(before) };
+  // A third of the pay is stopped for the men's arms and kept in the chest for the quartermaster (`equipment.ts`): it is the army's cost still, and is added back with the rest.
+  return { pay, income: chest(after) - chest(before) + pay - Math.floor(pay / 3) + keepingSpent(before, after, "rome"), chest: chest(after), opened: chest(before) };
 }
 
 describe("an army costs its share", () => {

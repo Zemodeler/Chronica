@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
-import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, kmFrom, type Force, type WorldDelta, type WorldState } from "@chronica/shared";
+import { assiduiShareBps, ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, kmFrom, type Force, type WorldDelta, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
 import { levyCost, MEN_MUSTERED_PER_DAY, MUSTER_AT_ONCE } from "./levies";
@@ -48,6 +48,13 @@ const manpower = (world: WorldState, provinceId: string): number => world.materi
 /** Every province of Rome's own, and the men of age they hold between them. */
 const romanGround = (world: WorldState): string[] => world.map.provinces.filter((province) => province.controllerPolityId === "rome").map((province) => province.id);
 const romanManpower = (world: WorldState): number => romanGround(world).reduce((sum, id) => sum + manpower(world, id), 0);
+/** The men of a province's roll the census classes let a levy take: the assidui only (`assiduiShareBps`); the landless stay on the roll. */
+const levyable = (world: WorldState, provinceId: string): number => {
+  const row = world.material.provinceMaterial.find((candidate) => candidate.provinceId === provinceId)!;
+  const establishment = world.establishments.find((candidate) => candidate.polityId === "rome")!;
+  return Math.floor((row.availableManpower * assiduiShareBps(establishment.recruitment.basis, establishment.recruitment.floor, row.developmentBps ?? 5_000)) / 10_000);
+};
+const romanLevyable = (world: WorldState): number => romanGround(world).reduce((sum, id) => sum + levyable(world, id), 0);
 const treasury = (world: WorldState): number => world.material.accounts.find((account) => account.id === "rome-treasury")!.balance;
 const raised = (world: WorldState): Force => world.material.forces.find((force) => force.name === "Two new legions")!;
 const fit = (force: Force): number => force.personnel.reduce((sum, group) => sum + group.fit, 0);
@@ -57,10 +64,11 @@ describe("a levy", () => {
   it("draws the men out of the province, then the rest of Rome's ground", () => {
     const before = opening();
     // More than Latium holds: the rest comes from Rome's ground round about it, and from nowhere that is not Rome's.
-    const asked = manpower(before, LATIUM) + 5_000;
+    const asked = levyable(before, LATIUM) + 5_000;
     const result = applyDeltas(before, [raise(asked)], context);
     expect(result.rejected.map((rejection) => rejection.reason)).toEqual([]);
-    expect(manpower(result.world, LATIUM)).toBe(0);
+    // Latium's assidui are gone and its landless are not: the census classes limit the levy (Livy 1.43; Polybius 6.19).
+    expect(manpower(result.world, LATIUM)).toBe(manpower(before, LATIUM) - levyable(before, LATIUM));
     expect(romanManpower(result.world)).toBe(romanManpower(before) - asked);
     const taken = before.map.provinces.filter((province) => manpower(result.world, province.id) < manpower(before, province.id)).map((province) => province.id);
     expect(taken.length).toBeGreaterThan(1);
@@ -98,7 +106,7 @@ describe("a levy", () => {
     const result = applyDeltas(before, [raise(200_000)], context);
     expect(result.rejected).toEqual([]);
     expect(manpower(result.world, ETRURIA)).toBe(manpower(before, ETRURIA));
-    expect(raised(result.world).authorizedStrength).toBe(romanManpower(before));
+    expect(raised(result.world).authorizedStrength).toBe(romanLevyable(before));
     expect(result.factProposals.some((fact) => fact.kind === "levy_short" && /no more men of age/.test(fact.summary))).toBe(true);
   });
 
@@ -109,8 +117,8 @@ describe("a levy", () => {
     expect(manpower(result.world, ETRURIA)).toBe(manpower(before, ETRURIA));
     // From the Roman ground nearest the allies' country, not from a Rome that lies a province further.
     const reach = kmFrom(before, ETRURIA);
-    const nearest = romanGround(before).filter((id) => manpower(before, id) > 0).sort((a, b) => (reach.get(a) ?? Infinity) - (reach.get(b) ?? Infinity) || a.localeCompare(b))[0]!;
-    expect(manpower(result.world, nearest)).toBe(Math.max(0, manpower(before, nearest) - 1_000));
+    const nearest = romanGround(before).filter((id) => levyable(before, id) > 0).sort((a, b) => (reach.get(a) ?? Infinity) - (reach.get(b) ?? Infinity) || a.localeCompare(b))[0]!;
+    expect(manpower(result.world, nearest)).toBe(manpower(before, nearest) - Math.min(1_000, levyable(before, nearest)));
     expect(romanManpower(result.world)).toBe(romanManpower(before) - 1_000);
   });
 

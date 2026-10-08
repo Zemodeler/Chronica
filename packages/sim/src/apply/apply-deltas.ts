@@ -171,6 +171,8 @@ import { commandChanges } from "../command-changes";
 import { endPolity } from "../polity-end";
 import { LOAN_TERM_PERIODS, loanInstalment } from "../debts";
 import { receiveDefector } from "../defection";
+import { rankOf } from "../reception";
+import { formTheHiredBand } from "../hired-bands";
 import { loanRefusal, termPeriodsOf } from "../lending";
 import { EMBARGO_BREACH_TRUST, endObligationsOfEndedAgreements, hasGrievance, shiftTrust } from "../treaties";
 import { safeLocalId } from "../safe-local-id";
@@ -2674,7 +2676,7 @@ function applyOne(
       // Raised out of a country and paid for, and a large levy musters over
       // days (`levies.ts`): whoever pays its wages pays its bounties.
       const payerAccountId = world.material.obligations.find((obligation) => obligation.id === payObligationId)?.payerAccountId ?? null;
-      const levy = raiseLevy(world, { polityId: forcePolityId, provinceId: delta.locationId, men: delta.authorizedStrength, payerAccountId, pays: true, atStep, cause: id, ids: context.ids });
+      const levy = raiseLevy(world, { polityId: forcePolityId, provinceId: delta.locationId, men: delta.authorizedStrength, payerAccountId, pays: true, atStep, cause: id, ids: context.ids, categoryId: category.id });
       if (levy.men <= 0) reject(levy.short ?? `No men could be raised for ${delta.name}.`);
       if (levy.short !== null) {
         emitFact({ localId: safeLocalId(`levy_short_${id}`).slice(0, 60), kind: "levy_short", summary: levy.short, affectedRefs: [{ kind: "province", id: delta.locationId }, { kind: "polity", id: forcePolityId }], visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 45 });
@@ -3094,7 +3096,7 @@ function applyOne(
       let arriving: Pick<ForcePersonnelCategory, "fit" | "unavailable"> = { fit: joining, unavailable: [] };
       if (delta.fromForceRef === null) {
         const payerAccountId = world.material.obligations.find((obligation) => obligation.id === force.payObligationId)?.payerAccountId ?? null;
-        const levy = raiseLevy(world, { polityId: force.polityId, provinceId: force.locationId, men: joining, payerAccountId, pays: true, atStep, cause: forceId, ids: context.ids });
+        const levy = raiseLevy(world, { polityId: force.polityId, provinceId: force.locationId, men: joining, payerAccountId, pays: true, atStep, cause: forceId, ids: context.ids, categoryId: delta.categoryId });
         if (levy.men <= 0) reject(levy.short ?? `No men could be raised for ${force.name}.`);
         if (levy.short !== null) {
           emitFact({ localId: safeLocalId(`levy_short_${forceId}_${atStep}`).slice(0, 60), kind: "levy_short", summary: levy.short, affectedRefs: [{ kind: "force", id: forceId }, { kind: "province", id: force.locationId }], visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 45 });
@@ -4944,12 +4946,13 @@ function applyOne(
       if (newPolityId !== undefined && newPolityId !== person.polityId) {
         changed = handOverForcesOf(vacateOfficesOf(changed, characterId, "resignation", atStep), characterId, newPolityId);
         // A man who goes over is a guest and no citizen, and the power he left answers for it (`defection.ts`).
-        const went = person.polityId === null ? null : receiveDefector(changed, person, newPolityId, atStep);
+        const went = person.polityId === null ? null : receiveDefector(changed, person, newPolityId, atStep, rankOf(world, person));
         if (went !== null) {
           if (went.refusal !== undefined) reject(went.refusal);
           changed = went.world;
           for (const fact of went.facts) emitFact(fact);
           for (const status of went.statuses) if (!statuses.includes(status)) statuses.push(status);
+          for (const status of went.lifted ?? []) { const at = statuses.indexOf(status); if (at >= 0) statuses.splice(at, 1); }
         }
       }
 
@@ -5228,6 +5231,8 @@ function applyOne(
             balance: 0, status: "active" as const, visibility: "polity" as const,
           }],
         } };
+        // A band of a people is drawn up as that people's own, under its captain, never by the hirer's legion (`hired-bands.ts`).
+        next = formTheHiredBand(next, { forceId, texts: [delta.label, delta.duties, delta.reason, employee.name, employee.cultureId], captainName: employee.name, atStep, naval }).world;
       }
       next = { ...next, material: { ...next.material, contracts: [...next.material.contracts, {
         id, role: delta.role, label: delta.label, employerAccountId, employeeCharacterId: employeeId, obligationId, incomeSourceId, grantId,

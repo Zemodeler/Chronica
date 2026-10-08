@@ -30,6 +30,22 @@ import { act, government, holdersOf, opening, taxSet, thinksIll } from "./compet
 
 /** The files whose every word is the player's or a model's to read, or from which such words are made. */
 const NEW_FILES = [
+  // Orders by rule: the march template, the honest reply to an order the engine cannot read, and the carried question that becomes an act.
+  "./march-template.ts",
+  "./place-named.ts",
+  "./an-order-the-engine-cannot-read.ts",
+  "./decree-reader.ts",
+  "./decrees-by-rule.ts",
+  // The coin under strain: the reading of it, the hired hosts of Carthage, the billon.
+  "./fiscal-strain.ts",
+  "../../db/src/punic-wars-hired-hosts.ts",
+  // Offices and data gaps closed: the far calendar, the votes a chamber remembers, a minor heir's tutor, the treasuries and the seats' chambers, the parties a scenario may author.
+  "./far-calendar.ts",
+  "./vote-history.ts",
+  "./house-tutelage.ts",
+  "../../db/src/punic-wars-treasuries.ts",
+  "../../db/src/punic-wars-seats.ts",
+  "../../db/src/punic-wars-factions.ts",
   "../../shared/src/authority/competence.ts",
   "../../shared/src/authority/charge-vocabulary.ts",
   "../../shared/src/world/act-marks.ts",
@@ -42,6 +58,17 @@ const NEW_FILES = [
   "./close-of-office.ts",
   // H6: the lectio and the censors' mark, the Senate's provinces, the quorum of a chamber, the friends of a king and their envy.
   "./the-lectio.ts",
+  // Defection gaps closed: the Senate's reception decree, the hired bands of their own peoples, and what a defection does to a man's bargains.
+  "./reception.ts",
+  "./hired-bands.ts",
+  "./defection-consequences.ts",
+  // War gaps closed (docs/plans/war-plans.md): the shadowing of an army, the armies shared between two wars, peace priced from the war's aims, the dated war of 264.
+  "./a-shadowing-army.ts",
+  "./a-shadowed-army-goes-hungry.ts",
+  "./two-fronts.ts",
+  "./a-war-ends-for-what-it-was-for.ts",
+  "./a-dated-war.ts",
+  "../../db/src/punic-wars-mamertines.ts",
   // Playtest fixes (batch 1).
   "./safe-local-id.ts",
   "./clip-overlong.ts",
@@ -57,6 +84,10 @@ const NEW_FILES = [
   "./public-works.ts",
   "./keeping-the-state.ts",
   "./played-ruler-books.ts",
+  // Kit, crews and the refilling of the legions: the quartermaster's purchases, the census classes, the levy by the month.
+  "../../shared/src/warfare/equipment.ts",
+  "./equipment.ts",
+  "./legion-refill.ts",
   // The noble families (docs/plans/gentes.md): what they say, and the files that say it.
   "../../shared/src/world/gentes.ts",
   "../../shared/src/characters/roman-names.ts",
