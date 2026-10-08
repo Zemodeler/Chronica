@@ -3752,8 +3752,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       excludedPolityIds: new Set<string>(
         world.map.polities.filter((polity) => reader.rulers(polity.id).some((ruler) => ruler.id === playerId)).map((polity) => polity.id),
       ),
+      // A far man of the wider world's seats is the rules' to play while he rests between asks (`far-cast-rests.ts`): the model is not asked about Hanno for forty-five days, and the rules do not stand back from him for them.
       playedByModel: new Set([...answeredBy.keys(), ...world.cast.members
-        .filter((member) => interests.detailOf(member.characterId) !== "background")
+        .filter((member) => interests.detailOf(member.characterId) !== "background"
+          && !(playerId !== null && !answeredBy.has(member.characterId) && aFarManRests(world, member, interests, circleOf(world, playerId), touchedByThePlayer(world, playerId), cognitionMemory.lastAskedStep(member.characterId), { far: budget.farRestDays, near: budget.nearWorldRestDays })))
         .map((member) => member.characterId)]),
       playerCharacterId: playerId,
       nearPlayer: powersNearThePlayer(world, playerId),

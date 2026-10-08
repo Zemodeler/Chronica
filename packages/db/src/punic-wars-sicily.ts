@@ -67,7 +67,7 @@ function withCarthageHoldingSicily(world: WorldState): WorldState {
   }
   const forces = [
     {
-      ...FORCE_COMMON, id: "carthaginian-sicilian-army", name: "Carthaginian army in Sicily", commanderCharacterId: "hasdrubal-son-of-hanno", controllerCharacterId: "hasdrubal-son-of-hanno",
+      ...FORCE_COMMON, id: "carthaginian-sicilian-army", name: "Punic army in Sicily", commanderCharacterId: "hasdrubal-son-of-hanno", controllerCharacterId: "hasdrubal-son-of-hanno",
       locationId: PUNIC_IDS.lilybaeum, authorizedStrength: 3_200,
       personnel: [
         { categoryId: "infantry", label: "Libyan foot", fit: 1_300, unavailable: [] }, { categoryId: "cavalry", label: "Numidian and Libyan horse", fit: 300, unavailable: [] },

@@ -1197,7 +1197,8 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
         .map((character) => `${character.name} [${character.id}]${character.officeId === null ? "" : `, ${character.officeId}`}`),
       forces: world.material.forces
         .filter((force) => force.polityId === polity.id)
-        .slice(0, 4)
+        // Three, not four: Carthage keeps an army and two garrisons in Sicily now (`punic-wars-sicily.ts`), and the slice does not grow for them.
+        .slice(0, 3)
         // Another power's numbers are a guess, and as good as the source: the
         // model hears what the character could, never the true count.
         .map((force) => `${force.name}${force.outlaw === true ? " (outlaw)" : ""} [${force.id}] — ${station === null ? `${force.personnel.reduce((sum, category) => sum + category.fit, 0)} men` : strangerStrength(force, station.provinceIds, knownToActor, station.characterId, world.elapsedStep).label.replace("unknown to you", "strength unknown")} at ${provinceName(force.locationId)} [${force.locationId}]`),
