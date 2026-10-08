@@ -27,6 +27,9 @@ const silent: SimModelPort = {
 };
 const idFor = createIdFactory("war-sanity");
 let world = ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
+/** --from-day=N: the same world opened on day N (the age's dated things are done on their days, not the years before them), for a run that is only about what comes after. */
+const fromDay = Number(args.find((a) => a.startsWith("--from-day="))?.split("=")[1] ?? "0");
+if (fromDay > 0) world = { ...world, instant: { ...world.instant, day: fromDay }, elapsedStep: fromDay };
 const context = () => ({ now: world.instant, actorRef: { kind: "character" as const, id: actor }, actsForTheWorld: true, offices: definition.government.offices, warfare: definition.warfare, terrains: definition.terrains ?? definition.map.terrains, ids: idFor, gameId: "war-sanity" });
 
 interface Year { orders: number; flips: number; naval: number; battles: number; sieges: number; planShifts: number; retargets: number; wars: number; cpu: number; men: number; engagements: number }
@@ -46,6 +49,22 @@ let pendingBefore = new Map<string, string>();
 const lastObjective = new Map<string, string>();
 const priorIssued = new Map<string, number>();
 const free = args.includes("--free");
+/** --losses: the men a power's armies lost, by year and by what took them (battle, wounds, hunger, sickness, storm, desertion), read off the armies' own histories. */
+const losses = new Map<string, number>();
+const lossesSeen = new Set<string>();
+function tallyLosses(w: WorldState, year: number): void {
+  for (const f of w.material.forces) {
+    if (isNavalForce(f, definition.warfare)) continue;
+    for (const e of f.history) {
+      if (lossesSeen.has(e.id)) continue;
+      lossesSeen.add(e.id);
+      if (e.kind === "reinforcement" || e.kind === "recovery" || e.kind === "unavailable") continue;
+      const cause = e.kind === "attrition_death" || e.kind === "desertion" ? ` (${String(e.causeId).replace(/^.*?-(hunger|sickness|winter-storm|unpaid|pay).*$/, "$1")})` : "";
+      const key = `year ${year + 1} ${f.polityId} ${e.kind}${cause}`;
+      losses.set(key, (losses.get(key) ?? 0) + e.count);
+    }
+  }
+}
 let carthageWarDay: number | null = null;
 for (let month = 0; month < years * 12; month += 1) {
   if (month === 6 && !free) {
@@ -67,6 +86,16 @@ for (let month = 0; month < years * 12; month += 1) {
   row.cpu += ms;
   if (ms > worstMonth.ms) { worstMonth.ms = ms; worstMonth.month = month + 1; }
   total = combineAudits(total, auditMoney(before, world));
+  if (args.includes("--losses")) tallyLosses(world, year);
+  const trace = args.find((a) => a.startsWith("--trace="))?.split("=")[1];
+  if (trace !== undefined) {
+    const f = world.material.forces.find((x) => x.id === trace);
+    if (f !== undefined) {
+      const province = world.map.provinces.find((x) => x.id === f.locationId);
+      const cp = (world.campaigns ?? []).find((x) => x.forceId === f.id);
+      console.log(`  trace month ${month + 1} (day ${world.instant.day}): ${f.name} ${fitStrengthOf(f)} men, ${f.provisionStatus} (through day ${f.provisionedThroughStep}), at ${province?.name ?? f.locationId} held by ${province?.controllerPolityId ?? "nobody"}, orders ${cp === undefined ? "none" : `${cp.mode} ${cp.objective.kind === "province" ? cp.objective.provinceId : cp.objective.forceId}`}${f.hold === true ? " HOLD" : ""}`);
+    }
+  }
   // March orders: a new force_move project. A flip is a new destination ordered for an army whose last march (as the month before ended) had not been finished.
   const pendingNow = new Map<string, string>();
   for (const project of world.projects) {
@@ -108,7 +137,11 @@ for (let month = 0; month < years * 12; month += 1) {
     if (planSignature.has(key) && planSignature.get(key) !== signature) row.planShifts += 1;
     planSignature.set(key, signature);
   }
-  if (carthageWarDay === null && world.polityAgreements.some((a) => a.kind === "war" && a.status === "active" && [a.polityId, a.otherPolityId].includes("rome") && [a.polityId, a.otherPolityId].includes("carthage"))) carthageWarDay = world.instant.day;
+  if (carthageWarDay === null && world.polityAgreements.some((a) => a.kind === "war" && a.status === "active" && [a.polityId, a.otherPolityId].includes("rome") && [a.polityId, a.otherPolityId].includes("carthage"))) {
+    carthageWarDay = world.instant.day;
+    const war = world.polityAgreements.find((x) => x.kind === "war" && x.status === "active" && [x.polityId, x.otherPolityId].includes("rome") && [x.polityId, x.otherPolityId].includes("carthage"));
+    console.log(`  >>> rome-carthage war opens by day ${carthageWarDay} (${formatWorldDate(world.instant, definition.clock)}): ${war?.terms ?? ""}; motions: ${world.material.politicalProcedures.filter((x) => /carthag|war be made/i.test(x.label)).map((x) => `${x.label.slice(0, 70)} => ${x.outcome ?? x.stage}`).join("; ") || "none"}`);
+  }
   row.wars = world.polityAgreements.filter((a) => a.kind === "war" && a.status === "active").length;
   row.battles = battlesOf(world);
   row.men = menOf(world);
@@ -144,5 +177,6 @@ const plans = ((world as unknown as { warPlans?: unknown[] }).warPlans ?? []);
 if (plans.length > 0) console.log(`final war plans: ${JSON.stringify(plans).slice(0, 1_800)}`);
 const campaigns = ((world as unknown as { campaigns?: unknown[] }).campaigns ?? []);
 if (campaigns.length > 0) console.log(`final campaign plans: ${JSON.stringify(campaigns).slice(0, 1_800)}`);
+if (args.includes("--losses")) for (const [key, count] of [...losses].filter(([k]) => /rome|carthage/.test(k)).sort()) console.log(`  losses ${key}: ${count}`);
 console.log(`unexplained money entries: ${total.unexplained.length}`);
 if (args.includes("--audit")) console.log(auditInWords(total));

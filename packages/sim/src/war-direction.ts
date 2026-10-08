@@ -18,6 +18,7 @@ import {
 } from "@chronica/shared";
 import { REACH_KM, besiegerOrder, campaignStillGood, conductByPlan, issueCampaign, type OrderSets } from "./campaign-orders";
 import { commandTenureOf } from "./constitutions";
+import { shareArmies } from "./two-fronts";
 import { landForcesOf, planTheWar, reachOf, theatresForAims, type StrategyContext } from "./grand-strategy";
 import { fleetOrder, navalForces, navalPlanFor } from "./naval-orders";
 import type { StatecraftDecision } from "./statecraft";
@@ -73,9 +74,14 @@ export function directTheWar(input: DirectInput): StatecraftDecision[] {
   const ctxOf = new Map<string, StrategyContext>();
   const plans: WarPlan[] = [];
   const claimed = new Set<string>();
+  const warWith = (enemy: string) => world.polityAgreements.find((agreement) => agreement.kind === "war" && agreement.status === "active"
+    && ((agreement.polityId === polityId && agreement.otherPolityId === enemy) || (agreement.polityId === enemy && agreement.otherPolityId === polityId)));
+  // The armies are shared among the wars by what each has at stake (two-fronts.ts), the second war keeping a reserve.
+  const warIds = new Map(principals.map((enemy) => [warWith(enemy)?.id ?? "", enemy] as const));
+  const placedIn = new Map((world.campaigns ?? []).filter((entry) => entry.polityId === polityId && entry.expiresStep > day && warIds.has(entry.warId)).map((entry) => [entry.forceId, warIds.get(entry.warId)!] as const));
+  const shares = shareArmies(principals.filter((enemy) => warWith(enemy) !== undefined).map((enemy) => ({ enemy, ctx: { ...ctx, enemies: sideOf(enemy) } })), mine, placedIn);
   for (const enemy of principals) {
-    const war = world.polityAgreements.find((agreement) => agreement.kind === "war" && agreement.status === "active"
-      && ((agreement.polityId === polityId && agreement.otherPolityId === enemy) || (agreement.polityId === enemy && agreement.otherPolityId === polityId)));
+    const war = warWith(enemy);
     if (war === undefined) continue;
     const existing = warPlanOf(world, polityId, enemy);
     const wctx: StrategyContext = { ...ctx, enemies: sideOf(enemy) };
@@ -83,7 +89,7 @@ export function directTheWar(input: DirectInput): StatecraftDecision[] {
     const campaigns = (world.campaigns ?? []).filter((entry) => entry.polityId === polityId).map((entry) => ({ forceId: entry.forceId, theatreId: entry.theatreId, issuedStep: entry.issuedStep }));
     // A plan the model's man laid down stands for a while; the rules do not unwrite what he wrote.
     const modelMade = existing !== undefined && existing.issuedByCharacterId !== null && input.playedByModel.has(existing.issuedByCharacterId) && day - existing.aimsSetAtStep < MODEL_PLAN_DAYS;
-    const free = mine.filter((force) => !claimed.has(force.id));
+    const free = (shares.get(enemy) ?? []).filter((force) => !claimed.has(force.id));
     const planned = modelMade
       ? { plan: existing.theatres.length > 0 ? existing : { ...existing, theatres: theatresForAims(wctx, existing.aims, free, [], campaigns) }, changed: false, rebuilt: false, why: "" }
       : planTheWar(wctx, enemy, war, existing, free, campaigns);

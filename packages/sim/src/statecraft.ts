@@ -49,6 +49,8 @@ import { decideMagistrates, type Skim } from "./magistrates";
 import { decideAudits } from "./close-of-office";
 import { perceivedRatio } from "./perceive";
 import { directTheWar } from "./war-direction";
+import { peaceFromTheAims } from "./a-war-ends-for-what-it-was-for";
+import { decideDatedEvents } from "./a-dated-war";
 import { STEP_DAYS, letterVerdict } from "./letter-verdict";
 import { safeLocalId } from "./safe-local-id";
 import { decideCallsForHelp, decideTheAppealWar, theAppealBehind } from "./the-appeal-goes-to-the-people";
@@ -207,6 +209,9 @@ export function decideStatecraft(input: StatecraftInput): StatecraftDecision[] {
 
   const rulerOf = (polityId: string): Character | undefined => rulers.rulers(polityId).find((ruler) => ruler.alive && ruler.id !== input.playerCharacterId);
   const actsFor = (polityId: string): boolean => !input.excludedPolityIds.has(polityId) && rulerOf(polityId) !== undefined;
+
+  // ── 0. What the age dates, done (a-dated-war.ts) ───────────────────────
+  decisions.push(...decideDatedEvents(input, rulerOf));
 
   // ── 1. Letters to powers the model is not playing ──────────────────────
   for (const message of world.diplomacy) {
@@ -896,13 +901,17 @@ function peacesByRule(world: WorldState, input: StatecraftInput, rulerOf: (polit
     const ahead = days >= AHEAD_PEACE_DAYS && Math.max(standingA.score, standingB.score) >= AHEAD_SCORE;
     // Two proud men let a war go nowhere for longer than two sensible ones.
     const stale = days >= STALEMATE_DAYS * (1 + (proudest - 0.5) * 0.8);
-    if (winner === null && !spent && !satisfied && !ahead && !stale) continue;
-    const victor = winner ?? (satisfied ? war.polityId : standingA.score >= standingB.score ? a : b);
+    // A war plan with the aim of peace is an asking, and the terms are what the war was for (a-war-ends-for-what-it-was-for.ts).
+    const aimed = winner === null ? peaceFromTheAims(world, war) : null;
+    if (winner === null && aimed === null && !spent && !satisfied && !ahead && !stale) continue;
+    const victor = winner ?? aimed?.victor ?? (satisfied ? war.polityId : standingA.score >= standingB.score ? a : b);
     const loser = victor === a ? b : a;
     const speaker = (victor === a ? rulerA : rulerB) ?? (victor === a ? rulerB : rulerA);
     if (speaker === undefined) continue;
     const surrender = winner !== null && (victor === a ? standingA : standingB).totalDefeat && ground(loser) <= 3;
-    const why = winner !== null
+    const why = aimed !== null && !spent && !satisfied
+      ? aimed.why
+      : winner !== null
       ? `${nameOf(loser)} is beaten`
       : satisfied ? `${nameOf(victor)} holds the ground it went to war for`
         : spent ? "both sides are spent"
@@ -917,15 +926,16 @@ function peacesByRule(world: WorldState, input: StatecraftInput, rulerOf: (polit
       continue;
     }
     if (way.how === "wait") continue;
+    const byTheAims = aimed !== null && !surrender && !spent && !satisfied;
     const terms = surrender
       ? `${nameOf(loser)} gives itself up to ${nameOf(victor)}.`
-      : `Peace between ${nameOf(victor)} and ${nameOf(loser)}, each keeping the ground it holds.`;
+      : byTheAims ? aimed.terms : `Peace between ${nameOf(victor)} and ${nameOf(loser)}, each keeping the ground it holds.`;
     decisions.push({
       polityId: victor, actorCharacterId: speaker.id, act: "make_peace", targetPolityId: loser, why,
       deltas: [delta({
         op: "agreement_open", localId: safeLocalId(`peace_${victor}_${loser}`).slice(0, 60), kind: "peace",
         polityId: victor, otherPolityId: loser, terms,
-        ...(surrender ? { clauses: [{ kind: "submission", polityId: loser, toPolityId: victor }] } : {}),
+        ...(surrender ? { clauses: [{ kind: "submission", polityId: loser, toPolityId: victor }] } : byTheAims && aimed.clauses.length > 0 ? { clauses: aimed.clauses } : {}),
         forDays: null, sourceMessageRef: null, visibility: "public", reason: `${why}.`.slice(0, 240),
       })],
       facts: [fact({

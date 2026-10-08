@@ -62,6 +62,21 @@ export const CARRIED_DAYS = 30;
 /** Days on short rations before men begin to die of it. */
 export const STARVING_AFTER_DAYS = 10;
 /**
+ * What an army with no bread at all loses, of its men, for every day past the short rations: dead of hunger and the sickness that comes with it, or gone.
+ * A quarter of a per cent a day, seven and a half in the hundred a month. It was four in a thousand, twelve in the hundred a month, which is what Hannibal's
+ * army lost in the Alps and the marches to Italy in all (about 38,000 foot and 8,000 horse become 20,000 and 6,000 in some five months, battles, cold and
+ * hunger together: Polybius 3.35, 3.56), taken for hunger alone and for an army that was ordinarily fed until the day its bread ran out: a consular army of 17,500
+ * was found to lose 7,000 men to hunger in one campaigning year (docs/plans/war-plans.md, "War gaps closed"), nine in ten of what it lost.
+ */
+const STARVING_LOSS_PER_DAY = 0.0025;
+/**
+ * Of the men a starving army loses, the share that slips away rather than dies. Six in ten for men whose pay is owed them (the hired hosts of the Carthaginians, whose desertions
+ * and mutiny are Polybius 1.66-67); a quarter for an army that is paid, whose men are sworn (the Roman sacramentum, the allies' oath by the treaty) and whose desertion was a
+ * capital offence (Polybius 6.37): no Roman army of this age is said to have dissolved of it, though several went hungry (Agrigentum, 262; Polybius 1.17-18).
+ */
+const UNPAID_WALK_SHARE = 0.6;
+const SWORN_WALK_SHARE = 0.25;
+/**
  * Of the people of a province, how many soldiers' mouths its fields can feed
  * besides their own: one for every forty, now that a province counts its
  * country people as well as its townsfolk (`province-material.ts`).
@@ -278,8 +293,8 @@ export function keepTheField(input: KeepTheFieldInput): { world: WorldState; fac
         cohesionBps: clampBps(force.cohesionBps - starvingDays * 60),
       };
       if (starvingDays > 0) {
-        const lost = Math.min(Math.floor(men * 0.3), Math.floor(men * starvingDays * 0.004));
-        const walked = Math.floor(lost * 0.6);
+        const lost = Math.min(Math.floor(men * 0.3), Math.floor(men * starvingDays * STARVING_LOSS_PER_DAY));
+        const walked = Math.floor(lost * (force.payArrearsPeriods > 0 ? UNPAID_WALK_SHARE : SWORN_WALK_SHARE));
         force = takeMen(takeMen(force, lost - walked, "attrition_death", toDay, "hunger"), walked, "desertion", toDay, "hunger");
         // Said when the hunger begins and once a month after: every tick of it
         // once filled a turn's record with the same army starving.

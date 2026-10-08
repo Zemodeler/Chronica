@@ -114,8 +114,8 @@ export function applyCampaignPlanSet(world: WorldState, delta: CampaignPlanSet, 
   if (!same) {
     const where = plan.objective.kind === "province" ? nameOfProvince(world, plan.objective.provinceId) : world.material.forces.find((candidate) => candidate.id === (plan.objective as { forceId: string }).forceId)?.name ?? "the enemy";
     const giver = world.characters.find((character) => character.id === issuer)?.name ?? nameOfPolity(world, force.polityId);
-    const verb = plan.mode === "seek_battle" ? "sends" : plan.mode === "siege" ? "sends" : plan.mode === "raid" ? "sends" : plan.mode === "winter" ? "quarters" : plan.mode === "garrison" ? "keeps" : "bids";
-    const rest = plan.mode === "seek_battle" ? `against ${where}` : plan.mode === "siege" ? `to besiege ${where}` : plan.mode === "raid" ? `to harry ${where}` : plan.mode === "winter" ? `at ${where} for the winter` : plan.mode === "garrison" ? `at ${where}` : `keep clear of ${where} and spare his men`;
+    const verb = plan.mode === "seek_battle" ? "sends" : plan.mode === "siege" ? "sends" : plan.mode === "raid" ? "sends" : plan.mode === "winter" ? "quarters" : plan.mode === "garrison" ? "keeps" : plan.mode === "shadow" ? "sends" : "bids";
+    const rest = plan.mode === "seek_battle" ? `against ${where}` : plan.mode === "siege" ? `to besiege ${where}` : plan.mode === "raid" ? `to harry ${where}` : plan.mode === "winter" ? `at ${where} for the winter` : plan.mode === "garrison" ? `at ${where}` : plan.mode === "shadow" ? `to keep ${where} in sight and cut it off from its bread` : `keep clear of ${where} and spare his men`;
     handles.emitFact({
       localId: safeLocalId(`orders_${forceId}_${atStep}`).slice(0, 60), kind: "campaign_orders",
       summary: `${giver} ${verb} ${force.name} ${rest}.`.slice(0, 300),

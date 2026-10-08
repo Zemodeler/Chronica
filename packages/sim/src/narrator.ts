@@ -373,7 +373,8 @@ function standingIn(world: WorldState, polityIds: readonly string[], provinceId:
  */
 export function livePressures(world: WorldState, pressures: readonly ScenarioHistoricalPressure[]): ScenarioHistoricalPressure[] {
   const spent = new Set(world.narrator.spentPressureIds);
-  return pressures.filter((pressure) => !spent.has(pressure.id) && pressureHolds(world, pressure, spent));
+  // What the age dates and the rules bring about themselves (`happens`) is not the narrator's to offer.
+  return pressures.filter((pressure) => pressure.happens === undefined && !spent.has(pressure.id) && pressureHolds(world, pressure, spent));
 }
 
 /**

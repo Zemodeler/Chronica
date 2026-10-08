@@ -68,7 +68,7 @@ export const WarPlanSchema = z.object({
 }).strict();
 export type WarPlan = z.infer<typeof WarPlanSchema>;
 
-export const CAMPAIGN_MODES = ["seek_battle", "refuse", "siege", "raid", "garrison", "winter"] as const;
+export const CAMPAIGN_MODES = ["seek_battle", "refuse", "siege", "raid", "garrison", "winter", "shadow"] as const;
 export const CampaignModeSchema = z.enum(CAMPAIGN_MODES);
 export type CampaignMode = z.infer<typeof CampaignModeSchema>;
 
@@ -115,7 +115,7 @@ export const campaignOf = (world: { readonly campaigns?: readonly CampaignPlan[]
 
 const MODE_IN_WORDS: Record<CampaignMode, string> = {
   seek_battle: "to seek the enemy's army", refuse: "to refuse battle and keep his strength", siege: "to besiege",
-  raid: "to harry the country of", garrison: "to hold", winter: "to winter at",
+  raid: "to harry the country of", garrison: "to hold", winter: "to winter at", shadow: "to shadow the army at",
 };
 const AIM_IN_WORDS: Record<WarAim["kind"], string> = {
   hold_province: "hold", take_province: "take", break_army: "break the army of", sue_for_peace: "bring them to peace", raid: "raid", blockade: "shut up the harbours of",

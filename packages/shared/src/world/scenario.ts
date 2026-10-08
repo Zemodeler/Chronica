@@ -78,6 +78,27 @@ export const ScenarioHistoricalPressureSchema = z
     /** An incident that runs its course rather than one that grows into a thread. */
     oneShot: z.boolean().default(false),
     /**
+     * A thing the age dates, that the rules bring about of themselves when its day comes (`a-dated-war.ts`; docs/plans/war-plans.md, "War gaps closed"): a war that
+     * opens after a battle, a garrison that enters a city, a people's appeal. Not offered to the narrator: nothing needs a model to happen. It is done once, the
+     * first monthly reckoning on or after `atDay` that finds it undone, and not after `atDay` + a year.
+     */
+    happens: z
+      .object({
+        atDay: z.number().int().min(0).max(3_660_000),
+        /** What is told, in the people's own words. */
+        summary: z.string().trim().min(1).max(400),
+        /** A war opens between these two (and the first of them wins what is told). */
+        warOpens: z.object({ polityId: z.string().trim().min(1), otherPolityId: z.string().trim().min(1), terms: z.string().trim().min(1).max(300) }).strict().optional(),
+        /** The power's armies in the field lose this share of their men (in basis points) and their spirit: a battle lost, told above. */
+        armyBeaten: z.object({ polityId: z.string().trim().min(1), lossBps: z.number().int().min(1).max(6_000) }).strict().optional(),
+        /** A garrison of this many men, under this man, enters this province. */
+        garrisonEnters: z.object({ polityId: z.string().trim().min(1), provinceId: z.string().trim().min(1), name: z.string().trim().min(1).max(120), men: z.number().int().min(1).max(100_000), commanderCharacterId: z.string().trim().min(1) }).strict().optional(),
+        /** A people writes to these powers for help. */
+        appeals: z.object({ polityId: z.string().trim().min(1), toPolityIds: z.array(z.string().trim().min(1)).min(1).max(4), terms: z.string().trim().min(1).max(400) }).strict().optional(),
+      })
+      .strict()
+      .optional(),
+    /**
      * When the world still looks like this. Every stated condition must hold;
      * an empty set of conditions is a pressure that is always available, which
      * is a legitimate thing to author and a dangerous one.

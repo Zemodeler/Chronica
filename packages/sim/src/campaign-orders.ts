@@ -21,6 +21,7 @@ import { roughMen } from "./board";
 import { chooseBattlePlan, chooseManoeuvre, temperOf } from "./battle-plan";
 import { enemyArmies, monthOf, reachOf, worthOf, type StrategyContext } from "./grand-strategy";
 import { SIEGE_NEEDED_AT } from "./occupation";
+import { conductShadow, shadowStillGood, shadowTarget } from "./a-shadowing-army";
 import type { StatecraftDecision } from "./statecraft";
 import { safeLocalId } from "./safe-local-id";
 
@@ -148,6 +149,7 @@ export function campaignStillGood(ctx: StrategyContext, force: Force, cp: Campai
     if (held === null || !ctx.enemies.has(held)) return false;
   }
   if (cp.mode === "seek_battle" && cp.objective.kind === "province" && here === objectiveProvince) return false;
+  if (cp.mode === "shadow" && !shadowStillGood(ctx, force, cp)) return false;
   if ((cp.mode === "garrison" || cp.mode === "refuse" || cp.mode === "winter") && held !== ctx.polityId) return false;
   // What a model-played head ordered himself stands until it runs out or its object is gone; the rules' order in his name does not, or the army sat the winter out in May.
   if (playedByModel.has(cp.issuedByCharacterId) && cp.byRule !== true) return true;
@@ -155,7 +157,7 @@ export function campaignStillGood(ctx: StrategyContext, force: Force, cp: Campai
   const winter = month !== null && isWinterMonth(month);
   if (cp.mode === "winter" && month !== null && !winter) return false;
   if (cp.mode !== "winter" && force.provisionStatus === "critical") return false;
-  if ((cp.mode === "seek_battle" || cp.mode === "raid") && winter && force.provisionStatus !== "provisioned") return false;
+  if ((cp.mode === "seek_battle" || cp.mode === "raid" || cp.mode === "shadow") && winter && force.provisionStatus !== "provisioned") return false;
   if (theatre !== undefined && cp.theatreId !== null && cp.theatreId !== theatre.id) return false;
   if (plan.aimsChangedAtStep > cp.issuedStep) return false;
   if ((cp.mode === "seek_battle" || cp.mode === "raid" || cp.mode === "siege") && superiorNear(ctx, force, reach) !== null && !ownGround(ctx, here)) return false;
@@ -218,6 +220,12 @@ export function issueCampaign(ctx: StrategyContext, force: Force, plan: WarPlan,
   const takes = aims.filter((aim) => (aim.kind === "take_province" || aim.kind === "raid") && aim.provinceId !== undefined && canGet(aim.provinceId));
   const careful = temper.careful - temper.bold >= 20;
   const rash = temper.bold - temper.careful >= 20;
+
+  // Shadow: a careful strategist against a stronger army that is ranging ground that does not feed it keeps it in sight and cuts it from its bread.
+  const shadowed = plan.posture === "decisive" ? null : shadowTarget(ctx, force, temper, reach);
+  if (shadowed !== null) {
+    return make("shadow", { kind: "army", forceId: shadowed.id }, ORDER_DAYS, `${roughMen(fitStrengthOf(shadowed))} of the enemy are at ${placeName(ctx, shadowed.locationId)}, the stronger: he keeps them in sight, between them and their bread, and will not meet them but on his own terms`);
+  }
 
   // Hold: to stand in a town and refuse battle where the posture is to stand, or the enemy is too strong, or the man is a careful one.
   const mustHold = plan.posture === "defend" || (nearEnemy !== null && (careful || plan.posture === "attrition"));
@@ -308,7 +316,7 @@ export function conductByPlan(ctx: ConductContext, force: Force, cp: CampaignPla
   const reach = reachOf(ctx, here, REACH_KM, true);
   // A hold the plan laid is lifted when the army is to act: an army on hold starts no battle, and the engine refuses it.
   const unhold: WorldDelta[] = force.hold === true ? [wd({ op: "force_modify", forceRef: force.id, hold: false, reason: `${force.name} takes the field again.` })] : [];
-  const modeWants = cp.mode === "seek_battle" ? 0.9 : cp.mode === "refuse" || cp.mode === "garrison" || cp.mode === "winter" ? 1.4 : 1.1;
+  const modeWants = cp.mode === "seek_battle" ? 0.9 : cp.mode === "refuse" || cp.mode === "garrison" || cp.mode === "winter" || cp.mode === "shadow" ? 1.4 : 1.1;
 
   // The enemy is here: give battle, or give way, or keep the town.
   const facing = enemies.filter((other) => other.locationId === here).sort((a, b) => fitStrengthOf(b) - fitStrengthOf(a) || a.id.localeCompare(b.id));
@@ -324,7 +332,7 @@ export function conductByPlan(ctx: ConductContext, force: Force, cp: CampaignPla
         wd({ op: "force_engage", forceRef: force.id, targetForceRef: facing[0]!.id, posture: "offer_battle", tactic, ...(manoeuvre === null ? {} : { manoeuvre: manoeuvre.kind }), reason: `${force.name} offers battle: the odds are good${tactic === null ? "" : ", and the ground is read"}.` }),
       ]);
     }
-    if (theirs >= RETREAT_ODDS * odds.flees * men || (cp.mode === "refuse" && theirs > men)) {
+    if (theirs >= RETREAT_ODDS * odds.flees * men || ((cp.mode === "refuse" || cp.mode === "shadow") && theirs > men)) {
       if (walled && (cp.mode === "refuse" || cp.mode === "garrison" || cp.mode === "winter")) {
         const tactic = chooseBattlePlan(world, here, [force], facing, commander, ctx.warfare);
         if (force.hold === true && JSON.stringify(force.battlePlan ?? null) === JSON.stringify(tactic)) return null;
@@ -346,7 +354,7 @@ export function conductByPlan(ctx: ConductContext, force: Force, cp: CampaignPla
   // Before an enemy town with walls and no army to stop us: invest it, by the plan's way.
   const enemyHeld = hereProvince.controllerPolityId !== null && ctx.enemies.has(hereProvince.controllerPolityId);
   const walledEnemy = enemyHeld && hereProvince.settlements.some((settlement) => settlement.fortificationLevel >= SIEGE_NEEDED_AT && (settlement.controllerPolityId === null || ctx.enemies.has(settlement.controllerPolityId)));
-  if (walledEnemy && cp.mode !== "winter" && cp.mode !== "refuse") {
+  if (walledEnemy && cp.mode !== "winter" && cp.mode !== "refuse" && cp.mode !== "shadow") {
     const already = world.sieges.some((siege) => siege.status === "active" && siege.provinceId === here);
     if (!already) {
       const temper = temperOf(commander);
@@ -359,6 +367,12 @@ export function conductByPlan(ctx: ConductContext, force: Force, cp: CampaignPla
       ]);
     }
     return null;
+  }
+
+  // Shadowing: to the post that keeps the enemy in sight, and not to the enemy.
+  if (cp.mode === "shadow") {
+    const move = conductShadow(ctx, force, cp, reach, unhold);
+    return move === null ? null : decide(ctx, force, move.act, move.target, move.why, move.deltas);
   }
 
   // The order's object.
