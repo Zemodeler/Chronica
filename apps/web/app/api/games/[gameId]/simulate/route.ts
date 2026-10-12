@@ -5,10 +5,11 @@ import { TIME_SPANS, getGameView, startDetachedBurst } from "../../../../../lib/
  * The order box: one natural-language instruction, one simulation burst.
  *
  * The burst does not run inside this request. The request checks the order,
- * opens the burst, and answers with its id at once; the burst carries on in
- * the server after the response has gone, and the page follows it at
- * `/bursts/<id>`. A tab closed is not a burst nobody can watch, and a turn is
- * no longer bounded by how long a connection may stay open.
+ * queues it as a durable turn, and answers with its id at once; a worker
+ * carries it out (`lib/turn-worker.ts`), and the page follows it at
+ * `/bursts/<id>`. A tab closed is not a burst nobody can watch, a turn is not
+ * bounded by how long a connection may stay open, and a server restarted
+ * mid-turn does not lose it.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ gameId: string }> }) {
   const { gameId } = await params;

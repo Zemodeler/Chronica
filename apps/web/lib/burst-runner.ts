@@ -148,7 +148,12 @@ async function guardTurn(db: ChronicaDatabase, input: TurnRequest): Promise<Guar
   // One burst at a time, and refused at the door rather than at the commit.
   // The read turns most second orders away; the insert turns away the one
   // sent in the same breath, which read "nothing running" too.
-  if (running !== undefined) return ALREADY_MOVING;
+  if (running !== undefined) {
+    // The same order sent twice in one breath: both passed the key check
+    // above before either was written, and the running burst is the first.
+    const sent = key === undefined ? undefined : await findBurstByIdempotencyKey(db, gameId, key);
+    return sent === undefined ? ALREADY_MOVING : { status: "existing", burstId: sent.id };
+  }
   return { status: "clear", view };
 }
 
