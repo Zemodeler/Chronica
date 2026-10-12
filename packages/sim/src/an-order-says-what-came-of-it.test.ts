@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { OrderPartSchema, isOrderPartStale, orderPartStatus, type OrderPart, type WorldState } from "@chronica/shared";
+import { OrderPartSchema, isOrderPartStale, orderPartStatus, type AppliedEffect, type OrderPart, type WorldState } from "@chronica/shared";
 import { opening } from "./fiscal-test-kit";
 import { lineOf, namedForceRaised } from "./order-outcomes";
 import { carriedOutLine } from "./order-lines";
@@ -13,11 +13,21 @@ import { carriedOutLine } from "./order-lines";
 
 const part = (change: Record<string, unknown> = {}): OrderPart => OrderPartSchema.parse({ said: "Buy a small estate near Capua.", ...change });
 const world = (): WorldState => opening(150);
+/** An act the world applied, kept with its part: a purse debited, a holding made. */
+const applied = (op: string): AppliedEffect => ({ op, atStep: 140, refs: [], by: "act", attemptId: null, actorId: "x" });
 
 describe("what came of an order", () => {
   it("is done where every act it wrote was done by being done (the purse debited, the holding made)", () => {
-    expect(orderPartStatus(world(), part({ actsCarried: 1, actsDone: 1 }))).toBe("achieved");
-    expect(orderPartStatus(world(), part({ actsCarried: 2, actsDone: 2 }))).toBe("achieved");
+    expect(orderPartStatus(world(), part({ actsCarried: 1, actsDone: 1, effects: [applied("holding_create")] }))).toBe("achieved");
+    expect(orderPartStatus(world(), part({ actsCarried: 2, actsDone: 2, effects: [applied("holding_create"), applied("money_transfer")] }))).toBe("achieved");
+  });
+
+  it("is unverified where an old save kept only the count of acts done, with nothing to say which act or when", () => {
+    expect(orderPartStatus(world(), part({ actsCarried: 1, actsDone: 1 }))).toBe("carried_unverified");
+    // Nor done on fewer effects than acts, nor on an act whose effect is still to come.
+    expect(orderPartStatus(world(), part({ actsCarried: 2, actsDone: 2, effects: [applied("holding_create")] }))).toBe("carried_unverified");
+    expect(orderPartStatus(world(), part({ actsCarried: 1, actsDone: 0, effects: [applied("force_move")] }))).toBe("carried_unverified");
+    expect(orderPartStatus(world(), part({ actsCarried: 1, actsDone: 1, effects: [] }))).toBe("carried_unverified");
   });
 
   it("is not done where an act of it is only begun, and says so, not 'nothing'", () => {
@@ -36,7 +46,7 @@ describe("what came of an order", () => {
     expect(isOrderPartStale(w, { givenAtStep: 390 }, ordered)).toBe(false);
     expect(isOrderPartStale(w, { givenAtStep: 300 }, ordered)).toBe(true);
     // And an order that was done is never stale: it is done.
-    expect(isOrderPartStale(w, { givenAtStep: 300 }, part({ actsCarried: 1, actsDone: 1 }))).toBe(false);
+    expect(isOrderPartStale(w, { givenAtStep: 300 }, part({ actsCarried: 1, actsDone: 1, effects: [applied("holding_create")] }))).toBe(false);
   });
 
   it("says what was carried out when nothing public came of it", () => {

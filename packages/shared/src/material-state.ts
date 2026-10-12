@@ -1086,6 +1086,12 @@ export const ForceSchema = z.object({
   serviceTerms: z.string().trim().min(1).max(300).optional(),
   history: z.array(ForcePersonnelEventSchema),
   /**
+   * Which of the losses in `history` have been laid to a war (`archiveWarLosses`): their ids, of
+   * those still in the record. Absent on an army none of whose losses has been laid yet -- every
+   * army of a save from before -- whose record is then laid whole, once.
+   */
+  lossesArchived: z.object({ ids: z.array(EntityIdSchema) }).strict().optional(),
+  /**
    * Named people serving in the ranks -- not the commander, who is named
    * above. A force was a commander and headcounts, so a man could command an
    * army or be nowhere in it: a player who declared himself a legionary was

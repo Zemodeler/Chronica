@@ -1,0 +1,2 @@
+# This asset is hashed byte for byte; checkout must preserve its exact bytes.
+apps/web/public/maps/punic-wars-provinces.geojson -text

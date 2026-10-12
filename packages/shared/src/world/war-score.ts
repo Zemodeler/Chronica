@@ -1,5 +1,6 @@
 import type { WorldState } from "./world-state";
-import { agreementsBetweenSides, atWar, type PolityAgreement } from "./agreements";
+import { agreementsBetweenSides, atWar, warsOf, type PolityAgreement } from "./agreements";
+import { lossesToWar, type LossWorld } from "./war-losses";
 
 /**
  * How a war stands between two powers, from the first one's side: -100 lost
@@ -60,7 +61,40 @@ function warBetween(agreements: readonly PolityAgreement[], a: string, b: string
     && ((agreement.polityId === a && agreement.otherPolityId === b) || (agreement.polityId === b && agreement.otherPolityId === a)));
 }
 
-export function warStanding(world: Pick<WorldState, "map" | "material" | "polityAgreements" | "elapsedStep" | "sieges">, a: string, b: string): WarStanding {
+/** The world a war's losses are read from: the wars' own records of them, and the armies' entries not yet laid there (`war-losses.ts`). */
+export type WarLossWorld = LossWorld & Pick<WorldState, "elapsedStep">;
+
+/** What a power's armies have lost to one war, by what took the men. */
+export interface WarLosses {
+  /** Killed in the war's battles. */
+  readonly battle: number;
+  /** Dead of wounds afterwards. */
+  readonly wounds: number;
+  /** Dead of hunger, sickness and the road. */
+  readonly hardship: number;
+  readonly desertion: number;
+  readonly total: number;
+}
+
+/**
+ * The men a power has lost to this war since it began: the dead of battle and
+ * of wounds, the deserters, and the dead of hunger and sickness, who in a year
+ * of a long war outnumber the dead of battle. Read from the war's own record,
+ * where each loss was laid the day it happened, by what the world showed then
+ * (`archiveWarLosses`): a destroyed army's dead stay counted, a handed-over
+ * army's stay its old power's, a change of orders moves nothing, two wars
+ * never both claim one man, and a share is whole men.
+ */
+export function warLossesOf(world: WarLossWorld, polityId: string, enemyId: string): WarLosses {
+  const war = warBetween(world.polityAgreements, polityId, enemyId)
+    // A power fighting in its leader's war: the leader's war with that enemy.
+    ?? warsOf(world.polityAgreements, polityId).filter((enemy) => enemy === enemyId).flatMap((enemy) => world.polityAgreements.filter((agreement) => agreement.kind === "war" && agreement.status === "active" && (agreement.polityId === enemy || agreement.otherPolityId === enemy)))[0];
+  if (war === undefined) return { battle: 0, wounds: 0, hardship: 0, desertion: 0, total: 0 };
+  const tally = lossesToWar(world, war, polityId);
+  return { ...tally, total: tally.battle + tally.wounds + tally.hardship + tally.desertion };
+}
+
+export function warStanding(world: Pick<WorldState, "map" | "material" | "polityAgreements" | "elapsedStep" | "sieges"> & Pick<WarLossWorld, "campaigns" | "engagements" | "conflicts">, a: string, b: string): WarStanding {
   const war = warBetween(world.polityAgreements, a, b);
   const since = war?.sinceStep ?? 0;
   const days = world.elapsedStep - since;
@@ -117,12 +151,11 @@ export function warStanding(world: Pick<WorldState, "map" | "material" | "polity
     if (edge !== 0) { score += edge; parts.push(`${edge > 0 ? "more" : "fewer"} men under arms (${ours} to ${theirs})`); }
   }
 
-  // The blood each has lost since it began.
-  const lost = (polityId: string) => world.material.forces.filter((force) => force.polityId === polityId)
-    .flatMap((force) => force.history).filter((event) => event.atStep >= since && (event.kind === "battle_death" || event.kind === "wounds_death" || event.kind === "desertion"))
-    .reduce((sum, event) => sum + event.count, 0);
-  const bled = lost(b) - lost(a);
-  const totalBled = lost(a) + lost(b);
+  // The blood each has lost since it began, hunger and sickness counted with the sword (`warLossesOf`).
+  const lostA = warLossesOf(world, a, b).total;
+  const lostB = warLossesOf(world, b, a).total;
+  const bled = lostB - lostA;
+  const totalBled = lostA + lostB;
   if (totalBled > 0) {
     const edge = Math.round((bled / totalBled) * 20);
     if (edge !== 0) { score += edge; parts.push(`${edge > 0 ? "has bled them more" : "has bled more"}`); }

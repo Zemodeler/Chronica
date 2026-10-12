@@ -139,7 +139,7 @@ function SurplusMark({ books }: { readonly books: BooksView }) {
     <Tip label={word} note={() => (
       <TipCard kicker="Why it is marked" title={word}>
         {spent && (
-          <p>If nothing changes, what is in hand {books.runsOutInDays! <= 0 ? "is already spent" : `runs out in ${books.runsOutInDays! < 14 ? "days" : `about ${spanInWords(books.runsOutInDays!)}`}`}.</p>
+          <p>If nothing changes, what is in hand {books.runsOutInDays <= 0 ? "is already spent" : `runs out in ${books.runsOutInDays < 14 ? "days" : `about ${spanInWords(books.runsOutInDays)}`}`}.</p>
         )}
         {books.arrears > 0 && <p>{money(books.arrears)} is owed and has not been paid. A surplus with arrears under it is not a surplus.</p>}
       </TipCard>

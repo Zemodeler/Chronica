@@ -395,6 +395,17 @@ export interface EntryTag {
   readonly label: string;
 }
 
+/**
+ * Where a part of an order stands for the historian: the line to print, the status it tells
+ * when the window closes, and (`before`) the status when the window opened, so a passage is
+ * judged against the part as it stood at any time within the window, not only at its close.
+ */
+export interface OrderOutcomeView {
+  readonly line: string;
+  readonly status: OrderPartStatus;
+  readonly before?: OrderPartStatus | null;
+}
+
 export interface ChronicleInput {
   readonly port: SimModelPort;
   readonly clock: ScenarioClock;
@@ -414,7 +425,7 @@ export interface ChronicleInput {
   /** What the reader's campaign is about (`campaignOf`): news touching it is weighed lightly. */
   readonly campaignIds?: ReadonlySet<string> | undefined;
   /** Where a part of an order stands, by its ref, read from the whole world (`order-outcomes.ts`). */
-  readonly orderOutcome?: ((partKey: string) => { readonly line: string; readonly status: OrderPartStatus } | null) | undefined;
+  readonly orderOutcome?: ((partKey: string) => OrderOutcomeView | null) | undefined;
   /** What the actors said they were doing, for colour the bare facts lack. */
   readonly narrative: readonly NarrativeLine[];
   readonly frictions: readonly NarrativeLine[];
@@ -551,6 +562,12 @@ export interface ChronicleEntry {
   readonly quote: EntryQuote | null;
   /** The threads of history it belongs to, as the reader could know them. */
   readonly storylineIds?: readonly string[];
+  /**
+   * Whose words the passage is: the historian's own prose, or the facts set down plainly where she
+   * failed, overstated past saving, or was never asked. Read before the passage is let stand for an
+   * order's outcome line (`orderOutcomeLines`). Absent on entries the books strike, and on old ones.
+   */
+  readonly voice?: "historian" | "facts" | undefined;
   readonly fromInstantSortKey: number;
   readonly toInstantSortKey: number;
 }
@@ -1290,7 +1307,14 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
     && facts.some((fact) => fact.affectedEntities.some((entity) => input.ownEntityIds!.has(entity.id)));
 
   /** Where a part of an order stands, as the engine says it (`order-outcomes.ts`). */
-  const outcomeOf = (partKey: string | null): Thread["outcome"] => (partKey === null ? null : input.orderOutcome?.(partKey) ?? null);
+  const outcomeOf = (partKey: string | null): Thread["outcome"] => {
+    const view = partKey === null ? null : input.orderOutcome?.(partKey) ?? null;
+    if (view === null) return null;
+    // A passage is held to the part as it stood at any time within the window, not only at its
+    // close: a legion that landed on the third day and was broken on the ninth did land, and a
+    // passage saying so is not an overclaim. The line itself always says where it stands now.
+    return { line: view.line, status: view.before === "achieved" ? "achieved" : view.status };
+  };
   const threadOf = (facts: readonly Fact[], digest: Thread["digest"] = null): Thread => {
     const ids = new Set(facts.map((fact) => fact.id));
     const belongs = (line: { readonly factIds: readonly string[] }): boolean => line.factIds.some((factId) => ids.has(factId));
@@ -1607,7 +1631,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
     const days = new Set(thread.facts.flatMap((fact) => [fact.time.day, fact.atStep]));
     return namesIt && causes.some((cause) => days.has(cause.day));
   };
-  const entryOf = (thread: Thread, title: string, body: string): ChronicleEntry => {
+  const entryOf = (thread: Thread, title: string, body: string, voice: "historian" | "facts" = "historian"): ChronicleEntry => {
     const keys = thread.facts.map((fact) => sortKeyOf(fact.time));
     const subjects = subjectsOf(thread.facts);
     return {
@@ -1620,6 +1644,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
       changes: changes.filter((change) => madeBy(change, thread)),
       quote: null,
       storylineIds: mattersOf(thread.facts, input.storylines ?? [], input.observer, input.observerPolityId, polityOf).map((storyline) => storyline.id),
+      voice,
       fromInstantSortKey: Math.min(...keys, sortKeyOf(input.to)),
       toInstantSortKey: Math.max(...keys, sortKeyOf(input.from)),
     };
@@ -1652,7 +1677,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   // A failed narration must not cost the player the record itself: fall back to
   // the plain facts, under the period as a title, rather than losing the span.
   const plainly = (thread: Thread): ChronicleEntry =>
-    entryOf(thread, headlineOf(thread.facts) ?? period, thread.facts.map((fact) => readable(fact.summary)).join("\n\n"));
+    entryOf(thread, headlineOf(thread.facts) ?? period, thread.facts.map((fact) => readable(fact.summary)).join("\n\n"), "facts");
 
   // One matter to a call, and every matter written, the light ones too. A
   // light home thread was once printed in its facts' own words to save its
@@ -1789,7 +1814,9 @@ Write the passage again: say plainly where it stands, and tell the rest of the m
         if (contradicted) overstated += 1;
         entry = passage === undefined
           ? (answering ? plainly(thread) : null)
-          : entryOf(thread, thread.outcome !== null && claimsItDone(passage.title, thread.outcome.status) ? headlineOf(thread.facts) ?? period : passage.title, body!);
+          : entryOf(thread, thread.outcome !== null && claimsItDone(passage.title, thread.outcome.status) ? headlineOf(thread.facts) ?? period : passage.title, body!,
+            // Replaced whole by the engine's line and the facts, it is not her passage any more.
+            thread.outcome !== null && body === plainAccount(thread) ? "facts" : "historian");
         const own = passage?.quote ?? null;
         // A quotation is somebody's recorded words, or it is not printed. The
         // historian's own line is kept only where it is, near enough, what that
@@ -1809,6 +1836,13 @@ Write the passage again: say plainly where it stands, and tell the rest of the m
     // Words somebody actually said, where the historian gave none of her own.
     if (entry !== null && entry.quote === null && quoted !== null && quoted.index === index) {
       entry = { ...entry, quote: { line: quoted.utterance.line, speaker: quoted.utterance.speaker, occasion: quoted.utterance.occasion } };
+    }
+    // A quotation printed as the passage's own voice says no more than the world shows: a man's
+    // recorded boast that the legion landed stands under a part that did not land only in his
+    // facts, never as the entry's headline words (the body and title are held to it above).
+    if (entry !== null && entry.quote !== null && thread.outcome !== null && claimsItDone(entry.quote.line, thread.outcome.status)) {
+      overstated += 1;
+      entry = { ...entry, quote: null };
     }
     results[index] = entry;
     handOut();

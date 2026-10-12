@@ -37,6 +37,7 @@ import {
   passageFor,
   passagePlanFor,
   disbandForces,
+  archiveWarLosses,
   normalizeName,
   spelledAlike,
   threatWaitsOnAttack,
@@ -86,6 +87,7 @@ import {
   fitStrengthOf,
   isNavalForce,
   isWaterCrossing,
+  kmFrom,
   describeFerry,
   ferryDays,
   ensureProvinceMaterial,
@@ -219,7 +221,7 @@ import { restedCeilingOf } from "../campaign";
 import { enemyFleetOff, perilsOfTheRoad } from "../crossings";
 import { diplomaticAnswererOf } from "../letters";
 import { moneyMadeBetween, newIssues } from "./what-a-batch-did";
-import { journeysOf, onTheWayTo, settledCourse, shoreItMakesFor, turnOnTheRoad, wasTurnedOnTheRoad } from "./marches";
+import { journeysOf, onTheWayTo, partwayOf, settledCourse, shoreItMakesFor, turnOnTheRoad, wasTurnedOnTheRoad } from "./marches";
 import { WORLD_THREAD_CAP, makeRoomForTheOrder, worldThreadsFull } from "../storyline-cap";
 import { admitCandidacy } from "../candidacy";
 import { benefactionPayer, giveToThePeople } from "./benefaction";
@@ -864,6 +866,13 @@ function fillHirePay(world: WorldState, deltas: readonly WorldDelta[], context: 
 }
 
 export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], given: ApplyContext): ApplyResult {
+  const result = applyGroupedDeltas(world, deltas, given);
+  // Every loss the answer's acts caused laid to its war while the world still shows whose and against whom (`archiveWarLosses`).
+  const archived = archiveWarLosses(result.world);
+  return archived === result.world ? result : { ...result, world: archived };
+}
+
+function applyGroupedDeltas(world: WorldState, deltas: readonly WorldDelta[], given: ApplyContext): ApplyResult {
   fillHirePay(world, deltas, given);
   const context: ApplyContext = given.batchStart === undefined ? { ...given, batchStart: world } : given;
   const groups = hiringGroups(deltas, context.atomicGroups);
@@ -1834,6 +1843,23 @@ function arrangeCrossing(
 }
 
 /**
+ * The days an army takes to march `km` from `from` to `to`. A commander who
+ * can feed an army on the road moves it faster: a quarter quicker at best, a
+ * quarter slower at worst; whoever is in charge of his power's supply, behind
+ * him, a seventh either way on top; and how the army marches (`march_speed`):
+ * men carrying their own kit, with a short baggage train, cover more road in
+ * a day. And winter, when the roads are mud and the passes snow -- only a pass
+ * on the map is a pass: asked whether there was a way by land and river
+ * alone, a march with a crossing at the end of it was timed as a winter pass.
+ */
+function marchDaysOn(world: WorldState, force: Force, from: string, to: string, km: number, context: ApplyContext): number {
+  const quartermaster = world.characters.find((character) => character.id === force.commanderCharacterId);
+  const supplied = readDepartments(world).headLift({ kind: "polity", id: force.polityId }, "supply");
+  const overPass = mustCrossAPass(world, from, to);
+  return daysInSeason(Math.max(Math.ceil(km / FASTEST_MARCH_KM_PER_DAY), Math.round((km / MARCH_KM_PER_DAY) * (1 - (quartermaster === undefined ? 0 : skillShare(aptitude(quartermaster, "logistics"), 0.25)) - supplied - Math.max(-0.35, Math.min(0.35, forceLever(warfareWith(world, context.warfare), force, "march_speed")))))), monthOf(context), overPass);
+}
+
+/**
  * An army sent somewhere it takes days to reach: a march project that moves it
  * on arrival, and word that it set out. `carried` says how it goes over water,
  * when it does. The rest of the order -- a new commander, fresh rations --
@@ -2739,8 +2765,14 @@ function applyOne(
       }
       // Sent somewhere new, it is no longer going where it was sent before.
       // Its own ground written back beside a new name or commander is not an
-      // order to halt, and leaves the road alone.
-      if (delta.locationId !== undefined && delta.locationId !== force.locationId) {
+      // order to halt, and leaves the road alone. Its own ground and nothing
+      // else is: "back to Latium" to an army a few days out of Latium, which
+      // the world still holds at Latium until it reaches the next province,
+      // was read as nothing at all and the march went on to Rhegium.
+      const onlyGoes = Object.keys(delta).every((key) => key === "op" || key === "forceRef" || key === "locationId" || key === "reason" || key === "fleetRefs");
+      const turnsBack = delta.locationId !== undefined && delta.locationId === force.locationId && onlyGoes
+        && journeysOf(world, forceId).some((project) => project.kind !== "crossing" && project.completionOutcome?.provinceId !== delta.locationId);
+      if (delta.locationId !== undefined && (delta.locationId !== force.locationId || turnsBack)) {
         if (keptToItsWork(world, forceId, context.actorRef.id, delta.locationId)) reject(`${force.name} is already on the work its master sent it on, and keeps to it.`);
         // Somebody other than the player turning a force he sent out within
         // the fortnight holds his first course: Hannibal Gisco sent his fleet
@@ -2750,6 +2782,23 @@ function applyOne(
         if (recent !== undefined) reject(`${force.name} set out on "${recent.label}" ${atStep - recent.startedAtStep} days ago and holds that course.`);
         const turned = callOffMarches(world, forceId, delta.locationId, emitFact);
         if (turned !== world) return applyOne(turned, delta, context, assignedIds, resolve, emitFact, emitAccount);
+      }
+      // Turned part way along a stretch: the journey it makes now is reckoned from where it really
+      // is -- on along the stretch, the part walked counted; or back, that much walked first --
+      // and never begins with it set down at either end of the stretch for nothing.
+      const offRoad = delta.locationId === undefined ? undefined : partwayOf(force);
+      if (offRoad !== undefined && delta.locationId !== undefined) {
+        const sails = isNavalForce(force, warfareWith(world, context.warfare));
+        const toGo = kmFrom(world, delta.locationId, { passable: (edge) => sails || !isWaterCrossing(edge.crossing) });
+        const beyond = toGo.get(offRoad.toward);
+        const behind = toGo.get(force.locationId);
+        const km = Math.min(beyond === undefined ? Infinity : offRoad.stretchKm - offRoad.km + beyond, behind === undefined ? Infinity : offRoad.km + behind);
+        if (Number.isFinite(km) && km > 0) {
+          const days = sails ? Math.max(1, sailDaysFor(km)) : marchDaysOn(world, force, force.locationId, delta.locationId, km, context);
+          const setOut = setOutOn(world, force, forceId, delta, km, days, null, context, assignedIds, resolve, emitFact, emitAccount);
+          const journeyId = assignedIds.get(safeLocalId(`march-${forceId}`).slice(0, 60));
+          return { ...setOut, projects: setOut.projects.map((project) => project.id !== journeyId ? project : { ...project, offRoad: { towardProvinceId: offRoad.toward, km: offRoad.km } }) };
+        }
       }
       // An army has to cross the ground between here and there. The map has
       // always said what that ground is; nothing ever asked it, so a legion
@@ -2819,22 +2868,11 @@ function applyOne(
           // for it, the army sets out, and it arrives when the road is walked.
           // A commander who can feed an army on the road moves it faster: a
           // quarter quicker at best, a quarter slower at worst.
-          const quartermaster = world.characters.find((character) => character.id === force.commanderCharacterId);
-          // And whoever is in charge of his power's supply, behind him: a
-          // seventh either way on top.
-          const supplied = readDepartments(world).headLift({ kind: "polity", id: force.polityId }, "supply");
-          // And winter, when the roads are mud and the passes snow.
-          // Only a pass on the map is a pass: asked whether there was a way by
-          // land and river alone, a march with a crossing at the end of it was
-          // timed as a winter pass.
-          const overPass = mustCrossAPass(world, force.locationId, delta.locationId);
           // Ships sail it: a fleet sent 300 km along the coast was timed at a
           // marching pace and took 25 days.
           const days = isNavalForce(force, warfareWith(world, context.warfare))
             ? Math.max(1, sailDaysFor(km))
-            // And how the army marches (`march_speed`): men carrying their own
-            // kit, with a short baggage train, cover more road in a day.
-            : daysInSeason(Math.max(Math.ceil(km / FASTEST_MARCH_KM_PER_DAY), Math.round((km / MARCH_KM_PER_DAY) * (1 - (quartermaster === undefined ? 0 : skillShare(aptitude(quartermaster, "logistics"), 0.25)) - supplied - Math.max(-0.35, Math.min(0.35, forceLever(warfareWith(world, context.warfare), force, "march_speed")))))), monthOf(context), overPass);
+            : marchDaysOn(world, force, force.locationId, delta.locationId, km, context);
           const bySea = passage.by === "sea" ? passage.ferry : null;
           return setOutOn(world, force, forceId, delta, km, days + (bySea === null ? 0 : ferryDays(bySea)), bySea === null ? null : describeFerry(world, force, bySea), context, assignedIds, resolve, emitFact, emitAccount);
         }

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
+import { punicWarsScenario } from "@chronica/db";
 import { WorldStateSchema, ensureProvinceMaterial, orderPartStatus, type OrderPart, type WorldState } from "@chronica/shared";
 import type { ChronicleEntry } from "./chronicle";
 import { lineOf } from "./order-outcomes";
-import { scoreOrders, scoreProse } from "./scorecard";
+import { scoreDisplayedOrder, scoreOrders, scoreProse } from "./scorecard";
 import { runScorecard } from "./scorecard-fixtures";
 
 const opening = (): WorldState => ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
@@ -91,5 +91,24 @@ describe("a part whose goal was already so", () => {
     const legion = opening().material.forces.find((force) => force.id === "roman-field-army")!;
     const moved = part({ goals: [{ kind: "force_at", forceId: legion.id, provinceId: legion.locationId }], metAtOrder: false, actsCarried: 1 });
     expect(orderPartStatus(opening(), moved)).toBe("achieved");
+  });
+});
+
+describe("an order judged by what was displayed for it", () => {
+  // The scorecard reads the receipts and the prose it is handed, never narration it assumes.
+  it("counts a part shown no line and no prose as a missing clause, and reads a line's own words", () => {
+    const world = withParts([part({ said: "Carry Legio I to Messana" })]);
+    expect(scoreDisplayedOrder(world, "rec", []).missingClauses).toBe(1);
+    const told = scoreDisplayedOrder(world, "rec", ["\"Carry Legio I to Messana\" -- nothing came of it."]);
+    expect(told.missingClauses).toBe(0);
+    expect(told.parts[0]!.status).toBe("unanswered");
+    expect(told.doneWithoutEvidence).toBe(0);
+  });
+
+  it("holds a line that says done, from wherever it came, to the evidence", () => {
+    const world = withParts([part({ said: "Carry Legio I to Messana" })]);
+    const falsified = scoreDisplayedOrder(world, "rec", ["\"Carry Legio I to Messana\" -- done."]);
+    expect(falsified.doneWithoutEvidence).toBe(1);
+    expect(falsified.matched).toBe(0);
   });
 });

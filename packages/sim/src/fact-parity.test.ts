@@ -37,3 +37,14 @@ describe("a fact held to the state it claims", () => {
     expect(factContradictsState(state, { kind: "feast", summary: "Rome held games.", affectedRefs: [] }, () => new Set())).toBeNull();
   });
 });
+
+describe("a fact that denies what it names", () => {
+  it("is not taken for the claim: an army that never arrived is not said to have arrived", () => {
+    const state = world();
+    const legion = state.material.forces.find((force) => force.id === "roman-field-army")!;
+    const elsewhere = state.map.provinces.find((province) => province.id !== legion.locationId)!;
+    const refs = [{ kind: "force", id: legion.id }, { kind: "province", id: elsewhere.id }] as OrderPartyRef[];
+    expect(factContradictsState(state, { kind: "march", summary: "The legion never arrived at the strait.", affectedRefs: refs }, (id) => where(id, state))).toBeNull();
+    expect(factContradictsState(state, { kind: "march", summary: "The legion made landfall at the strait.", affectedRefs: refs }, (id) => where(id, state))).toMatch(/not at/);
+  });
+});

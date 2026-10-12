@@ -6,5 +6,7 @@ export * from "./dialogue";
 export * from "./games";
 export * from "./shared-knowledgebase";
 export * from "./world";
+export * from "./turn-jobs";
+export * from "./chronicle-cursor";
 export * from "./repin";
 export * from "../built-in-scenarios";

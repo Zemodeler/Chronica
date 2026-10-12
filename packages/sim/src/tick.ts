@@ -65,6 +65,7 @@ import {
   liveProvinceIds,
   type ProvinceMaterial,
   allOffices,
+  archiveWarLosses,
 } from "@chronica/shared";
 import { projectConflicts } from "./conflicts";
 import { trespassOf } from "./trespass";
@@ -1890,7 +1891,8 @@ export function runDeterministicTick(given: TickInput): TickResult {
   // country they stand in at war is theirs to hold (`occupation.ts`).
   const occupied = occupyOpenCountry(aged, input.toDay);
   return {
-    world: forgetSettledPressures(reconcileCapitals(occupied.world), input.toDay),
+    // And every loss of the day laid to its war while the world still shows whose and against whom (`archiveWarLosses`).
+    world: archiveWarLosses(forgetSettledPressures(reconcileCapitals(occupied.world), input.toDay)),
     factProposals: [...facts, ...plans.facts, ...plots.facts, ...lives.facts, ...contracts.facts, ...thrones.facts, ...elections.facts, ...votes.facts, ...accounted.facts, ...rolled.facts, ...tenure.facts, ...society.facts, ...kept.facts, ...byRule.facts, ...appointed.facts, ...occupied.facts],
     notes,
     died: [...plots.died, ...lives.died],

@@ -241,7 +241,10 @@ describe("E4: eight letters", () => {
     const sent = first.world.orders.find((candidate) => candidate.id === first.orderRecordId)!.parts[0]!.workRefs.find((ref) => ref.kind === "message");
     expect(sent).toBeDefined();
     const resent = again.world.orders.find((candidate) => candidate.id === again.orderRecordId)!.parts[0]!;
-    expect(resent.workRefs).toContainEqual(sent);
+    // The same letter, by its identity. The first part's act made it, and its ref says so (the day,
+    // the op); the second part did not make it again, and its ref claims no such thing.
+    expect(sent).toMatchObject({ madeAtStep: expect.any(Number), op: "diplomatic_message_send", by: "act" });
+    expect(resent.workRefs).toContainEqual({ kind: sent!.kind, id: sent!.id });
   });
 });
 

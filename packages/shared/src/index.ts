@@ -5,6 +5,7 @@ export * from "./world/mercenary-pay";
 export * from "./world/siege";
 export * from "./world/command";
 export * from "./world/war-score";
+export * from "./world/war-losses";
 export * from "./world/enactment";
 export * from "./world/covert-plot";
 export * from "./world/orders";

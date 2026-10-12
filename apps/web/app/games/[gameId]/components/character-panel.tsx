@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { explanationOf, type MirrorReading, type MirrorRelation, type NotableEvent, type PeersReading, type PromiseReading } from "@chronica/shared";
+import { type MirrorReading, type MirrorRelation, type NotableEvent, type PeersReading, type PromiseReading } from "@chronica/shared";
 import { Sheet, type SheetSide } from "../../../components/ui/sheet";
 import { Era } from "../../../components/ui/era";
 import { Tip, TipCard } from "../../../components/ui/tip";

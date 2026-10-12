@@ -1,7 +1,10 @@
 /**
  * Runs once when the server starts (Next's instrumentation hook): clears the
- * bursts and coin holds a previous server left behind (`orphan-sweep.ts`).
- * Only in the Node runtime, and only with a database configured.
+ * bursts and coin holds a previous server left behind (`orphan-sweep.ts`),
+ * and -- unless `CHRONICA_TURN_WORKER=external` says a separate worker process
+ * does it -- starts this server's own turn worker (`lib/turn-worker.ts`),
+ * which also takes up any turn the previous server was carrying out when it
+ * stopped. Only in the Node runtime, and only with a database configured.
  */
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
@@ -13,4 +16,6 @@ export async function register(): Promise<void> {
   if (url === undefined || url.length === 0) return;
   const { scheduleOrphanSweeps } = await import("./lib/orphan-sweep");
   scheduleOrphanSweeps(url);
+  const { runsEmbeddedWorker, startEmbeddedTurnWorker } = await import("./lib/turn-worker");
+  if (runsEmbeddedWorker()) startEmbeddedTurnWorker(url);
 }

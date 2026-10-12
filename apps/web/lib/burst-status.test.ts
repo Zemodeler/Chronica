@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { ABANDONED_ERROR, BURST_NO_PROGRESS_MS, BURST_STALE_MS, STUCK_ERROR, isStale, livenessAt, noProgressAllowedMs, toBurstStatus, type BurstRow, type ProgressRow } from "./burst-status";
+import { ABANDONED_ERROR, BURST_NO_PROGRESS_MS, BURST_STALE_MS, STALE_HOLD_MS, STUCK_ERROR, isStale, livenessAt, noProgressAllowedMs, staleHoldMs, toBurstStatus, type BurstRow, type ProgressRow } from "./burst-status";
 
 // 2026-10-08: which model answers is read from the machine's local AI settings file. These tests are
 // about the clock, not the machine: a developer who has picked the free adapter locally must not turn
 // every burst into one that can never be called stuck.
-vi.mock("@chronica/ai", () => ({ getSelectedLocalAiProvider: () => "openai" }));
+vi.mock("@chronica/ai", () => ({ getSelectedLocalAiProvider: () => "openai", aiMaxMs: () => 150_000, aiMaxRetries: () => 1 }));
 
 const at = (ms: number) => new Date(1_700_000_000_000 + ms);
 const row = (overrides: Partial<BurstRow> = {}): BurstRow => ({
@@ -89,5 +89,15 @@ describe("a burst answered by hand", () => {
     expect(noProgressAllowedMs({}, true)).toBeGreaterThan(365 * 24 * 60 * 60_000);
     const { progressAfter } = livenessAt(new Date("2026-09-28T12:00:00Z"), noProgressAllowedMs({ CHRONICA_AI_MODE: "hand" }));
     expect(Number.isNaN(progressAfter.getTime())).toBe(false);
+  });
+});
+
+describe("a coin hold with no turn to answer for it", () => {
+  it("is abandoned after six minutes with the default call limits (150 s, one retry)", () => {
+    expect(staleHoldMs()).toBe(STALE_HOLD_MS);
+  });
+  it("outlives the longest call the configured limits allow, with a minute's grace", () => {
+    // CHRONICA_AI_MAX_MS=600000 with two retries: a call may run thirty minutes, its hold thirty-one.
+    expect(staleHoldMs(600_000, 2)).toBe(31 * 60_000);
   });
 });

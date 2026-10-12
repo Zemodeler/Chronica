@@ -100,6 +100,14 @@ export const ProjectSchema = z
     completedAtStep: ElapsedStepSchema.nullable().default(null),
     /** So an entity this project later produces can point back at why it exists. */
     provenanceEventIds: z.array(z.string().max(120)).max(20).default([]),
+    /**
+     * For a journey begun by an army turned on the road: it stood `km` along the stretch from the
+     * province it set out from toward `towardProvinceId`, not at the province itself. Its days
+     * count that stretch -- the part already walked, where the new road goes on that way; the way
+     * back first, where it does not -- and where it is on its road is read with it
+     * (`progressOnTheRoad`). Absent for every journey begun at a province.
+     */
+    offRoad: z.object({ towardProvinceId: EntityIdSchema, km: z.number().nonnegative().max(100_000) }).strict().optional(),
   })
   .strict();
 export type Project = z.infer<typeof ProjectSchema>;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo, useRef, type PointerEvent } from "react";
-import { applyMapOverlayDelta, DynamicMapOverlaySchema, isGeoJsonMapDocument, MapOverlayDeltaSchema, type GeoJsonMap, type DynamicMapOverlay, type AgendaDestination, type TradeProposalKind, type MatterFocus, type RoomStates, MAP_CHANGE_KINDS } from "@chronica/shared";
+import { applyMapOverlayDelta, DynamicMapOverlaySchema, isGeoJsonMapDocument, MapOverlayDeltaSchema, type GeoJsonMap, type DynamicMapOverlay, type AgendaDestination, type TradeProposalKind, type RoomStates, MAP_CHANGE_KINDS } from "@chronica/shared";
 import type { RoomContents } from "../../../../lib/room-service";
 
 // A map document never changes at its version, so each version is downloaded
@@ -40,7 +40,7 @@ import { Tip, TipCard, TipRoot } from "../../../components/ui/tip";
 import { WindowWorkspace } from "../../../components/ui/window-workspace";
 import { EntityReference } from "./entity-reference";
 import { OrdersPanel } from "./orders-panel";
-import { unreadCount, useGameView } from "./use-game-view";
+import { unreadInView, useGameView } from "./use-game-view";
 import { standardFor, standardsForPolity, type ArmyStandard } from "../../../../lib/army-standards";
 
 type ZoomBand = "far" | "medium" | "close";
@@ -251,12 +251,6 @@ export function GameShell({
     },
     onOpenEntry: openChronicleEntry,
   }), [room, gameId, openChronicleEntry]);
-  // Matters in hand's way into the record: at the thread of the row chosen.
-  const openChronicleAt = useCallback((focus: MatterFocus) => {
-    openSurface("chronicle");
-    setChronicleFocus({ filter: focus, entryId: null });
-  }, [openSurface]);
-
   // The agenda's way to the sheet an item belongs to, at the page and the row.
   const goTo = useCallback((to: AgendaDestination) => {
     setPlace("office");
@@ -307,7 +301,7 @@ export function GameShell({
   }, [openSurface]);
 
   const { view } = controller;
-  const unread = unreadCount(view.chronicle);
+  const unread = unreadInView(view);
 
   /**
    * What is in the room, and what is not.

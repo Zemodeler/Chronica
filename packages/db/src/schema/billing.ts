@@ -88,8 +88,21 @@ export const creditHolds = pgTable("credit_holds", {
   leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
   status: holdStatus("status").notNull(),
   idempotencyKey: text("idempotency_key").notNull(),
+  /**
+   * The durable turn and attempt the call was made for (0044), null for any
+   * other call (a conversation, a letter) and on holds written before. A hold
+   * with an owner is expired only once that attempt no longer holds a live
+   * lease on its turn, whatever its age (`expireStaleHolds`).
+   */
+  turnBurstId: uuid("turn_burst_id"),
+  turnAttempt: integer("turn_attempt"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (table) => [uniqueIndex("credit_holds_work_idempotency_unique").on(table.idempotencyKey), index("credit_holds_lease_idx").on(table.status, table.leaseExpiresAt)]);
+}, (table) => [
+  uniqueIndex("credit_holds_work_idempotency_unique").on(table.idempotencyKey),
+  index("credit_holds_lease_idx").on(table.status, table.leaseExpiresAt),
+  index("credit_holds_turn_idx").on(table.turnBurstId, table.turnAttempt),
+  check("credit_holds_turn_owner_whole", sql`(${table.turnBurstId} is null) = (${table.turnAttempt} is null)`),
+]);
 
 export const creditLedgerEntries = pgTable("credit_ledger_entries", {
   id: uuid("id").defaultRandom().primaryKey(),

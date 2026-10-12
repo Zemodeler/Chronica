@@ -1,5 +1,5 @@
 import { calculateCoinUsage } from "@chronica/billing";
-import { authorizeCoinHold, settleCoinHold, releaseCoinHold, getCoinWalletSnapshot, CoinHoldRefusedError, type ChronicaDatabase } from "@chronica/db";
+import { authorizeCoinHold, settleCoinHold, releaseCoinHold, getCoinWalletSnapshot, CoinHoldRefusedError, type ChronicaDatabase, type CoinHoldOwner } from "@chronica/db";
 import type { AiOperation } from "@chronica/shared";
 import { randomUUID } from "node:crypto";
 import type {
@@ -107,7 +107,7 @@ export async function callWithCoinGate(
   adapter: AiAdapter,
   prompts: { system: string; user: string },
   validate?: (content: string) => boolean,
-  options?: { maxRetries?: number },
+  options?: { maxRetries?: number; turn?: CoinHoldOwner | undefined },
 ): Promise<AiCallResult> {
   // Nothing to reserve and nothing to charge: a person is answering.
   if (adapter.free === true) return adapter.call(operation, prompts.system, prompts.user);
@@ -138,7 +138,9 @@ export async function callWithCoinGate(
     let holdId: string;
     const heldAt = performance.now();
     try {
-      const hold = await authorizeCoinHold(db, { gameId, workId, maximumMicroUnits: maxHold, idempotencyKey });
+      // A durable turn's call names its turn and attempt: the hold is then in flight for as long as
+      // that attempt holds its lease, not for a fixed age (`expireStaleHolds`).
+      const hold = await authorizeCoinHold(db, { gameId, workId, maximumMicroUnits: maxHold, idempotencyKey, turn: options?.turn });
       holdId = hold.holdId;
     } catch (error) {
       // Only a refusal is "out of coins". Anything else the ledger throws is

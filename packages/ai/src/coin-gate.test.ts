@@ -24,6 +24,7 @@ vi.mock("@chronica/db", () => ({
 
 import { CoinHoldRefusedError } from "@chronica/db";
 import { callWithCoinGate } from "./coin-gate";
+import { createTimedPort } from "./timed-port";
 import type { AiAdapter } from "./adapter";
 
 const call = vi.fn(() => Promise.resolve({ content: "{}", model: "gpt-6-luna", inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 }));
@@ -76,5 +77,20 @@ describe("a free adapter", () => {
     expect(ledger.getCoinWalletSnapshot).not.toHaveBeenCalled();
     expect(ledger.authorizeCoinHold).not.toHaveBeenCalled();
     expect(ledger.settleCoinHold).not.toHaveBeenCalled();
+  });
+});
+
+describe("the turn a hold is for", () => {
+  it("names the durable turn and attempt on the hold, so the stale sweep judges it by that lease", async () => {
+    const port = createTimedPort({ db, userId: "user", gameId: "game", adapter, turn: { burstId: "burst-1", attempt: 2 } }).port;
+    await port.complete("simulate_cognition", "", "");
+    expect(ledger.authorizeCoinHold).toHaveBeenCalledWith(db, expect.objectContaining({ turn: { burstId: "burst-1", attempt: 2 } }));
+  });
+
+  it("names none for a call that is not a turn's, which the sweep judges by age", async () => {
+    await gate();
+    expect(ledger.authorizeCoinHold.mock.calls[0]![1].turn).toBeUndefined();
+    await createTimedPort({ db, userId: "user", gameId: "game", adapter }).port.complete("simulate_cognition", "", "");
+    expect(ledger.authorizeCoinHold.mock.calls[1]![1].turn).toBeUndefined();
   });
 });

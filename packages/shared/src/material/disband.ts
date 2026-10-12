@@ -1,4 +1,5 @@
 import type { WorldState } from "../world/world-state";
+import { archiveWarLosses } from "../world/war-losses";
 
 /**
  * Armies that are no more -- surrendered, or yielded with their city -- taken
@@ -8,8 +9,10 @@ import type { WorldState } from "../world/world-state";
  * `intoAccountId` where there is one; the chest, what it paid and was paid,
  * and who could draw on it, go with the army.
  */
-export function disbandForces(world: WorldState, forceIds: ReadonlySet<string>, intoAccountId: string | null): WorldState {
-  if (forceIds.size === 0) return world;
+export function disbandForces(before: WorldState, forceIds: ReadonlySet<string>, intoAccountId: string | null): WorldState {
+  if (forceIds.size === 0) return before;
+  // What the armies lost is laid to their wars before they go, and stays there (`archiveWarLosses`).
+  const world = archiveWarLosses(before, forceIds);
   const chests = new Set(world.material.accounts.filter((account) => account.owner.kind === "force" && forceIds.has(account.owner.id)).map((account) => account.id));
   const kept = world.material.accounts.reduce((sum, account) => sum + (chests.has(account.id) ? account.balance : 0), 0);
   return {

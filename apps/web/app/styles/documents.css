@@ -212,11 +212,14 @@
   }
   .chronicle-entry__date .era { text-transform: none; }
   .chronicle-entry h3 { font-size: var(--step-2); line-height: 1.2; }
-  .chronicle-entry.is-unfolding h3::after {
-    content: "  being written";
+  /* A passage of a turn still running: shown as it is written, and said to be
+     provisional in words, since it is not the record until the turn commits. */
+  .chronicle-entry__provisional {
     color: var(--ink-faded);
     font: italic 400 var(--step--1) var(--font-sans);
   }
+  /* Where the reader turns back past the pages in hand, at the foot of the record. */
+  .chronicle-older { display: grid; justify-items: start; gap: .4rem; padding-top: 1.2rem; border-top: 1px solid var(--rule); }
   .chronicle-entry__tags { display: flex; flex-wrap: wrap; gap: .25rem 1rem; margin: 0; padding: 0; list-style: none; }
   .chronicle-entry__tags .word-button { color: var(--ink-faded); font-size: var(--step--1); }
   .chronicle-entry__tags .word-button:hover { color: var(--ink); }

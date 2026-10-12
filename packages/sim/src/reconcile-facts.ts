@@ -1,4 +1,5 @@
-import { abortsTheTurn, ReconcileOutputSchema } from "@chronica/shared";
+import { abortsTheTurn, ReconcileOutputSchema, type FactProposal } from "@chronica/shared";
+import { asClaim } from "./apply/fill-gaps";
 import { extractJson } from "./json";
 import type { SimModelPort } from "./ports";
 import type { RejectedDelta } from "./apply/context";
@@ -17,6 +18,10 @@ import type { RejectedDelta } from "./apply/context";
  * So it is asked of whoever wrote the sentences, once, and only when something
  * was refused. The answer is bounded: a fact can be withdrawn or rewritten,
  * never added, so a correction cannot smuggle in history the engine never saw.
+ * And a fact the call could not settle -- the call failed, its answer could
+ * not be read, or it was judged without the refusal it names in full -- is
+ * never the event: the caller keeps it as somebody's report, with its source
+ * said (`asUnsettledReport`).
  */
 
 export const FACT_RECONCILE_SYSTEM_PROMPT = `You are correcting the record of a historical simulation.
@@ -44,26 +49,49 @@ export interface FactReconcileResult<F> {
   readonly facts: readonly F[];
   readonly calls: number;
   readonly failure: string | null;
+  /**
+   * The facts whose fate nobody settled: the answer could not be read, the
+   * call failed, or it judged them without being shown in full the refusal
+   * they name. They come back as written, for callers that cannot tell them
+   * apart, but must never stand as the event: the caller keeps them as
+   * somebody's report (`asUnsettledReport`) or drops them.
+   */
+  readonly unresolved: readonly string[];
 }
 
-export async function reconcileFacts<F extends { readonly localId: string; readonly summary: string }>(input: {
+/** How many refusals are shown in full; the next ones are listed a line each, so a fact naming one of them is still judged against it. */
+export const REFUSALS_IN_FULL = 20;
+export const REFUSALS_LISTED = 60;
+
+export async function reconcileFacts<F extends { readonly localId: string; readonly summary: string; readonly affectedRefs?: readonly { readonly id: string }[]; readonly storylineRef?: string | null }>(input: {
   readonly port: SimModelPort;
   readonly facts: readonly F[];
   readonly refused: readonly RejectedDelta[];
 }): Promise<FactReconcileResult<F>> {
-  if (input.facts.length === 0 || input.refused.length === 0) return { facts: input.facts, calls: 0, failure: null };
+  if (input.facts.length === 0 || input.refused.length === 0) return { facts: input.facts, calls: 0, failure: null, unresolved: [] };
+  const everyFact = input.facts.map((fact) => fact.localId);
 
-  // Twenty, not twelve: a round's people are reconciled in one call.
-  const refusals = input.refused
-    .slice(0, 20)
-    .map((rejection, index) => `${index + 1}. ${JSON.stringify(rejection.delta)}\n   REFUSED: ${rejection.reason}`)
-    .join("\n");
+  // Twenty in full, not twelve: a round's people are reconciled in one call. The next forty
+  // are still listed, briefly, and the rest counted. A fact naming a refusal shown only briefly
+  // or not at all was judged without it: whatever the answer kept of those stays unsettled.
+  const full = input.refused.slice(0, REFUSALS_IN_FULL)
+    .map((rejection, index) => `${index + 1}. ${JSON.stringify(rejection.delta)}\n   REFUSED: ${rejection.reason}`);
+  const brief = input.refused.slice(REFUSALS_IN_FULL, REFUSALS_LISTED)
+    .map((rejection, index) => `${REFUSALS_IN_FULL + index + 1}. ${rejection.delta.op}: REFUSED: ${rejection.reason.slice(0, 160)}`);
+  const beyond = Math.max(0, input.refused.length - REFUSALS_LISTED);
+  const refusals = [...full, ...brief, ...(beyond > 0 ? [`(and ${beyond} more refused changes)`] : [])].join("\n");
   const facts = input.facts.map((fact) => `- ${fact.localId}: ${fact.summary}`).join("\n");
   const message = `Refused changes:\n${refusals}\n\nYour facts:\n${facts}`;
+  // The facts that name a refusal the answer was not shown in full: judged on a line, or on nothing.
+  const notShownInFull = input.refused.slice(REFUSALS_IN_FULL);
+  const judgedShort = new Set(notShownInFull.length === 0 ? [] : factsNamingRefusals(
+    input.facts.map((fact) => ({ localId: fact.localId, summary: fact.summary, affectedRefs: fact.affectedRefs ?? [], storylineRef: fact.storylineRef ?? null })),
+    notShownInFull,
+  ).map((fact) => fact.localId));
 
   try {
     const parsed = ReconcileOutputSchema.safeParse(extractJson(await input.port.complete("reconcile_facts", FACT_RECONCILE_SYSTEM_PROMPT, message)));
-    if (!parsed.success) return { facts: input.facts, calls: 1, failure: parsed.error.issues[0]?.message ?? "unreadable" };
+    if (!parsed.success) return { facts: input.facts, calls: 1, failure: parsed.error.issues[0]?.message ?? "unreadable", unresolved: everyFact };
     const withdrawn = new Set(parsed.data.withdraw);
     const rewritten = new Map(parsed.data.rewrite.map((entry) => [entry.localId, entry.summary]));
     return {
@@ -75,14 +103,28 @@ export async function reconcileFacts<F extends { readonly localId: string; reado
         }),
       calls: 1,
       failure: null,
+      // Kept as written, while naming a refusal it was not shown in full: unsettled.
+      unresolved: input.facts.filter((fact) => !withdrawn.has(fact.localId) && !rewritten.has(fact.localId) && judgedShort.has(fact.localId)).map((fact) => fact.localId),
     };
   } catch (error) {
     if (abortsTheTurn(error)) throw error;
-    // Without the correction the record keeps what was written, beside the
-    // refusal that contradicts it -- the state before this existed, and never
-    // worth failing a turn over.
-    return { facts: input.facts, calls: 1, failure: error instanceof Error ? error.message : String(error) };
+    // Never worth failing a turn over. The facts come back as written and
+    // marked unresolved: the caller keeps them as reports, never as the event.
+    return { facts: input.facts, calls: 1, failure: error instanceof Error ? error.message : String(error), unresolved: everyFact };
   }
+}
+
+/**
+ * A fact nobody settled, kept as what it is: somebody's report (`asClaim`),
+ * with its source said in the fact's own story (`story.source: "reported"`),
+ * so the historian hedges it as the sources do and a later reader can tell
+ * testimony from the record. The words and the names are kept: dropping it
+ * lost what was said, and keeping it as written made history of it.
+ */
+export function asUnsettledReport(fact: FactProposal): FactProposal {
+  const claim = asClaim(fact);
+  const story = fact.story ?? { subject: null, deed: null, motive: null, cost: null, source: null };
+  return { ...claim, story: { ...story, source: "reported" } };
 }
 
 /**
@@ -92,11 +134,14 @@ export async function reconcileFacts<F extends { readonly localId: string; reado
  * as already answered sent every fact of the round to be reconsidered, at a
  * call apiece. A fact is about a refusal when it names something the refused
  * delta names -- a handle, an id, a local handle it minted -- or repeats a
- * name the delta carries. Anything else stands without asking.
+ * name the delta carries, or names what the refusal's own reason names (the
+ * army an act depended on, which "No force legio-nova exists" names, so a
+ * fact about a dependent act is asked about with the act it depended on).
+ * Anything else stands without asking.
  */
 export function factsNamingRefusals<F extends { readonly affectedRefs: readonly { readonly id: string }[]; readonly summary: string; readonly storylineRef?: string | null }>(
   facts: readonly F[],
-  refused: readonly { readonly delta: unknown }[],
+  refused: readonly { readonly delta: unknown; readonly reason?: string }[],
   /** Ids that count as named beside the deltas' own: the owners of accounts they name, and for the order's own refusals the actor and their power. */
   also: Iterable<string> = [],
 ): F[] {
@@ -116,7 +161,11 @@ export function factsNamingRefusals<F extends { readonly affectedRefs: readonly 
       for (const [childKey, child] of Object.entries(record)) walk(child, childKey);
     }
   };
-  for (const rejection of refused) walk(rejection.delta, "");
+  for (const rejection of refused) {
+    walk(rejection.delta, "");
+    // The ids the refusal's reason names: what the act depended on and could not find.
+    for (const id of rejection.reason?.match(/\b(?:local:)?[a-z0-9]+(?:-[a-z0-9]+)+\b/g) ?? []) handles.add(strip(id));
+  }
   return facts.filter((fact) =>
     fact.affectedRefs.some((ref) => handles.has(strip(ref.id)))
     || (fact.storylineRef !== null && fact.storylineRef !== undefined && handles.has(strip(fact.storylineRef)))

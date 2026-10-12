@@ -1,18 +1,18 @@
 import {
   CAMPAIGN_MAX_DAYS,
   WorldDeltaSchema,
+  alliesLedBy,
   aptitude,
   fitStrengthOf,
   isNavalForce,
   isWinterMonth,
-  kmFrom,
+  leaderOf,
   passagePlanFor,
   type Character,
   type Force,
   type CampaignMode,
   type CampaignPlan,
   type StatecraftAct,
-  type WarAim,
   type WarPlan,
   type WarTheatre,
   type WorldDelta,
@@ -34,7 +34,6 @@ import { safeLocalId } from "./safe-local-id";
  * a stronger army before him, his bread gone, the object taken, the siege relieved. Nothing is chosen anew each month.
  */
 
-const BY_LAND = { passable: (edge: { readonly crossing: string }) => edge.crossing !== "sea_lane" && edge.crossing !== "strait" };
 /** Odds an army takes battle at, as before: beaten odds, and on its own ground to drive an invader off. */
 const ATTACK_ODDS = 1.3;
 const DEFEND_ODDS = 0.9;
@@ -50,6 +49,11 @@ const ALARM_KM = 250;
 /** The days an order is given for. */
 const ORDER_DAYS = 150;
 const WINTER_ORDER_DAYS = 100;
+/**
+ * An army that fell back before a stronger enemy is not sent against him again for this long unless its side now has the odds at
+ * the place: the Lucanian contingent was sent to the siege of Rhegium, fell back from the garrison, and was sent again the next month.
+ */
+export const FELL_BACK_DAYS = 60;
 
 const wd = (raw: Record<string, unknown>): WorldDelta => WorldDeltaSchema.parse(raw);
 
@@ -105,10 +109,52 @@ function forageGround(ctx: StrategyContext, reach: ReadonlyMap<string, number>):
   return best?.id ?? null;
 }
 
-/** The enemy armies that would beat us if we stayed, near enough to matter. */
+/** The powers on our side of the war: ourselves, the leader we follow by foedus, and every people that follows him (or us). */
+export function sideOf(ctx: Pick<StrategyContext, "world" | "polityId">): ReadonlySet<string> {
+  const leader = leaderOf(ctx.world.polityAgreements, ctx.polityId) ?? ctx.polityId;
+  return new Set([ctx.polityId, leader, ...alliesLedBy(ctx.world.polityAgreements, leader)]);
+}
+
+/**
+ * The men of our side standing in a province besides this army's own: the odds an army takes are its side's at the spot, not
+ * its own alone. The Lucanian contingent (349 men) reached the siege of Rhegium, where the consul's twenty thousand stood,
+ * reckoned the garrison of four thousand against itself alone, and fell back home.
+ */
+export function friendsAt(ctx: Pick<StrategyContext, "world" | "polityId" | "warfare">, provinceId: string, exceptForceId: string | null): number {
+  const side = sideOf(ctx);
+  return ctx.world.material.forces
+    .filter((other) => other.id !== exceptForceId && other.locationId === provinceId && side.has(other.polityId) && other.outlaw !== true && !isNavalForce(other, ctx.warfare))
+    .reduce((sum, other) => sum + fitStrengthOf(other), 0);
+}
+
+/** The enemy's men standing in a province. */
+export function enemiesAt(ctx: StrategyContext, provinceId: string): number {
+  return enemyArmies(ctx).filter((other) => other.locationId === provinceId).reduce((sum, other) => sum + fitStrengthOf(other), 0);
+}
+
+/**
+ * Whether an army can stand in a province with what its side has there: the enemy's men against its own and its friends'. The
+ * test is the one it gives way on in the field (`RETREAT_ODDS`, by the commander's temper), so what is safe to go to is what
+ * would not be fallen back from on arrival.
+ */
+export function standsAt(ctx: StrategyContext, force: Force, provinceId: string, coming = 0): { readonly safe: boolean; readonly theirs: number; readonly ours: number } {
+  const odds = oddsOf(ctx.world.characters.find((character) => character.id === force.commanderCharacterId));
+  const theirs = enemiesAt(ctx, provinceId);
+  const ours = fitStrengthOf(force) + friendsAt(ctx, provinceId, force.id) + Math.max(0, coming);
+  return { safe: theirs < RETREAT_ODDS * odds.flees * Math.max(1, ours), theirs, ours };
+}
+
+/** Whether this army's commander fell back before a stronger enemy lately, as the powers' own record of what they did has it. */
+export function fellBackLately(ctx: Pick<StrategyContext, "world" | "polityId">, force: Force): boolean {
+  const day = ctx.world.instant.day;
+  return ctx.world.statecraft.log.some((entry) => entry.act === "fall_back" && entry.polityId === ctx.polityId
+    && entry.actorCharacterId === force.commanderCharacterId && day - entry.day < FELL_BACK_DAYS);
+}
+
+/** The enemy armies that would beat us if we stayed, near enough to matter. Our side's men on the same ground stand with us. */
 function superiorNear(ctx: StrategyContext, force: Force, reach: ReadonlyMap<string, number>): Force | null {
   const odds = oddsOf(ctx.world.characters.find((character) => character.id === force.commanderCharacterId));
-  const men = fitStrengthOf(force);
+  const men = fitStrengthOf(force) + friendsAt(ctx, force.locationId, force.id);
   let worst: Force | null = null;
   for (const other of enemyArmies(ctx)) {
     const km = reach.get(other.locationId);
@@ -240,9 +286,13 @@ export function issueCampaign(ctx: StrategyContext, force: Force, plan: WarPlan,
     }
   }
 
+  // The odds at a place are the side's: an army sent where friends of its stand goes with their numbers. One that fell back lately
+  // is sent against the enemy again only with the odds of an attack, not merely enough to stand.
+  const fellBack = fellBackLately(ctx, force);
+  const sideAt = (provinceId: string): number => men + friendsAt(ctx, provinceId, force.id);
   // To meet the enemy's army: where the plan is to have it out, or the aim is to break it, or the man is a bold one with the odds.
   const breakable = enemies
-    .filter((other) => canGet(other.locationId) && men >= (ownGround(ctx, other.locationId) ? DEFEND_ODDS : ATTACK_ODDS) * odds.wants * fitStrengthOf(other))
+    .filter((other) => canGet(other.locationId) && sideAt(other.locationId) >= (ownGround(ctx, other.locationId) ? DEFEND_ODDS : ATTACK_ODDS) * odds.wants * enemiesAt(ctx, other.locationId))
     .sort((a, b) => kmTo(a.locationId) - kmTo(b.locationId) || fitStrengthOf(b) - fitStrengthOf(a) || a.id.localeCompare(b.id))[0];
   const wantsBattle = plan.posture === "decisive" || aims.some((aim) => aim.kind === "break_army") || (rash && plan.posture !== "defend");
   if (breakable !== undefined && wantsBattle && !(careful && plan.posture !== "decisive") && kmTo(breakable.locationId) <= SIGHT_KM) {
@@ -255,8 +305,12 @@ export function issueCampaign(ctx: StrategyContext, force: Force, plan: WarPlan,
   if (target?.provinceId !== undefined) {
     const province = ctx.provinces.get(target.provinceId);
     const walled = province?.settlements.some((settlement) => settlement.fortificationLevel >= SIEGE_NEEDED_AT) === true;
-    const defenders = enemies.filter((other) => other.locationId === target.provinceId).reduce((sum, other) => sum + fitStrengthOf(other), 0);
-    if (defenders * ATTACK_ODDS * odds.wants <= men || walled) {
+    const defenders = enemiesAt(ctx, target.provinceId);
+    const there = sideAt(target.provinceId);
+    // Walls are besieged, not stormed, so the attack's odds are not asked for a siege; but a besieger must at least match the
+    // garrison, or he is the one shut in. Three hundred and forty-nine Lucanians were sent to besiege four thousand.
+    const enough = fellBack ? defenders * ATTACK_ODDS * odds.wants <= there : walled ? defenders * odds.wants <= there : defenders * ATTACK_ODDS * odds.wants <= there;
+    if (enough) {
       const mode: CampaignMode = target.kind === "raid" && !walled ? "raid" : walled ? "siege" : "seek_battle";
       if (mode === "seek_battle" && province?.controllerPolityId !== null && province !== undefined) {
         // An open province is taken by marching into it: standing there is occupying it.
@@ -322,6 +376,9 @@ export function conductByPlan(ctx: ConductContext, force: Force, cp: CampaignPla
   const facing = enemies.filter((other) => other.locationId === here).sort((a, b) => fitStrengthOf(b) - fitStrengthOf(a) || a.id.localeCompare(b.id));
   if (facing.length > 0) {
     const theirs = menAt(here);
+    // Whether to give way is the side's question: the men of ours and of our leader's and his other allies' on this ground stand with us.
+    // Whether to offer battle stays this army's own, on its own numbers: a contingent does not commit the consul's legions.
+    const ours = men + friendsAt(ctx, here, force.id);
     const bar = (ownGround(ctx, here) ? DEFEND_ODDS : ATTACK_ODDS) * odds.wants * modeWants;
     const walled = hereProvince.controllerPolityId === polityId && hereProvince.settlements.some((settlement) => settlement.fortificationLevel >= 1);
     if (men >= bar * theirs && !(force.hold === true && (cp.mode === "refuse" || cp.mode === "garrison") && theirs > men * 0.8)) {
@@ -332,16 +389,16 @@ export function conductByPlan(ctx: ConductContext, force: Force, cp: CampaignPla
         wd({ op: "force_engage", forceRef: force.id, targetForceRef: facing[0]!.id, posture: "offer_battle", tactic, ...(manoeuvre === null ? {} : { manoeuvre: manoeuvre.kind }), reason: `${force.name} offers battle: the odds are good${tactic === null ? "" : ", and the ground is read"}.` }),
       ]);
     }
-    if (theirs >= RETREAT_ODDS * odds.flees * men || ((cp.mode === "refuse" || cp.mode === "shadow") && theirs > men)) {
+    if (theirs >= RETREAT_ODDS * odds.flees * ours || ((cp.mode === "refuse" || cp.mode === "shadow") && theirs > ours)) {
       if (walled && (cp.mode === "refuse" || cp.mode === "garrison" || cp.mode === "winter")) {
         const tactic = chooseBattlePlan(world, here, [force], facing, commander, ctx.warfare);
         if (force.hold === true && JSON.stringify(force.battlePlan ?? null) === JSON.stringify(tactic)) return null;
-        return decide(ctx, force, "hold", facing[0]!.polityId, `${roughMen(theirs)} against our ${roughMen(men)}: he keeps within the walls and will not come out`, [
+        return decide(ctx, force, "hold", facing[0]!.polityId, `${roughMen(theirs)} against our ${roughMen(ours)}: he keeps within the walls and will not come out`, [
           wd({ op: "force_modify", forceRef: force.id, hold: true, battlePlan: tactic, reason: `${force.name} keeps to ${hereProvince.name} and will not give battle.` }),
         ]);
       }
       const home = fallBackTo(ctx, force, cp, reach);
-      if (home !== null) return decide(ctx, force, "fall_back", facing[0]!.polityId, `${roughMen(theirs)} against our ${roughMen(men)}: too many`, [...unhold, wd({ op: "force_modify", forceRef: force.id, locationId: home, reason: `${force.name} falls back before a stronger army.` })]);
+      if (home !== null) return decide(ctx, force, "fall_back", facing[0]!.polityId, `${roughMen(theirs)} against our ${roughMen(ours)} at ${hereProvince.name}: too many`, [...unhold, wd({ op: "force_modify", forceRef: force.id, locationId: home, reason: `${force.name} falls back before a stronger army.` })]);
     }
     // In between: he stands, and if he is attacked he fights by the plan he has laid for the field.
     const standing = chooseBattlePlan(world, here, [force], facing, commander, ctx.warfare);
@@ -416,7 +473,8 @@ export function besiegerOrder(ctx: StrategyContext, force: Force): StatecraftDec
   if (siege === undefined || siege.awaiting !== null) return null;
   const commander = world.characters.find((character) => character.id === force.commanderCharacterId);
   const temper = temperOf(commander);
-  const men = fitStrengthOf(force);
+  // The lines are held by everyone of our side before the town: the allies' contingents count against a relief.
+  const men = fitStrengthOf(force) + friendsAt(ctx, siege.provinceId, force.id);
   const garrison = world.material.forces.filter((other) => other.locationId === siege.provinceId && other.polityId === siege.defenderPolityId && fitStrengthOf(other) > 0).reduce((sum, other) => sum + fitStrengthOf(other), 0);
   const near = reachOf(ctx, siege.provinceId, 300, true);
   const reliefMen = enemyArmies(ctx).filter((other) => other.locationId !== siege.provinceId && near.has(other.locationId)).reduce((sum, other) => sum + fitStrengthOf(other), 0);

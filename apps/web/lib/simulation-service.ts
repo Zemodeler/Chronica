@@ -1,7 +1,8 @@
 import { headers } from "next/headers";
-import { after } from "next/server";
 import { and, eq } from "drizzle-orm";
 import {
+  ChronicleCursorError,
+  countUnreadChronicle,
   createDatabase,
   getSharedDatabase,
   findRunningBurst,
@@ -9,30 +10,32 @@ import {
   getOpenDecision,
   getWorldView,
   listBurstProgress,
-  listChronicle,
+  listChroniclePage,
   markChronicleRead,
   setThreadFollowed,
   reapStaleBursts,
   schema,
+  settleTurnJobs,
   type ChronicaDatabase,
 } from "@chronica/db";
 import { formatCoins } from "@chronica/billing";
 import { buildStation, formatWorldDate, PlayerDecisionSchema, seesAccount, type OrderPartyRef, type WorldState } from "@chronica/shared";
-import { nameOfSubject, whoSeeksThePlayer, type AnsweredDecision } from "@chronica/sim";
+import { nameOfSubject, type AnsweredDecision } from "@chronica/sim";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
-import { dateLabel, prepareBurst, runBurstWithContinuations, type BurstJob } from "./burst-runner";
+import { dateLabel, enqueueBurst, turnSettlement } from "./burst-runner";
 import { ABANDONED_ERROR, livenessAt, toBurstStatus, type BurstStatusView } from "./burst-status";
 import { requiredDatabaseUrl } from "./database-url";
-import { openInitiatedDialogue } from "./dialogue-service";
+import { nudgeTurnWorker } from "./turn-worker";
 
 /**
  * Where the pure simulation meets the application.
  *
  * `@chronica/sim` deliberately knows nothing about databases, sessions or
  * billing -- that is what makes it testable. This module supplies the session:
- * it says who is asking, prepares the burst, and hands it to `burst-runner.ts`
- * to finish on its own. The request returns as soon as the burst has a row;
- * the page follows it through `getBurstStatus`.
+ * it says who is asking, settles the guards, and queues the order as a
+ * durable job (`burst-runner.ts`) that a worker carries out (`turn-worker.ts`).
+ * The request returns as soon as the burst and its job have rows; the page
+ * follows it through `getBurstStatus`.
  */
 
 
@@ -79,18 +82,15 @@ export type StartOutcome =
   | { readonly status: "error"; readonly message: string };
 
 /**
- * Gives an order, or lets time pass, and returns as soon as the burst exists.
+ * Gives an order, or lets time pass, and returns as soon as it is queued.
  *
- * The burst itself runs after the response is sent (`after`), in this same
- * process, with its own database pool. It heartbeats while it runs and marks
- * its progress as it makes it; a process that dies mid-turn is found out by
- * its silence, one stuck by its lack of progress (`livenessAt`), and the next
- * order or look at the page reaps the row and the coins it held.
- *
- * There is no durable queue behind this: a burst whose process dies is not
- * resumed, it is failed and the world stays at its last commit. The order is
- * the player's to give again, and with the same `idempotencyKey` a resend
- * that raced the first finds its burst rather than paying twice.
+ * The order is stored with its burst as a durable job; nothing of the turn
+ * runs in this request. A worker -- this server's own, or a separate process
+ * (`CHRONICA_TURN_WORKER=external`) -- leases the job and carries it out, and
+ * a worker that dies mid-turn is replaced when its lease lapses, a bounded
+ * number of times, rather than the turn being failed with it. With the same
+ * `idempotencyKey` a resend that raced the first finds its burst rather than
+ * paying twice.
  */
 export async function startDetachedBurst(
   gameId: string,
@@ -121,28 +121,13 @@ async function launch(
   },
 ): Promise<StartOutcome> {
   const { db, userId, playerId, characterId } = context;
-  const prepared = await prepareBurst(db, { ...input, userId, playerId, characterId });
-  if (prepared.status === "error") return prepared;
+  const queued = await enqueueBurst(db, { ...input, userId, playerId, characterId });
+  if (queued.status === "error") return queued;
   // Sent before, under the same id: follow that burst, pay for nothing new.
-  if (prepared.status === "existing") return { status: "started", burstId: prepared.burstId };
-  const job = prepared.job;
-
-  after(async () => {
-    const detached = createDatabase(requiredDatabaseUrl());
-    try {
-      await runBurstWithContinuations(detached.db, job, { afterCommit: openConversations });
-    } finally {
-      await detached.close();
-    }
-  });
-  return { status: "started", burstId: job.burstId };
-}
-
-/** Now that the world has settled, let anyone with real reason to seek the ruler out open a conversation. */
-async function openConversations(db: ChronicaDatabase, job: BurstJob, world: WorldState): Promise<void> {
-  for (const initiation of whoSeeksThePlayer({ world, playerRef: job.actorRef })) {
-    await openInitiatedDialogue(db, job.gameId, job.playerId, initiation.characterId, initiation.openingLine);
-  }
+  if (queued.status === "existing") return { status: "started", burstId: queued.burstId };
+  // This server's own worker, when it runs one, takes it up now rather than at its next poll.
+  nudgeTurnWorker();
+  return { status: "started", burstId: queued.burstId };
 }
 
 /** Where a burst has got to, for the page polling it. Null when it is not this player's game. */
@@ -152,7 +137,7 @@ export async function getBurstStatus(gameId: string, burstId: string, afterId: n
   const { db, close } = context;
   try {
     const now = new Date();
-    await reapStaleBursts(db, gameId, livenessAt(now), ABANDONED_ERROR);
+    await Promise.all([reapStaleBursts(db, gameId, livenessAt(now), ABANDONED_ERROR), settleTurnJobs(db, turnSettlement(gameId))]);
     const [row, rows] = await Promise.all([getBurst(db, gameId, burstId), listBurstProgress(db, burstId, afterId)]);
     if (row === undefined) return null;
     return toBurstStatus(row, rows, afterId, now);
@@ -166,19 +151,16 @@ export async function getGameView(gameId: string) {
   if (context === null) return null;
   const { db, close, userId, characterId } = context;
   try {
-    const [view, chronicle, decision, running, purse] = await Promise.all([
+    const [view, page, unreadTotal, decision, running, purse] = await Promise.all([
       getWorldView(db, gameId),
-      listChronicle(db, gameId),
+      listChroniclePage(db, gameId, { limit: CHRONICLE_PAGE }),
+      countUnreadChronicle(db, gameId),
       getOpenDecision(db, gameId),
       findRunningBurst(db, gameId, livenessAt(new Date())),
       readPurse(db, gameId, userId),
     ]);
     if (view === undefined) return null;
-    // A purse's movements belong to whoever may open it. The historian's
-    // entry claimed the change by its owner; this checks the reader too.
-    const station = buildStation({ world: view.world, characterId, offices: view.scenarioGovernment?.offices ?? [] });
-    const readable = (change: { readonly kind?: unknown; readonly id?: unknown }): boolean =>
-      change.kind !== "account" || (typeof change.id === "string" && seesAccount(station, change.id));
+    const chronicle = page.entries;
     return {
       gameTitle: view.gameTitle,
       worldRevision: String(view.revision),
@@ -198,38 +180,93 @@ export async function getGameView(gameId: string) {
       // The report the last committed order wrote: by when it was written, not
       // by where its passages sort in the calendar (R79).
       latestBurstId: [...chronicle].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0]?.burstId ?? null,
-      chronicle: chronicle.map((entry) => ({
-        id: entry.id,
-        burstId: entry.burstId,
-        kind: entry.kind === "recorded" ? "recorded" : "narrated",
-        // The day the matter entered the record, which is what a chronicle is
-        // indexed by. Formatted here because the scenario's calendar lives with
-        // the world and has no business being shipped to the browser.
-        date: dateLabel(entry.toInstantSortKey, view.scenarioClock),
-        // When what it tells happened, where that was days before the court
-        // learned of it: a letter's arrival and the battle it reports are two
-        // dates, and a late report read as the day of the event (C08).
-        happened: entry.toInstantSortKey - entry.fromInstantSortKey > LATE_NEWS_MINUTES ? dateLabel(entry.fromInstantSortKey, view.scenarioClock) : null,
-        title: entry.title,
-        body: entry.body,
-        subjects: entry.subjects,
-        // Entries written before tags carried their own label still hold bare
-        // refs. Naming them on the way out repairs the old record rather than
-        // leaving two rows of engine handles in it forever.
-        tags: namedTags(view.world, entry.tags),
-        changes: (Array.isArray(entry.changes) ? entry.changes as { kind?: unknown; id?: unknown }[] : []).filter(readable),
-        quote: entry.quote,
-        storylineIds: Array.isArray(entry.storylineIds) ? (entry.storylineIds as unknown[]).filter((id): id is string => typeof id === "string") : [],
-        // read_at has been on the row since the table was written and nothing
-        // ever set it, so the badge counted the length of the record and
-        // called it unopened.
-        unread: entry.readAt === null,
-      })),
+      chronicle: presentChronicle(chronicle, view, characterId),
+      // Where the page before this one starts, or null when this is the whole
+      // record: the reign is read back a page at a time (`getChroniclePage`).
+      chronicleOlder: page.older,
+      // Across the whole record, not the page in hand.
+      unreadTotal,
       decision: decision === undefined ? null : { id: decision.id, prompt: decision.prompt, options: decision.options },
       // A burst still moving the world, so a page opened mid-turn can follow
       // it rather than sit on a stale record.
       running: running === undefined ? null : { burstId: running.id },
     };
+  } finally {
+    await close();
+  }
+}
+
+/** How many entries of the record the page is given at a time. */
+const CHRONICLE_PAGE = 200;
+
+type ChronicleRows = Awaited<ReturnType<typeof listChroniclePage>>["entries"];
+type GameWorldView = NonNullable<Awaited<ReturnType<typeof getWorldView>>>;
+
+/**
+ * Entries as the reader is shown them: dated in the scenario's calendar, tags
+ * named, and the movements of any purse the reader may not open taken out.
+ * Every page of the record goes through here, so an older page is held to the
+ * same eyes as the newest.
+ */
+function presentChronicle(rows: ChronicleRows, view: GameWorldView, characterId: string) {
+  // A purse's movements belong to whoever may open it. The historian's
+  // entry claimed the change by its owner; this checks the reader too.
+  const station = buildStation({ world: view.world, characterId, offices: view.scenarioGovernment?.offices ?? [] });
+  const readable = (change: { readonly kind?: unknown; readonly id?: unknown }): boolean =>
+    change.kind !== "account" || (typeof change.id === "string" && seesAccount(station, change.id));
+  return rows.map((entry) => ({
+    id: entry.id,
+    burstId: entry.burstId,
+    // Where it sorts in the record, so pages read at different times merge in order.
+    orderKey: entry.orderKey,
+    kind: entry.kind === "recorded" ? "recorded" : "narrated",
+    // The day the matter entered the record, which is what a chronicle is
+    // indexed by. Formatted here because the scenario's calendar lives with
+    // the world and has no business being shipped to the browser.
+    date: dateLabel(entry.toInstantSortKey, view.scenarioClock),
+    // When what it tells happened, where that was days before the court
+    // learned of it: a letter's arrival and the battle it reports are two
+    // dates, and a late report read as the day of the event (C08).
+    happened: entry.toInstantSortKey - entry.fromInstantSortKey > LATE_NEWS_MINUTES ? dateLabel(entry.fromInstantSortKey, view.scenarioClock) : null,
+    title: entry.title,
+    body: entry.body,
+    subjects: entry.subjects,
+    // Entries written before tags carried their own label still hold bare
+    // refs. Naming them on the way out repairs the old record rather than
+    // leaving two rows of engine handles in it forever.
+    tags: namedTags(view.world, entry.tags),
+    changes: (Array.isArray(entry.changes) ? entry.changes as { kind?: unknown; id?: unknown }[] : []).filter(readable),
+    quote: entry.quote,
+    storylineIds: Array.isArray(entry.storylineIds) ? (entry.storylineIds as unknown[]).filter((id): id is string => typeof id === "string") : [],
+    // read_at has been on the row since the table was written and nothing
+    // ever set it, so the badge counted the length of the record and
+    // called it unopened.
+    unread: entry.readAt === null,
+  }));
+}
+
+export type ChronicleEntryView = ReturnType<typeof presentChronicle>[number];
+
+export type ChroniclePageOutcome =
+  | { readonly status: "ok"; readonly entries: readonly ChronicleEntryView[]; readonly older: string | null }
+  | { readonly status: "not-found" }
+  | { readonly status: "bad-cursor" };
+
+/**
+ * The page of the record before `before` (an entry's `orderKey`), oldest
+ * first, for a reader turning back past what the view carried.
+ */
+export async function getChroniclePage(gameId: string, before: string, limit = CHRONICLE_PAGE): Promise<ChroniclePageOutcome> {
+  const context = await resolveContext(gameId, true);
+  if (context === null) return { status: "not-found" };
+  const { db, close, characterId } = context;
+  try {
+    const [view, page] = await Promise.all([getWorldView(db, gameId), listChroniclePage(db, gameId, { before, limit })]);
+    if (view === undefined) return { status: "not-found" };
+    return { status: "ok", entries: presentChronicle(page.entries, view, characterId), older: page.older };
+  } catch (error) {
+    if (error instanceof ChronicleCursorError) return { status: "bad-cursor" };
+    throw error;
   } finally {
     await close();
   }
