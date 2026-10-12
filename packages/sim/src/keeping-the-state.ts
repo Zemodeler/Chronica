@@ -174,7 +174,10 @@ export function keepTheState(input: KeepingInput): { world: WorldState; facts: F
     const slack = Math.max(SLACK_FLOOR_SHARE * book.takings, book.takings - book.owed);
     const upkeepDue = bill === null ? 0 : Math.round(Math.min(bill.upkeep.total, book.takings * UPKEEP_CAP_SHARE, slack * UPKEEP_SLACK_SHARE) * months);
     const costsDue = bill === null ? 0 : Math.round(Math.min(bill.costs.total, book.takings * COSTS_CAP_SHARE, slack * COSTS_SLACK_SHARE) * months);
-    const floor = Math.max(FLOOR_OWED_MONTHS * book.owed, FLOOR_TAKEN_MONTHS * book.takings);
+    // Monthly rates may be fractional (for example a weekly obligation), but
+    // the reserve and every payment are whole monetary units. Keep the next
+    // whole unit rather than paying a fraction that a later tick rounds away.
+    const floor = Math.ceil(Math.max(FLOOR_OWED_MONTHS * book.owed, FLOOR_TAKEN_MONTHS * book.takings));
     let spendable = Math.max(0, balanceOf(book.treasuryId) - floor);
     const paidCosts = Math.min(costsDue, spendable);
     spendable -= paidCosts;
@@ -231,7 +234,7 @@ export function keepTheState(input: KeepingInput): { world: WorldState; facts: F
     const k = contract.built ? contract.instalments : Math.min(contract.instalments, Math.floor((toDay - contract.letAtStep) / MONTH) + 1);
     const shouldHavePaid = k >= contract.instalments ? contract.price : Math.round((contract.price * k) / contract.instalments);
     const shouldHaveSpent = k >= contract.instalments ? contract.cost : Math.round((contract.cost * k) / contract.instalments);
-    const floor = Math.max(FLOOR_OWED_MONTHS * book.owed, FLOOR_TAKEN_MONTHS * book.takings) / 2;
+    const floor = Math.ceil(Math.max(FLOOR_OWED_MONTHS * book.owed, FLOOR_TAKEN_MONTHS * book.takings) / 2);
     let toPay = Math.min(shouldHavePaid - contract.paid, Math.max(0, balanceOf(book.treasuryId) - floor));
     let next = contract;
     if (toPay > 0) {
