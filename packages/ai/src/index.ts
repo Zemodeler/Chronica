@@ -10,7 +10,7 @@ export type {
 export { parseToolArguments } from "./adapter";
 export { callWithCoinGate, callWithToolsAndCoinGate, InsufficientCoinsError, AiParseError } from "./coin-gate";
 export { createTimedPort, type TimedModelPort } from "./timed-port";
-export { AiTimeoutError, aiMaxRetries, aiRequestTimeoutMs, isTimeout } from "./timeouts";
+export { AiTimeoutError, aiMaxMs, aiMaxRetries, aiRequestTimeoutMs, isTimeout } from "./timeouts";
 export { createAnthropicLocalAdapter } from "./adapters/anthropic-local";
 export { createOpenAiLocalAdapter } from "./adapters/openai-local";
 export { createMockAdapter, type MockAdapterOptions, type MockToolStep } from "./adapters/mock";

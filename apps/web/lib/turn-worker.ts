@@ -25,7 +25,7 @@ import {
 } from "@chronica/db";
 import { whoSeeksThePlayer } from "@chronica/sim";
 import type { WorldState } from "@chronica/shared";
-import { EXHAUSTED_ERROR, STALE_HOLD_MS, TURN_LEASE_MS } from "./burst-status";
+import { EXHAUSTED_ERROR, TURN_LEASE_MS, staleHoldMs } from "./burst-status";
 import { MAX_LEGS, MIN_LEG_DAYS, loadBurstJob, restoreAskingCharacter, runBurstToCommit, turnInputOf, turnMaxAttempts, turnSettlement, type BurstJob, type RunControl, type RunHooks } from "./burst-runner";
 import { openInitiatedDialogue } from "./initiated-dialogue";
 import { unopenableSave } from "./save-errors";
@@ -91,6 +91,7 @@ export function durableControl(db: ChronicaDatabase, job: BurstJob, claimed: Cla
   };
   return {
     attempt: lease.attempt,
+    holdOwner: { burstId, attempt: lease.attempt },
     beat: () => renewTurnLease(db, burstId, lease, TURN_LEASE_MS),
     progressed: () => markBurstProgress(db, burstId),
     wrapPort: (port) => {
@@ -279,7 +280,7 @@ export function startTurnWorker(options: TurnWorkerOptions): TurnWorker {
     lastSettled = Date.now();
     const [settled, holds] = await Promise.all([
       settleTurnJobs(db, turnSettlement(null)),
-      expireStaleHolds(db, new Date(Date.now() - STALE_HOLD_MS)),
+      expireStaleHolds(db, new Date(Date.now() - staleHoldMs())),
     ]);
     const jobs = settled.exhausted + settled.stuck + settled.unclaimed;
     if (jobs > 0 || holds > 0) console.warn(`[turn worker ${workerId}] settled ${settled.exhausted} turn(s) out of attempts, ${settled.stuck} stuck, ${settled.unclaimed} never taken up, and ${holds} stale coin hold(s)`);

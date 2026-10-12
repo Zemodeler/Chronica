@@ -1,4 +1,4 @@
-import type { ChronicaDatabase } from "@chronica/db";
+import type { ChronicaDatabase, CoinHoldOwner } from "@chronica/db";
 import type { AiOperation } from "@chronica/shared";
 import type { AiAdapter } from "./adapter";
 import { callWithCoinGate } from "./coin-gate";
@@ -32,15 +32,15 @@ interface Stage {
   lastEndedAt: number;
 }
 
-export function createTimedPort(input: { readonly db: ChronicaDatabase; readonly userId: string; readonly gameId: string; readonly adapter: AiAdapter }): TimedModelPort {
-  const { db, userId, gameId, adapter } = input;
+export function createTimedPort(input: { readonly db: ChronicaDatabase; readonly userId: string; readonly gameId: string; readonly adapter: AiAdapter; /** The durable turn attempt its calls are for, so their holds live as long as its lease. */ readonly turn?: CoinHoldOwner | undefined }): TimedModelPort {
+  const { db, userId, gameId, adapter, turn } = input;
   const stages = new Map<string, Stage>();
   return {
     port: {
       async complete(operation, systemPrompt, userMessage) {
         const startedAt = performance.now();
         try {
-          const result = await callWithCoinGate(db, userId, gameId, operation, adapter, { system: systemPrompt, user: userMessage });
+          const result = await callWithCoinGate(db, userId, gameId, operation, adapter, { system: systemPrompt, user: userMessage }, undefined, turn === undefined ? undefined : { turn });
           return result.content;
         } finally {
           // In `finally`, so a call that threw still shows up: a stage that is

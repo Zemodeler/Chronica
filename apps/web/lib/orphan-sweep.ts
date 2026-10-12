@@ -1,6 +1,6 @@
 import { createDatabase, expireStaleHolds, reapStaleBursts, settleTurnJobs } from "@chronica/db";
 import { turnSettlement } from "./burst-runner";
-import { ABANDONED_ERROR, BURST_STALE_MS, STALE_HOLD_MS, livenessAt } from "./burst-status";
+import { ABANDONED_ERROR, BURST_STALE_MS, livenessAt, staleHoldMs } from "./burst-status";
 
 /**
  * What the last server left running, cleared when this one starts.
@@ -21,7 +21,7 @@ export async function sweepOrphanedBursts(databaseUrl: string, now = new Date())
   try {
     const [bursts, holds, settled] = await Promise.all([
       reapStaleBursts(db, null, livenessAt(now), ABANDONED_ERROR),
-      expireStaleHolds(db, new Date(now.getTime() - STALE_HOLD_MS)),
+      expireStaleHolds(db, new Date(now.getTime() - staleHoldMs())),
       settleTurnJobs(db, turnSettlement(null)),
     ]);
     return { bursts, holds, turns: settled.exhausted + settled.stuck + settled.unclaimed };

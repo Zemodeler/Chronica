@@ -1,4 +1,4 @@
-import { getSelectedLocalAiProvider } from "@chronica/ai";
+import { aiMaxMs, aiMaxRetries, getSelectedLocalAiProvider } from "@chronica/ai";
 
 /**
  * What a running burst looks like to the page polling it.
@@ -16,6 +16,18 @@ export const BURST_STALE_MS = 90_000;
 export const HEARTBEAT_MS = 20_000;
 /** A coin hold older than this was taken by a call that can no longer be running: the cap is 150 s, tried at most twice. */
 export const STALE_HOLD_MS = 6 * 60_000;
+
+/**
+ * The age past which a hold with no turn to answer for it -- a conversation's
+ * call, a letter's, one written before holds had owners -- is abandoned: the
+ * longest such a call can run as configured (`CHRONICA_AI_MAX_MS`, tried
+ * `CHRONICA_AI_MAX_RETRIES` more times), with a minute's grace, and never
+ * under `STALE_HOLD_MS`. A durable turn's hold is not judged by age at all,
+ * but by its attempt's lease (`expireStaleHolds`).
+ */
+export function staleHoldMs(maxMs: number = aiMaxMs(), retries: number = aiMaxRetries()): number {
+  return Math.max(STALE_HOLD_MS, (retries + 1) * maxMs + 60_000);
+}
 /**
  * How long a burst may go without getting anywhere -- no stage reported, no
  * call answered, no passage written -- before it is treated as stuck, however

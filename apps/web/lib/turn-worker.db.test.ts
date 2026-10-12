@@ -119,6 +119,13 @@ describe.skipIf(TEST_DATABASE_URL === null)("the turn worker against Postgres", 
     expect(calls.replayed).toBeGreaterThan(0);
     // A coin hold is a provider call paid for: the second attempt took one only for what it actually asked.
     expect(await holdsOf(save.gameId)).toBe(holdsAfterFirst + askedAgain);
+    // Each hold names the turn and the attempt that took it, and none is left active: the
+    // stale sweep judges a turn's hold by that attempt's lease, never by its age (0044).
+    const holds = await db.select({ status: schema.creditHolds.status, burstId: schema.creditHolds.turnBurstId, attempt: schema.creditHolds.turnAttempt }).from(schema.creditHolds).where(eq(schema.creditHolds.gameId, save.gameId));
+    expect(holds.length).toBeGreaterThan(0);
+    expect(holds.every((hold) => hold.burstId === burstId && (hold.attempt === 1 || hold.attempt === 2))).toBe(true);
+    expect(holds.filter((hold) => hold.attempt === 2)).toHaveLength(askedAgain);
+    expect(holds.filter((hold) => hold.status === "active")).toEqual([]);
     expect(await revisionOf(save.gameId)).toBe(2);
     const passages = await db.select({ ordinal: schema.chronicleCheckpoints.ordinal }).from(schema.chronicleCheckpoints).where(and(eq(schema.chronicleCheckpoints.gameId, save.gameId), eq(schema.chronicleCheckpoints.burstId, burstId)));
     expect(new Set(passages.map((row) => row.ordinal)).size).toBe(passages.length);

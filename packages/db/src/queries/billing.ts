@@ -1,9 +1,11 @@
 import type { NormalizedPaymentEvent, ProductCatalogEntry } from "@chronica/billing";
 import type { AiOperation, TokenUsage } from "@chronica/shared";
-import { and, asc, count, desc, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import type { ChronicaDatabase } from "../database";
 import { users } from "../schema/auth";
 import { games } from "../schema/game";
+import { turnJobs } from "../schema/simulation";
+import type { ChronicaTransaction } from "./world";
 import {
   aiCalls,
   billingCustomers,
@@ -242,13 +244,19 @@ async function withDeadlockRetry<T>(work: () => Promise<T>, attempts = 3): Promi
   }
 }
 
+/** The durable turn, and the attempt of it, a call is made for: its hold is that attempt's while its lease lives. */
+export type CoinHoldOwner = Readonly<{ burstId: string; attempt: number }>;
+
 export async function authorizeCoinHold(db: ChronicaDatabase, input: Readonly<{
   gameId: string;
   workId: string;
   maximumMicroUnits: bigint;
   idempotencyKey: string;
+  /** Set for a call a durable turn makes; absent for every other call (a conversation, a letter). */
+  turn?: CoinHoldOwner | undefined;
 }>): Promise<{ holdId: string; replayed?: boolean }> {
   if (input.maximumMicroUnits < 0n) throw new RangeError("Hold cannot be negative.");
+  if (input.turn !== undefined && (!Number.isSafeInteger(input.turn.attempt) || input.turn.attempt < 1)) throw new RangeError("A turn's attempt is a positive whole number.");
   // Lock order: game, then wallet, then lots. Settlement and release take
   // theirs in the same order.
   const result = await withDeadlockRetry(() => db.transaction(async (tx) => {
@@ -279,7 +287,7 @@ export async function authorizeCoinHold(db: ChronicaDatabase, input: Readonly<{
       needed -= amount;
     }
     if (needed !== 0n) throw new Error("Wallet lots do not reconcile to the available balance.");
-    const [hold] = await tx.insert(creditHolds).values({ walletId: wallet.id, gameId: game.id, workId: input.workId, maximumMicrocredits: input.maximumMicroUnits, lotAllocation: allocation, status: "active", idempotencyKey: input.idempotencyKey }).returning({ id: creditHolds.id });
+    const [hold] = await tx.insert(creditHolds).values({ walletId: wallet.id, gameId: game.id, workId: input.workId, maximumMicrocredits: input.maximumMicroUnits, lotAllocation: allocation, status: "active", idempotencyKey: input.idempotencyKey, turnBurstId: input.turn?.burstId ?? null, turnAttempt: input.turn?.attempt ?? null }).returning({ id: creditHolds.id });
     if (hold === undefined) throw new Error("Coin hold was not created.");
     await tx.update(creditWallets).set({ availableMicrocredits: wallet.availableMicrocredits - input.maximumMicroUnits, heldMicrocredits: wallet.heldMicrocredits + input.maximumMicroUnits, version: wallet.version + 1 }).where(eq(creditWallets.id, wallet.id));
     await tx.insert(creditLedgerEntries).values({ walletId: wallet.id, kind: "hold", signedMicrocredits: -input.maximumMicroUnits, idempotencyKey: `ledger:${input.idempotencyKey}`, gameId: game.id, workId: input.workId, holdId: hold.id, balanceAfterMicrocredits: wallet.availableMicrocredits - input.maximumMicroUnits, reason: "AI work authorized" });
@@ -345,19 +353,51 @@ export async function releaseCoinHold(db: ChronicaDatabase, holdId: string): Pro
  * A hold is released or settled by the process that took it, when its call
  * ends. A process killed mid-call -- the dev server restarted, the machine put
  * to sleep -- leaves the hold `active` for good, and the coins it reserved
- * stay unspendable. Anything older than the longest a call can possibly run
- * is not in flight; it is abandoned, and the coins come back.
+ * stay unspendable.
+ *
+ * A hold taken for a durable turn (`turn_burst_id`, `turn_attempt`) is in
+ * flight for exactly as long as that attempt holds a live lease on its job,
+ * however long its call runs, and is expired at the first sweep after the
+ * attempt has lost the lease (lapsed, revoked as stuck, handed back) or the
+ * job has ended, whatever its age. That is read under the hold's row lock and
+ * a share lock on the job, in the transaction that would release it, so a
+ * renewal, a settlement or another sweep racing it is either seen or waited
+ * for -- never released past.
+ *
+ * Any other hold -- a conversation's call, a letter's, every hold written
+ * before turns had owners -- is judged by age: older than `olderThan`, the
+ * longest such a call can run, it is not in flight; it is abandoned, and the
+ * coins come back. Returns how many were expired.
  */
 export async function expireStaleHolds(db: ChronicaDatabase, olderThan: Date): Promise<number> {
-  const stale = await db.select({ id: creditHolds.id }).from(creditHolds).where(and(eq(creditHolds.status, "active"), lt(creditHolds.createdAt, olderThan)));
-  for (const hold of stale) await giveBackHold(db, hold.id, "expired", "AI call abandoned: the process that reserved the coins did not come back");
-  return stale.length;
+  // Only candidates -- every owned hold, whatever its age, and the old unowned ones: whether each
+  // is let go is decided again under its lock, never on this read.
+  const stale = await db.select({ id: creditHolds.id }).from(creditHolds)
+    .where(and(eq(creditHolds.status, "active"), or(lt(creditHolds.createdAt, olderThan), isNotNull(creditHolds.turnBurstId))));
+  let expired = 0;
+  for (const hold of stale) {
+    if (await giveBackHold(db, hold.id, "expired", "AI call abandoned: the process that reserved the coins did not come back", { unlessOwnerLive: true })) expired += 1;
+  }
+  return expired;
 }
 
-async function giveBackHold(db: ChronicaDatabase, holdId: string, status: "released" | "expired", reason: string): Promise<void> {
-  await withDeadlockRetry(() => db.transaction(async (tx) => {
+/**
+ * Whether the turn attempt a hold was taken for still holds a live lease on
+ * its job, by the database's clock. Takes a share lock on the job row, so a
+ * renewal or a claim in flight finishes first and is seen.
+ */
+async function ownerHoldsLiveLease(tx: ChronicaTransaction, burstId: string, attempt: number): Promise<boolean> {
+  const [job] = await tx.select({ live: sql<boolean>`${turnJobs.status} = 'leased' and ${turnJobs.attempts} = ${attempt} and ${turnJobs.leaseExpiresAt} > now()` })
+    .from(turnJobs).where(eq(turnJobs.burstId, burstId)).for("share").limit(1);
+  return job?.live === true;
+}
+
+async function giveBackHold(db: ChronicaDatabase, holdId: string, status: "released" | "expired", reason: string, options: { readonly unlessOwnerLive?: boolean } = {}): Promise<boolean> {
+  return withDeadlockRetry(() => db.transaction(async (tx) => {
     const [hold] = await tx.select().from(creditHolds).where(eq(creditHolds.id, holdId)).for("update").limit(1);
-    if (hold === undefined || hold.status !== "active") return;
+    if (hold === undefined || hold.status !== "active") return false;
+    // Lock order: hold, job, wallet, lots. Nothing locks a job and then a hold.
+    if (options.unlessOwnerLive === true && hold.turnBurstId !== null && hold.turnAttempt !== null && await ownerHoldsLiveLease(tx, hold.turnBurstId, hold.turnAttempt)) return false;
     const [wallet] = await tx.select().from(creditWallets).where(eq(creditWallets.id, hold.walletId)).for("update").limit(1);
     if (wallet === undefined) throw new Error("Coin wallet missing during release.");
     for (const item of hold.lotAllocation as LotAllocation[]) {
@@ -369,6 +409,7 @@ async function giveBackHold(db: ChronicaDatabase, holdId: string, status: "relea
     await tx.update(creditWallets).set({ availableMicrocredits: availableAfter, heldMicrocredits: wallet.heldMicrocredits - hold.maximumMicrocredits, version: wallet.version + 1 }).where(eq(creditWallets.id, wallet.id));
     await tx.update(creditHolds).set({ status }).where(eq(creditHolds.id, hold.id));
     await tx.insert(creditLedgerEntries).values({ walletId: wallet.id, kind: "release", signedMicrocredits: hold.maximumMicrocredits, idempotencyKey: `release:hold:${hold.id}`, gameId: hold.gameId, workId: hold.workId, holdId: hold.id, balanceAfterMicrocredits: availableAfter, reason });
+    return true;
   }));
 }
 

@@ -93,8 +93,14 @@ the rows stay as the account of what was asked.
 
 This does **not** promise a provider call is billed exactly once: a worker that dies after the provider
 received the request and before the answer was written has paid for an answer nobody read, and nothing
-here can know. The coin hold such a call took is given back by the stale-hold sweep (6 min, above the
-longest honest call). What it promises is that an answer an earlier attempt received is not asked for
+here can know. The coin hold such a call took names its turn and attempt (`credit_holds.turn_burst_id`,
+`turn_attempt`, migration `0044_turn_owned_holds.sql`): the stale-hold sweep keeps it for as long as that
+attempt holds a live lease, however long the call runs, and gives it back at the first sweep after the
+lease is lost (lapsed, revoked as stuck, handed back) or the job has ended -- decided under the hold's row
+lock and a share lock on the job, so a renewal, a settlement or a second sweep racing it never releases
+it twice. A hold with no turn (a conversation's, a letter's, any written before 0044) is given back by
+age: past the longest call the configured limits allow (`CHRONICA_AI_MAX_MS` times one more than
+`CHRONICA_AI_MAX_RETRIES`, plus a minute), and never under 6 min (`staleHoldMs`). What it promises is that an answer an earlier attempt received is not asked for
 again, and that of two attempts that both believe they hold a turn, at most one writes the world.
 
 ## The page
@@ -128,6 +134,9 @@ reader. The unread badge counts the whole record (`unreadTotal`), not the page i
    read is failed with a sentence, never guessed at; bump the version when the shape changes.
 5. **Rolling back** to the pre-0043 code is safe for the world: jobs left queued or leased are bursts
    the old code reaps as silent after 90 s. The tables may stay.
+6. **`0044`** adds two nullable columns to `credit_holds`; nothing stored changes, and the code before it
+   reads and writes the table as it did (holds it writes have no owner and are expired by age). The
+   migration's header carries the three statements that take it out again; it is safe to re-run.
 
 ## Tests
 
@@ -136,6 +145,8 @@ reader. The unread badge counts the whole record (`unreadTotal`), not the page i
 | `apps/web/lib/turn-evidence.test.ts`, `durable-turn-status.test.ts`, `use-game-view.test.ts` | nothing | evidence and replay rules, the page's reading of a durable burst, paging merges |
 | `packages/db/src/durable-turns.db.test.ts` | `CHRONICA_TEST_DATABASE_URL` | leases, fencing, replay, rollback, continuation, settlement, paging past one page with ties |
 | `packages/db/src/durable-turns-upgrade.db.test.ts` | `CHRONICA_TEST_DATABASE_URL` | 0043 on a database with saves in it |
+| `packages/db/src/turn-owned-holds.db.test.ts` | `CHRONICA_TEST_DATABASE_URL` | a healthy turn's aged hold kept; a lost lease's, a superseded attempt's and a handed-back attempt's released; renewal, settlement and sweeps racing never release twice; holds with no turn by age |
+| `packages/db/src/turn-owned-holds-upgrade.db.test.ts` | `CHRONICA_TEST_DATABASE_URL` | 0044 over old holds, its rollback and re-apply |
 | `apps/web/lib/turn-worker.db.test.ts` | `CHRONICA_TEST_DATABASE_URL` | real turns with the mock model: a vanished worker, a commit the database interrupted, a shutdown mid-turn, the embedded worker's lifecycle |
 | `apps/web/e2e/chronicle-history.spec.ts` | a browser, a Postgres | the record turned back past 200 entries, an order sent twice |
 

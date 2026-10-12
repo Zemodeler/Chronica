@@ -1,4 +1,8 @@
+import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { createDatabase, type ChronicaDatabase } from "../database";
 import { gameWorlds } from "../schema/simulation";
@@ -27,7 +31,7 @@ export async function openTestDatabase(): Promise<{ db: ChronicaDatabase; close:
   if (TEST_DATABASE_URL === null) throw new Error("CHRONICA_TEST_DATABASE_URL is not set.");
   assertDisposable(TEST_DATABASE_URL);
   const opened = createDatabase(TEST_DATABASE_URL);
-  await migrate(opened.db, { migrationsFolder: fileURLToPath(new URL("../../migrations", import.meta.url)) });
+  await migrate(opened.db, { migrationsFolder: MIGRATIONS });
   return opened;
 }
 
@@ -63,4 +67,34 @@ export async function seedGame(db: ChronicaDatabase): Promise<{ gameId: string; 
   const [player] = await db.insert(players).values({ gameId: game!.id, userId: user!.id, characterId: "someone" }).returning({ id: players.id });
   await db.insert(gameWorlds).values({ gameId: game!.id, world: minimalWorld(), schemaVersion: 3, revision: 1, stateHash: "seed", instantSortKey: 0 });
   return { gameId: game!.id, userId: user!.id, playerId: player!.id };
+}
+
+/** Every migration, as shipped. */
+export const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
+
+/** The migrations folder as it stood before `tag`: the journal cut short there. */
+export function migrationsBefore(tag: string): string {
+  const folder = mkdtempSync(join(tmpdir(), "chronica-migrations-"));
+  cpSync(MIGRATIONS, folder, { recursive: true });
+  const journalPath = join(folder, "meta", "_journal.json");
+  const journal = JSON.parse(readFileSync(journalPath, "utf8")) as { entries: { tag: string }[] };
+  journal.entries = journal.entries.slice(0, journal.entries.findIndex((entry) => entry.tag === tag));
+  writeFileSync(journalPath, JSON.stringify(journal));
+  return folder;
+}
+
+/** A database of its own for one upgrade case, created on the test server and dropped after. */
+export async function withFreshDatabase(run: (url: string) => Promise<void>): Promise<void> {
+  const admin = createDatabase(TEST_DATABASE_URL!);
+  const name = `chronica_test_upgrade_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+  await admin.db.execute(sql.raw(`create database "${name}"`));
+  const url = new URL(TEST_DATABASE_URL!);
+  url.pathname = `/${name}`;
+  try {
+    assertDisposable(url.toString());
+    await run(url.toString());
+  } finally {
+    await admin.db.execute(sql.raw(`drop database if exists "${name}" with (force)`)).catch(() => undefined);
+    await admin.close();
+  }
 }

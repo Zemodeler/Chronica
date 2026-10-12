@@ -31,7 +31,7 @@ import {
 import { FactSchema, abortsTheTurn, formatWorldDate, type Fact, type Office, type OrderPartyRef, type ScenarioClock, type WorldState } from "@chronica/shared";
 import { DEFAULT_BUDGET, allowanceFromEnv, closeTheBooks, createRequestLedger, meteredPort, createWindowWriter, openThreadsEntry, orderOutcomeLines, runSimulationBurst, whatChangedEntry, withOrderOutcomes, type AnsweredDecision, type BurstProgress, type BurstResult, type ChronicleEntry, type SimModelPort } from "@chronica/sim";
 import { eq } from "drizzle-orm";
-import { ABANDONED_ERROR, BURST_DEADLINE_MS, EXHAUSTED_ERROR, HEARTBEAT_MS, STALE_HOLD_MS, STUCK_ERROR, UNCLAIMED_ERROR, UNCLAIMED_TURN_MS, livenessAt, noProgressAllowedMs } from "./burst-status";
+import { ABANDONED_ERROR, BURST_DEADLINE_MS, EXHAUSTED_ERROR, HEARTBEAT_MS, STUCK_ERROR, UNCLAIMED_ERROR, UNCLAIMED_TURN_MS, livenessAt, noProgressAllowedMs, staleHoldMs } from "./burst-status";
 import { unopenableSave } from "./save-errors";
 import { TURN_INPUT_VERSION, turnInput, type TurnInput } from "./turn-input";
 
@@ -124,7 +124,7 @@ async function guardTurn(db: ChronicaDatabase, input: TurnRequest): Promise<Guar
   const now = new Date();
   const [reaped, expired, settled] = await Promise.all([
     reapStaleBursts(db, gameId, livenessAt(now), ABANDONED_ERROR),
-    expireStaleHolds(db, new Date(now.getTime() - STALE_HOLD_MS)),
+    expireStaleHolds(db, new Date(now.getTime() - staleHoldMs())),
     settleTurnJobs(db, turnSettlement(gameId)),
   ]);
   const jobs = settled.exhausted + settled.stuck + settled.unclaimed;
@@ -335,6 +335,8 @@ export interface RunHooks {
 export interface RunControl {
   /** Which lease of a durable job this run is; absent in-process. Written on every passage handed to the page. */
   readonly attempt?: number | undefined;
+  /** The turn and attempt its model calls' coin holds belong to; absent in-process, where holds are judged by age. */
+  readonly holdOwner?: { readonly burstId: string; readonly attempt: number } | undefined;
   /** The timer's sign of life. False once the run is no longer this one's to finish. */
   readonly beat: () => Promise<boolean>;
   /** The run got somewhere. False once it is no longer this one's to finish. */
@@ -435,7 +437,7 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
 
   try {
     const adapter = createAiAdapter();
-    const timed = createTimedPort({ db, userId, gameId, adapter });
+    const timed = createTimedPort({ db, userId, gameId, adapter, turn: control.holdOwner });
     const asked = control.wrapPort === undefined ? timed.port : control.wrapPort(timed.port);
     // Every answered call is progress, whichever stage asked for it.
     const counted: SimModelPort = {
