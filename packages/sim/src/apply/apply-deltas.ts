@@ -868,7 +868,16 @@ function fillHirePay(world: WorldState, deltas: readonly WorldDelta[], context: 
 export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], given: ApplyContext): ApplyResult {
   const result = applyGroupedDeltas(world, deltas, given);
   // Every loss the answer's acts caused laid to its war while the world still shows whose and against whom (`archiveWarLosses`).
-  const archived = archiveWarLosses(result.world);
+  // Only the armies whose record the answer wrote to: a refused act, or an army the answer never touched (an old save's unlaid
+  // record), is left as it was; the tick lays the rest at its end, and `lossesToWar` reads an unlaid loss the same way meanwhile.
+  // Read by the record's entries, not by object identity: a batch works on a copy of the world, so every army comes back new.
+  if (result.world === world) return result;
+  const was = new Map(world.material.forces.map((force) => [force.id, force.history]));
+  const sameRecord = (before: Force["history"] | undefined, after: Force["history"]): boolean =>
+    before !== undefined && before.length === after.length && before.every((event, index) => event.id === after[index]!.id);
+  const changed = new Set(result.world.material.forces.filter((force) => !sameRecord(was.get(force.id), force.history)).map((force) => force.id));
+  if (changed.size === 0) return result;
+  const archived = archiveWarLosses(result.world, changed);
   return archived === result.world ? result : { ...result, world: archived };
 }
 
