@@ -1,4 +1,5 @@
-import { createDatabase, expireStaleHolds, reapStaleBursts } from "@chronica/db";
+import { createDatabase, expireStaleHolds, reapStaleBursts, settleTurnJobs } from "@chronica/db";
+import { turnSettlement } from "./burst-runner";
 import { ABANDONED_ERROR, BURST_STALE_MS, STALE_HOLD_MS, livenessAt } from "./burst-status";
 
 /**
@@ -10,15 +11,20 @@ import { ABANDONED_ERROR, BURST_STALE_MS, STALE_HOLD_MS, livenessAt } from "./bu
  * game as it starts, and once more a heartbeat's grace later -- a burst the
  * old process was running seconds before it died still looks alive at the
  * first sweep, and cannot at the second.
+ *
+ * A durable turn is not reaped here: its lease lapses and a worker takes it
+ * up again. What is settled is only what no worker will take: a turn out of
+ * attempts, or one no worker has claimed in `UNCLAIMED_TURN_MS`.
  */
-export async function sweepOrphanedBursts(databaseUrl: string, now = new Date()): Promise<{ bursts: number; holds: number }> {
+export async function sweepOrphanedBursts(databaseUrl: string, now = new Date()): Promise<{ bursts: number; holds: number; turns: number }> {
   const { db, close } = createDatabase(databaseUrl);
   try {
-    const [bursts, holds] = await Promise.all([
+    const [bursts, holds, settled] = await Promise.all([
       reapStaleBursts(db, null, livenessAt(now), ABANDONED_ERROR),
       expireStaleHolds(db, new Date(now.getTime() - STALE_HOLD_MS)),
+      settleTurnJobs(db, turnSettlement(null)),
     ]);
-    return { bursts, holds };
+    return { bursts, holds, turns: settled.exhausted + settled.stuck + settled.unclaimed };
   } finally {
     await close();
   }
@@ -28,7 +34,7 @@ export async function sweepOrphanedBursts(databaseUrl: string, now = new Date())
 export function scheduleOrphanSweeps(databaseUrl: string): void {
   const sweep = (): void => {
     void sweepOrphanedBursts(databaseUrl).then(
-      ({ bursts, holds }) => { if (bursts > 0 || holds > 0) console.warn(`[startup] cleared ${bursts} orphaned burst(s) and ${holds} stale coin hold(s)`); },
+      ({ bursts, holds, turns }) => { if (bursts > 0 || holds > 0 || turns > 0) console.warn(`[startup] cleared ${bursts} orphaned burst(s), ${turns} durable turn(s) no worker can finish and ${holds} stale coin hold(s)`); },
       (error: unknown) => { console.warn("[startup] the orphaned-burst sweep failed:", error); },
     );
   };

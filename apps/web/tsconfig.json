@@ -5,7 +5,15 @@
     "incremental": true,
     "jsx": "preserve",
     "noEmit": true,
-    "plugins": [{ "name": "next" }]
+    "plugins": [{ "name": "next" }],
+    "paths": {
+      "@chronica/db": ["../../packages/db/src/index.ts"],
+      "@chronica/db/schema": ["../../packages/db/src/schema/index.ts"],
+      "@chronica/shared": ["../../packages/shared/src/index.ts"],
+      "@chronica/sim": ["../../packages/sim/src/index.ts"],
+      "@chronica/ai": ["../../packages/ai/src/index.ts"],
+      "@chronica/billing": ["../../packages/billing/src/index.ts"]
+    }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
   "exclude": ["node_modules"]

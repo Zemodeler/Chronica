@@ -1,14 +1,16 @@
 # The guardrails the repository claims, run on every push.
 #
-# Nothing here reaches a model provider or a database: no secrets are read,
-# the AI adapter is pinned to the deterministic mock, and every test in the
-# repository runs against scripted ports and in-memory worlds. The e2e suite
-# (Playwright, needs a database and a browser) is not run here.
+# Nothing here reaches a model provider: no secrets are read and the AI
+# adapter is pinned to the deterministic mock. The gates and the unit tests
+# run against scripted ports and in-memory worlds; the database tier runs the
+# Postgres-backed tests against a service container of its own; the browser
+# tier (Playwright, its own Postgres too) is started by hand.
 name: CI
 
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -55,3 +57,86 @@ jobs:
       - run: npm install -g npm@11.16.0
       - run: npm ci
       - run: npm run test -w ${{ matrix.workspace }}
+
+  # Durable turns and the Chronicle's paging against a real Postgres: every
+  # migration applied to an empty database, then leases, reclaim, replay,
+  # fenced commits, rollback, upgrades of existing saves and history past one
+  # page. The model is the deterministic mock; no provider key exists here.
+  # Only CHRONICA_TEST_DATABASE_URL is read, and it must name a test database.
+  database:
+    name: Database tier (Postgres, mock model)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: chronica
+          POSTGRES_PASSWORD: chronica
+          POSTGRES_DB: chronica_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U chronica"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      CHRONICA_TEST_DATABASE_URL: postgres://chronica:chronica@localhost:5432/chronica_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install -g npm@11.16.0
+      - run: npm ci
+      - run: npx vitest run src/durable-turns.db.test.ts src/durable-turns-upgrade.db.test.ts
+        working-directory: packages/db
+      - run: npx vitest run lib/turn-worker.db.test.ts
+        working-directory: apps/web
+
+  # The browser against a mock-mode dev server and its own Postgres: the
+  # Chronicle turned back past its first page, an order sent twice, and the
+  # rest of the suite. Started by hand (Actions -> CI -> Run workflow) until it
+  # has run green here a few times; it compiles every route on first hit and
+  # takes several minutes.
+  browser:
+    name: Browser tier (Playwright, mock model)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: chronica
+          POSTGRES_PASSWORD: chronica
+          POSTGRES_DB: chronica_e2e_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U chronica"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://chronica:chronica@localhost:5432/chronica_e2e_test
+      BETTER_AUTH_URL: http://localhost:3100
+      # Not a secret: a throwaway server that lives for this job.
+      BETTER_AUTH_SECRET: ci-browser-tier-only-not-a-real-secret-0123456789
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install -g npm@11.16.0
+      - run: npm ci
+      - run: npx drizzle-kit migrate
+        working-directory: packages/db
+      - run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+      - run: npm run test:e2e -w @chronica/web
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: apps/web/test-results
+          retention-days: 7

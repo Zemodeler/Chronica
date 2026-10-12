@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, getTableColumns, gt, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import {
   ScenarioDefinitionSchema,
   WorldDocumentUnreadableError,
@@ -24,8 +24,10 @@ import {
   playerDecisions,
   scheduledEvents,
   simulationBursts,
+  turnJobs,
   worldFacts,
 } from "../schema/simulation";
+import { chronicleOrderKey, parseChronicleCursor } from "./chronicle-cursor";
 
 /**
  * Reading and writing the live world.
@@ -430,16 +432,39 @@ export interface BurstCommit {
  * saved, are both unrecoverable by inspection afterwards.
  */
 export async function commitBurst(db: ChronicaDatabase, commit: BurstCommit): Promise<number> {
+  assertCommitLoads(commit);
+  return db.transaction(async (tx) => {
+    // Serializes against the other writer of this world (the chat path), so a
+    // slow burst and a fast conversation cannot interleave mid-commit.
+    await lockWorld(tx, commit.gameId);
+    return writeBurstCommit(tx, commit);
+  });
+}
+
+/** A transaction of `ChronicaDatabase`, for the writes that must share one. */
+export type ChronicaTransaction = Parameters<Parameters<ChronicaDatabase["transaction"]>[0]>[0];
+
+/** The world a commit would save, refused before any transaction if the next load would refuse it. */
+export function assertCommitLoads(commit: BurstCommit): void {
   const loadable = WorldStateSchema.safeParse(commit.world);
   if (!loadable.success) {
     const [first] = loadable.error.issues;
     throw new WorldWouldNotLoadError(commit.gameId, first === undefined ? "unknown" : `${first.path.join(".")}: ${first.message}`);
   }
-  return db.transaction(async (tx) => {
-    // Serializes against the other writer of this world (the chat path), so a
-    // slow burst and a fast conversation cannot interleave mid-commit.
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${commit.gameId}))`);
+}
 
+/** The advisory lock every writer of one world's revision takes, for the rest of the transaction. */
+export async function lockWorld(tx: ChronicaTransaction, gameId: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${gameId}))`);
+}
+
+/**
+ * The body of `commitBurst`, inside a transaction that already holds the
+ * world's lock: a durable turn's commit (`commitTurn`) writes the same rows
+ * under the same checks, and its own fence, in one transaction.
+ */
+export async function writeBurstCommit(tx: ChronicaTransaction, commit: BurstCommit): Promise<number> {
+  {
     const [current] = await tx.select({ revision: gameWorlds.revision }).from(gameWorlds).where(eq(gameWorlds.gameId, commit.gameId)).limit(1);
     if (current === undefined) throw new WorldRevisionConflictError(commit.gameId, commit.expectedRevision, 0);
     if (current.revision !== commit.expectedRevision) {
@@ -534,7 +559,7 @@ export async function commitBurst(db: ChronicaDatabase, commit: BurstCommit): Pr
     }
 
     return nextRevision;
-  });
+  }
 }
 
 /**
@@ -645,8 +670,15 @@ export async function findRunningBurst(
     .where(and(
       eq(simulationBursts.gameId, gameId),
       eq(simulationBursts.status, "running"),
-      gt(sql`coalesce(${simulationBursts.heartbeatAt}, ${simulationBursts.startedAt})`, liveness.aliveAfter.toISOString()),
-      gt(sql`coalesce(${simulationBursts.progressAt}, ${simulationBursts.startedAt})`, liveness.progressAfter.toISOString()),
+      or(
+        and(
+          gt(sql`coalesce(${simulationBursts.heartbeatAt}, ${simulationBursts.startedAt})`, liveness.aliveAfter.toISOString()),
+          gt(sql`coalesce(${simulationBursts.progressAt}, ${simulationBursts.startedAt})`, liveness.progressAfter.toISOString()),
+        ),
+        // A durable turn is running while its job is queued or leased, beating
+        // or not: its liveness is the lease's, and `settleTurnJobs` judges it.
+        hasActiveTurnJob,
+      ),
     ))
     .orderBy(desc(simulationBursts.startedAt))
     .limit(1);
@@ -658,6 +690,18 @@ export async function findRunningBurst(
  * returns how many: of one game, or with `gameId` null of every game -- the
  * sweep a server makes when it starts, since a burst whose process died with
  * the last server is otherwise only found when somebody opens that game.
+ */
+/**
+ * The running burst has a durable job still queued or leased (0043). Spelled
+ * with the table qualified, so it correlates the same way in a select and in
+ * an update of `simulation_bursts`.
+ */
+const hasActiveTurnJob = sql`exists (select 1 from ${turnJobs} where ${turnJobs.burstId} = "simulation_bursts"."id" and ${turnJobs.status} in ('queued', 'leased'))`;
+
+/**
+ * Bursts with an active durable job are not reaped here: a silent worker's
+ * lease lapses and another takes the job up (`claimTurnJob`), and a job out of
+ * attempts or stuck is failed by `settleTurnJobs`, which also fails its burst.
  */
 export async function reapStaleBursts(db: ChronicaDatabase, gameId: string | null, liveness: BurstLiveness, error: string): Promise<number> {
   const reaped = await db
@@ -672,6 +716,7 @@ export async function reapStaleBursts(db: ChronicaDatabase, gameId: string | nul
         lte(sql`coalesce(${simulationBursts.heartbeatAt}, ${simulationBursts.startedAt})`, liveness.aliveAfter.toISOString()),
         lte(sql`coalesce(${simulationBursts.progressAt}, ${simulationBursts.startedAt})`, liveness.progressAfter.toISOString()),
       ),
+      sql`not ${hasActiveTurnJob}`,
     ))
     .returning({ id: simulationBursts.id });
   return reaped.length;
@@ -688,8 +733,13 @@ export async function getBurst(db: ChronicaDatabase, gameId: string, burstId: st
       heartbeatAt: simulationBursts.heartbeatAt,
       progressAt: simulationBursts.progressAt,
       endedAt: simulationBursts.endedAt,
+      // The durable job carrying it, when there is one (0043): null for a burst run in-process.
+      jobStatus: turnJobs.status,
+      attempt: turnJobs.attempts,
+      maxAttempts: turnJobs.maxAttempts,
     })
     .from(simulationBursts)
+    .leftJoin(turnJobs, eq(turnJobs.burstId, simulationBursts.id))
     .where(and(eq(simulationBursts.id, burstId), eq(simulationBursts.gameId, gameId)))
     .limit(1);
   return row;
@@ -803,16 +853,70 @@ export async function listPendingEvents(db: ChronicaDatabase, gameId: string, li
  * was a year stale.
  */
 export async function listChronicle(db: ChronicaDatabase, gameId: string, limit = 200) {
+  return (await listChroniclePage(db, gameId, { limit })).entries;
+}
+
+/**
+ * `created_at` to the microsecond, as text. A JS Date keeps milliseconds, so a
+ * cursor made from one would fall between two rows written in the same
+ * millisecond; this is exact on every Postgres (extract returns a double before
+ * 14, and both parts are whole numbers well inside its exact range).
+ */
+const createdMicros = sql<string>`((extract(epoch from date_trunc('second', ${chronicleCheckpoints.createdAt})))::bigint * 1000000 + (extract(microseconds from ${chronicleCheckpoints.createdAt}))::bigint % 1000000)::text`;
+
+/**
+ * One page of the record, oldest first, and where the page before it starts.
+ *
+ * The record is read newest first by (day entered, when written, place in its
+ * report, id): two passages of one report share a timestamp and keep their
+ * ordinal, and the id breaks the last tie so no row sits on both sides of a
+ * page boundary. `before` is the `orderKey` of the oldest entry already
+ * shown; `older` is null once the page reaches the first entry of the reign.
+ */
+export async function listChroniclePage(
+  db: ChronicaDatabase,
+  gameId: string,
+  options: { readonly before?: string | null | undefined; readonly limit?: number | undefined } = {},
+) {
+  const limit = Math.max(1, Math.min(500, Math.floor(options.limit ?? 200)));
+  const given = options.before ?? null;
+  const before = given === null ? null : parseChronicleCursor(given);
+  if (given !== null && before === null) throw new ChronicleCursorError(given);
   const newestFirst = await db
-    .select()
+    .select({ ...getTableColumns(chronicleCheckpoints), createdMicros })
     .from(chronicleCheckpoints)
-    .where(eq(chronicleCheckpoints.gameId, gameId))
+    .where(and(
+      eq(chronicleCheckpoints.gameId, gameId),
+      ...(before === null ? [] : [sql`(${chronicleCheckpoints.toInstantSortKey}, ${chronicleCheckpoints.createdAt}, ${chronicleCheckpoints.ordinal}, ${chronicleCheckpoints.id}) < (${before.toInstantSortKey}::bigint, timestamptz 'epoch' + ${before.createdMicros}::bigint * interval '1 microsecond', ${before.ordinal}::integer, ${before.id}::uuid)`]),
+    ))
     // Two entries of one day by when they were written, then by their place in
     // their report: a letter written today no longer sorts before the passage
     // of yesterday's order that happened to be dated later in the day.
-    .orderBy(desc(chronicleCheckpoints.toInstantSortKey), desc(chronicleCheckpoints.createdAt), desc(chronicleCheckpoints.ordinal))
-    .limit(limit);
-  return newestFirst.reverse();
+    .orderBy(desc(chronicleCheckpoints.toInstantSortKey), desc(chronicleCheckpoints.createdAt), desc(chronicleCheckpoints.ordinal), desc(chronicleCheckpoints.id))
+    .limit(limit + 1);
+  const more = newestFirst.length > limit;
+  const entries = newestFirst.slice(0, limit).reverse().map((row) => ({
+    ...row,
+    orderKey: chronicleOrderKey({ toInstantSortKey: row.toInstantSortKey, createdMicros: row.createdMicros, ordinal: row.ordinal, id: row.id }),
+  }));
+  return { entries, older: more && entries.length > 0 ? entries[0]!.orderKey : null };
+}
+
+/** A `before` that is not a cursor this build wrote. */
+export class ChronicleCursorError extends Error {
+  constructor(readonly cursor: string) {
+    super("That is not a place in the record.");
+    this.name = "ChronicleCursorError";
+  }
+}
+
+/** Entries not yet read, across the whole record rather than the page in hand. */
+export async function countUnreadChronicle(db: ChronicaDatabase, gameId: string): Promise<number> {
+  const [row] = await db
+    .select({ unread: count() })
+    .from(chronicleCheckpoints)
+    .where(and(eq(chronicleCheckpoints.gameId, gameId), isNull(chronicleCheckpoints.readAt)));
+  return Number(row?.unread ?? 0);
 }
 
 /** The threads of history this save follows, by storyline id. */

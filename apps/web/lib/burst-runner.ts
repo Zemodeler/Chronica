@@ -1,10 +1,12 @@
 import { InsufficientCoinsError, createAiAdapter, createTimedPort } from "@chronica/ai";
 import {
   BurstNoLongerRunningError,
+  TurnLeaseLostError,
   WorldRevisionConflictError,
   WorldWouldNotLoadError,
   appendBurstProgress,
   commitBurst,
+  enqueueTurn,
   expireStaleHolds,
   factRowOf,
   failBurst,
@@ -19,16 +21,19 @@ import {
   listUntoldFacts,
   reapStaleBursts,
   schema,
+  settleTurnJobs,
   startBurst,
   subjectsOfRecentReports,
   titlesOfRecentReports,
+  type BurstCommit,
   type ChronicaDatabase,
 } from "@chronica/db";
 import { FactSchema, abortsTheTurn, formatWorldDate, type Fact, type Office, type OrderPartyRef, type ScenarioClock, type WorldState } from "@chronica/shared";
 import { DEFAULT_BUDGET, allowanceFromEnv, closeTheBooks, createRequestLedger, meteredPort, createWindowWriter, openThreadsEntry, orderOutcomeLines, runSimulationBurst, whatChangedEntry, withOrderOutcomes, type AnsweredDecision, type BurstProgress, type BurstResult, type ChronicleEntry, type SimModelPort } from "@chronica/sim";
 import { eq } from "drizzle-orm";
-import { ABANDONED_ERROR, BURST_DEADLINE_MS, HEARTBEAT_MS, STALE_HOLD_MS, livenessAt } from "./burst-status";
+import { ABANDONED_ERROR, BURST_DEADLINE_MS, EXHAUSTED_ERROR, HEARTBEAT_MS, STALE_HOLD_MS, STUCK_ERROR, UNCLAIMED_ERROR, UNCLAIMED_TURN_MS, livenessAt, noProgressAllowedMs } from "./burst-status";
 import { unopenableSave } from "./save-errors";
+import { TURN_INPUT_VERSION, turnInput, type TurnInput } from "./turn-input";
 
 /**
  * One turn, from the order to the commit, with no request around it.
@@ -80,54 +85,53 @@ export type PreparedBurst =
   | { readonly status: "existing"; readonly burstId: string }
   | { readonly status: "error"; readonly message: string };
 
-/** Everything the request must settle before the burst is handed off. */
-export async function prepareBurst(
-  db: ChronicaDatabase,
-  input: {
-    readonly gameId: string;
-    readonly userId: string;
-    readonly playerId: string;
-    readonly characterId: string;
-    readonly orderText: string | null;
-    readonly spanDays?: number | undefined;
-    /** A further stretch of a cut-off turn. */
-    readonly continuation?: boolean | undefined;
-    readonly answeredDecision?: AnsweredDecision | undefined;
-    readonly resolvesDecision?: { readonly id: string; readonly optionId: string } | undefined;
-    readonly askedAs?: string | undefined;
-    /** The client's own id for this order: sent twice, it finds the first burst rather than paying for a second. */
-    readonly idempotencyKey?: string | undefined;
-  },
-): Promise<PreparedBurst> {
-  const { gameId, userId, playerId, characterId } = input;
+/** What the player asked for, and on whose behalf: everything a burst is prepared from. */
+export interface TurnRequest {
+  readonly gameId: string;
+  readonly userId: string;
+  readonly playerId: string;
+  readonly characterId: string;
+  readonly orderText: string | null;
+  readonly spanDays?: number | undefined;
+  /** A further stretch of a cut-off turn. */
+  readonly continuation?: boolean | undefined;
+  readonly answeredDecision?: AnsweredDecision | undefined;
+  readonly resolvesDecision?: { readonly id: string; readonly optionId: string } | undefined;
+  readonly askedAs?: string | undefined;
+  /** The client's own id for this order: sent twice, it finds the first burst rather than paying for a second. */
+  readonly idempotencyKey?: string | undefined;
+}
+
+type Guarded =
+  | { readonly status: "clear"; readonly view: WorldView }
+  | { readonly status: "existing"; readonly burstId: string }
+  | { readonly status: "error"; readonly message: string };
+
+const ALREADY_MOVING = { status: "error", message: "The world is already moving on an earlier order. Wait for it to settle." } as const;
+
+/** Everything the request must settle before a burst may be opened: a resend, what a dead process left, the world, a waiting decision, a burst already moving. */
+async function guardTurn(db: ChronicaDatabase, input: TurnRequest): Promise<Guarded> {
+  const { gameId } = input;
   const key = input.idempotencyKey;
   if (key !== undefined) {
     const sent = await findBurstByIdempotencyKey(db, gameId, key);
     if (sent !== undefined) return { status: "existing", burstId: sent.id };
   }
   // What an earlier process left behind: a burst that stopped beating or
-  // stopped getting anywhere, and the coins a call it never finished still
-  // holds. Cleared before the guards are read, so a dead burst never refuses
-  // a live order.
+  // stopped getting anywhere, a durable job out of attempts or never taken
+  // up, and the coins a call it never finished still holds. Cleared before
+  // the guards are read, so a dead burst never refuses a live order.
   const now = new Date();
-  const [reaped, expired] = await Promise.all([
+  const [reaped, expired, settled] = await Promise.all([
     reapStaleBursts(db, gameId, livenessAt(now), ABANDONED_ERROR),
     expireStaleHolds(db, new Date(now.getTime() - STALE_HOLD_MS)),
+    settleTurnJobs(db, turnSettlement(gameId)),
   ]);
-  if (reaped > 0 || expired > 0) console.warn(`[game ${gameId}] cleared ${reaped} abandoned burst(s) and ${expired} stale coin hold(s)`);
-  // Everything the turn reads, in one round of the database rather than seven.
+  const jobs = settled.exhausted + settled.stuck + settled.unclaimed;
+  if (reaped > 0 || expired > 0 || jobs > 0) console.warn(`[game ${gameId}] cleared ${reaped} abandoned burst(s), ${jobs} durable turn(s) and ${expired} stale coin hold(s)`);
   let read;
   try {
-    read = await Promise.all([
-      getWorldView(db, gameId),
-      getOpenDecision(db, gameId),
-      findRunningBurst(db, gameId, livenessAt(now)),
-      listRecentFacts(db, gameId),
-      listPendingEvents(db, gameId),
-      subjectsOfRecentReports(db, gameId),
-      titlesOfRecentReports(db, gameId),
-      listUntoldFacts(db, gameId),
-    ]);
+    read = await Promise.all([getWorldView(db, gameId), getOpenDecision(db, gameId), findRunningBurst(db, gameId, livenessAt(now))]);
   } catch (error) {
     // A save that will not open is refused here, with a sentence that says
     // so, rather than escaping the request as a 500.
@@ -136,7 +140,7 @@ export async function prepareBurst(
     console.error(`[game ${gameId}] ${error instanceof Error ? error.message : String(error)}`);
     return { status: "error", message: unopenable };
   }
-  const [view, open, running, factRows, queueRows, recentSubjects, recentTitles, untoldRows] = read;
+  const [view, open, running] = read;
   if (view === undefined) return { status: "error", message: "This world has no state to act on yet." };
   // An answer carries its own decision, and is the one order allowed to run
   // while one is open -- it is what closes it.
@@ -144,51 +148,142 @@ export async function prepareBurst(
   // One burst at a time, and refused at the door rather than at the commit.
   // The read turns most second orders away; the insert turns away the one
   // sent in the same breath, which read "nothing running" too.
-  const alreadyMoving = { status: "error", message: "The world is already moving on an earlier order. Wait for it to settle." } as const;
-  if (running !== undefined) return alreadyMoving;
+  if (running !== undefined) {
+    // The same order sent twice in one breath: both passed the key check
+    // above before either was written, and the running burst is the first.
+    const sent = key === undefined ? undefined : await findBurstByIdempotencyKey(db, gameId, key);
+    return sent === undefined ? ALREADY_MOVING : { status: "existing", burstId: sent.id };
+  }
+  return { status: "clear", view };
+}
 
+/** A burst's opening was refused by a unique index: the same order sent in the same breath (find it), or another burst running. */
+async function refusedOpening(db: ChronicaDatabase, gameId: string, key: string | undefined): Promise<Exclude<PreparedBurst, { status: "ready" }>> {
+  const sent = key === undefined ? undefined : await findBurstByIdempotencyKey(db, gameId, key);
+  return sent === undefined ? ALREADY_MOVING : { status: "existing", burstId: sent.id };
+}
+
+/**
+ * Everything the request must settle before the burst is handed off, and the
+ * burst opened and loaded to run in this process (the terminal driver's path,
+ * `scripts/play-turn.mts`). The web queues a durable job instead (`enqueueBurst`).
+ */
+export async function prepareBurst(db: ChronicaDatabase, input: TurnRequest): Promise<PreparedBurst> {
+  const guarded = await guardTurn(db, input);
+  if (guarded.status !== "clear") return guarded;
+  const burstId = await startBurst(db, { gameId: input.gameId, playerUserId: input.userId, orderText: input.orderText ?? "(time passes)", idempotencyKey: input.idempotencyKey ?? null });
+  if (burstId === null) return refusedOpening(db, input.gameId, input.idempotencyKey);
+  return { status: "ready", job: await loadBurstJob(db, { ...input, burstId }, guarded.view) };
+}
+
+export type EnqueuedBurst =
+  | { readonly status: "queued"; readonly burstId: string }
+  | { readonly status: "existing"; readonly burstId: string }
+  | { readonly status: "error"; readonly message: string };
+
+/**
+ * Settles the guards and queues the order as a durable job: the burst row and
+ * the job, with the order as given (`TurnInput`), in one transaction. Nothing
+ * runs here; a worker leases the job (`turn-worker.ts`).
+ */
+export async function enqueueBurst(db: ChronicaDatabase, input: TurnRequest & { readonly leg?: number | undefined }): Promise<EnqueuedBurst> {
+  const guarded = await guardTurn(db, input);
+  if (guarded.status !== "clear") return guarded;
+  const burstId = await enqueueTurn(db, {
+    gameId: input.gameId,
+    playerUserId: input.userId,
+    orderText: input.orderText ?? "(time passes)",
+    idempotencyKey: input.idempotencyKey ?? null,
+    input: turnInputOf(input, input.leg ?? 1),
+    inputVersion: TURN_INPUT_VERSION,
+    baseRevision: guarded.view.revision,
+    maxAttempts: turnMaxAttempts(process.env),
+  });
+  if (burstId === null) return refusedOpening(db, input.gameId, input.idempotencyKey);
+  return { status: "queued", burstId };
+}
+
+/** The stored form of a request (`turn_jobs.input`). */
+export function turnInputOf(input: TurnRequest, leg: number): TurnInput {
+  return turnInput({
+    userId: input.userId,
+    playerId: input.playerId,
+    characterId: input.characterId,
+    orderText: input.orderText,
+    spanDays: input.spanDays,
+    continuation: input.continuation === true,
+    leg,
+    answeredDecision: input.answeredDecision,
+    resolvesDecision: input.resolvesDecision,
+    askedAs: input.askedAs,
+  });
+}
+
+/** How many leases a durable turn may take before it is failed: `CHRONICA_TURN_MAX_ATTEMPTS`, 3 by default, 1 to 10. */
+export function turnMaxAttempts(env: Readonly<Record<string, string | undefined>> = process.env): number {
+  const raw = Number(env.CHRONICA_TURN_MAX_ATTEMPTS?.trim());
+  return Number.isInteger(raw) && raw >= 1 && raw <= 10 ? raw : 3;
+}
+
+/** The cutoffs and messages `settleTurnJobs` judges durable turns by. */
+export function turnSettlement(gameId: string | null) {
+  return {
+    gameId,
+    noProgressMs: noProgressAllowedMs(),
+    unclaimedMs: UNCLAIMED_TURN_MS,
+    messages: { exhausted: EXHAUSTED_ERROR, stuck: STUCK_ERROR, unclaimed: UNCLAIMED_ERROR },
+  };
+}
+
+/**
+ * Reads everything one attempt of a burst works from: the world as it stands
+ * now, the recent record, the queue. Throws what `getWorldView` throws for a
+ * save that will not open.
+ */
+export async function loadBurstJob(db: ChronicaDatabase, input: TurnRequest & { readonly burstId: string }, given?: WorldView): Promise<BurstJob> {
+  const { gameId, burstId, userId, playerId, characterId } = input;
+  // Everything the turn reads, in one round of the database rather than six.
+  const [view, factRows, queueRows, recentSubjects, recentTitles, untoldRows] = await Promise.all([
+    given === undefined ? getWorldView(db, gameId) : Promise.resolve(given),
+    listRecentFacts(db, gameId),
+    listPendingEvents(db, gameId),
+    subjectsOfRecentReports(db, gameId),
+    titlesOfRecentReports(db, gameId),
+    listUntoldFacts(db, gameId),
+  ]);
+  if (view === undefined) throw new Error("This world has no state to act on yet.");
   const actorRef: OrderPartyRef = { kind: "character", id: characterId };
   const actorPolityId = view.world.characters.find((character) => character.id === characterId)?.polityId ?? null;
-  const burstId = await startBurst(db, { gameId, playerUserId: userId, orderText: input.orderText ?? "(time passes)", idempotencyKey: key ?? null });
-  if (burstId === null) {
-    // Refused by one of the two unique indexes: another burst running, or
-    // this very order sent twice in the same breath and the other send won.
-    const sent = key === undefined ? undefined : await findBurstByIdempotencyKey(db, gameId, key);
-    return sent === undefined ? alreadyMoving : { status: "existing", burstId: sent.id };
-  }
   return {
-    status: "ready",
-    job: {
-      gameId,
-      burstId,
-      userId,
-      playerId,
-      actorRef,
-      actorPolityId,
-      view,
-      // Offices are scenario data, not world state, and authority derivation needs them.
-      offices: view.scenarioGovernment.offices,
-      knownFacts: factRows.flatMap((row) => {
+    gameId,
+    burstId,
+    userId,
+    playerId,
+    actorRef,
+    actorPolityId,
+    view,
+    // Offices are scenario data, not world state, and authority derivation needs them.
+    offices: view.scenarioGovernment.offices,
+    knownFacts: factRows.flatMap((row) => {
+      const parsed = FactSchema.safeParse(row.fact);
+      return parsed.success ? [parsed.data] : [];
+    }),
+    queue: queueRows.map((row) => ({ id: row.id, dueInstantSortKey: row.dueInstantSortKey, kind: row.kind, summary: row.summary, payload: row.payload })),
+    recentSubjects,
+    recentTitles,
+    untold: {
+      facts: untoldRows.flatMap((row) => {
         const parsed = FactSchema.safeParse(row.fact);
         return parsed.success ? [parsed.data] : [];
       }),
-      queue: queueRows.map((row) => ({ id: row.id, dueInstantSortKey: row.dueInstantSortKey, kind: row.kind, summary: row.summary, payload: row.payload })),
-      recentSubjects,
-      recentTitles,
-      untold: {
-        facts: untoldRows.flatMap((row) => {
-          const parsed = FactSchema.safeParse(row.fact);
-          return parsed.success ? [parsed.data] : [];
-        }),
-        significanceByFactId: new Map(untoldRows.map((row) => [row.id, row.significance])),
-      },
-      orderText: input.orderText,
-      spanDays: input.spanDays,
-      continuation: input.continuation === true,
-      answeredDecision: input.answeredDecision,
-      resolvesDecision: input.resolvesDecision,
-      askedAs: input.askedAs,
+      significanceByFactId: new Map(untoldRows.map((row) => [row.id, row.significance])),
     },
+    orderText: input.orderText,
+    spanDays: input.spanDays,
+    continuation: input.continuation === true,
+    answeredDecision: input.answeredDecision,
+    resolvesDecision: input.resolvesDecision,
+    askedAs: input.askedAs,
   };
 }
 
@@ -225,6 +320,47 @@ export interface RunHooks {
   readonly afterCommit?: ((db: ChronicaDatabase, job: BurstJob, world: WorldState, stopReason: string) => Promise<void>) | undefined;
   /** Also shown on the terminal, when there is one. */
   readonly onProgress?: ((line: ProgressLine) => void) | undefined;
+  /** How the run keeps its row: in this process by default, or under a durable job's lease (`turn-worker.ts`). */
+  readonly control?: RunControl | undefined;
+}
+
+/**
+ * The writes a run makes about itself, and the one that ends it.
+ *
+ * In-process (`inProcessControl`), these are the burst row's own: beat it,
+ * fail it, commit it. Under a durable job, each carries the attempt's lease,
+ * a failure that another attempt might not share is queued again rather than
+ * failed, and the commit is the job's as well as the burst's.
+ */
+export interface RunControl {
+  /** Which lease of a durable job this run is; absent in-process. Written on every passage handed to the page. */
+  readonly attempt?: number | undefined;
+  /** The timer's sign of life. False once the run is no longer this one's to finish. */
+  readonly beat: () => Promise<boolean>;
+  /** The run got somewhere. False once it is no longer this one's to finish. */
+  readonly progressed: () => Promise<boolean>;
+  /** Wraps the metered port, below the progress counting: a durable run records and replays its calls here. */
+  readonly wrapPort?: ((port: SimModelPort) => SimModelPort) | undefined;
+  /** The run ended without a commit; `message` is the player's, `cause` what went wrong (null when nothing threw). */
+  readonly fail: (message: string, cause: unknown) => Promise<void>;
+  /** Commits the burst. "lost" when the run turned out not to be this one's to commit: nothing was written and nothing more should be. */
+  readonly commit: (commit: BurstCommit, outcome: { readonly stopReason: string; readonly continuationDays: number | null }) => Promise<"committed" | "lost">;
+}
+
+/** A burst run by this process alone, as every burst was before durable turns. */
+export function inProcessControl(db: ChronicaDatabase, job: BurstJob): RunControl {
+  return {
+    beat: () => heartbeatBurst(db, job.burstId),
+    progressed: () => markBurstProgress(db, job.burstId),
+    fail: async (message) => {
+      await failBurst(db, job.burstId, message).catch((error: unknown) => { console.error(`[burst ${job.burstId}] could not record its own failure:`, error); });
+      if (job.askedAs !== undefined) await restoreAskingCharacter(db, job.playerId, job.askedAs);
+    },
+    commit: async (commit) => {
+      await commitBurst(db, commit);
+      return "committed";
+    },
+  };
 }
 
 /**
@@ -242,8 +378,8 @@ export interface RunHooks {
  * `burstDeadlineMs`: between hops, keeping what it has done.
  */
 /** The most stretches a cut-off turn goes on in, and the fewest days worth starting one for. */
-const MAX_LEGS = 8;
-const MIN_LEG_DAYS = 3;
+export const MAX_LEGS = 8;
+export const MIN_LEG_DAYS = 3;
 
 /**
  * A turn cut off by its time limit goes on where it stopped, as a further
@@ -274,15 +410,16 @@ export async function runBurstWithContinuations(db: ChronicaDatabase, job: Burst
 
 export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hooks: RunHooks = {}): Promise<void> {
   const { gameId, burstId, userId, actorRef, actorPolityId, view, offices } = job;
+  const control = hooks.control ?? inProcessControl(db, job);
   // Set once the row says the burst is no longer running -- reaped by a page
-  // that judged it dead -- so the work stops rather than running on to a
-  // commit that will be refused.
+  // that judged it dead, or its lease taken by another worker -- so the work
+  // stops rather than running on to a commit that will be refused.
   let reaped = false;
   const beat = (alive: Promise<boolean>, what: string): void => {
     void alive.then((running) => { if (!running) reaped = true; }, (error: unknown) => { console.warn(`[burst ${burstId}] could not record ${what}:`, error); });
   };
-  const heartbeat = setInterval(() => beat(heartbeatBurst(db, burstId), "a heartbeat"), HEARTBEAT_MS);
-  const progressed = (): void => beat(markBurstProgress(db, burstId), "progress");
+  const heartbeat = setInterval(() => beat(control.beat(), "a heartbeat"), HEARTBEAT_MS);
+  const progressed = (): void => beat(control.progressed(), "progress");
   let progressWrites = Promise.resolve();
   const say = (line: ProgressLine): void => {
     hooks.onProgress?.(line);
@@ -292,18 +429,22 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
     progressWrites = progressWrites.then(() => appendBurstProgress(db, { gameId, burstId, kind: "progress", payload: line })).then(() => {})
       .catch((error: unknown) => { console.warn(`[burst ${burstId}] a progress line was not recorded:`, error); });
   };
-  const fail = async (message: string): Promise<void> => {
-    await failBurst(db, burstId, message).catch((error: unknown) => { console.error(`[burst ${burstId}] could not record its own failure:`, error); });
-    if (job.askedAs !== undefined) await restoreAskingCharacter(db, job.playerId, job.askedAs);
+  const fail = async (message: string, cause: unknown = null): Promise<void> => {
+    await control.fail(message, cause).catch((error: unknown) => { console.error(`[burst ${burstId}] could not record its own failure:`, error); });
   };
 
   try {
     const adapter = createAiAdapter();
     const timed = createTimedPort({ db, userId, gameId, adapter });
+    const asked = control.wrapPort === undefined ? timed.port : control.wrapPort(timed.port);
     // Every answered call is progress, whichever stage asked for it.
     const counted: SimModelPort = {
       complete: async (operation, system, user) => {
-        const answer = await timed.port.complete(operation, system, user);
+        // A run that is no longer this one's to finish -- its row given up,
+        // or its lease taken by another attempt -- asks the provider nothing
+        // more: every call is paid for, and nothing it answers can be kept.
+        if (reaped) throw control.attempt === undefined ? new BurstNoLongerRunningError(burstId) : new TurnLeaseLostError(burstId, control.attempt);
+        const answer = await asked.complete(operation, system, user);
         progressed();
         return answer;
       },
@@ -347,6 +488,9 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
           payload: {
             window,
             ordinal,
+            // Which attempt wrote it: a passage of an attempt that did not
+            // commit is shown as provisional and dropped when the next takes over.
+            ...(control.attempt === undefined ? {} : { attempt: control.attempt }),
             kind: entry.kind,
             title: entry.title,
             body: entry.body,
@@ -399,17 +543,24 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
         ...(cognitionShardsFromEnv() === undefined ? {} : { budget: { ...DEFAULT_BUDGET, cognitionShards: cognitionShardsFromEnv() } }),
       });
     } catch (error) {
-      if (error instanceof InsufficientCoinsError) { await fail("You have run out of coins."); return; }
+      // Given up while it worked (the page reaped it, or another attempt holds
+      // the turn): the row already says so, and nothing of this run is kept.
+      if (error instanceof BurstNoLongerRunningError || error instanceof TurnLeaseLostError) {
+        console.warn(`[burst ${burstId}] stopped: ${error.message}`);
+        if (job.askedAs !== undefined && error instanceof BurstNoLongerRunningError) await restoreAskingCharacter(db, job.playerId, job.askedAs);
+        return;
+      }
+      if (error instanceof InsufficientCoinsError) { await fail("You have run out of coins.", error); return; }
       // The provider refusing every call -- no credit on the account, a key it
       // will not take -- stops the turn before anything is saved, and says so,
       // rather than a season passing in which nothing came of the order.
       if (abortsTheTurn(error)) {
         console.error(`[burst ${burstId}] the model provider refused the turn:`, error);
-        await fail("The model provider refused the request (its account may be out of credit). Nothing was saved and your world is unchanged; try again once it is restored.");
+        await fail("The model provider refused the request (its account may be out of credit). Nothing was saved and your world is unchanged; try again once it is restored.", error);
         return;
       }
       console.error(`[burst ${burstId}] the burst failed:`, error);
-      await fail(error instanceof Error ? error.message : String(error));
+      await fail(error instanceof Error ? error.message : String(error), error);
       return;
     }
 
@@ -466,8 +617,10 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
 
     say({ stage: "committing", line: "The record is entered." });
     await progressWrites;
+    // What is left of a span its time limit cut off, for the stretch that carries it on.
+    const continuationDays = result.stopReason === "deadline" && job.spanDays !== undefined ? job.spanDays - (result.world.instant.day - view.world.instant.day) : null;
     try {
-      await commitBurst(db, {
+      const committed = await control.commit({
         gameId,
         expectedRevision: view.revision,
         world: result.world,
@@ -516,23 +669,31 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
           reason: entry.reason,
           delta: entry.delta,
         })),
-      });
+      }, { stopReason: result.stopReason, continuationDays });
+      if (committed === "lost") {
+        console.warn(`[burst ${burstId}] its commit was not this run's to make (another attempt holds the turn); nothing was written`);
+        return;
+      }
     } catch (error) {
-      if (error instanceof WorldRevisionConflictError) { await fail("The world moved while your order was being carried out. Try again."); return; }
-      // Given up while it worked, and the page already told the player so.
-      // Nothing to write: the row already says failed.
-      if (error instanceof BurstNoLongerRunningError) {
+      // A conversation (or any other writer) moved the world under the turn.
+      // Not retried: the world it read is gone, and another attempt would ask
+      // the provider -- and charge the player -- all over again.
+      if (error instanceof WorldRevisionConflictError) { await fail("The world moved while your order was being carried out. Try again.", error); return; }
+      // Given up while it worked, and the page already told the player so --
+      // or, durable, taken up by another attempt that owns the turn now.
+      // Nothing to write: the row already says so.
+      if (error instanceof BurstNoLongerRunningError || error instanceof TurnLeaseLostError) {
         console.warn(`[burst ${burstId}] ${error.message}`);
-        if (job.askedAs !== undefined) await restoreAskingCharacter(db, job.playerId, job.askedAs);
+        if (job.askedAs !== undefined && error instanceof BurstNoLongerRunningError) await restoreAskingCharacter(db, job.playerId, job.askedAs);
         return;
       }
       if (error instanceof WorldWouldNotLoadError) {
         console.error(`[burst ${burstId}] ${error.message}`);
-        await fail("Something in this turn would have damaged the save, so it was not kept. Your world is as it was; try the order again.");
+        await fail("Something in this turn would have damaged the save, so it was not kept. Your world is as it was; try the order again.", error);
         return;
       }
       console.error(`[burst ${burstId}] the commit failed:`, error);
-      await fail(error instanceof Error ? error.message : String(error));
+      await fail(error instanceof Error ? error.message : String(error), error);
       return;
     }
 
@@ -569,7 +730,7 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
   } catch (error) {
     // Nothing above should reach here; if it does, the row still says so.
     console.error(`[burst ${burstId}] escaped:`, error);
-    await fail(error instanceof Error ? error.message : String(error));
+    await fail(error instanceof Error ? error.message : String(error), error);
   } finally {
     clearInterval(heartbeat);
   }
@@ -634,7 +795,7 @@ export function dateLabel(sortKey: number, clock: ScenarioClock | undefined): st
 }
 
 /** Puts the player back behind the eyes they answered from, when the answer did not take. */
-async function restoreAskingCharacter(db: ChronicaDatabase, playerId: string, characterId: string): Promise<void> {
+export async function restoreAskingCharacter(db: ChronicaDatabase, playerId: string, characterId: string): Promise<void> {
   await db.update(schema.players).set({ characterId }).where(eq(schema.players.id, playerId)).catch(() => undefined);
 }
 
