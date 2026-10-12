@@ -18,12 +18,17 @@ The game accepts ambitious, conditional orders instead of a menu of verbs. The A
 - [Product guide](docs/product.md) — what the game is and how it plays today.
 - [Architecture guide](docs/architecture.md) — how the system is put together.
 - [Design](DESIGN.md) — how the interface looks and why: the lamplit room, its tokens, type and parts.
+- [Durable turns and the turn worker](apps/web/TURN-WORKER.md) — how an order survives the server that took it: leases, fenced commits, replayed model calls, the embedded and external worker, deploying and upgrading.
 
 The documentation intentionally describes the current direction, not a chronological record of replaced proposals. Anything not yet built says so at the top.
 
 ## Run locally
 
 On macOS or Linux, run `./hosted.sh`. On Windows, run `hosted.bat`. Each launcher installs the locked dependencies when needed and starts the website at http://localhost:3000. Stop the server with `Ctrl-C`.
+
+Orders are carried out by a turn worker the website runs inside itself, so one server is still the whole game; a turn in flight when the server stops is taken up again when it starts. To run the worker as its own process instead, set `CHRONICA_TURN_WORKER=external` on the website and run `npm run worker -w @chronica/web`. See [apps/web/TURN-WORKER.md](apps/web/TURN-WORKER.md).
+
+The tests that need a database (`*.db.test.ts`, and the browser suite) run only against a disposable Postgres named by `CHRONICA_TEST_DATABASE_URL` (its name must contain `test`, and it must not be `DATABASE_URL`); unset, they are skipped.
 
 ### Develop using your Codex allowance
 

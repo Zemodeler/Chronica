@@ -18,13 +18,53 @@ import type { WorldState } from "./world-state";
 /** The most goals a part keeps: four of its own, and one answer for each of its letters besides. */
 export const MAX_PART_GOALS = 12;
 
+/** How a piece of work came to be a part's: by an act of the answer, by a held act resumed, by a delegate's act, or by a guess at its words. */
+export const WorkLinkSchema = z.enum(["act", "stage", "delegate", "guess"]);
+export type WorkLink = z.infer<typeof WorkLinkSchema>;
+
 export const OrderWorkRefSchema = z
   .object({
     kind: z.enum(["project", "procedure", "message", "audit", "plot", "order_attempt", "force", "entity", "contract", "siege"]),
     id: EntityIdSchema,
+    /**
+     * The causal link, kept with the ref (plan chronicle-and-order-truth, the
+     * evidence rule): the day the part's own act made this thing, the act's op,
+     * and how the ref came to be the part's. A ref with none of these -- an
+     * old save's, or one the engine attached by a name -- proves nothing was
+     * made: "Raise an army called Roman field army" with a ref to the army
+     * that stood before the order read as the army raised.
+     */
+    madeAtStep: ElapsedStepSchema.optional(),
+    op: z.string().max(60).optional(),
+    by: WorkLinkSchema.optional(),
   })
   .strict();
 export type OrderWorkRef = z.infer<typeof OrderWorkRefSchema>;
+
+/** Whether a work ref says the part's own act made the thing, on or after the order was given. */
+export function workWasMadeByPart(ref: OrderWorkRef, givenAtStep: number): boolean {
+  return ref.madeAtStep !== undefined && ref.madeAtStep >= givenAtStep && ref.by !== "guess";
+}
+
+/**
+ * An act of the order the world applied, kept with the part as its evidence:
+ * the op, the day, what it named once resolved, and how it was done. Read by
+ * the outcome line and the scorecard, never by the prose: "done" is said only
+ * on an effect like this, a goal met since the order, or a work finished.
+ */
+export const AppliedEffectSchema = z
+  .object({
+    op: z.string().min(1).max(60),
+    atStep: ElapsedStepSchema,
+    refs: z.array(z.object({ kind: z.string().min(1).max(40), id: EntityIdSchema }).strict()).max(6).default([]),
+    by: WorkLinkSchema.default("act"),
+    /** The delegation whose holder did it, where a delegate did. */
+    attemptId: EntityIdSchema.nullable().default(null),
+  })
+  .strict();
+export type AppliedEffect = z.infer<typeof AppliedEffectSchema>;
+/** The most effects a part keeps; the earliest are kept, since they are the ones that answer it. */
+export const MAX_PART_EFFECTS = 24;
 
 /**
  * What a held act waits on before it is tried again: a vote to pass, an army
@@ -73,6 +113,8 @@ export const OrderStageSchema = z
      * could outlive the order that made it (plan chronicle-and-order-truth, 2.3).
      */
     reviewAtStep: ElapsedStepSchema.nullable().default(null),
+    /** When it was taken up again as the order's, so what it then made can be dated to it. Absent on old saves and on stages still waiting. */
+    resumedAtStep: ElapsedStepSchema.nullable().optional(),
   })
   .strict();
 export type OrderStage = z.infer<typeof OrderStageSchema>;
@@ -161,9 +203,21 @@ export const OrderPartSchema = z
     attribution: z.enum(["tagged", "guessed"]).default("tagged"),
     /** Set when the part is finished with: done, refused for good, or superseded by a later order. */
     closedAtStep: ElapsedStepSchema.nullable().default(null),
+    /**
+     * The acts of it the world applied, as its evidence (`AppliedEffect`):
+     * the op, the day and what each named. Absent on old saves, which keep
+     * only the counts above; a part without them is judged by its goals, its
+     * work and its counts, and never told done on a name found elsewhere.
+     */
+    effects: z.array(AppliedEffectSchema).max(MAX_PART_EFFECTS).optional(),
   })
   .strict();
 export type OrderPart = z.infer<typeof OrderPartSchema>;
+
+/** The effects of a part, old saves having none. */
+export function effectsOf(part: Pick<OrderPart, "effects">): readonly AppliedEffect[] {
+  return part.effects ?? [];
+}
 
 export const OrderRecordSchema = z
   .object({
@@ -207,12 +261,55 @@ export const OwedTurnSchema = z
     sinceStep: ElapsedStepSchema,
     /** How many bursts have ended with him still owed. */
     bursts: z.number().int().nonnegative().default(0),
+    /**
+     * Why he was not asked: the request allowance or call budget was spent
+     * (`budget`), the turn's time ran out (`time`), the round was full
+     * (`round`), or the provider failed (`provider`). Always the processing,
+     * never his choice: an owed turn is not a refusal, and nothing put to him
+     * is answered against him for it (`owedTurnStands`). Absent on old saves,
+     * which were owed for the same reasons and are read the same way.
+     */
+    cause: z.enum(["budget", "time", "round", "provider"]).optional(),
   })
   .strict();
 export type OwedTurn = z.infer<typeof OwedTurnSchema>;
+export type OwedCause = NonNullable<OwedTurn["cause"]>;
 
-/** A man is owed his turn for this many bursts, and then the world stops waiting. */
+/**
+ * How many bursts an owed turn whose reason the engine cannot read is kept
+ * for. One it can read -- a request to him still open, an order he holds still
+ * open, a letter awaiting his answer -- is kept as long as the reason stands,
+ * however many bursts that is: the wait is the processing's, and the rules
+ * answering for him after two bursts made a budget into his refusal.
+ */
 export const MAX_OWED_BURSTS = 2;
+
+/** The request statuses still waiting on the man asked. */
+const REQUEST_OPEN: ReadonlySet<string> = new Set(["issued", "received", "delayed"]);
+
+/**
+ * Whether what a man was owed his turn for still stands, read from the world
+ * and never from the burst count: a request put to him and unanswered, an
+ * order of the ruler's he holds whose part is open, or a letter awaiting his
+ * answer. A reason the engine cannot read ("his promise's day") stands for
+ * `MAX_OWED_BURSTS` and is then let go, with nothing answered for him.
+ * A dead man's stands for nothing.
+ */
+export function owedTurnStands(world: Pick<WorldState, "orderAttempts" | "orders" | "diplomacy" | "characters">, entry: Pick<OwedTurn, "characterId" | "bursts">): boolean {
+  const person = world.characters.find((character) => character.id === entry.characterId);
+  if (person !== undefined && !person.alive) return false;
+  const asked = world.orderAttempts.some((attempt) => attempt.recipientRef.id === entry.characterId && REQUEST_OPEN.has(attempt.status));
+  if (asked) return true;
+  const holdsAnOpenPart = world.orderAttempts.some((attempt) => {
+    if (attempt.recipientRef.id !== entry.characterId || attempt.status !== "accepted" || attempt.servesRef === null) return false;
+    const found = findOrderPart(world, attempt.servesRef);
+    return found !== null && found.part.closedAtStep === null;
+  });
+  if (holdsAnOpenPart) return true;
+  const letterWaits = world.diplomacy.some((message) => message.status === "awaiting_reply" && message.toCharacterId === entry.characterId);
+  if (letterWaits) return true;
+  return entry.bursts < MAX_OWED_BURSTS;
+}
 
 /** Whether somebody is owed a turn the world has not given him. */
 export function isOwedATurn(world: Pick<WorldState, "owed">, characterId: string): boolean {
@@ -228,7 +325,7 @@ export function orderPartRef(recordId: string, index: number): string {
 }
 
 /** The record and part a part ref names, or null. */
-export function findOrderPart(world: WorldState, ref: string): { readonly order: OrderRecord; readonly index: number; readonly part: OrderPart } | null {
+export function findOrderPart(world: Pick<WorldState, "orders">, ref: string): { readonly order: OrderRecord; readonly index: number; readonly part: OrderPart } | null {
   const match = /^(.*)-p(\d+)$/.exec(ref);
   if (match === null) return null;
   const order = world.orders.find((candidate) => candidate.id === match[1]);
@@ -477,8 +574,13 @@ export function orderPartStatus(world: WorldState, part: OrderPart, options: { r
     // and "done" would be a claim nobody can see the evidence for.
     if (part.actsCarried > 0) {
       if (part.actsRefused > 0) return "partly_done";
-      // Every act it wrote was done by being done: the world shows it.
-      return (part.actsDone ?? 0) >= part.actsCarried ? "achieved" : "carried_unverified";
+      // Every act it wrote was done by being done: the world shows it. Where the part keeps its
+      // applied effects, they are read instead of the count: every one an act of that kind, none a guess.
+      const effects = part.effects;
+      const doneByApplication = effects === undefined
+        ? (part.actsDone ?? 0) >= part.actsCarried
+        : effects.length >= part.actsCarried && effects.every((effect) => DONE_ON_APPLICATION_OPS.has(effect.op) && effect.by !== "guess");
+      return doneByApplication ? "achieved" : "carried_unverified";
     }
     return "unanswered";
   }

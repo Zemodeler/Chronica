@@ -1,5 +1,5 @@
 import type { WorldState } from "./world-state";
-import { agreementsBetweenSides, atWar, type PolityAgreement } from "./agreements";
+import { agreementsBetweenSides, atWar, warsOf, type PolityAgreement } from "./agreements";
 
 /**
  * How a war stands between two powers, from the first one's side: -100 lost
@@ -60,7 +60,62 @@ function warBetween(agreements: readonly PolityAgreement[], a: string, b: string
     && ((agreement.polityId === a && agreement.otherPolityId === b) || (agreement.polityId === b && agreement.otherPolityId === a)));
 }
 
-export function warStanding(world: Pick<WorldState, "map" | "material" | "polityAgreements" | "elapsedStep" | "sieges">, a: string, b: string): WarStanding {
+/** The world a war's losses are read from: the armies' own records, the wars, and the orders that say which war an army is in. */
+export type WarLossWorld = Pick<WorldState, "material" | "polityAgreements" | "elapsedStep"> & { readonly campaigns?: readonly { readonly forceId: string; readonly warId: string }[] | undefined };
+
+/** What a power's armies have lost to one war, by what took the men. */
+export interface WarLosses {
+  /** Killed in the war's battles. */
+  readonly battle: number;
+  /** Dead of wounds afterwards. */
+  readonly wounds: number;
+  /** Dead of hunger, sickness and the road. */
+  readonly hardship: number;
+  readonly desertion: number;
+  readonly total: number;
+}
+
+/**
+ * The men a power has lost to this war since it began, read off its armies' own records.
+ *
+ * Only the dead of battle, of wounds and the deserters were counted, and the dead of hunger and sickness, who in a year of a
+ * long war outnumbered the dead of battle three to one, were nobody's loss. They are counted now. A power with two wars is not
+ * made to bleed twice for one loss: a death in one of this war's battles (by the war's own record of its battles) is this war's;
+ * every other loss is the war the army is under orders in, and where it is under none, is shared equally among the power's wars.
+ * Losses live with the army that took them: an army that is no more, or has forgotten its oldest entries, takes its losses with it,
+ * and the sum here is a floor.
+ */
+export function warLossesOf(world: WarLossWorld, polityId: string, enemyId: string): WarLosses {
+  const war = warBetween(world.polityAgreements, polityId, enemyId);
+  const none = { battle: 0, wounds: 0, hardship: 0, desertion: 0, total: 0 };
+  if (war === undefined) return none;
+  const since = war.sinceStep;
+  const wars = warsOf(world.polityAgreements, polityId);
+  const ours = new Set(wars.map((enemy) => warBetween(world.polityAgreements, polityId, enemy)?.id ?? ""));
+  const daysOf = (agreement: PolityAgreement | undefined): Set<number> => new Set((agreement?.battles ?? []).map((battle) => battle.atStep));
+  const near = (days: ReadonlySet<number>, day: number): boolean => days.has(day) || days.has(day - 1) || days.has(day + 1);
+  const battleDays = daysOf(war);
+  const othersDays = wars.filter((enemy) => enemy !== enemyId).map((enemy) => daysOf(warBetween(world.polityAgreements, polityId, enemy)));
+  const orders = new Map((world.campaigns ?? []).map((entry) => [entry.forceId, entry.warId] as const));
+  const tally = { battle: 0, wounds: 0, hardship: 0, desertion: 0 };
+  for (const force of world.material.forces) {
+    if (force.polityId !== polityId) continue;
+    const under = orders.get(force.id);
+    const share = under === war.id ? 1 : under !== undefined && ours.has(under) ? 0 : 1 / Math.max(1, wars.length);
+    for (const event of force.history) {
+      if (event.atStep < since) continue;
+      // A battle's dead are the war's that recorded the battle; another war's battle on that day is not this one's.
+      if (event.kind === "battle_death") tally.battle += near(battleDays, event.atStep) ? event.count : othersDays.some((days) => near(days, event.atStep)) ? 0 : event.count * share;
+      else if (event.kind === "wounds_death") tally.wounds += event.count * share;
+      else if (event.kind === "attrition_death") tally.hardship += event.count * share;
+      else if (event.kind === "desertion") tally.desertion += event.count * share;
+    }
+  }
+  const rounded = { battle: Math.round(tally.battle), wounds: Math.round(tally.wounds), hardship: Math.round(tally.hardship), desertion: Math.round(tally.desertion) };
+  return { ...rounded, total: rounded.battle + rounded.wounds + rounded.hardship + rounded.desertion };
+}
+
+export function warStanding(world: Pick<WorldState, "map" | "material" | "polityAgreements" | "elapsedStep" | "sieges"> & { readonly campaigns?: WarLossWorld["campaigns"] }, a: string, b: string): WarStanding {
   const war = warBetween(world.polityAgreements, a, b);
   const since = war?.sinceStep ?? 0;
   const days = world.elapsedStep - since;
@@ -117,12 +172,11 @@ export function warStanding(world: Pick<WorldState, "map" | "material" | "polity
     if (edge !== 0) { score += edge; parts.push(`${edge > 0 ? "more" : "fewer"} men under arms (${ours} to ${theirs})`); }
   }
 
-  // The blood each has lost since it began.
-  const lost = (polityId: string) => world.material.forces.filter((force) => force.polityId === polityId)
-    .flatMap((force) => force.history).filter((event) => event.atStep >= since && (event.kind === "battle_death" || event.kind === "wounds_death" || event.kind === "desertion"))
-    .reduce((sum, event) => sum + event.count, 0);
-  const bled = lost(b) - lost(a);
-  const totalBled = lost(a) + lost(b);
+  // The blood each has lost since it began, hunger and sickness counted with the sword (`warLossesOf`).
+  const lostA = warLossesOf(world, a, b).total;
+  const lostB = warLossesOf(world, b, a).total;
+  const bled = lostB - lostA;
+  const totalBled = lostA + lostB;
   if (totalBled > 0) {
     const edge = Math.round((bled / totalBled) * 20);
     if (edge !== 0) { score += edge; parts.push(`${edge > 0 ? "has bled them more" : "has bled more"}`); }

@@ -1,5 +1,11 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "noEmit": true },
+  "compilerOptions": {
+    "noEmit": true,
+    "paths": {
+      "@chronica/shared": ["../shared/src/index.ts"],
+      "@chronica/billing": ["../billing/src/index.ts"]
+    }
+  },
   "include": ["src/**/*.ts", "drizzle.config.ts", "vitest.config.ts"]
 }

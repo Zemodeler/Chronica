@@ -1,7 +1,7 @@
 import type { FactProposal, OrderPartyRef, WorldDelta, WorldState } from "@chronica/shared";
 import type { RejectedDelta } from "./apply/context";
 import type { SimModelPort } from "./ports";
-import { reconcileFacts } from "./reconcile-facts";
+import { asUnsettledReport, reconcileFacts } from "./reconcile-facts";
 import { repairDeltas } from "./repair-deltas";
 
 /**
@@ -96,7 +96,7 @@ export function unanswered(refused: readonly RejectedDelta[], correctedOps: read
 export async function reconcileTheRound(input: {
   readonly port: SimModelPort;
   readonly held: readonly { readonly facts: readonly FactProposal[]; readonly refused: readonly RejectedDelta[] }[];
-}): Promise<{ readonly facts: readonly (readonly FactProposal[])[]; readonly calls: number; readonly failure: string | null }> {
+}): Promise<{ readonly facts: readonly (readonly FactProposal[])[]; readonly calls: number; readonly failure: string | null; readonly unresolved: number }> {
   const byTag = new Map<string, { readonly at: number; readonly fact: FactProposal }>();
   const tagged = input.held.flatMap((entry, at) => entry.facts.map((fact) => {
     const tag = `${at + 1}.${fact.localId}`;
@@ -106,9 +106,16 @@ export async function reconcileTheRound(input: {
   const refused = [...new Set(input.held.flatMap((entry) => entry.refused))];
   const reconciled = await reconcileFacts({ port: input.port, facts: tagged, refused });
   const facts: FactProposal[][] = input.held.map(() => []);
+  // A fact the call did not settle -- the call failed, its answer could not be read, or it
+  // was judged without the refusal it names shown in full -- is kept as somebody's report
+  // with its source said (`asUnsettledReport`), never as the event: a refused act is not
+  // promoted into history by a failed call.
+  const unresolved = new Set(reconciled.unresolved);
   for (const fact of reconciled.facts) {
     const found = byTag.get(fact.localId);
-    if (found !== undefined) facts[found.at]!.push({ ...found.fact, summary: fact.summary });
+    if (found === undefined) continue;
+    const kept = { ...found.fact, summary: fact.summary };
+    facts[found.at]!.push(unresolved.has(fact.localId) ? asUnsettledReport(kept) : kept);
   }
-  return { facts, calls: reconciled.calls, failure: reconciled.failure };
+  return { facts, calls: reconciled.calls, failure: reconciled.failure, unresolved: reconciled.unresolved.length };
 }

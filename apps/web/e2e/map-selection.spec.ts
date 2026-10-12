@@ -1,9 +1,22 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { punicWarsScenario } from "@chronica/db";
-import type { GeoJsonMapFeature, GeoJsonPosition } from "@chronica/shared";
+import type { GeoJsonMap, GeoJsonPosition } from "@chronica/shared";
 import { computeViewBox } from "../app/games/[gameId]/components/geo-projection";
-import { PUNIC_WARS_MAP_ASSET_ID, builtInScenarioMap } from "../lib/built-in-scenario-maps";
 import { enterTheWorld, placeTab, theMap, waitForTheOffice } from "./fixture";
+
+/**
+ * The scenario's map, read from the file the server serves it from. Not
+ * through `lib/built-in-scenario-maps`: that module is marked `server-only`,
+ * a package Next resolves inside its own compiler and nothing else can, so
+ * importing it here failed the whole spec before a test ran.
+ */
+let punicWarsMap: GeoJsonMap | undefined;
+const theScenarioMap = (): GeoJsonMap => {
+  punicWarsMap ??= JSON.parse(readFileSync(path.join(__dirname, "..", "public", "maps", "punic-wars-provinces.geojson"), "utf8")) as GeoJsonMap;
+  return punicWarsMap;
+};
 
 /**
  * Clicking a province selects it; dragging the map does not.
@@ -56,10 +69,10 @@ const inside = (rings: readonly (readonly GeoJsonPosition[])[], x: number, y: nu
  * and the map, so no province id or name is spelt here.
  */
 function gaetuliGround(): { provinceId: string; lon: number; lat: number } {
-  const map = builtInScenarioMap(PUNIC_WARS_MAP_ASSET_ID)!;
+  const map = theScenarioMap();
   const held = new Set(punicWarsScenario.initialWorld.map.provinces.filter((province) => province.controllerPolityId === "gaetuli").map((province) => province.id));
   let best: { provinceId: string; lon: number; lat: number; area: number } | undefined;
-  for (const feature of map.features as GeoJsonMapFeature[]) {
+  for (const feature of map.features) {
     if (feature.properties.kind !== "province" || !held.has(String(feature.id))) continue;
     const g = feature.geometry;
     const polygons = g.type === "Polygon" ? [g.coordinates] : g.type === "MultiPolygon" ? g.coordinates : [];
@@ -85,7 +98,7 @@ function gaetuliGround(): { provinceId: string; lon: number; lat: number } {
 /** That ground on the screen at the opening view: the map's own pointer maths, run backwards. */
 async function inGaetuli(page: Page) {
   const ground = gaetuliGround();
-  const [vx, vy, vw, vh] = computeViewBox(builtInScenarioMap(PUNIC_WARS_MAP_ASSET_ID)!).split(" ").map(Number) as [number, number, number, number];
+  const [vx, vy, vw, vh] = computeViewBox(theScenarioMap()).split(" ").map(Number) as [number, number, number, number];
   const frame = (await theMap(page).locator(".map-frame").boundingBox())!;
   const css = await theMap(page).locator(".map-frame > div").first().evaluate((el) => (el as HTMLElement).style.transform);
   const [, tx, ty, scale] = /translate\(([-\d.e]+)px, ([-\d.e]+)px\) scale\(([-\d.e]+)\)/.exec(css)!.map(Number) as [number, number, number, number];

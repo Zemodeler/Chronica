@@ -85,10 +85,25 @@ Seven tables, split by lifetime rather than by turn (migration `0034_simulation_
 | `chronicle_checkpoints` | what the player was shown |
 | `player_decisions` | forks needing the player's own authority |
 | `delta_audit` | every act refused, ignored or carried out with a detail the engine filled in; never shown to the player |
+| `turn_jobs` | one per burst: the order as given, who holds its lease, how many attempts it has taken (`0043_durable_turns.sql`) |
+| `turn_job_attempts` | each lease of a job and how it ended |
+| `turn_job_calls` | every model request an attempt made, written before the provider is asked, so a later attempt replays what was answered and knows what is uncertain |
 
 `commitBurst` writes all of it in one transaction under one revision bump, behind an advisory lock —
 the conversation path writes world state too, and a slow burst must not interleave with a fast
 conversation.
+
+A turn is durable work. The request that takes an order writes the burst and its `turn_jobs` row and
+returns; a worker — the web server's own by default, or a separate process — leases the job, renews the
+lease on every heartbeat, and commits under it (`commitTurn`: the burst's commit, the job's, and the
+queued continuation of a cut-off turn, in one transaction under the same lock). A lease that lapses is
+taken up again by any worker, a bounded number of times, and every write of the old holder is refused
+by its fence. Which failures are worth another attempt, what is and is not promised about provider
+calls, and how the worker is run and deployed are in `apps/web/TURN-WORKER.md`.
+
+The Chronicle is read a page at a time by keyset — day entered, written at, ordinal, id — so a commit
+never shifts the pages under the reader; `listChroniclePage` and `/api/games/<id>/chronicle` turn back
+from the oldest entry in hand, and the unread badge counts the whole record.
 
 `delta_audit` exists because a refusal filed as unreadable (`"reference"`) never reaches the Chronicle,
 so an order refused for want of a detail no player would know simply did less than it said, and nobody

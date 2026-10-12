@@ -67,6 +67,12 @@ export interface EntryQuote {
 
 export interface ChronicleEntry {
   readonly id: string;
+  /**
+   * Where the entry sorts in the record (the server's reading order, as one
+   * comparable string). Pages read at different times merge by it. Absent on
+   * a passage still being written.
+   */
+  readonly orderKey?: string;
   /** The burst that wrote it: one order's answer may run to several entries. */
   readonly burstId: string | null;
   readonly kind: "narrated" | "recorded";
@@ -89,6 +95,8 @@ export interface ChronicleEntry {
    * shown as it is written, and the commit is what makes it the record.
    */
   readonly published: boolean;
+  /** Which attempt of a durable turn wrote a passage still being written; a later attempt's passages replace it. */
+  readonly attempt?: number;
 }
 
 export interface DecisionOption {
@@ -105,7 +113,12 @@ export interface OpenDecision {
 
 export interface GameView {
   readonly worldRevision?: string | undefined;
+  /** The record as far back as the reader has turned, oldest first, then any passages still being written. */
   readonly chronicle: readonly ChronicleEntry[];
+  /** Where the record before the oldest entry in hand starts, or null once the first entry of the reign is in hand. */
+  readonly chronicleOlder?: string | null;
+  /** Unread entries in the whole record, loaded or not, and the passages still being written. Absent until the first read. */
+  readonly unreadTotal?: number | undefined;
   /** The burst that wrote the newest report: what "since your last order" shows. */
   readonly latestBurstId?: string | null;
   readonly decision: OpenDecision | null;
@@ -128,6 +141,9 @@ export interface Purse {
 /** One answer from `/bursts/<id>`. Mirrors the server's `BurstStatusView`. */
 interface BurstStatus {
   readonly status: "running" | "committed" | "failed";
+  readonly phase?: "queued" | "running" | "retrying";
+  readonly attempt?: number;
+  readonly maxAttempts?: number;
   readonly error: string | null;
   readonly startedAt: string;
   readonly progress: readonly { readonly id: number; readonly stage: string; readonly line: string; readonly at: string }[];
@@ -172,6 +188,9 @@ export interface GameViewController {
    * badge clear as the entry is read rather than after a round trip.
    */
   readonly markRead: (entryIds?: readonly string[]) => Promise<void>;
+  /** Reads the page of the record before the oldest entry in hand. Resolves false when it could not. */
+  readonly loadOlder: () => Promise<boolean>;
+  readonly loadingOlder: boolean;
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); });
@@ -182,6 +201,7 @@ export function useGameView(gameId: string, initialRevision?: string): GameViewC
   const [progressSeconds, setProgressSeconds] = useState<readonly number[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [committed, setCommitted] = useState<GameView>({ chronicle: [], decision: null, running: null, worldRevision: initialRevision });
+  const [loadingOlder, setLoadingOlder] = useState(false);
   /** Passages of the running burst, in the order they were written. Dropped once the commit is read back. */
   const [pending, setPending] = useState<readonly ChronicleEntry[]>([]);
   /**
@@ -212,20 +232,46 @@ export function useGameView(gameId: string, initialRevision?: string): GameViewC
       setLastTurnCost(coinDifference(spent, spentBefore.current));
       spentBefore.current = null;
     }
-    setCommitted({
+    const page = (body.chronicle ?? []).map((entry) => ({ ...entry, published: true }));
+    // The newest page, merged with whatever older pages the reader has
+    // already turned back to: a commit must not throw away the reading.
+    setCommitted((current) => ({
       worldRevision: body.worldRevision,
       latestBurstId: body.latestBurstId ?? null,
-      chronicle: (body.chronicle ?? []).map((entry) => ({ ...entry, published: true })),
+      ...mergeNewestPage(current.chronicle, current.chronicleOlder ?? null, page, body.chronicleOlder ?? null),
+      unreadTotal: body.unreadTotal,
       decision: body.decision ?? null,
       running: body.running ?? null,
       dateLabel: body.dateLabel,
       coins: body.coins,
-    });
+    }));
   }, [gameId]);
-  const view = useMemo<GameView>(
-    () => (pending.length === 0 ? committed : { ...committed, chronicle: [...committed.chronicle, ...pending] }),
-    [committed, pending],
-  );
+  const view = useMemo<GameView>(() => {
+    const unreadTotal = committed.unreadTotal === undefined ? undefined : committed.unreadTotal + pending.length;
+    return pending.length === 0 ? { ...committed, unreadTotal } : { ...committed, unreadTotal, chronicle: [...committed.chronicle, ...pending] };
+  }, [committed, pending]);
+
+  const loadOlder = useCallback(async (): Promise<boolean> => {
+    const before = committed.chronicleOlder ?? null;
+    if (before === null || loadingOlder) return false;
+    setLoadingOlder(true);
+    try {
+      const response = await fetch(`/api/games/${gameId}/chronicle?before=${encodeURIComponent(before)}`, { cache: "no-store" });
+      if (!response.ok) return false;
+      const body = (await response.json()) as { entries?: ChronicleEntry[]; older?: string | null };
+      const older = (body.entries ?? []).map((entry) => ({ ...entry, published: true }));
+      setCommitted((current) => (current.chronicleOlder !== before ? current : {
+        ...current,
+        chronicle: mergeByOrder(older, current.chronicle),
+        chronicleOlder: body.older ?? null,
+      }));
+      return true;
+    } catch {
+      return false;
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [gameId, committed.chronicleOlder, loadingOlder]);
 
   /**
    * Follows a burst to its end: progress lines as they come, then the record
@@ -242,6 +288,9 @@ export function useGameView(gameId: string, initialRevision?: string): GameViewC
     setPending([]);
     let cursor = 0;
     let failures = 0;
+    /** The attempt whose passages are on the page; a new one replaces them. */
+    let attempt: number | undefined;
+    let toldQueued = false;
     const superseded = () => following.current !== burstId;
     try {
       for (;;) {
@@ -261,11 +310,31 @@ export function useGameView(gameId: string, initialRevision?: string): GameViewC
         } else {
           failures = 0;
           cursor = status.cursor;
+          if (status.status === "running" && status.phase === "queued" && !toldQueued) {
+            toldQueued = true;
+            setProgress((lines) => [...lines, "Your order waits to be taken up."]);
+            setProgressSeconds((times) => [...times, 0]);
+          }
+          if (status.attempt !== undefined && attempt !== undefined && status.attempt !== attempt) {
+            // An interrupted attempt's passages were never the record; the
+            // attempt taking over writes its own.
+            setPending([]);
+            const of = status.maxAttempts === undefined ? "" : ` of ${status.maxAttempts}`;
+            setProgress((lines) => [...lines, `The work was interrupted and is being taken up again (attempt ${status.attempt}${of}). Passages shown so far will be written again.`]);
+            setProgressSeconds((times) => [...times, Math.max(0, Math.round((Date.now() - Date.parse(status.startedAt)) / 1000))]);
+          }
+          if (status.attempt !== undefined) attempt = status.attempt;
           if (status.progress.length > 0) {
             setProgress((lines) => [...lines, ...status.progress.map((line) => line.line)]);
             setProgressSeconds((times) => [...times, ...status.progress.map((line) => Math.max(0, Math.round((Date.parse(line.at) - Date.parse(status.startedAt)) / 1000)))]);
           }
-          if (status.entries.length > 0) setPending((entries) => [...entries, ...status.entries]);
+          if (status.entries.length > 0) {
+            // By id: a passage asked for twice is shown once.
+            setPending((entries) => {
+              const shown = new Set(entries.map((entry) => entry.id));
+              return [...entries, ...status.entries.filter((entry) => !shown.has(entry.id))];
+            });
+          }
           // The commit is what makes the passages the record: read it back and
           // let the committed copies replace the ones shown while it ran.
           if (status.status === "committed") { await refresh(); setPending([]); return true; }
@@ -343,9 +412,16 @@ export function useGameView(gameId: string, initialRevision?: string): GameViewC
     if (entryIds !== undefined && entryIds.length === 0) return;
     const wanted = entryIds === undefined ? null : new Set(entryIds);
     const reads = (entry: ChronicleEntry) => entry.unread && (wanted === null || wanted.has(entry.id));
-    setCommitted((current) => (current.chronicle.some(reads)
-      ? { ...current, chronicle: current.chronicle.map((entry) => (reads(entry) ? { ...entry, unread: false } : entry)) }
-      : current));
+    setCommitted((current) => {
+      if (!current.chronicle.some(reads) && wanted !== null) return current;
+      const marked = current.chronicle.filter(reads).length;
+      return {
+        ...current,
+        chronicle: current.chronicle.map((entry) => (reads(entry) ? { ...entry, unread: false } : entry)),
+        // "Mark all" reaches entries not yet loaded too.
+        ...(current.unreadTotal === undefined ? {} : { unreadTotal: wanted === null ? 0 : Math.max(0, current.unreadTotal - marked) }),
+      };
+    });
     // A badge that fails to clear is a small thing; an error dialog over a
     // panel the player is reading is not. Swallowed on purpose.
     await fetch(`/api/games/${gameId}/chronicle/read`, {
@@ -354,7 +430,38 @@ export function useGameView(gameId: string, initialRevision?: string): GameViewC
     }).catch(() => undefined);
   }, [gameId]);
 
-  return { view, busy, progress, progressSeconds, error, lastTurnCost, send, choose, refresh, markRead };
+  return { view, busy, progress, progressSeconds, error, lastTurnCost, send, choose, refresh, markRead, loadOlder, loadingOlder };
+}
+
+/** Two runs of the record merged in reading order, each entry once (the later copy wins: it carries the latest read mark). */
+export function mergeByOrder(first: readonly ChronicleEntry[], second: readonly ChronicleEntry[]): ChronicleEntry[] {
+  const byId = new Map<string, ChronicleEntry>();
+  for (const entry of [...first, ...second]) byId.set(entry.id, entry);
+  const merged = [...byId.values()];
+  // Entries without a key (an older server) keep the order they came in.
+  if (merged.some((entry) => entry.orderKey === undefined)) return merged;
+  return merged.sort((a, b) => (a.orderKey! < b.orderKey! ? -1 : a.orderKey! > b.orderKey! ? 1 : 0));
+}
+
+/**
+ * The newest page read back after a commit, against what the reader had.
+ *
+ * Entries the page no longer reaches -- pushed out by the new ones, or turned
+ * back to earlier -- stay, and so does the place to turn back from: the
+ * reader's, if they had gone further back than the page goes.
+ */
+export function mergeNewestPage(
+  had: readonly ChronicleEntry[],
+  hadOlder: string | null,
+  page: readonly ChronicleEntry[],
+  pageOlder: string | null,
+): { chronicle: ChronicleEntry[]; chronicleOlder: string | null } {
+  const committed = had.filter((entry) => entry.published);
+  if (pageOlder === null || committed.length === 0) return { chronicle: [...page], chronicleOlder: pageOlder };
+  const oldestHad = committed[0]?.orderKey;
+  const oldestPage = page[0]?.orderKey;
+  const reachesFurther = oldestHad !== undefined && oldestPage !== undefined && oldestHad < oldestPage;
+  return { chronicle: mergeByOrder(committed, page), chronicleOlder: reachesFurther ? hadOlder : pageOlder };
 }
 
 /** The wallet is empty, or this save has spent its cap: nothing more can be sent. */
@@ -383,6 +490,10 @@ export function coinDifference(after: string, before: string): string {
 /** How many entries the player has not yet turned back to. */
 export const unreadCount = (chronicle: readonly ChronicleEntry[]): number =>
   chronicle.reduce((n, entry) => n + (entry.unread ? 1 : 0), 0);
+
+/** Unread across the whole record when the server has said, else across what is in hand. */
+export const unreadInView = (view: Pick<GameView, "chronicle" | "unreadTotal">): number =>
+  view.unreadTotal ?? unreadCount(view.chronicle);
 
 /** Everything the newest report produced -- not merely its last passage. */
 export function latestReport(chronicle: readonly ChronicleEntry[], latestBurstId?: string | null): readonly ChronicleEntry[] {

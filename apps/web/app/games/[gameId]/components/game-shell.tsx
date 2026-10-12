@@ -40,7 +40,7 @@ import { Tip, TipCard, TipRoot } from "../../../components/ui/tip";
 import { WindowWorkspace } from "../../../components/ui/window-workspace";
 import { EntityReference } from "./entity-reference";
 import { OrdersPanel } from "./orders-panel";
-import { unreadCount, useGameView } from "./use-game-view";
+import { unreadInView, useGameView } from "./use-game-view";
 import { standardFor, standardsForPolity, type ArmyStandard } from "../../../../lib/army-standards";
 
 type ZoomBand = "far" | "medium" | "close";
@@ -307,7 +307,7 @@ export function GameShell({
   }, [openSurface]);
 
   const { view } = controller;
-  const unread = unreadCount(view.chronicle);
+  const unread = unreadInView(view);
 
   /**
    * What is in the room, and what is not.

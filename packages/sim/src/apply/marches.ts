@@ -91,9 +91,19 @@ export function settledCourse(world: WorldState, forceId: string, to: string, co
 
 /**
  * Where on its road a force has got to: the province on the way nearest the
- * share of the road its days have covered. Never the end of the road -- it
- * has not arrived until the march says it has -- and the start of it when the
- * way cannot be traced. An army keeps to the land; ships to anything.
+ * share of the road its days have covered, the road's end included once the
+ * force is past the middle of its last stretch. The start of it when the way
+ * cannot be traced. An army keeps to the land; ships to anything.
+ *
+ * The end was never given before, so that a force did not arrive before the
+ * march said it had; but a march of one stretch turned on its fifteenth day
+ * of twenty then stood where it had set out, the fifteen days thrown away,
+ * and a march of several stretches turned at the last was set a whole stretch
+ * back. The world holds a force at a province and nowhere between, so the
+ * nearest province is the honest place, and the error is at most half a
+ * stretch either way rather than a whole one in one direction. A march that
+ * had not yet reached the far shore of a crossing is not on it: a crossing is
+ * its own journey and is never turned here (`turnOnTheRoad`).
  */
 export function whereOnTheRoad(world: WorldState, project: Project, from: string, bySea: boolean): string {
   const to = project.completionOutcome?.provinceId ?? null;
@@ -112,11 +122,13 @@ export function whereOnTheRoad(world: WorldState, project: Project, from: string
     const left = toGo.get(here)!;
     const next = adjacentTo(world, here).find((neighbour) => passable(neighbour.edge) && toGo.has(neighbour.provinceId)
       && Math.abs(neighbour.edge.distance + toGo.get(neighbour.provinceId)! - left) < 1e-6);
-    if (next === undefined || next.provinceId === to) return here;
+    if (next === undefined) return here;
     const further = done + next.edge.distance;
+    // Past the middle of this stretch it is nearer the far end of it: the road's own end as much as any province on the way.
     if (further >= walked) return walked - done <= further - walked ? here : next.provinceId;
     here = next.provinceId;
     done = further;
+    if (here === to) return to;
   }
   return here;
 }

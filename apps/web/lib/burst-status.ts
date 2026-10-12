@@ -29,6 +29,14 @@ export const BURST_NO_PROGRESS_MS = 8 * 60_000;
  * 80-130 s; this is the ceiling on a pathological one, not a budget.
  */
 export const BURST_DEADLINE_MS = 12 * 60_000;
+/**
+ * How long a durable turn's lease runs without being renewed. Renewed with
+ * every heartbeat, so a live worker never lets it lapse; one that dies lets
+ * it lapse within this, and another worker takes the turn up.
+ */
+export const TURN_LEASE_MS = BURST_STALE_MS;
+/** A queued turn no worker has taken up in this long is failed: no worker is running. */
+export const UNCLAIMED_TURN_MS = 10 * 60_000;
 
 /** Long enough for any person answering by hand, short enough to be a date. */
 const HAND_NO_PROGRESS_MS = 100 * 365 * 24 * 60 * 60_000;
@@ -58,6 +66,11 @@ export interface BurstRow {
   /** Last time the burst got somewhere; null on rows written before 0042. */
   readonly progressAt?: Date | null | undefined;
   readonly endedAt: Date | null;
+  /** The durable job carrying the burst (0043), absent or null for one run in-process. */
+  readonly jobStatus?: "queued" | "leased" | "committed" | "failed" | null | undefined;
+  /** Leases the job has taken: the attempt now running, or the last one. */
+  readonly attempt?: number | null | undefined;
+  readonly maxAttempts?: number | null | undefined;
 }
 
 export interface ProgressRow {
@@ -82,11 +95,21 @@ export interface PendingEntry {
   readonly unread: true;
   /** False until the commit: the page shows it, and the commit is what makes it the record. */
   readonly published: false;
+  /** Which attempt of a durable turn wrote it; a later attempt's passages replace it. Absent in-process. */
+  readonly attempt?: number | undefined;
 }
 
 export interface BurstStatusView {
   readonly burstId: string;
   readonly status: "running" | "committed" | "failed";
+  /**
+   * While running: waiting for a worker, being carried out, or being carried
+   * out again after an attempt was interrupted. Absent once it has ended.
+   */
+  readonly phase?: "queued" | "running" | "retrying" | undefined;
+  /** The attempt the passages below belong to, and how many a turn may take; absent in-process. */
+  readonly attempt?: number | undefined;
+  readonly maxAttempts?: number | undefined;
   readonly error: string | null;
   readonly startedAt: string;
   readonly endedAt: string | null;
@@ -101,6 +124,10 @@ export interface BurstStatusView {
 export const ABANDONED_ERROR = "The world stopped moving before the order was carried out. Your world is as it was; give the order again.";
 
 export const STUCK_ERROR = "The world stopped getting anywhere with the order, so it was given up. Your world is as it was; give the order again.";
+
+export const EXHAUSTED_ERROR = "The order was interrupted more often than it may be taken up again, so it was given up. Your world is as it was; give the order again.";
+
+export const UNCLAIMED_ERROR = "No one took the order up: the server that carries orders out is not running. Your world is as it was; give the order again once it is.";
 
 /** Why a "running" row is not running: its process fell silent, or it stopped getting anywhere. Null while it is alive. */
 export function abandonment(row: BurstRow, now: Date, staleMs = BURST_STALE_MS, noProgressMs = BURST_NO_PROGRESS_MS): "silent" | "stuck" | null {
@@ -117,8 +144,14 @@ export function isStale(row: BurstRow, now: Date, staleMs = BURST_STALE_MS): boo
 }
 
 export function toBurstStatus(row: BurstRow, rows: readonly ProgressRow[], afterId: number, now: Date): BurstStatusView {
-  const abandoned = abandonment(row, now, BURST_STALE_MS, noProgressAllowedMs());
+  // A durable turn still queued or leased is judged by its lease, not by the
+  // row's heartbeat: a worker that died is replaced, not mourned
+  // (`settleTurnJobs` fails it when it cannot be).
+  const durable = row.jobStatus !== undefined && row.jobStatus !== null;
+  const active = durable && (row.jobStatus === "queued" || row.jobStatus === "leased");
+  const abandoned = active ? null : abandonment(row, now, BURST_STALE_MS, noProgressAllowedMs());
   const stale = abandoned !== null;
+  const attempt = durable && typeof row.attempt === "number" ? row.attempt : undefined;
   const progress = rows
     .filter((entry) => entry.id > afterId && entry.kind === "progress")
     .map((entry) => {
@@ -131,8 +164,14 @@ export function toBurstStatus(row: BurstRow, rows: readonly ProgressRow[], after
       if (typeof entry.payload !== "object" || entry.payload === null) return [];
       const p = entry.payload as Record<string, unknown>;
       if (typeof p.title !== "string" || typeof p.body !== "string") return [];
+      // Only the attempt now carrying the turn: what an interrupted one wrote
+      // was never the record and will be written again.
+      const writtenBy = typeof p.attempt === "number" ? p.attempt : undefined;
+      if (attempt !== undefined && writtenBy !== undefined && writtenBy !== attempt) return [];
       return [{
-        id: `${row.id}:${entry.id}`,
+        // Stable for the passage: the attempt and its place in that attempt's
+        // writing, so a page that asks again never shows it twice.
+        id: writtenBy === undefined || typeof p.ordinal !== "number" ? `${row.id}:${entry.id}` : `${row.id}:${writtenBy}:${p.ordinal}`,
         burstId: row.id,
         kind: p.kind === "recorded" ? "recorded" : "narrated",
         date: typeof p.date === "string" ? p.date : null,
@@ -146,12 +185,16 @@ export function toBurstStatus(row: BurstRow, rows: readonly ProgressRow[], after
         quote: p.quote ?? null,
         unread: true,
         published: false,
+        ...(writtenBy === undefined ? {} : { attempt: writtenBy }),
       }];
     });
   const cursor = rows.reduce((max, entry) => Math.max(max, entry.id), afterId);
+  const status = stale ? "failed" : row.status;
   return {
     burstId: row.id,
-    status: stale ? "failed" : row.status,
+    status,
+    ...(status !== "running" ? {} : { phase: row.jobStatus === "queued" ? (attempt !== undefined && attempt > 0 ? "retrying" : "queued") : attempt !== undefined && attempt > 1 ? "retrying" : "running" }),
+    ...(attempt === undefined ? {} : { attempt, ...(typeof row.maxAttempts === "number" ? { maxAttempts: row.maxAttempts } : {}) }),
     error: abandoned === "silent" ? ABANDONED_ERROR : abandoned === "stuck" ? STUCK_ERROR : row.error,
     startedAt: row.startedAt.toISOString(),
     endedAt: row.endedAt?.toISOString() ?? null,

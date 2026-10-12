@@ -1403,4 +1403,11 @@ describe("the overstatement alarm", () => {
     expect((await compose("The legion arrived at Messana on the third day.", "achieved")).inspection!.overstated).toBe(0);
     expect((await compose("The consul ordered the legion over, and it set about the work.", "unanswered")).inspection!.overstated).toBe(0);
   });
+
+  it("keeps a passage that says the thing did not happen, and catches the landfall said in other words", async () => {
+    const honest = await compose("The legion never arrived at Messana, and the consul waited at Rhegium for ships that did not come.", "unanswered");
+    expect(honest.inspection!.overstated).toBe(0);
+    expect(honest.entries[0]!.body).toContain("never arrived");
+    expect((await compose("The legion made landfall at Messana on the third day.", "unanswered")).inspection!.overstated).toBe(1);
+  });
 });

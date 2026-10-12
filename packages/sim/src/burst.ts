@@ -58,7 +58,13 @@ import {
   goalsMet,
   orderPartRef,
   findOrderPart,
-  MAX_OWED_BURSTS,
+  owedTurnStands,
+  answerDueOf,
+  effectsOf,
+  MAX_PART_EFFECTS,
+  type AppliedEffect,
+  type OwedCause,
+  type WorkLink,
   BINDING_ANSWER_DAYS,
   REQUESTED_ANSWER_DAYS,
   capOrders,
@@ -120,7 +126,7 @@ import { answerEngagement, engagementDecision } from "./engagement-decisions";
 import { answerSiege, siegeDecision } from "./siege-decisions";
 import { commandersFollowTheirArmies } from "./commanders-in-the-field";
 import { fieldDecision, playerPlight, resolveFieldPerils } from "./field-perils";
-import { factsNamingRefusals, reconcileFacts } from "./reconcile-facts";
+import { asUnsettledReport, factsNamingRefusals, reconcileFacts } from "./reconcile-facts";
 import { reconcileTheRound, repairTheRound, unanswered, type CorrectionCalls, type RoundCorrection } from "./round-corrections";
 import { repairDeltas, worthRepairing } from "./repair-deltas";
 import { runDeterministicTick } from "./tick";
@@ -826,6 +832,8 @@ interface OwnAct {
   readonly goals?: readonly OrderGoal[];
   /** The money it moved and the obligations it left, to be filed as its part's (`stampOrderMoney`). */
   readonly money?: MadeMoney | undefined;
+  /** The act as applied, dated and resolved, kept with its part as evidence (`AppliedEffect`). */
+  readonly effect?: AppliedEffect;
   /**
    * Refused because the engine could not read it, and not put right. Never
    * the part's refusal -- "No force legio-phantasma exists" is not history --
@@ -920,6 +928,8 @@ const ORDER_RESERVE_CALLS = 3;
 const MIN_HOP_DAYS = 4;
 /** The most people asked in one round (`SimulationBudget.maxAskedPerRound`). */
 const MAX_ASKED_PER_ROUND = 3;
+/** A request still waiting on the man it was put to (`requests.ts`). */
+const REQUEST_WAITING: ReadonlySet<string> = new Set(["issued", "received", "delayed"]);
 /** How many of the world's own people are asked while the order is still being read. */
 const EARLY_ASKED = 3;
 /** Days a person with nothing pressing is left alone after answering. */
@@ -944,7 +954,39 @@ function wordStems(text: string): Set<string> {
  * after it: the project, the vote, the letter, the audit, the plot, the army.
  * A march is a project the engine makes (`setOutOn`), found by the force it moves.
  */
-function workMadeBy(before: WorldState, after: WorldState, delta: WorldDelta, assignedIds: ReadonlyMap<string, string>): OrderWorkRef[] {
+function workMadeBy(before: WorldState, after: WorldState, delta: WorldDelta, assignedIds: ReadonlyMap<string, string>, by: WorkLink = "act"): OrderWorkRef[] {
+  // Each ref carries its causal link: the day the act made the thing, the act's op, and how it
+  // came to be the part's. A ref without them proves nothing was made (`workWasMadeByPart`).
+  return workOf(before, after, delta, assignedIds).map((ref) => ({ ...ref, madeAtStep: after.elapsedStep, op: delta.op, by }));
+}
+
+/**
+ * The applied act as a part's evidence (`AppliedEffect`): its op, the day, and what it named once
+ * resolved -- the things it made, the army, the people, the accounts, the place.
+ */
+function effectOf(delta: WorldDelta, atStep: number, by: WorkLink, resolve: (ref: string) => string, work: readonly OrderWorkRef[], attemptId: string | null = null): AppliedEffect {
+  const refs: { kind: string; id: string }[] = work.map((ref) => ({ kind: ref.kind, id: ref.id }));
+  for (const [key, value] of Object.entries(delta as Record<string, unknown>)) {
+    if (typeof value !== "string" || value === "") continue;
+    const kind = /CharacterRef$|^characterRef$/.test(key) ? "character"
+      : key === "forceRef" ? "force"
+        : /AccountRef$/.test(key) ? "account"
+          : key === "officeId" || key === "officeRef" ? "office"
+            : key === "locationId" || key === "provinceId" ? "province"
+              : null;
+    if (kind === null) continue;
+    const id = resolve(value);
+    if (!refs.some((ref) => ref.kind === kind && ref.id === id)) refs.push({ kind, id });
+  }
+  return { op: delta.op, atStep, refs: refs.slice(0, 6), by, attemptId };
+}
+
+/** A part's effects with more added, the earliest kept (they are the ones that answer it). */
+function withEffects(part: OrderPart, more: readonly AppliedEffect[]): OrderPart {
+  return more.length === 0 ? part : { ...part, effects: [...effectsOf(part), ...more].slice(0, MAX_PART_EFFECTS) };
+}
+
+function workOf(before: WorldState, after: WorldState, delta: WorldDelta, assignedIds: ReadonlyMap<string, string>): OrderWorkRef[] {
   const made = "localId" in delta && typeof delta.localId === "string" ? assignedIds.get(delta.localId) ?? null : null;
   const isNew = <T extends { readonly id: string }>(list: readonly T[], id: string | null): id is string =>
     id !== null && list.some((entry) => entry.id === id);
@@ -1199,14 +1241,14 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
    */
   const creditDelegatedWork = (
     recipientId: string,
-    acts: readonly { readonly said: string; readonly delta: WorldDelta; readonly work: readonly OrderWorkRef[]; readonly index: number | null; readonly goals: readonly OrderGoal[]; readonly money?: MadeMoney | undefined }[],
+    acts: readonly { readonly said: string; readonly delta: WorldDelta; readonly work: readonly OrderWorkRef[]; readonly index: number | null; readonly goals: readonly OrderGoal[]; readonly money?: MadeMoney | undefined; readonly effect: AppliedEffect }[],
     factIds: readonly string[],
     serves: readonly { readonly ref: string; readonly acts: readonly number[] }[],
   ): void => {
     const held = world.orderAttempts.filter((attempt) => attempt.recipientRef.id === recipientId && attempt.status === "accepted");
     if (held.length === 0) return;
     const instructions = held.map((attempt) => attempt.instruction);
-    const credited = new Map<string, { work: OrderWorkRef[]; goals: OrderGoal[]; guessed: boolean; money: (MadeMoney | undefined)[] }>();
+    const credited = new Map<string, { work: OrderWorkRef[]; goals: OrderGoal[]; guessed: boolean; money: (MadeMoney | undefined)[]; effects: AppliedEffect[] }>();
     for (const act of acts) {
       // By the order he said the act was for; where he held one order only,
       // that one; only otherwise by its words, and then as a guess.
@@ -1215,8 +1257,13 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       if (index === null || index < 0) continue;
       const guessed = named === undefined && held.length > 1;
       if (guessed) audit.push({ actorRef: { kind: "character", id: recipientId }, op: act.delta.op, kind: "attribution_uncertain", ofTheOrder: false, attempt: "first", reason: `Work credited to "${held[index]!.instruction.slice(0, 120)}" by its words alone.`, delta: act.delta });
-      const entry = credited.get(held[index]!.id) ?? { work: [], goals: [], guessed: false, money: [] };
-      credited.set(held[index]!.id, { work: [...entry.work, ...act.work], goals: [...entry.goals, ...act.goals], guessed: entry.guessed || guessed, money: [...entry.money, act.money] });
+      const entry = credited.get(held[index]!.id) ?? { work: [], goals: [], guessed: false, money: [], effects: [] };
+      // A guess at its words is kept as one, on the ref and on the effect: never evidence (`workWasMadeByPart`).
+      const link: WorkLink = guessed ? "guess" : "delegate";
+      credited.set(held[index]!.id, {
+        work: [...entry.work, ...act.work.map((ref) => ({ ...ref, by: link }))], goals: [...entry.goals, ...act.goals], guessed: entry.guessed || guessed, money: [...entry.money, act.money],
+        effects: [...entry.effects, { ...act.effect, by: link, attemptId: held[index]!.id }],
+      });
     }
     if (credited.size === 0) return;
     // What he spent doing it is the order's spending (`stampOrderMoney`).
@@ -1239,7 +1286,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
           // A part that named no goal of its own takes the goals of the work
           // done for it: the legate's march says where the legion is going.
           const goals = part.goals.length > 0 ? part.goals : mergeGoals(extra.flatMap((entry) => entry.goals), []).goals;
-          return { ...part, goals, workRefs: [...part.workRefs, ...fresh].slice(0, 12), attribution: extra.some((entry) => entry.guessed) ? "guessed" as const : part.attribution };
+          return withEffects({ ...part, goals, workRefs: [...part.workRefs, ...fresh].slice(0, 12), attribution: extra.some((entry) => entry.guessed) ? "guessed" as const : part.attribution }, extra.flatMap((entry) => entry.effects));
         }),
       })),
     };
@@ -1435,13 +1482,16 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
           world = tried.world;
           for (const [handle, id] of tried.assignedIds) handles.set(handle, id);
           world = stampOrderMoney(world, tried.applied.map((entry) => entry.madeMoney), ref);
-          const made = acts.flatMap((act) => workMadeBy(before, world, act, tried.assignedIds));
+          const made = acts.flatMap((act) => workMadeBy(before, world, act, tried.assignedIds, "stage"));
           const resolve = refResolver(world, tried.assignedIds);
           const goals = mergeGoals([...next.goals, ...acts.flatMap((act) => goalsOfAct(before, act, made, resolve))], []).goals;
-          next = {
+          // What the resumed act did is the part's evidence, dated to the day it was taken up again.
+          const resolveId = (handle: string): string => tried.assignedIds.get(handle.replace(/^local:/, "")) ?? handle;
+          const effects = tried.applied.map((entry) => effectOf(entry.delta, world.elapsedStep, "stage", resolveId, workMadeBy(before, world, entry.delta, tried.assignedIds, "stage")));
+          next = withEffects({
             ...next, refusal: null, refusedAtStep: null, goals, actsCarried: Math.min(99, next.actsCarried + tried.applied.length), actsDone: Math.min(99, (next.actsDone ?? 0) + tried.applied.filter((entry) => DONE_ON_APPLICATION_OPS.has(entry.delta.op)).length),
             workRefs: [...next.workRefs, ...made.filter((work) => !next.workRefs.some((known) => known.id === work.id))].slice(0, 12),
-          };
+          }, effects);
           const materialized = materializeFacts({
             proposals: [...tried.factProposals, {
               localId: safeLocalId(`order_resumed_${partIndex}_${stageIndex}`),
@@ -1458,7 +1508,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
           });
           newFacts.push(...materialized.facts.map((fact) => ({ ...fact, sourceActionId: ref })));
           for (const [factId, weight] of materialized.significanceByFactId) significanceByFactId.set(factId, weight);
-          return { ...stage, status: "resumed" };
+          return { ...stage, status: "resumed", resumedAtStep: world.elapsedStep };
         };
         for (let stageIndex = 0; stageIndex < next.stages.length; stageIndex += 1) {
           // Read from the part as it now stands: an act held beside one just
@@ -1994,7 +2044,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       modelCalls += reconciled.calls;
       if (reconciled.failure !== null) parseFailures.push(`fact reconciliation: ${reconciled.failure}`);
       const kept = new Set(reconciled.facts.map((fact) => fact.localId));
-      const rewritten = new Map(reconciled.facts.map((fact) => [fact.localId, fact]));
+      // What the reconciliation left unsettled is somebody's report, never the event, and says its source.
+      const unsettled = new Set(reconciled.unresolved);
+      const rewritten = new Map(reconciled.facts.map((fact) => [fact.localId, unsettled.has(fact.localId) ? asUnsettledReport(fact) : fact]));
+      if (unsettled.size > 0) skipped.push({ stage: "reconcile", reason: `${unsettled.size} fact(s) naming what was refused could not be settled; kept as reports` });
       const asked = new Set(naming.map((fact) => fact.localId));
       happened = aboutRealThings.flatMap((fact) => (!asked.has(fact.localId) ? [fact] : kept.has(fact.localId) ? [rewritten.get(fact.localId)!] : []));
     }
@@ -2407,12 +2460,14 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       return at < 0 ? null : at;
     };
     const resolveRefs = refResolver(world, result.assignedIds);
+    /** A handle the answer minted, as the id the world gave it; anything else as written. */
+    const resolveHandle = (handle: string): string => result.assignedIds.get(handle.replace(/^local:/, "")) ?? handle;
     // A man who took on somebody's order and has now done something: what he
     // made is that order's work, and the order's part says so (`creditDelegatedWork`).
     if (!actsForTheWorld && actorRef.kind === "character") {
       checkpoint("crediting delegated work", () => creditDelegatedWork(actorRef.id, result.applied.filter((entry) => entry.changed !== false && !CHANGES_NOTHING.has(entry.delta.op)).map((entry) => {
-        const work = workMadeBy(worldAtStart, world, entry.delta, result.assignedIds);
-        return { said: wordsOfAct(entry.delta), delta: entry.delta, work, index: indexIn(entry), goals: goalsOfAct(worldAtStart, entry.delta, work, resolveRefs), money: entry.madeMoney };
+        const work = workMadeBy(worldAtStart, world, entry.delta, result.assignedIds, "delegate");
+        return { said: wordsOfAct(entry.delta), delta: entry.delta, work, index: indexIn(entry), goals: goalsOfAct(worldAtStart, entry.delta, work, resolveRefs), money: entry.madeMoney, effect: effectOf(entry.delta, world.elapsedStep, "delegate", resolveHandle, work) };
       }), materialized.facts.map((fact) => fact.id), serves));
     }
     // A letter already on its way, written again, is still that letter: the
@@ -2436,6 +2491,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
           const work = workMadeBy(worldAtStart, world, entry.delta, result.assignedIds);
           return {
             said: wordsOfAct(entry.delta), carried: true, refusal: null, work, delta: entry.delta, index: indexIn(entry),
+            effect: effectOf(entry.delta, world.elapsedStep, "act", resolveHandle, work),
             goals: [...goalsOfAct(worldAtStart, entry.delta, work, resolveRefs), ...renamedOrRecommanded(entry.delta, resolveRefs)],
             breach: result.breaches.some((breach) => breach.delta.op === entry.delta.op && wordsOfAct(breach.delta) === wordsOfAct(entry.delta))
               ? describeBreach(entry.delta, world, actorName) : null,
@@ -2578,7 +2634,33 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
    */
   const plans = emptyPlanTally();
   let planFactSerial = 0;
+  /**
+   * A request put to a man owed his turn is not answered for him by the rules
+   * while he waits: its day is kept a fortnight ahead of wherever the calendar
+   * is going, so no tick reaches it before he is asked. The owed turn was the
+   * processing's doing, and the rules' answer on its day was his in the
+   * record: a budget became a man's "no". Asked, he answers it himself; dead,
+   * or his reason gone, the world stops holding it (`owedTurnStands`).
+   */
+  const holdRequestsForTheOwed = (fromStep: number = world.elapsedStep, everyone = false): void => {
+    const owedIds = new Set(world.owed.map((entry) => entry.characterId));
+    if (owedIds.size === 0 && !everyone) return;
+    const playerId = input.actorRef.kind === "character" ? input.actorRef.id : null;
+    const until = Math.max(fromStep, world.elapsedStep) + REQUESTED_ANSWER_DAYS;
+    let changed = false;
+    const attempts = world.orderAttempts.map((attempt) => {
+      const held = everyone ? attempt.recipientRef.id !== playerId : owedIds.has(attempt.recipientRef.id);
+      if (!held || !REQUEST_WAITING.has(attempt.status) || answerDueOf(attempt) > until) return attempt;
+      changed = true;
+      return { ...attempt, answerDueByStep: until };
+    });
+    if (changed) world = { ...world, orderAttempts: attempts };
+  };
   const tickTo = (toDay: number): void => {
+    // The days about to pass must not reach the day of a request put to a man still owed his turn.
+    // With the turn's time spent, nobody will be asked again before the burst ends: every request
+    // still waiting on a man is held, so the days passing on the engine alone decide none of them.
+    holdRequestsForTheOwed(toDay, input.outOfTime?.() === true);
     const ticked = runDeterministicTick({
       world, toDay, ids, warfare: input.warfare, clock: input.clock,
       ...(input.life === undefined ? {} : { life: input.life }),
@@ -3192,10 +3274,12 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       const mine = own.filter((act) => act.part === index);
       const handedOn = delegated.filter((attempt) => partOfAttempt(attempt).part === index);
       for (const attempt of handedOn) handedTo.set(attempt.id, index);
+      // A ref placed by a guess at its words is kept as one: never evidence the part made the thing.
       const workRefs: OrderWorkRef[] = [
-        ...mine.flatMap((act) => act.work ?? []),
-        ...handedOn.map((attempt) => ({ kind: "order_attempt" as const, id: attempt.id })),
+        ...mine.flatMap((act) => (act.work ?? []).map((ref) => (act.guessed ? { ...ref, by: "guess" as const } : ref))),
+        ...handedOn.map((attempt) => ({ kind: "order_attempt" as const, id: attempt.id, madeAtStep: world.elapsedStep, op: "order_attempt_issue", by: partOfAttempt(attempt).guessed ? "guess" as const : "act" as const })),
       ].slice(0, 12);
+      const effects: AppliedEffect[] = mine.flatMap((act) => act.carried && act.effect !== undefined ? [act.guessed ? { ...act.effect, by: "guess" as const } : act.effect] : []).slice(0, MAX_PART_EFFECTS);
       const refused = mine.filter((act) => !act.carried && act.refusal !== null);
       const resolve = refResolver(world, acts.assignedIds ?? new Map());
       const named = (part.goals ?? []).map((goal) => resolveGoal(world, goal, actorPolityId, resolve)).filter((goal): goal is OrderGoal => goal !== null);
@@ -3312,6 +3396,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         actsDone: Math.min(99, carried.filter((act) => act.delta !== undefined && DONE_ON_APPLICATION_OPS.has(act.delta.op)).length),
         // Refused for good: what is held for later is not refused yet.
         actsRefused: Math.min(99, mine.filter((act) => !act.carried && !heldActs.has(act)).length),
+        ...(effects.length === 0 ? {} : { effects }),
       };
     });
     // A part that wants what an earlier open part of his wants replaces it:
@@ -3428,15 +3513,18 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
    * forgotten, and the next thing that read the world held their silence
    * against them.
    */
-  const oweTurns = (actors: readonly { readonly characterId: string }[], whyOf: (id: string) => string | undefined): void => {
+  const oweTurns = (actors: readonly { readonly characterId: string }[], whyOf: (id: string) => string | undefined, cause: OwedCause = "budget"): void => {
     const fresh = actors.flatMap((actor) => {
       const why = whyOf(actor.characterId);
       if (why === undefined || world.owed.some((entry) => entry.characterId === actor.characterId)) return [];
       owedThisBurst.add(actor.characterId);
-      return [{ characterId: actor.characterId, why: why.slice(0, 300), sinceStep: world.elapsedStep, bursts: 0 }];
+      return [{ characterId: actor.characterId, why: why.slice(0, 300), sinceStep: world.elapsedStep, bursts: 0, cause }];
     });
     if (fresh.length > 0) world = { ...world, owed: [...world.owed, ...fresh].slice(-40) };
+    holdRequestsForTheOwed();
   };
+  // Owed from the last burst: their requests are held from the first day (`holdRequestsForTheOwed`).
+  holdRequestsForTheOwed();
 
   // ── Iteration 0: the player's order ────────────────────────────────────
   const threadOf = (event: PendingEvent): string | undefined => {
@@ -4207,7 +4295,15 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // The order read has already spent the turn's time: the first round asks only those the order is waiting on, and whom the early questions already covered.
     const lateStart = hops === 1 && input.outOfTime?.() === true;
     const gated = rushed ? [] : lateStart ? fresh.filter((actor) => orderPeople.has(actor.characterId) || dueWhy.has(actor.characterId) || owesAnAnswer.has(actor.characterId) || (prefetch.current?.ids.has(actor.characterId) ?? false)) : hops === 1 ? fresh : eventful.length > 0 ? eventful : quietForDays >= budget.newChainAfterDays ? fresh : [];
-    if (rushed && fresh.length > 0) skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: the turn's time is spent; ${fresh.length} left unasked and the days pass on the engine alone` });
+    if (rushed && fresh.length > 0) {
+      skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: the turn's time is spent; ${fresh.length} left unasked and the days pass on the engine alone` });
+      // Those with something of their own to decide -- an order of the ruler's, a step due, a letter to
+      // answer -- are owed their turn: the time running out is the processing, not their choice.
+      oweTurns(fresh, (id) => dueWhy.get(id) ?? (orderPeople.has(id) ? "an order of the ruler's he holds" : owesAnAnswer.has(id) ? "a request put to him he has not answered" : undefined), "time");
+    }
+    if (lateStart && gated.length < fresh.length) {
+      oweTurns(fresh.filter((actor) => !gated.includes(actor)), (id) => dueWhy.get(id), "time");
+    }
     if (!rushed && gated.length < fresh.length) {
       skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: nothing that calls for a decision (${fresh.length - gated.length} left unasked until news of weight, a due step or ${budget.newChainAfterDays} quiet days)` });
     }
@@ -4227,7 +4323,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // the rest are owed their turn, the player's people having been put first.
     const roundCap = budget.maxAskedPerRound ?? MAX_ASKED_PER_ROUND;
     const asking = (callCap - budgetCalls() === 1 ? candidates.slice(0, 8) : room < 3 ? candidates.slice(0, 8 * Math.max(0, room)) : candidates).slice(0, roundCap);
-    if (asking.length < candidates.length) oweTurns(candidates.filter((actor) => !asking.includes(actor)), (id) => dueWhy.get(id));
+    if (asking.length < candidates.length) oweTurns(candidates.filter((actor) => !asking.includes(actor)), (id) => dueWhy.get(id), "round");
     if (reserved && asking.length < fresh.length) {
       skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: the last calls are kept for the order; ${fresh.length - asking.length} others left unasked` });
       oweTurns(fresh.filter((actor) => !asking.includes(actor)), (id) => dueWhy.get(id));
@@ -4317,6 +4413,16 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       parallelExtraCalls += cognition.parallelExtraCalls ?? 0;
       const answeredIds = new Set(cognition.answeredActorIds ?? []);
       if (world.owed.some((entry) => answeredIds.has(entry.characterId))) world = { ...world, owed: world.owed.filter((entry) => !answeredIds.has(entry.characterId)) };
+      // Asked, and the provider gave no answer that could be read: nobody decided anything. Whoever
+      // had something of his own to decide is owed his turn, for the provider's failure, and nothing
+      // put to him is answered against him for it.
+      if (cognition.parseFailure !== null) {
+        const unanswered = asking.filter((actor) => !answeredIds.has(actor.characterId));
+        if (unanswered.length > 0) {
+          skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: the provider's answer could not be read (${cognition.parseFailure.slice(0, 120)}); ${unanswered.length} left unanswered and owed their turn` });
+          oweTurns(unanswered, (id) => dueWhy.get(id) ?? (orderPeople.has(id) ? "an order of the ruler's he holds" : owesAnAnswer.has(id) ? "a request put to him he has not answered" : undefined), "provider");
+        }
+      }
       for (const actor of asking) {
         if (!answeredIds.has(actor.characterId)) continue;
         const seen = answeredBy.get(actor.characterId) ?? new Set<string>();
@@ -4435,18 +4541,26 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   }
 
   if (playerDecision !== null) stopReason = "player_decision";
-  // Whoever is still owed a turn at the end has waited one burst more; after
-  // `MAX_OWED_BURSTS` the world stops waiting for him.
+  // Whoever is still owed a turn at the end has waited one burst more. He is
+  // kept owed as long as what he was wanted for still stands in the world
+  // (`owedTurnStands`): a request to him unanswered, an order of the ruler's
+  // he holds, a letter awaiting him. The processing's limits never become his
+  // refusal: the rules used to answer for him after two bursts, as though he
+  // had chosen, and a short budget was written into the record as his "no".
+  // Only a reason the engine cannot read lapses by count, and then nothing is
+  // answered for him; only a dead man's requests are answered -- that he was
+  // dead before he could answer, which is history.
   const owedBefore = world.owed;
   world = {
     ...world,
     owed: world.owed
       .map((entry) => (owedThisBurst.has(entry.characterId) ? entry : { ...entry, bursts: entry.bursts + 1 }))
-      .filter((entry) => entry.bursts < MAX_OWED_BURSTS),
+      .filter((entry) => owedTurnStands(world, entry)),
   };
-  // And what was put to him is answered for him, rather than waiting on a
-  // turn that will not come: dropped, his requests used to wait for ever (E14).
-  const silent = answerForTheSilent(world, owedBefore.filter((entry) => !world.owed.some((kept) => kept.characterId === entry.characterId)).map((entry) => entry.characterId), {
+  const letGo = owedBefore.filter((entry) => !world.owed.some((kept) => kept.characterId === entry.characterId));
+  if (letGo.length > 0) skipped.push({ stage: "cognition", reason: `${letGo.length} owed turn(s) let go, their reason settled or past reading: ${letGo.map((entry) => entry.characterId).join(", ")}` });
+  holdRequestsForTheOwed();
+  const silent = answerForTheSilent(world, letGo.filter((entry) => world.characters.some((character) => character.id === entry.characterId && !character.alive)).map((entry) => entry.characterId), {
     toDay: world.elapsedStep, offices: input.offices, ids, playerCharacterId: input.actorRef.kind === "character" ? input.actorRef.id : null,
   });
   world = silent.world;

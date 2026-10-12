@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Sheet, type SheetSide } from "../../../components/ui/sheet";
 import { useWindowState } from "../../../components/ui/window-workspace";
 import { Era } from "../../../components/ui/era";
-import { unreadCount, type ChronicleEntry, type EntryTag, type GameViewController } from "./use-game-view";
+import { unreadCount, unreadInView, type ChronicleEntry, type EntryTag, type GameViewController } from "./use-game-view";
 import { Tip, TipCard } from "../../../components/ui/tip";
 import { Linkify, Name, ThreadName, useThreads } from "./notes";
 import type { EntityKey } from "@chronica/shared";
@@ -84,6 +84,7 @@ function Entry({ entry, onTag, focused }: { readonly entry: ChronicleEntry; read
       id={`chronicle-entry-${entry.id}`}
       data-entry-id={entry.id}
       data-unread={entry.unread && entry.published ? "true" : undefined}
+      data-provisional={entry.published ? undefined : "true"}
       className={`chronicle-entry${entry.published ? "" : " is-unfolding"}${focused ? " is-focused" : ""}`}
     >
       <header>
@@ -95,6 +96,8 @@ function Entry({ entry, onTag, focused }: { readonly entry: ChronicleEntry; read
           </p>
         )}
         <h3>{entry.title}</h3>
+        {/* Said in words, not only in styling: a passage is not the record until its turn commits, and one whose attempt was interrupted is written again. */}
+        {!entry.published && <p className="chronicle-entry__provisional">Being written. It enters the record when the turn is complete.</p>}
         {threadsOf(entry).length > 0 && (
           <p className="chronicle-entry__threads">
             {threadsOf(entry).map((id, index) => <span key={id}>{index > 0 && " · "}<ThreadName id={id} /></span>)}
@@ -169,7 +172,14 @@ export function ChroniclePanel({ controller, onClose, side, focus = null }: {
   // "Only what is unread" keeps the entries that were unread when it was
   // chosen: reading one must not make it vanish from under the reader.
   const [unreadOnly, setUnreadOnly] = useWindowState<readonly string[] | null>("chronicle:unread", null);
-  const unread = unreadCount(controller.view.chronicle);
+  const unread = unreadInView(controller.view);
+  const unreadInHand = unreadCount(controller.view.chronicle);
+  const olderAvailable = (controller.view.chronicleOlder ?? null) !== null;
+  const [olderFailed, setOlderFailed] = useState(false);
+  const turnBack = async (): Promise<void> => {
+    setOlderFailed(false);
+    if (!(await controller.loadOlder())) setOlderFailed(true);
+  };
 
   // Newest first: a reader opening the record wants where it has got to, and
   // can turn back from there.
@@ -206,6 +216,9 @@ export function ChroniclePanel({ controller, onClose, side, focus = null }: {
               {unreadOnly !== null && <button type="button" className="word-button" onClick={() => setUnreadOnly(null)}>Show everything</button>}
               {unread > 0 && <button type="button" className="word-button" onClick={() => void controller.markRead()}>Mark all as read</button>}
             </div>
+            {unreadOnly !== null && unread > unreadInHand && olderAvailable && (
+              <p className="quiet">{`${unread - unreadInHand} more unread ${unread - unreadInHand === 1 ? "entry is" : "entries are"} further back. Turn back further to read ${unread - unreadInHand === 1 ? "it" : "them"}.`}</p>
+            )}
             {controller.busy && (
               <p className="chronicle-unfolding" aria-live="polite">The season is still unfolding. What follows is written as it happens; nothing already shown will move.</p>
             )}
@@ -220,6 +233,15 @@ export function ChroniclePanel({ controller, onClose, side, focus = null }: {
             ) : (
               <div ref={list}>
                 {entries.map((entry) => <Entry key={entry.id} entry={entry} onTag={setFilter} focused={entry.id === focusedId} />)}
+              </div>
+            )}
+            {olderAvailable && (
+              <div className="chronicle-older">
+                {(filter !== null || unreadOnly !== null) && <p className="quiet">Only the entries turned back to so far are shown here.</p>}
+                <button type="button" className="word-button" onClick={() => void turnBack()} disabled={controller.loadingOlder} aria-busy={controller.loadingOlder}>
+                  {controller.loadingOlder ? "Turning back…" : "Turn back further"}
+                </button>
+                {olderFailed && <p className="quiet" role="status">The earlier record could not be read. Try again.</p>}
               </div>
             )}
     </Sheet>
