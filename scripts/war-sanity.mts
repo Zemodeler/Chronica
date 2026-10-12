@@ -2,8 +2,8 @@
  * The war sanity run (docs/plans/war-plans.md): the Punic opening advanced a number of game years, month by
  * month, with a model that never acts and with nobody at the player's seat in any power at war (the player is
  * an Egyptian), so that the rules conduct both Rome's and Carthage's wars. Opens a Rome-Carthage war at month 6.
- * Reports per year: wars, battles, sieges, march orders and how many were flips (a new objective ordered
- * before the last one was reached), plan shifts, naval moves, men under arms, and the months' cpu cost.
+ * Reports per year: wars, battles, sieges, march orders and how many were flips (a journey called off while
+ * still under way, by the engine's `march_called_off` facts), plan shifts, naval moves, men under arms, and the months' cpu cost.
  * Closes with the money audit (unexplained must be 0). No provider is called.
  *
  *   npx tsx scripts/war-sanity.mts [years=5] [--actor=<characterId>] [--actor-polity=<polityId>] [--free]
@@ -33,7 +33,6 @@ const context = () => ({ now: world.instant, actorRef: { kind: "character" as co
 interface Year { orders: number; flips: number; naval: number; battles: number; sieges: number; planShifts: number; retargets: number; wars: number; cpu: number; men: number; engagements: number }
 const blank = (): Year => ({ orders: 0, flips: 0, naval: 0, battles: 0, sieges: 0, planShifts: 0, retargets: 0, wars: 0, cpu: 0, men: 0, engagements: 0 });
 const perYear: Year[] = [];
-const lastOrder = new Map<string, string>();
 const seenProjects = new Set<string>();
 const seenSieges = new Set<string>();
 const seenEngagements = new Set<string>();
@@ -43,7 +42,6 @@ const menOf = (w: WorldState): number => w.material.forces.reduce((sum, f) => su
 let total = emptyAudit();
 const worstMonth = { ms: 0, month: 0 };
 const flipLog: string[] = [];
-let pendingBefore = new Map<string, string>();
 const lastObjective = new Map<string, string>();
 const priorIssued = new Map<string, number>();
 const free = args.includes("--free");
@@ -109,13 +107,9 @@ for (let month = 0; month < years * 12; month += 1) {
       console.log(`  trace month ${month + 1} (day ${world.instant.day}): ${f.name} ${fitStrengthOf(f)} men, ${f.provisionStatus} (through day ${f.provisionedThroughStep}), at ${province?.name ?? f.locationId} held by ${province?.controllerPolityId ?? "nobody"}, orders ${cp === undefined ? "none" : `${cp.mode} ${cp.objective.kind === "province" ? cp.objective.provinceId : cp.objective.forceId}`}${f.hold === true ? " HOLD" : ""}`);
     }
   }
-  // March orders: a new force_move project. A flip is a new destination ordered for an army whose last march (as the month before ended) had not been finished.
-  const pendingNow = new Map<string, string>();
-  for (const project of world.projects) {
-    const outcome = project.completionOutcome;
-    if (outcome?.kind !== "force_move" || outcome.forceId == null || (project.status !== "funded" && project.status !== "in_progress")) continue;
-    pendingNow.set(outcome.forceId, String(outcome.provinceId));
-  }
+  // March orders: a new force_move project. A flip is a journey called off while still under way (the engine's own `march_called_off`
+  // fact, told once per cancelled journey). An army that arrived and was then sent elsewhere, or fell back, was counted as a flip
+  // before, which made every answer to the enemy look like indecision.
   for (const project of world.projects) {
     const outcome = project.completionOutcome;
     if (outcome?.kind !== "force_move" || outcome.forceId == null || seenProjects.has(project.id)) continue;
@@ -124,15 +118,15 @@ for (let month = 0; month < years * 12; month += 1) {
     if (force === undefined) continue;
     if (isNavalForce(force, definition.warfare)) { row.naval += 1; continue; }
     row.orders += 1;
-    const last = lastOrder.get(force.id);
-    const earlier = pendingBefore.get(force.id);
-    if (last !== undefined && last !== outcome.provinceId && earlier !== undefined && earlier !== outcome.provinceId) {
-      row.flips += 1;
-      flipLog.push(`month ${month + 1}: ${force.name} ordered to ${String(outcome.provinceId)} before reaching ${earlier}`);
-    }
-    lastOrder.set(force.id, String(outcome.provinceId));
   }
-  pendingBefore = pendingNow;
+  for (const fact of result.newFacts) {
+    if (fact.kind !== "march_called_off") continue;
+    const forceId = fact.affectedRefs.find((ref) => ref.kind === "force")?.id;
+    const force = forceId === undefined ? undefined : world.material.forces.find((f) => f.id === forceId);
+    if (force !== undefined && isNavalForce(force, definition.warfare)) continue;
+    row.flips += 1;
+    flipLog.push(`month ${month + 1}: ${fact.summary.slice(0, 160)}`);
+  }
   // The objective an army is sent on, changed before it was reached or run out (new rules only).
   for (const cp of (world as unknown as { campaigns?: { forceId: string; objective: { kind: string; provinceId?: string; forceId?: string }; mode: string; expiresStep: number; issuedStep: number }[] }).campaigns ?? []) {
     const key = JSON.stringify([cp.objective, cp.mode]);

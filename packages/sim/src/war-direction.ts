@@ -3,7 +3,6 @@ import {
   campaignOf,
   alliesLedBy,
   isNavalForce,
-  kmFrom,
   warPlanOf,
   leaderOf,
   warsOf,
@@ -16,7 +15,8 @@ import {
   type WorldDelta,
   type WorldState,
 } from "@chronica/shared";
-import { REACH_KM, besiegerOrder, campaignStillGood, conductByPlan, issueCampaign, type OrderSets } from "./campaign-orders";
+import { FELL_BACK_DAYS, REACH_KM, besiegerOrder, campaignStillGood, conductByPlan, enemiesAt, issueCampaign, standsAt, type OrderSets } from "./campaign-orders";
+import { roughMen } from "./board";
 import { commandTenureOf } from "./constitutions";
 import { shareArmies } from "./two-fronts";
 import { landForcesOf, planTheWar, reachOf, theatresForAims, type StrategyContext } from "./grand-strategy";
@@ -193,26 +193,79 @@ function campaignDecision(input: DirectInput, issuer: string, force: WorldState[
   };
 }
 
-/** The contingents of a power that follows a leader: his main army's orders, given them as their own and kept to as any army's are. */
+/** The days a contingent's orders to serve with the leader's army are given for. */
+const FOLLOWER_ORDER_DAYS = 120;
+
+/**
+ * The contingents of a power that follows a leader: they serve with his army, where it is or where it is sent, and share its work
+ * there. Each goes only where its side has the odds to stand: the enemy's men at the meeting place against the leader's, its own
+ * and the other contingents' already there. One that cannot keeps its own ground until the odds change.
+ *
+ * Before this each contingent was handed a copy of the leader's order and reckoned the odds alone: the Lucanians (349 men) were sent
+ * against the siege of Rhegium, found the garrison of four thousand, fell back home past the consul's twenty thousand, and were sent
+ * again the next month, every month.
+ */
 function directFollower(input: DirectInput, ctx: StrategyContext, mine: readonly WorldState["material"]["forces"][number][]): StatecraftDecision[] {
   const { world, polityId } = input;
   const leader = leaderOf(world.polityAgreements, polityId)!;
   const day = world.instant.day;
   const leaderPlan = (world.warPlans ?? []).find((plan) => plan.polityId === leader);
   const main = leaderPlan?.theatres.find((theatre) => theatre.mainEffort)?.id ?? null;
-  const orders = (world.campaigns ?? []).filter((entry) => entry.polityId === leader && entry.expiresStep > day && (entry.mode === "seek_battle" || entry.mode === "siege" || entry.mode === "raid"))
+  const hosts = landForcesOf(world, leader, input.warfare).filter((army) => army.outlaw !== true);
+  const orders = (world.campaigns ?? []).filter((entry) => entry.polityId === leader && entry.expiresStep > day && (entry.mode === "seek_battle" || entry.mode === "siege" || entry.mode === "raid") && hosts.some((army) => army.id === entry.forceId))
     .sort((a, b) => Number(b.theatreId === main) - Number(a.theatreId === main) || a.forceId.localeCompare(b.forceId));
+  // The leader's army the contingents serve with: the one carrying his first order in the field, else his strongest.
+  const given = orders[0];
+  const host = given === undefined ? [...hosts].sort((a, b) => fitStrengthOf(b) - fitStrengthOf(a) || a.id.localeCompare(b.id))[0] : hosts.find((army) => army.id === given.forceId);
+  const leaderBusy = (world.campaigns ?? []).some((entry) => entry.polityId === leader && entry.expiresStep > day);
+  const placeName = (id: string): string => ctx.provinces.get(id)?.name ?? id;
   const decisions: StatecraftDecision[] = [];
   for (const force of mine) {
     if (isModels(input, force)) continue;
     const kept = campaignOf(world, force.id);
-    const reach = reachOf(ctx, force.locationId, REACH_KM, true);
-    const good = kept !== undefined && leaderPlan !== undefined && kept.warId === leaderPlan.warId && campaignStillGood(ctx, force, kept, leaderPlan, undefined, input.playedByModel, reach);
-    let cp: CampaignPlan | undefined = good ? kept : undefined;
-    const given = orders[0];
-    if (cp === undefined && given !== undefined && leaderPlan !== undefined) {
-      cp = { ...given, forceId: force.id, polityId, theatreId: null, issuedByCharacterId: given.issuedByCharacterId, issuedStep: day, expiresStep: day + 120 };
-      decisions.push(campaignDecision(input, given.issuedByCharacterId, force, cp, "bidden to serve with the leader's army", leaderPlan.enemyPolityId));
+    let cp: CampaignPlan | undefined;
+    if (host !== undefined && leaderPlan !== undefined) {
+      // Where to meet him: the place his orders send him (he will be there, or is), else where he stands.
+      const meet = given !== undefined && given.objective.kind === "province" ? given.objective.provinceId : host.locationId;
+      const wanted: Pick<CampaignPlan, "mode" | "objective"> = given !== undefined && given.objective.kind === "province" && given.objective.provinceId === meet
+        ? { mode: given.mode, objective: given.objective }
+        : { mode: "seek_battle", objective: { kind: "province", provinceId: meet } };
+      // His men count at the meeting place when his orders send him there and he has not yet arrived: he will be there.
+      const coming = given !== undefined && host.locationId !== meet ? fitStrengthOf(host) : 0;
+      const odds = standsAt(ctx, force, meet, coming);
+      const stands = kept !== undefined && kept.warId === leaderPlan.warId && kept.expiresStep > day && kept.mode === wanted.mode
+        && JSON.stringify(kept.objective) === JSON.stringify(wanted.objective) && (kept.forCommanderId === undefined || kept.forCommanderId === force.commanderCharacterId);
+      if (odds.safe) {
+        if (stands) {
+          cp = kept;
+          if (kept.expiresStep - day < RENEW_WITHIN_DAYS) {
+            cp = { ...kept, expiresStep: day + FOLLOWER_ORDER_DAYS };
+            decisions.push(campaignDecision(input, kept.issuedByCharacterId, force, cp, "the orders stand", leaderPlan.enemyPolityId));
+          }
+        } else {
+          const issuer = given?.issuedByCharacterId ?? leaderPlan.issuedByCharacterId ?? host.commanderCharacterId;
+          cp = {
+            forceId: force.id, polityId, warId: leaderPlan.warId, theatreId: null, objective: wanted.objective, mode: wanted.mode,
+            baseProvinceId: kept?.baseProvinceId ?? null, fallbackProvinceId: kept?.fallbackProvinceId ?? null,
+            issuedByCharacterId: issuer, issuedStep: day, expiresStep: day + FOLLOWER_ORDER_DAYS, byRule: true, forCommanderId: force.commanderCharacterId,
+          };
+          const why = odds.theirs > 0
+            ? `bidden to serve with ${host.name} at ${placeName(meet)}: ${roughMen(odds.theirs)} of the enemy are there against ${roughMen(odds.ours)} of ours`
+            : `bidden to serve with ${host.name} at ${placeName(meet)}`;
+          decisions.push(campaignDecision(input, issuer, force, cp, why, leaderPlan.enemyPolityId));
+        }
+      } else {
+        // Not enough of ours at the meeting place to stand: it keeps its own ground, and answers only an enemy on it (its old orders
+        // carry it off that ground, and are kept for that alone).
+        cp = kept !== undefined && kept.warId === leaderPlan.warId && kept.expiresStep > day && enemiesAt(ctx, force.locationId) > 0 ? kept : undefined;
+        const saidLately = world.statecraft.log.some((entry) => entry.act === "hold" && entry.polityId === polityId && entry.actorCharacterId === force.commanderCharacterId && day - entry.day < FELL_BACK_DAYS);
+        if (!input.sets.marching.has(force.id) && !input.sets.fighting.has(force.id) && force.hold !== true && cp === undefined && !saidLately) {
+          decisions.push({
+            polityId, actorCharacterId: force.commanderCharacterId, act: "hold", targetPolityId: leaderPlan.enemyPolityId, facts: [], deltas: [],
+            why: `${force.name} keeps to ${placeName(force.locationId)}: ${roughMen(odds.theirs)} of the enemy are at ${placeName(meet)} against ${roughMen(odds.ours)} of ours with ${host.name}`.slice(0, 400),
+          });
+        }
+      }
     }
     if (input.sets.marching.has(force.id) || input.sets.fighting.has(force.id) || (force.hold === true && cp === undefined)) continue;
     if (input.sets.besieging.has(force.id)) {
@@ -221,7 +274,7 @@ function directFollower(input: DirectInput, ctx: StrategyContext, mine: readonly
       continue;
     }
     // While the leader has orders out and none that an ally can keep (he winters, he holds a town), the allies stay: they do not go off on their own.
-    if (cp === undefined && (world.campaigns ?? []).some((entry) => entry.polityId === leader && entry.expiresStep > day)) continue;
+    if (cp === undefined && (leaderBusy || host !== undefined)) continue;
     const order = cp === undefined ? input.legacy(force) : conductByPlan({ ...ctx, sets: input.sets }, force, cp, input.gameId);
     if (order !== null) decisions.push(order);
   }
