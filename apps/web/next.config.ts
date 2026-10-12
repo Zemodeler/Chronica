@@ -11,6 +11,12 @@ const nextConfig: NextConfig = {
   output: "standalone",
   // The corner badge sat over the room and the map in every screenshot.
   devIndicators: false,
+  turbopack: { root: "C:/Users/andrei", resolveAlias: {
+    "@chronica/db": "../../packages/db/src/index.ts",
+    "@chronica/shared": "../../packages/shared/src/index.ts",
+    "@chronica/sim": "../../packages/sim/src/index.ts",
+    "@chronica/billing": "../../packages/billing/src/index.ts",
+  } },
   transpilePackages: ["@chronica/billing", "@chronica/db", "@chronica/shared", "@chronica/sim"],
 };
 
