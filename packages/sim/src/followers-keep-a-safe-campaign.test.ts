@@ -33,7 +33,16 @@ function opening(day: number): WorldState {
   });
   const applied = applyDeltas(world, [muster], context(world, LUCANIAN));
   const made = applied.world.material.forces.find((force) => force.name === "Contingent of Lucanians")!;
-  return { ...applied.world, material: { ...applied.world.material, forces: applied.world.material.forces.map((force) => (force.id === made.id ? { ...force, id: CONTINGENT } : force)) } };
+  // The contingent is given a fixed id. Its chest (and anything else the muster wrote) names the force by id, so every reference is renamed
+  // with it: renaming the force alone left a chest owned by a force that no longer exists, and a world that would not load.
+  return JSON.parse(JSON.stringify(applied.world).replaceAll(JSON.stringify(made.id), JSON.stringify(CONTINGENT))) as WorldState;
+}
+
+/** The world a test starts from must be one that loads; a fixture that is not would let a test pass on a broken save. */
+function valid(world: WorldState): WorldState {
+  const parsed = WorldStateSchema.safeParse(world);
+  expect(parsed.success ? [] : parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`)).toEqual([]);
+  return world;
 }
 
 /** Rome's plan and the consul's orders, written in by hand so the test does not depend on what Rome's own rules choose. */
@@ -56,7 +65,7 @@ const aMonthLater = (world: WorldState): WorldState => ({ ...world, instant: { .
 
 describe("the allies' contingents keep a safe campaign", () => {
   it("is sent to serve with the consul's army at his siege, and stands with him before a garrison it could not face alone", () => {
-    const start = romeSends(placed(opening(120), ROMAN_ARMY, RHEGIUM), "siege", RHEGIUM);
+    const start = valid(romeSends(placed(opening(120), ROMAN_ARMY, RHEGIUM), "siege", RHEGIUM));
     const first = aMonth(start);
     const sent = lucanian(first.decisions);
     expect(sent.map((decision) => decision.act)).toEqual(expect.arrayContaining(["war_plan", "march"]));
@@ -64,7 +73,7 @@ describe("the allies' contingents keep a safe campaign", () => {
     expect(campaignOf(first.world, CONTINGENT)).toMatchObject({ mode: "siege", objective: { kind: "province", provinceId: RHEGIUM }, warId: WAR });
 
     // Arrived: three hundred and forty-nine beside the consul's seventeen thousand, before the garrison's thirty-six hundred.
-    const arrived = aMonthLater(placed(first.world, CONTINGENT, RHEGIUM));
+    const arrived = valid(aMonthLater(placed(first.world, CONTINGENT, RHEGIUM)));
     const second = aMonth(arrived);
     const there = lucanian(second.decisions);
     expect(there.map((decision) => decision.act)).not.toContain("fall_back");
@@ -77,7 +86,7 @@ describe("the allies' contingents keep a safe campaign", () => {
 
   it("keeps its own ground, and says so, where its side has not the odds at the meeting place", () => {
     // The consul's army is a thousand men at Latium with orders for Rhegium: a thousand and 349 against 3,600 is not a siege.
-    const start = romeSends(withMen(placed(opening(120), ROMAN_ARMY, LATIUM), ROMAN_ARMY, 1_000), "siege", RHEGIUM);
+    const start = valid(romeSends(withMen(placed(opening(120), ROMAN_ARMY, LATIUM), ROMAN_ARMY, 1_000), "siege", RHEGIUM));
     const month = aMonth(start);
     const theirs = lucanian(month.decisions);
     expect(theirs.map((decision) => decision.act)).not.toContain("march");
@@ -94,7 +103,7 @@ describe("the allies' contingents keep a safe campaign", () => {
       mode: "siege", issuedByCharacterId: CONSUL, issuedStep: 90, expiresStep: 210, byRule: true, forCommanderId: LUCANIAN,
     };
     const base = romeSends(placed(placed(opening(150), ROMAN_ARMY, BRUTTII_COAST), CONTINGENT, RHEGIUM), "seek_battle", BRUTTII_COAST);
-    const start = { ...base, campaigns: [...(base.campaigns ?? []), stale] };
+    const start = valid({ ...base, campaigns: [...(base.campaigns ?? []), stale] });
     const month = aMonth(start);
     const theirs = lucanian(month.decisions);
     expect(theirs.find((decision) => decision.act === "war_plan")?.why).toMatch(/bidden to serve with Roman field army at South-western coast of the Bruttii/);
@@ -105,7 +114,7 @@ describe("the allies' contingents keep a safe campaign", () => {
   });
 
   it("decides the same month twice from the same world", () => {
-    const start = romeSends(placed(opening(120), ROMAN_ARMY, RHEGIUM), "siege", RHEGIUM);
+    const start = valid(romeSends(placed(opening(120), ROMAN_ARMY, RHEGIUM), "siege", RHEGIUM));
     const once = decideStatecraft(inputFor(start));
     const again = decideStatecraft(inputFor(start));
     expect(JSON.stringify(lucanian(again))).toBe(JSON.stringify(lucanian(once)));
