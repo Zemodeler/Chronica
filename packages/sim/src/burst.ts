@@ -960,11 +960,39 @@ function workMadeBy(before: WorldState, after: WorldState, delta: WorldDelta, as
   return workOf(before, after, delta, assignedIds).map((ref) => ({ ...ref, madeAtStep: after.elapsedStep, op: delta.op, by }));
 }
 
+/** Who an act placed, in what role and where, and whose money it moved to whom: read from the act as applied, never from its words. */
+function effectIdentity(delta: WorldDelta, resolve: (ref: string) => string, work: readonly OrderWorkRef[]): Partial<AppliedEffect> {
+  switch (delta.op) {
+    case "money_transfer":
+      return { payerAccountId: resolve(delta.fromAccountRef), payeeAccountId: delta.toAccountRef === null ? null : resolve(delta.toAccountRef) };
+    case "force_post_set":
+      return { personId: resolve(delta.characterRef), role: delta.rankId, targetId: resolve(delta.forceRef) };
+    case "force_membership_set":
+      return delta.change === "enlist" ? { personId: resolve(delta.characterRef), role: "member", targetId: resolve(delta.forceRef) } : {};
+    case "force_modify":
+      return delta.commanderCharacterRef === undefined ? { targetId: resolve(delta.forceRef) } : { personId: resolve(delta.commanderCharacterRef), role: "commander", targetId: resolve(delta.forceRef) };
+    case "force_create": {
+      const made = work.find((ref) => ref.kind === "force");
+      return { personId: resolve(delta.commanderCharacterRef), role: "commander", ...(made === undefined ? {} : { targetId: made.id }) };
+    }
+    case "office_seat_set":
+      return delta.holderCharacterRef === null ? { targetId: delta.officeId } : { personId: resolve(delta.holderCharacterRef), role: "office", targetId: delta.officeId };
+    default:
+      return {};
+  }
+}
+
 /**
  * The applied act as a part's evidence (`AppliedEffect`): its op, the day, and what it named once
- * resolved -- the things it made, the army, the people, the accounts, the place.
+ * resolved -- the things it made, the army, the people, the accounts, the place -- with whose act it
+ * was, whom it placed in what role where, and the money lines it wrote with the sum they moved (a
+ * short chest pays what it has, so the sum is the lines', not the sum asked). Only ever made from an
+ * act the world applied.
  */
-function effectOf(delta: WorldDelta, atStep: number, by: WorkLink, resolve: (ref: string) => string, work: readonly OrderWorkRef[], attemptId: string | null = null): AppliedEffect {
+function effectOf(
+  delta: WorldDelta, atStep: number, by: WorkLink, resolve: (ref: string) => string, work: readonly OrderWorkRef[], attemptId: string | null = null,
+  context: { readonly actorId?: string | undefined; readonly money?: MadeMoney | undefined; readonly world?: WorldState | undefined } = {},
+): AppliedEffect {
   const refs: { kind: string; id: string }[] = work.map((ref) => ({ kind: ref.kind, id: ref.id }));
   for (const [key, value] of Object.entries(delta as Record<string, unknown>)) {
     if (typeof value !== "string" || value === "") continue;
@@ -978,7 +1006,16 @@ function effectOf(delta: WorldDelta, atStep: number, by: WorkLink, resolve: (ref
     const id = resolve(value);
     if (!refs.some((ref) => ref.kind === kind && ref.id === id)) refs.push({ kind, id });
   }
-  return { op: delta.op, atStep, refs: refs.slice(0, 6), by, attemptId };
+  const transactionIds = [...(context.money?.transactionIds ?? [])].slice(0, 6);
+  const lines = context.world === undefined ? [] : context.world.material.transactions.filter((transaction) => transactionIds.includes(transaction.id));
+  const moved = delta.op === "money_transfer" && lines.length > 0 ? { amount: lines.reduce((sum, line) => sum + line.amount, 0) } : {};
+  return {
+    op: delta.op, atStep, refs: refs.slice(0, 6), by, attemptId,
+    ...(context.actorId === undefined ? {} : { actorId: context.actorId }),
+    ...effectIdentity(delta, resolve, work),
+    ...moved,
+    ...(transactionIds.length === 0 ? {} : { transactionIds }),
+  };
 }
 
 /** A part's effects with more added, the earliest kept (they are the ones that answer it). */
@@ -1279,14 +1316,14 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       }),
       orders: world.orders.map((order) => ({
         ...order,
-        parts: order.parts.map((part) => {
+        parts: order.parts.map((part, partIndex) => {
           const extra = part.workRefs.flatMap((ref) => ref.kind === "order_attempt" ? [credited.get(ref.id)].filter((entry) => entry !== undefined) : []);
           if (extra.length === 0) return part;
           const fresh = extra.flatMap((entry) => entry.work).filter((ref) => !part.workRefs.some((known) => known.kind === ref.kind && known.id === ref.id));
           // A part that named no goal of its own takes the goals of the work
           // done for it: the legate's march says where the legion is going.
           const goals = part.goals.length > 0 ? part.goals : mergeGoals(extra.flatMap((entry) => entry.goals), []).goals;
-          return withEffects({ ...part, goals, workRefs: [...part.workRefs, ...fresh].slice(0, 12), attribution: extra.some((entry) => entry.guessed) ? "guessed" as const : part.attribution }, extra.flatMap((entry) => entry.effects));
+          return withEffects({ ...part, goals, workRefs: [...part.workRefs, ...fresh].slice(0, 12), attribution: extra.some((entry) => entry.guessed) ? "guessed" as const : part.attribution }, extra.flatMap((entry) => entry.effects).map((effect) => ({ ...effect, partRef: orderPartRef(order.id, partIndex) })));
         }),
       })),
     };
@@ -1487,7 +1524,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
           const goals = mergeGoals([...next.goals, ...acts.flatMap((act) => goalsOfAct(before, act, made, resolve))], []).goals;
           // What the resumed act did is the part's evidence, dated to the day it was taken up again.
           const resolveId = (handle: string): string => tried.assignedIds.get(handle.replace(/^local:/, "")) ?? handle;
-          const effects = tried.applied.map((entry) => effectOf(entry.delta, world.elapsedStep, "stage", resolveId, workMadeBy(before, world, entry.delta, tried.assignedIds, "stage")));
+          const effects = tried.applied.filter((entry) => entry.changed !== false).map((entry) => ({
+            ...effectOf(entry.delta, world.elapsedStep, "stage", resolveId, workMadeBy(before, world, entry.delta, tried.assignedIds, "stage"), null, { actorId: order.actorCharacterId, money: entry.madeMoney, world }),
+            partRef: ref,
+          }));
           next = withEffects({
             ...next, refusal: null, refusedAtStep: null, goals, actsCarried: Math.min(99, next.actsCarried + tried.applied.length), actsDone: Math.min(99, (next.actsDone ?? 0) + tried.applied.filter((entry) => DONE_ON_APPLICATION_OPS.has(entry.delta.op)).length),
             workRefs: [...next.workRefs, ...made.filter((work) => !next.workRefs.some((known) => known.id === work.id))].slice(0, 12),
@@ -2065,10 +2105,13 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       !(/(reply|refus|answer|accept|counter|declin)/i.test(fact.kind)
         && fact.affectedRefs.some((ref) => answeredBy.has(ref.id) || answeredBy.has(world.characters.find((character) => character.id === ref.id)?.polityId ?? ""))));
     // A fact claiming a city taken, an army arrived or a man appointed is held to
-    // the state the acts left, or dropped and said so (1.6).
+    // the state the acts left, or dropped and said so (1.6). A sum said paid is
+    // held to the lines this answer's own acts wrote, today: never to another
+    // payment of the same day.
+    const paidThisAnswer = { atStep: world.elapsedStep, transactionIds: new Set(result.applied.flatMap((entry) => entry.madeMoney?.transactionIds ?? [])) };
     const unrepeated = unrepeatedAll.filter((fact) => {
       const refs = fact.affectedRefs.map((ref) => resolveFactRef(world, ref));
-      const contradiction = factContradictsState(world, { kind: fact.kind, summary: fact.summary, affectedRefs: refs }, (forceId) => new Set([...groundOfForce(world, forceId), ...(stoodBefore.has(forceId) ? [stoodBefore.get(forceId)!] : [])]));
+      const contradiction = factContradictsState(world, { kind: fact.kind, summary: fact.summary, affectedRefs: refs }, (forceId) => new Set([...groundOfForce(world, forceId), ...(stoodBefore.has(forceId) ? [stoodBefore.get(forceId)!] : [])]), paidThisAnswer);
       if (contradiction === null) return true;
       skipped.push({ stage: "parity", reason: `dropped "${fact.summary.slice(0, 80)}": it ${contradiction}` });
       return false;
@@ -2467,7 +2510,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     if (!actsForTheWorld && actorRef.kind === "character") {
       checkpoint("crediting delegated work", () => creditDelegatedWork(actorRef.id, result.applied.filter((entry) => entry.changed !== false && !CHANGES_NOTHING.has(entry.delta.op)).map((entry) => {
         const work = workMadeBy(worldAtStart, world, entry.delta, result.assignedIds, "delegate");
-        return { said: wordsOfAct(entry.delta), delta: entry.delta, work, index: indexIn(entry), goals: goalsOfAct(worldAtStart, entry.delta, work, resolveRefs), money: entry.madeMoney, effect: effectOf(entry.delta, world.elapsedStep, "delegate", resolveHandle, work) };
+        return { said: wordsOfAct(entry.delta), delta: entry.delta, work, index: indexIn(entry), goals: goalsOfAct(worldAtStart, entry.delta, work, resolveRefs), money: entry.madeMoney, effect: effectOf(entry.delta, world.elapsedStep, "delegate", resolveHandle, work, null, { actorId: actorRef.id, money: entry.madeMoney, world }) };
       }), materialized.facts.map((fact) => fact.id), serves));
     }
     // A letter already on its way, written again, is still that letter: the
@@ -2491,7 +2534,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
           const work = workMadeBy(worldAtStart, world, entry.delta, result.assignedIds);
           return {
             said: wordsOfAct(entry.delta), carried: true, refusal: null, work, delta: entry.delta, index: indexIn(entry),
-            effect: effectOf(entry.delta, world.elapsedStep, "act", resolveHandle, work),
+            effect: effectOf(entry.delta, world.elapsedStep, "act", resolveHandle, work, null, { actorId: actorRef.id, money: entry.madeMoney, world }),
             goals: [...goalsOfAct(worldAtStart, entry.delta, work, resolveRefs), ...renamedOrRecommanded(entry.delta, resolveRefs)],
             breach: result.breaches.some((breach) => breach.delta.op === entry.delta.op && wordsOfAct(breach.delta) === wordsOfAct(entry.delta))
               ? describeBreach(entry.delta, world, actorName) : null,
@@ -3279,7 +3322,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         ...mine.flatMap((act) => (act.work ?? []).map((ref) => (act.guessed ? { ...ref, by: "guess" as const } : ref))),
         ...handedOn.map((attempt) => ({ kind: "order_attempt" as const, id: attempt.id, madeAtStep: world.elapsedStep, op: "order_attempt_issue", by: partOfAttempt(attempt).guessed ? "guess" as const : "act" as const })),
       ].slice(0, 12);
-      const effects: AppliedEffect[] = mine.flatMap((act) => act.carried && act.effect !== undefined ? [act.guessed ? { ...act.effect, by: "guess" as const } : act.effect] : []).slice(0, MAX_PART_EFFECTS);
+      const effects: AppliedEffect[] = mine.flatMap((act) => act.carried && act.effect !== undefined ? [{ ...act.effect, ...(act.guessed ? { by: "guess" as const } : {}), partRef: orderPartRef(recordId, index) }] : []).slice(0, MAX_PART_EFFECTS);
       const refused = mine.filter((act) => !act.carried && act.refusal !== null);
       const resolve = refResolver(world, acts.assignedIds ?? new Map());
       const named = (part.goals ?? []).map((goal) => resolveGoal(world, goal, actorPolityId, resolve)).filter((goal): goal is OrderGoal => goal !== null);
@@ -3396,7 +3439,9 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         actsDone: Math.min(99, carried.filter((act) => act.delta !== undefined && DONE_ON_APPLICATION_OPS.has(act.delta.op)).length),
         // Refused for good: what is held for later is not refused yet.
         actsRefused: Math.min(99, mine.filter((act) => !act.carried && !heldActs.has(act)).length),
-        ...(effects.length === 0 ? {} : { effects }),
+        // Kept whenever an act was carried, even with none to show: an empty list is a part whose acts
+        // left no effect to read (unverified), not an old save's part with no record of them.
+        ...(effects.length === 0 && carried.length === 0 ? {} : { effects }),
       };
     });
     // A part that wants what an earlier open part of his wants replaces it:

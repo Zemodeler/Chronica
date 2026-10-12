@@ -122,6 +122,40 @@ describe("a turn the provider could not answer", () => {
   });
 });
 
+describe("a turn whose time ran out", () => {
+  it("still asks the man a request waits on, or owes him his turn for the time: his request stays open across a save, answered by nobody for him", async () => {
+    const { world: base, recipient, attempt } = asking(world());
+    const sections: string[] = [];
+    const model: SimModelPort = {
+      complete(operation, _system, message) {
+        if (operation === "simulate_orchestrate") return Promise.resolve(ORDER);
+        if (operation === "simulate_cognition") sections.push(message);
+        return Promise.resolve(JSON.stringify({ actors: [] }));
+      },
+    };
+    const result = await runSimulationBurst(input(base, model, { spanDays: 7, outOfTime: () => true }));
+    // The turn's time is spent before the first round: those an answer is owed by are still asked
+    // first, and anyone it could not reach is owed his turn for the time -- never answered for.
+    const askedHim = sections.some((text) => text.includes(recipient));
+    const owed = result.world.owed.find((entry) => entry.characterId === recipient);
+    expect(askedHim || owed?.cause === "time").toBe(true);
+    const after = attemptOf(reloaded(result.world), attempt.id);
+    expect(WAITING).toContain(after.status);
+    expect(answerDueOf(after)).toBeGreaterThan(result.world.elapsedStep);
+    expect(result.newFacts.filter((fact) => fact.affectedEntities.some((entity) => entity.id === recipient) && /refus|declin|would not/i.test(fact.summary))).toEqual([]);
+    // Later hops pass on the engine's rules: routine decisions go on, and are said to.
+    expect(result.skipped.some((skip) => /routine decisions continue on engine rules|the turn's time is spent/.test(skip.reason))).toBe(true);
+  });
+
+  it("does not owe a turn to a man with nothing of his own waiting: routine quiet days pass without him", async () => {
+    const base = world();
+    const inCast = new Set(base.cast.members.map((member) => member.characterId));
+    const idle = base.characters.find((character) => character.alive && character.id !== PLAYER && !inCast.has(character.id))!.id;
+    const result = await runSimulationBurst(input(base, port([]), { spanDays: 7, outOfTime: () => true }));
+    expect(result.world.owed.some((entry) => entry.characterId === idle)).toBe(false);
+  });
+});
+
 describe("a turn whose reason is gone", () => {
   it("is let go when the man is dead, and his request is answered as a dead man's", async () => {
     const { world: base, recipient, attempt } = asking(world());

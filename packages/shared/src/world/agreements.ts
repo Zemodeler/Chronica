@@ -187,6 +187,18 @@ export const PolityAgreementSchema = z
       /** Men (or hulls) who fought on both sides, for how much it counts. */
       engaged: z.number().int().nonnegative(),
     }).strict()).max(80).optional(),
+    /**
+     * For a war: the men each power fighting it has lost to it, laid here on the day each loss is
+     * read (`archiveWarLosses`) and kept whatever becomes of the army after -- destroyed, handed
+     * over, sent to another war. Absent on a war none of whose losses has been laid yet.
+     */
+    losses: z.array(z.object({
+      polityId: EntityIdSchema,
+      battle: z.number().int().nonnegative(),
+      wounds: z.number().int().nonnegative(),
+      hardship: z.number().int().nonnegative(),
+      desertion: z.number().int().nonnegative(),
+    }).strict()).max(24).optional(),
   })
   .strict()
   .refine((agreement) => agreement.polityId !== agreement.otherPolityId, {

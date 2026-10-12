@@ -90,62 +90,110 @@ export function settledCourse(world: WorldState, forceId: string, to: string, co
 }
 
 /**
- * Where on its road a force has got to: the province on the way nearest the
- * share of the road its days have covered, the road's end included once the
- * force is past the middle of its last stretch. The start of it when the way
- * cannot be traced. An army keeps to the land; ships to anything.
+ * Where on its road a force is: the last province it has reached, the one it
+ * is walking toward and how far along that stretch it is. The road's end only
+ * once the road is walked: a march (one stretch, or a strait's shore) is
+ * never finished early by being turned.
  *
- * The end was never given before, so that a force did not arrive before the
- * march said it had; but a march of one stretch turned on its fifteenth day
- * of twenty then stood where it had set out, the fifteen days thrown away,
- * and a march of several stretches turned at the last was set a whole stretch
- * back. The world holds a force at a province and nowhere between, so the
- * nearest province is the honest place, and the error is at most half a
- * stretch either way rather than a whole one in one direction. A march that
- * had not yet reached the far shore of a crossing is not on it: a crossing is
- * its own journey and is never turned here (`turnOnTheRoad`).
+ * A march of one stretch turned on its fifteenth day of twenty stood where it
+ * had set out, the fifteen days thrown away; the first repair put it at the
+ * nearest province instead, which past the middle of a stretch was the far
+ * end -- an army half way to a place set down in it, and a march of one
+ * stretch finished by being called off. The world holds an army at a
+ * province, so it stands at the last one it reached, and the part of the
+ * stretch it has walked goes with it (`turnOnTheRoad`) into the journey it
+ * makes next. A journey that itself began part way along a stretch
+ * (`Project.offRoad`) is read from there: on the way on, the walked part
+ * counted; on the way back, that much to walk before it is at the province.
+ * The start when the way cannot be traced. An army keeps to the land; ships
+ * to anything.
  */
-export function whereOnTheRoad(world: WorldState, project: Project, from: string, bySea: boolean): string {
+export interface RoadProgress {
+  /** The last province reached. */
+  readonly at: string;
+  /** The province it is walking toward from there, when it is part way along a stretch. */
+  readonly toward: string | null;
+  /** How far along that stretch, in km. */
+  readonly kmAlong: number;
+  /** The stretch's length. */
+  readonly stretchKm: number;
+}
+
+export function progressOnTheRoad(world: WorldState, project: Project, from: string, bySea: boolean): RoadProgress {
+  const passable = (edge: ProvinceEdge): boolean => bySea || !isWaterCrossing(edge.crossing);
+  const stretchOf = (a: string, b: string): number | undefined => adjacentTo(world, a).find((neighbour) => neighbour.provinceId === b && passable(neighbour.edge))?.edge.distance;
+  const off = project.offRoad;
+  const offStretch = off === undefined ? undefined : stretchOf(from, off.towardProvinceId);
+  const standing: RoadProgress = off === undefined || offStretch === undefined || off.km <= 0
+    ? { at: from, toward: null, kmAlong: 0, stretchKm: 0 }
+    : { at: from, toward: off.towardProvinceId, kmAlong: Math.min(off.km, offStretch), stretchKm: offStretch };
   const to = project.completionOutcome?.provinceId ?? null;
-  if (to === null || to === from) return from;
+  if (to === null) return standing;
   const days = Math.max(0, ...project.milestones.map((milestone) => milestone.requiredAtElapsedOffset));
   const share = days <= 0 ? 0 : Math.min(1, Math.max(0, (world.elapsedStep - project.startedAtStep) / days));
-  if (share === 0) return from;
-  const passable = (edge: ProvinceEdge): boolean => bySea || !isWaterCrossing(edge.crossing);
   const toGo = kmFrom(world, to, { passable });
   const length = toGo.get(from);
-  if (length === undefined) return from;
-  const walked = share * length;
+  if (length === undefined) return standing;
+  // Where it began, read against the road it is on: already that far along its first stretch, or that far to walk back first.
+  let walked = share * length;
+  let first: string | null = null;
+  if (standing.toward !== null) {
+    const beyond = toGo.get(standing.toward);
+    const onward = beyond !== undefined && Math.abs(standing.stretchKm + beyond - length) < 1e-6;
+    if (onward) {
+      walked = standing.kmAlong + share * (length - standing.kmAlong);
+      first = standing.toward;
+    } else {
+      const back = share * (standing.kmAlong + length);
+      if (back < standing.kmAlong) return { ...standing, kmAlong: standing.kmAlong - back };
+      walked = back - standing.kmAlong;
+    }
+  }
+  if (walked <= 0) return { at: from, toward: null, kmAlong: 0, stretchKm: 0 };
   let here = from;
   let done = 0;
   for (let guard = 0; guard < 10_000; guard += 1) {
+    if (here === to) return { at: to, toward: null, kmAlong: 0, stretchKm: 0 };
     const left = toGo.get(here)!;
     const next = adjacentTo(world, here).find((neighbour) => passable(neighbour.edge) && toGo.has(neighbour.provinceId)
+      && (first === null || here !== from || neighbour.provinceId === first)
       && Math.abs(neighbour.edge.distance + toGo.get(neighbour.provinceId)! - left) < 1e-6);
-    if (next === undefined) return here;
+    if (next === undefined) return { at: here, toward: null, kmAlong: 0, stretchKm: 0 };
     const further = done + next.edge.distance;
-    // Past the middle of this stretch it is nearer the far end of it: the road's own end as much as any province on the way.
-    if (further >= walked) return walked - done <= further - walked ? here : next.provinceId;
+    // Short of the next province: it is on the stretch, and has reached only where it set out on it.
+    if (further > walked + 1e-9) return { at: here, toward: next.provinceId, kmAlong: walked - done, stretchKm: next.edge.distance };
     here = next.provinceId;
     done = further;
-    if (here === to) return to;
   }
-  return here;
+  return { at: here, toward: null, kmAlong: 0, stretchKm: 0 };
+}
+
+/** The last province a force on this road has reached (`progressOnTheRoad`). */
+export function whereOnTheRoad(world: WorldState, project: Project, from: string, bySea: boolean): string {
+  return progressOnTheRoad(world, project, from, bySea).at;
 }
 
 /**
- * An army whose march was turned this act, standing where the road had
- * brought it. The force object itself is the mark: the next change to the
- * army replaces it, and the mark with it.
+ * An army whose march was turned this act, standing at the last province the
+ * road had brought it to, with the part of the next stretch it had walked.
+ * The force object itself is the mark: the next change to the army replaces
+ * it, and the mark with it.
  */
 const turned = new WeakSet<Force>();
+const partway = new WeakMap<Force, { readonly toward: string; readonly km: number; readonly stretchKm: number }>();
 
-/** The army, moved to where the march being called off had brought it. */
+/** The army, moved to the last province the march being called off had brought it to. */
 export function turnOnTheRoad(world: WorldState, force: Force, march: Project): Force {
-  const near = whereOnTheRoad(world, march, force.locationId, march.kind === "sailing");
-  const moved: Force = near === force.locationId ? { ...force } : { ...force, locationId: near, positionId: null };
+  const progress = progressOnTheRoad(world, march, force.locationId, march.kind === "sailing");
+  const moved: Force = progress.at === force.locationId ? { ...force } : { ...force, locationId: progress.at, positionId: null };
   turned.add(moved);
+  if (progress.toward !== null && progress.kmAlong > 0) partway.set(moved, { toward: progress.toward, km: progress.kmAlong, stretchKm: progress.stretchKm });
   return moved;
+}
+
+/** How far along a stretch an army turned by this order was standing, and toward where; undefined at a province. */
+export function partwayOf(force: Force): { readonly toward: string; readonly km: number; readonly stretchKm: number } | undefined {
+  return partway.get(force);
 }
 
 /** Whether this army was turned on the road by the order now being carried out. */

@@ -60,6 +60,22 @@ export const AppliedEffectSchema = z
     by: WorkLinkSchema.default("act"),
     /** The delegation whose holder did it, where a delegate did. */
     attemptId: EntityIdSchema.nullable().default(null),
+    /**
+     * Identity and event-time evidence, written from the act as the world applied it (absent on
+     * effects kept before they were): the part it answers (`orderPartRef`), the man whose act it
+     * was, the man it placed and the role and army or office it placed him in, the sum it moved
+     * with its payer and payee, and the money lines it wrote. Nothing here is filled in afterwards:
+     * an effect without them is read as unverified, never as matching.
+     */
+    partRef: z.string().max(140).optional(),
+    actorId: EntityIdSchema.optional(),
+    personId: EntityIdSchema.optional(),
+    role: z.string().max(80).optional(),
+    targetId: EntityIdSchema.optional(),
+    amount: z.number().int().nonnegative().optional(),
+    payerAccountId: EntityIdSchema.optional(),
+    payeeAccountId: EntityIdSchema.nullable().optional(),
+    transactionIds: z.array(EntityIdSchema).max(6).optional(),
   })
   .strict();
 export type AppliedEffect = z.infer<typeof AppliedEffectSchema>;
@@ -527,7 +543,7 @@ export function procedureReasonOf(world: WorldState, part: OrderPart): string | 
   return null;
 }
 
-export function orderPartStatus(world: WorldState, part: OrderPart, options: { readonly without?: OrderWorkRef } = {}): OrderPartStatus {
+export function orderPartStatus(world: WorldState, part: OrderPart, options: { readonly without?: OrderWorkRef; /** The day its order was given, where known: an effect dated before it is not this part's. */ readonly givenAtStep?: number | undefined } = {}): OrderPartStatus {
   const work = options.without === undefined ? part.workRefs : part.workRefs.filter((ref) => ref.kind !== options.without!.kind || ref.id !== options.without!.id);
   // Several letters are read together, and the answer each one wanted with them.
   const tally = letterTally(world, { workRefs: work });
@@ -574,12 +590,14 @@ export function orderPartStatus(world: WorldState, part: OrderPart, options: { r
     // and "done" would be a claim nobody can see the evidence for.
     if (part.actsCarried > 0) {
       if (part.actsRefused > 0) return "partly_done";
-      // Every act it wrote was done by being done: the world shows it. Where the part keeps its
-      // applied effects, they are read instead of the count: every one an act of that kind, none a guess.
+      // Every act it wrote was done by being done: the world shows it. Read from the applied
+      // effects the part keeps -- one for every act carried, each an act of that kind, none a
+      // guess. A part kept before effects were (an old save's count of acts done, with nothing
+      // to say which act or when) stays unverified: the count is not evidence, and none is made up.
       const effects = part.effects;
-      const doneByApplication = effects === undefined
-        ? (part.actsDone ?? 0) >= part.actsCarried
-        : effects.length >= part.actsCarried && effects.every((effect) => DONE_ON_APPLICATION_OPS.has(effect.op) && effect.by !== "guess");
+      const doneByApplication = effects !== undefined
+        && effects.length >= part.actsCarried && effects.every((effect) => DONE_ON_APPLICATION_OPS.has(effect.op) && effect.by !== "guess"
+          && (options.givenAtStep === undefined || effect.atStep >= options.givenAtStep));
       return doneByApplication ? "achieved" : "carried_unverified";
     }
     return "unanswered";

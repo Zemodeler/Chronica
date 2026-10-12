@@ -562,6 +562,12 @@ export interface ChronicleEntry {
   readonly quote: EntryQuote | null;
   /** The threads of history it belongs to, as the reader could know them. */
   readonly storylineIds?: readonly string[];
+  /**
+   * Whose words the passage is: the historian's own prose, or the facts set down plainly where she
+   * failed, overstated past saving, or was never asked. Read before the passage is let stand for an
+   * order's outcome line (`orderOutcomeLines`). Absent on entries the books strike, and on old ones.
+   */
+  readonly voice?: "historian" | "facts" | undefined;
   readonly fromInstantSortKey: number;
   readonly toInstantSortKey: number;
 }
@@ -1625,7 +1631,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
     const days = new Set(thread.facts.flatMap((fact) => [fact.time.day, fact.atStep]));
     return namesIt && causes.some((cause) => days.has(cause.day));
   };
-  const entryOf = (thread: Thread, title: string, body: string): ChronicleEntry => {
+  const entryOf = (thread: Thread, title: string, body: string, voice: "historian" | "facts" = "historian"): ChronicleEntry => {
     const keys = thread.facts.map((fact) => sortKeyOf(fact.time));
     const subjects = subjectsOf(thread.facts);
     return {
@@ -1638,6 +1644,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
       changes: changes.filter((change) => madeBy(change, thread)),
       quote: null,
       storylineIds: mattersOf(thread.facts, input.storylines ?? [], input.observer, input.observerPolityId, polityOf).map((storyline) => storyline.id),
+      voice,
       fromInstantSortKey: Math.min(...keys, sortKeyOf(input.to)),
       toInstantSortKey: Math.max(...keys, sortKeyOf(input.from)),
     };
@@ -1670,7 +1677,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   // A failed narration must not cost the player the record itself: fall back to
   // the plain facts, under the period as a title, rather than losing the span.
   const plainly = (thread: Thread): ChronicleEntry =>
-    entryOf(thread, headlineOf(thread.facts) ?? period, thread.facts.map((fact) => readable(fact.summary)).join("\n\n"));
+    entryOf(thread, headlineOf(thread.facts) ?? period, thread.facts.map((fact) => readable(fact.summary)).join("\n\n"), "facts");
 
   // One matter to a call, and every matter written, the light ones too. A
   // light home thread was once printed in its facts' own words to save its
@@ -1807,7 +1814,9 @@ Write the passage again: say plainly where it stands, and tell the rest of the m
         if (contradicted) overstated += 1;
         entry = passage === undefined
           ? (answering ? plainly(thread) : null)
-          : entryOf(thread, thread.outcome !== null && claimsItDone(passage.title, thread.outcome.status) ? headlineOf(thread.facts) ?? period : passage.title, body!);
+          : entryOf(thread, thread.outcome !== null && claimsItDone(passage.title, thread.outcome.status) ? headlineOf(thread.facts) ?? period : passage.title, body!,
+            // Replaced whole by the engine's line and the facts, it is not her passage any more.
+            thread.outcome !== null && body === plainAccount(thread) ? "facts" : "historian");
         const own = passage?.quote ?? null;
         // A quotation is somebody's recorded words, or it is not printed. The
         // historian's own line is kept only where it is, near enough, what that

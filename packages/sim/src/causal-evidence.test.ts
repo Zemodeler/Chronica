@@ -154,7 +154,7 @@ describe("a fact that claims what the world can check", () => {
     const state = opening(150);
     const treasury = state.material.accounts.find((account) => account.id === "rome-treasury")!;
     const paid = { kind: "payment", summary: "The treasury paid 5,000 to the shipwrights.", affectedRefs: [{ kind: "account", id: treasury.id }] as OrderPartyRef[] };
-    expect(factContradictsState(state, paid, () => new Set(), { atStep: 150 })).toMatch(/no money moved/);
+    expect(factContradictsState(state, paid, () => new Set(), { atStep: 150 })).toMatch(/no line of this answer moved that sum/);
     const moved: WorldState = { ...state, material: { ...state.material, transactions: [...state.material.transactions, { ...state.material.transactions[0]!, id: "tx-paid", atStep: 150, sourceAccountId: treasury.id, amount: 5000 }] } };
     expect(factContradictsState(moved, paid, () => new Set(), { atStep: 150 })).toBeNull();
     // Without the day there is nothing to hold it to, and it passes as before.

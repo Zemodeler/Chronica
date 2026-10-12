@@ -120,7 +120,7 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
       if (found === null) return null;
       const opened = findOrderPart(worldAtOpen, partKey);
       return {
-        line: lineOf(world, found.part, found.order.actorCharacterId),
+        line: lineOf(world, found.part, found.order.actorCharacterId, undefined, found.order),
         status: toldOutcome(world, found.part, found.order.actorCharacterId, found.order).status,
         before: opened === null ? null : toldOutcome(worldAtOpen, opened.part, opened.order.actorCharacterId, opened.order).status,
       };

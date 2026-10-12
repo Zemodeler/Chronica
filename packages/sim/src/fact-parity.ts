@@ -29,11 +29,23 @@ export interface ClaimingFact {
 
 /**
  * Evidence at event time the fact's claim may be held to, beyond the world's
- * state: the day it happened, so a payment is looked for in that day's
- * transactions. Without it the money check is not made.
+ * state: the day it happened, and the money lines the answer that wrote it
+ * actually made (`MadeMoney.transactionIds` of its applied acts), so a
+ * payment is held to its own lines -- the sum, the accounts it names -- and
+ * never to another payment that happened to move the same day. Without it
+ * the money check is not made.
  */
 export interface ParityEvidence {
   readonly atStep: number;
+  /** The lines this answer's acts wrote; absent, any line of the day may answer (an older caller). */
+  readonly transactionIds?: ReadonlySet<string> | undefined;
+}
+
+/** "5,000" as 5000; null where the words hold no whole sum. */
+function sumOf(said: RegExpExecArray): number | null {
+  const digits = (said[1] ?? said[2] ?? "").replace(/,/g, "");
+  const value = Number(digits);
+  return digits === "" || !Number.isSafeInteger(value) ? null : value;
 }
 
 export function factContradictsState(world: WorldState, fact: ClaimingFact, groundOfForce: (forceId: string) => ReadonlySet<string>, evidence?: ParityEvidence): string | null {
@@ -69,15 +81,21 @@ export function factContradictsState(world: WorldState, fact: ClaimingFact, grou
     return `says ${forces[0]!.id} was raised, but no such army stands`;
   }
 
-  // A sum said paid must have moved on the day: a fact naming an account, with an amount, and no
-  // transaction of that day touching the account is a payment the world never made.
+  // A sum said paid must have moved, exactly, on the day, between the accounts the fact names, by a
+  // line the answer itself wrote: an unrelated payment of the same day, a short payment of part of
+  // the sum, or one between other purses is not this one.
   const accounts = refs("account");
   const said = PAID.exec(text);
-  if (evidence !== undefined && said !== null && accounts.length >= 1) {
+  const amount = said === null || !assertsWords(text, PAID) ? null : sumOf(said);
+  if (evidence !== undefined && amount !== null && accounts.length >= 1) {
     const named = new Set(accounts.map((ref) => ref.id));
+    const sides = (transaction: WorldState["material"]["transactions"][number]): string[] => [transaction.sourceAccountId, transaction.destinationAccountId].filter((id): id is string => id !== undefined);
     const moved = world.material.transactions.some((transaction) => transaction.atStep === evidence.atStep
-      && (named.has(transaction.sourceAccountId ?? "") || named.has(transaction.destinationAccountId ?? "")));
-    if (!moved) return `says ${(said[1] ?? said[2])!} was paid through ${accounts[0]!.id}, but no money moved there that day`;
+      && (evidence.transactionIds === undefined || evidence.transactionIds.has(transaction.id))
+      && transaction.amount === amount
+      // One account named: it paid or was paid. Two or more: the line runs between two of them.
+      && (named.size === 1 ? sides(transaction).some((id) => named.has(id)) : sides(transaction).length === 2 && sides(transaction).every((id) => named.has(id))));
+    if (!moved) return `says ${amount} was paid through ${accounts.map((ref) => ref.id).join(" and ")}, but no line of this answer moved that sum there that day`;
   }
   return null;
 }

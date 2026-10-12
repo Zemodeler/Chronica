@@ -33,7 +33,9 @@ const withLegioNova = (world: WorldState): WorldState => {
   const legion = world.material.forces.find((force) => force.id === LEGION)!;
   return { ...world, material: { ...world.material, forces: [...world.material.forces, { ...legion, id: "legio-nova", name: "Legio Nova" }] } };
 };
-const effect = (op: string, atStep: number, refs: AppliedEffect["refs"], by: AppliedEffect["by"] = "act"): AppliedEffect => ({ op, atStep, refs, by, attemptId: null });
+const effect = (op: string, atStep: number, refs: AppliedEffect["refs"], by: AppliedEffect["by"] = "act", identity: Partial<AppliedEffect> = {}): AppliedEffect => ({ op, atStep, refs, by, attemptId: null, actorId: ACTOR, ...identity });
+/** An act that set `personId` in command of `targetId`, as the world applied it. */
+const command = (atStep: number, personId: string, targetId: string): AppliedEffect => effect("force_modify", atStep, [{ kind: "character", id: personId }, { kind: "force", id: targetId }], "act", { personId, role: "commander", targetId });
 
 describe("the outcome line takes no credit it cannot tie to the part", () => {
   it("does not take a foreign army that already bears the name for the army asked to be raised", () => {
@@ -94,14 +96,14 @@ describe("the outcome line takes no credit it cannot tie to the part", () => {
     const appoint = OrderPartSchema.parse({ said: "Appoint Gaius Genucius Clepsina as rower aboard Allied Greek hulls", workRefs: [{ kind: "force", id: LEGION }] });
     expect(toldOutcome(withOrder([appoint]), appoint, ACTOR).status).not.toBe("achieved");
     // Nor with an act of the part behind his command: the role and the army asked for are not his.
-    const placed = part({ said: "Appoint Gaius Genucius Clepsina as rower aboard Allied Greek hulls", actsCarried: 1, effects: [effect("force_modify", 145, [{ kind: "character", id: ACTOR }, { kind: "force", id: LEGION }])] });
+    const placed = part({ said: "Appoint Gaius Genucius Clepsina as rower aboard Allied Greek hulls", actsCarried: 1, effects: [command(145, ACTOR, LEGION)] });
     expect(toldOutcome(withOrder([placed]), placed, ACTOR).status).not.toBe("achieved");
   });
 
   it("takes the appointment where the part's own act set him in command of the army it named", () => {
     const legion = opening(150).material.forces.find((force) => force.id === LEGION)!;
     const commander = opening(150).characters.find((character) => character.id === legion.commanderCharacterId)!;
-    const appoint = part({ said: `Appoint ${commander.name} to command ${legion.name}`, actsCarried: 1, effects: [effect("force_modify", 145, [{ kind: "character", id: commander.id }, { kind: "force", id: LEGION }])] });
+    const appoint = part({ said: `Appoint ${commander.name} to command ${legion.name}`, actsCarried: 1, effects: [command(145, commander.id, LEGION)] });
     const told = toldOutcome(withOrder([appoint]), appoint, ACTOR);
     expect(told.status).toBe("achieved");
     expect(told.appointed?.forceName).toBe(legion.name);
@@ -111,9 +113,9 @@ describe("the outcome line takes no credit it cannot tie to the part", () => {
   it("does not take the command where the part's act was before the order, or named another army", () => {
     const legion = opening(150).material.forces.find((force) => force.id === LEGION)!;
     const commander = opening(150).characters.find((character) => character.id === legion.commanderCharacterId)!;
-    const early = part({ said: `Appoint ${commander.name} to command ${legion.name}`, actsCarried: 1, effects: [effect("force_modify", 100, [{ kind: "character", id: commander.id }, { kind: "force", id: LEGION }])] });
+    const early = part({ said: `Appoint ${commander.name} to command ${legion.name}`, actsCarried: 1, effects: [command(100, commander.id, LEGION)] });
     expect(toldOutcome(withOrder([early]), early, ACTOR).status).not.toBe("achieved");
-    const elsewhere = part({ said: `Appoint ${commander.name} to command Carthaginian fleet`, actsCarried: 1, effects: [effect("force_modify", 145, [{ kind: "character", id: commander.id }, { kind: "force", id: LEGION }])] });
+    const elsewhere = part({ said: `Appoint ${commander.name} to command Carthaginian fleet`, actsCarried: 1, effects: [command(145, commander.id, LEGION)] });
     expect(toldOutcome(withOrder([elsewhere]), elsewhere, ACTOR).status).not.toBe("achieved");
   });
 

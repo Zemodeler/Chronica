@@ -1,7 +1,7 @@
-import { DONE_ON_APPLICATION_OPS, ORDER_PART_STATUS_LABEL, effectsOf, goalsMet, orderPartStatus, workStatus, workWasMadeByPart, type OrderPart, type OrderPartStatus, type WorldState } from "@chronica/shared";
+import { ORDER_PART_STATUS_LABEL, goalsMet, orderPartStatus, type OrderPart, type OrderPartStatus, type OrderRecord, type WorldState } from "@chronica/shared";
 import type { ChronicleEntry } from "./chronicle";
 import { CLERK_PHRASES } from "./chronicle-lint";
-import { assertsWords, forcesMadeByPart, lineOf, orderOfPart } from "./order-outcomes";
+import { assertsWords, lineOf, orderOfPart } from "./order-outcomes";
 
 /**
  * The scorecard of plan `chronicle-and-order-truth` (phase 0): what a run told
@@ -77,35 +77,80 @@ export function toldStatusOfLine(line: string): OrderPartStatus | null {
 /** The words a passage uses to say a thing was done, for a one-part order told by its prose alone. */
 const PROSE_DONE = /\b(arrived|landed|made landfall|came ashore|crossed over|made the crossing|reached|was completed|were completed|was finished|was carried out|were carried out|was done|was raised|were raised|was levied|was appointed|were appointed|was installed|was paid|were paid|was signed|was concluded|was ratified|was delivered|were delivered|was taken|were taken|was captured|fell to)\b/i;
 
+type Effect = NonNullable<OrderPart["effects"]>[number];
+
+/**
+ * The acts the scorecard itself accepts as done by being done, each with how it looks for that in
+ * the world. Kept apart from the engine's own list (`DONE_ON_APPLICATION_OPS`) and its readers
+ * (`forcesMadeByPart`, `workStatus`) on purpose: a scorecard that used them would agree with any
+ * mistake in them. An op the engine counts as done and this table does not know is not evidence
+ * here, and a line telling it done is counted as done without evidence -- the disagreement shows.
+ */
+const SHOWN_BY: Readonly<Record<string, (world: WorldState, effect: Effect, polityId: string) => boolean>> = {
+  // Money moved: its own lines are in the books, on the act's day, and add up to the sum it moved.
+  money_transfer: (world, effect) => {
+    const ids = effect.transactionIds ?? [];
+    const lines = world.material.transactions.filter((line) => ids.includes(line.id));
+    return ids.length > 0 && lines.length === ids.length && lines.every((line) => line.atStep === effect.atStep)
+      && effect.amount !== undefined && effect.amount > 0 && lines.reduce((sum, line) => sum + line.amount, 0) === effect.amount;
+  },
+  // An army made: it stands, and it is the actor's power's.
+  force_create: (world, effect, polityId) => effect.targetId !== undefined && world.material.forces.some((force) => force.id === effect.targetId && force.polityId === polityId),
+  force_reinforce: (world, effect, polityId) => effect.refs.some((ref) => ref.kind === "force" && world.material.forces.some((force) => force.id === ref.id && force.polityId === polityId)),
+  // A man placed: he holds, now, the post or the place the act gave him, in that army or office.
+  force_post_set: (world, effect) => effect.personId !== undefined && effect.role !== undefined
+    && world.material.forces.some((force) => force.id === effect.targetId && (force.posts ?? []).some((post) => post.characterId === effect.personId && post.rankId === effect.role)),
+  force_membership_set: (world, effect) => effect.personId !== undefined
+    && world.material.forces.some((force) => force.id === effect.targetId && force.memberCharacterIds.includes(effect.personId!)),
+  office_seat_set: (world, effect) => effect.personId !== undefined
+    && world.material.officeSeats.some((seat) => seat.officeId === effect.targetId && seat.status === "held" && seat.holderCharacterId === effect.personId),
+};
+/** Acts done by being done that leave nothing this table can look up, accepted on the act's own record: by whom, when, for this part. */
+const RECORDED_ONLY: ReadonlySet<string> = new Set([
+  "income_source_upsert", "obligation_upsert", "holding_create", "holding_improve", "holding_transfer", "trade_venture_open", "trade_venture_close",
+  "house_found", "loan_open", "loan_settle", "public_benefaction", "tax_policy_set", "coinage_debase", "family_tie_set", "adopt",
+  "service_contract_open", "service_contract_close", "legal_status_set",
+]);
+
+/** Whether one applied effect is this part's evidence: its own act, on or after the order's day, by a known hand, and shown. */
+function effectShows(world: WorldState, effect: Effect, since: number, polityId: string): boolean {
+  if (effect.by === "guess" || effect.atStep < since || effect.actorId === undefined) return false;
+  const check = SHOWN_BY[effect.op];
+  return check !== undefined ? check(world, effect, polityId) : RECORDED_ONLY.has(effect.op);
+}
+
 /**
  * Evidence tied to this part that what it asked for came about, read from raw
- * state and never from `orderPartStatus` or `lineOf`:
+ * state by the scorecard's own reading -- never `orderPartStatus`, `lineOf`,
+ * or the engine predicates they share:
  *  - where it has goals, the goals hold now and did not when it was given (an
  *    old record with no baseline is read as a change);
- *  - else, with nothing refused: its own work finished (tied to it by the
- *    answer, never by a guess at its words); an army its own act created on
- *    or after the order's day, of the actor's own power; or every act it
- *    wrote being its own evidence (a purse debited, a holding made), with any
- *    army it names its own.
- * A name, a post, a pre-existing army or a work found elsewhere in the world
- * is not evidence.
+ *  - else, with nothing refused and the order's day known: a project its own
+ *    act made since the order, finished; an army its own act created since
+ *    the order, of the actor's own power, standing; or one applied effect for
+ *    every act it carried, each shown (`effectShows`), with any army it names
+ *    one it made.
+ * A part kept before effects were (an old save's count of acts done) is not
+ * evidence: unverified, and nothing is made up for it. Nor is a name, a post,
+ * a pre-existing army, or a work found elsewhere in the world.
  */
 export function evidenceOfDone(world: WorldState, part: OrderPart, actorId: string, givenAtStep: number | null = orderOfPart(world, part)?.givenAtStep ?? null): boolean {
   if (part.goals.length > 0) return goalsMet(world, part.goals) === "met" && part.metAtOrder !== true;
-  if (part.actsRefused > 0 || part.refusal !== null) return false;
+  if (part.actsRefused > 0 || part.refusal !== null || givenAtStep === null) return false;
   const polityId = world.characters.find((character) => character.id === actorId)?.polityId ?? null;
-  const since = givenAtStep ?? Number.POSITIVE_INFINITY;
-  const made = forcesMadeByPart(world, part, since, polityId);
-  const tied = (ref: OrderPart["workRefs"][number]): boolean => ref.by !== "guess" && (ref.madeAtStep !== undefined ? workWasMadeByPart(ref, since) : part.attribution === "tagged");
-  const finishedWork = part.workRefs.some((ref) => ref.kind !== "force" && ref.kind !== "entity" && tied(ref) && workStatus(world, ref) === "achieved");
-  // Every act its own evidence -- and any army it names one it made: a ref to an army that stood
-  // before the order, beside a count of acts done, is not the army raised.
-  const forces = part.workRefs.filter((ref) => ref.kind === "force");
-  const effects = effectsOf(part);
-  const appliedActs = part.actsCarried > 0 && (part.actsDone ?? 0) >= part.actsCarried
-    && forces.every((ref) => made.some((entry) => entry.force.id === ref.id))
-    && effects.every((effect) => DONE_ON_APPLICATION_OPS.has(effect.op) && effect.by !== "guess");
-  return made.length > 0 || finishedWork || appliedActs;
+  if (polityId === null) return false;
+  const madeByIt = (ref: OrderPart["workRefs"][number]): boolean => ref.by !== "guess" && ref.madeAtStep !== undefined && ref.madeAtStep >= givenAtStep;
+  const armies = new Set([
+    ...part.workRefs.filter((ref) => ref.kind === "force" && ref.op === "force_create" && madeByIt(ref)).map((ref) => ref.id),
+    ...(part.effects ?? []).filter((effect) => effect.op === "force_create" && effectShows(world, effect, givenAtStep, polityId)).map((effect) => effect.targetId!),
+  ].filter((id) => world.material.forces.some((force) => force.id === id && force.polityId === polityId)));
+  const finishedWork = part.workRefs.some((ref) => ref.kind === "project" && madeByIt(ref) && world.projects.some((project) => project.id === ref.id && project.status === "completed"));
+  const effects = part.effects;
+  const appliedActs = effects !== undefined && part.actsCarried > 0
+    && effects.length >= part.actsCarried
+    && effects.every((effect) => effectShows(world, effect, givenAtStep, polityId))
+    && part.workRefs.filter((ref) => ref.kind === "force").every((ref) => armies.has(ref.id));
+  return armies.size > 0 || finishedWork || appliedActs;
 }
 
 /**
@@ -113,10 +158,10 @@ export function evidenceOfDone(world: WorldState, part: OrderPart, actorId: stri
  * own line when `shown` is omitted, or a line from elsewhere (a Chronicle
  * entry, a fixture's mutation). `null` is a part nobody told.
  */
-export function scoreToldPart(world: WorldState, part: OrderPart, actorId: string, shown?: string | null): PartScore {
-  const line = shown === undefined ? lineOf(world, part, actorId) : shown;
+export function scoreToldPart(world: WorldState, part: OrderPart, actorId: string, shown?: string | null, order: Pick<OrderRecord, "givenAtStep"> | undefined = orderOfPart(world, part)): PartScore {
+  const line = shown === undefined ? lineOf(world, part, actorId, undefined, order) : shown;
   const status = line === null ? null : toldStatusOfLine(line);
-  const evidence = evidenceOfDone(world, part, actorId);
+  const evidence = evidenceOfDone(world, part, actorId, order?.givenAtStep ?? null);
   const failedStage = part.stages.some((stage) => stage.status === "failed");
   const refusedOnRecord = part.refusal !== null || part.actsRefused > 0 || failedStage;
   const toldDone = status !== null && TOLD_DONE.has(status);
@@ -149,7 +194,7 @@ export function scoreDisplayedOrder(world: WorldState, orderId: string, displaye
   return tally(order.parts.map((part) => {
     const line = displayed.find((candidate) => candidate.includes(`"${part.said}" -- `)) ?? null;
     const toldByProse = line === null && order.parts.length === 1 && prose.some((passage) => assertsWords(passage, PROSE_DONE));
-    return scoreToldPart(world, part, order.actorCharacterId, toldByProse ? `"${part.said}" -- done` : line);
+    return scoreToldPart(world, part, order.actorCharacterId, toldByProse ? `"${part.said}" -- done` : line, order);
   }));
 }
 
@@ -171,7 +216,7 @@ function tally(parts: readonly PartScore[]): OrderScore {
 export function scoreOrders(world: WorldState, orderIds?: readonly string[]): OrderScore {
   return tally(world.orders
     .filter((order) => orderIds === undefined || orderIds.includes(order.id))
-    .flatMap((order) => order.parts.map((part) => scoreToldPart(world, part, order.actorCharacterId))));
+    .flatMap((order) => order.parts.map((part) => scoreToldPart(world, part, order.actorCharacterId, undefined, order))));
 }
 
 export { CLERK_PHRASES } from "./chronicle-lint";

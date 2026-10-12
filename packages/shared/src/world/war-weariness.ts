@@ -36,7 +36,7 @@ const ARREARS_SEASON_DAYS = 90;
 
 const fit = (force: WorldState["material"]["forces"][number]): number => force.personnel.reduce((sum, group) => sum + group.fit, 0);
 
-export type WearinessWorld = Pick<WorldState, "map" | "material" | "polityAgreements" | "elapsedStep" | "sieges"> & { readonly campaigns?: WarLossWorld["campaigns"] };
+export type WearinessWorld = Pick<WorldState, "map" | "material" | "polityAgreements" | "elapsedStep" | "sieges"> & Pick<WarLossWorld, "campaigns" | "engagements" | "conflicts">;
 
 /**
  * What a power's chest owes against what it can pay: the arrears of its
