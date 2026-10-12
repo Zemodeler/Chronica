@@ -34,7 +34,7 @@ const refuse = (code: 400 | 401 | 403 | 404 | 409, message: string): PeaceTableO
 export function readPeaceTableAction(body: unknown): PeaceTableAction | string {
   if (typeof body !== "object" || body === null) return "Say what is to be done at the table.";
   const record = body as Record<string, unknown>;
-  const text = (key: string): string | null => (typeof record[key] === "string" && (record[key] as string).length > 0 ? record[key] as string : null);
+  const text = (key: string): string | null => (typeof record[key] === "string" && (record[key]).length > 0 ? record[key] : null);
   switch (record.action) {
     case "open": return text("enemyId") === null ? "Name the power to talk with." : { action: "open", enemyId: text("enemyId")! };
     case "put": {

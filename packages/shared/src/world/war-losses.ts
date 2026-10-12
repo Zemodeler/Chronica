@@ -143,7 +143,9 @@ export function archiveWarLosses<W extends LossWorld>(world: W, onlyForceIds?: R
   const forces = world.material.forces.map((force) => {
     if (onlyForceIds !== undefined && !onlyForceIds.has(force.id)) return force;
     const fresh = unlaid(force);
-    if (fresh.length === 0 && force.lossesArchived !== undefined) return force;
+    // A refused/no-op batch must not mutate untouched armies just to add an
+    // empty archive marker. Only new loss events require an archive update.
+    if (fresh.length === 0) return force;
     for (const event of fresh) {
       for (const share of warsOfLoss(world, force, event)) {
         const byPolity = laid.get(share.warId) ?? new Map<string, WarLossTally>();

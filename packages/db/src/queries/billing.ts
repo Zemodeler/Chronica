@@ -313,6 +313,9 @@ export async function settleCoinHold(db: ChronicaDatabase, input: Readonly<{
     const [duplicate] = await tx.select({ id: aiCalls.id }).from(aiCalls).where(eq(aiCalls.idempotencyKey, input.callId)).limit(1);
     if (duplicate !== undefined) return;
     if (hold === undefined || hold.gameId === null || hold.status !== "active" || input.coinChargeMicroUnits > hold.maximumMicrocredits) throw new Error("Coin hold cannot settle this call.");
+    if (hold.turnBurstId !== null && hold.turnAttempt !== null && !(await ownerHoldsLiveLease(tx, hold.turnBurstId, hold.turnAttempt))) {
+      throw new Error("The turn attempt no longer owns this coin hold.");
+    }
     // The game row before the wallet row, the order authorization takes them
     // in. Taken the other way round, a settlement and an authorization running
     // at once each held the row the other wanted, and the database broke the

@@ -76,11 +76,11 @@ export async function reviseForce(gameId: string, forceId: string, revision: For
       ...(drill === undefined ? {} : { drilling: drill }),
       reason: renamed && reflagged
         ? `Renamed ${name} and given the ${standard.name} by its commander.`
-        : renamed ? `Renamed ${name} by its commander.` : reflagged ? `Given the ${standard!.name} by its commander.` : `${drillWords} by its commander's order.`,
+        : renamed ? `Renamed ${name} by its commander.` : reflagged ? `Given the ${standard.name} by its commander.` : `${drillWords} by its commander's order.`,
     };
     const orderText = renamed && reflagged
       ? `Rename ${force.name} to ${name} and give it the ${standard.name}`
-      : renamed ? `Rename ${force.name} to ${name}` : reflagged ? `Give ${force.name} the ${standard!.name}` : drill ? `Set ${force.name} to drill` : `Stand ${force.name} down from drill`;
+      : renamed ? `Rename ${force.name} to ${name}` : reflagged ? `Give ${force.name} the ${standard.name}` : drill ? `Set ${force.name} to drill` : `Stand ${force.name} down from drill`;
 
     const burstId = await startBurst(db, { gameId, playerUserId: userId, orderText });
     if (burstId === null) return refuse(409, "The world is moving on an earlier order. Wait for it to settle.");
@@ -103,13 +103,13 @@ export async function reviseForce(gameId: string, forceId: string, revision: For
       const at = instantSortKeyOf(result.world);
       const title = renamed && reflagged
         ? `${force.name} becomes ${name}, under the ${standard.name}`
-        : renamed ? `${force.name} is renamed ${name}` : reflagged ? `${force.name} takes up the ${standard!.name}` : drillWords!;
+        : renamed ? `${force.name} is renamed ${name}` : reflagged ? `${force.name} takes up the ${standard.name}` : drillWords!;
       const body = renamed && reflagged
         ? `By its commander's order, ${force.name} is to be called ${name} from now on, and marches under the ${standard.name}.`
         : renamed
           ? `By its commander's order, ${force.name} is to be called ${name} from now on.`
           : reflagged
-            ? `By its commander's order, ${force.name} marches from now on under the ${standard!.name}: ${standard!.description.charAt(0).toLowerCase()}${standard!.description.slice(1)}.`
+            ? `By its commander's order, ${force.name} marches from now on under the ${standard.name}: ${standard.description.charAt(0).toLowerCase()}${standard.description.slice(1)}.`
             : drill
               ? `By its commander's order, ${force.name} drills in camp: while it is paid and fed and not on the march, the men grow better at their work each day.`
               : `By its commander's order, ${force.name} stands down from its drill.`;

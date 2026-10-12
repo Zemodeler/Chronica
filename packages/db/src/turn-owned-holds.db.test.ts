@@ -1,5 +1,5 @@
 import { and, eq, sql } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { ChronicaDatabase } from "./database";
 import {
   authorizeCoinHold,
@@ -33,10 +33,17 @@ const HOLD = 1_000n;
 const FUNDED = 100_000n;
 
 describe.skipIf(TEST_DATABASE_URL === null)("coin holds owned by a durable turn", () => {
+  const heldForTest: string[] = [];
   let db: ChronicaDatabase;
   let close: () => Promise<void>;
-  beforeAll(async () => { ({ db, close } = await openTestDatabase()); }, 120_000);
+  beforeAll(async () => {
+    ({ db, close } = await openTestDatabase());
+    await expireStaleHolds(db, new Date(Date.now() - SIX_MINUTES));
+  }, 120_000);
   afterAll(async () => { await close?.(); });
+  afterEach(async () => {
+    for (const holdId of heldForTest.splice(0)) await releaseCoinHold(db, holdId);
+  });
 
   /** A game with a funded wallet and a running turn claimed by `worker`, with its lease. */
   const turnInFlight = async (leaseMs = 60_000) => {
@@ -51,6 +58,7 @@ describe.skipIf(TEST_DATABASE_URL === null)("coin holds owned by a durable turn"
   const hold = async (gameId: string, turn?: CoinHoldOwner) => {
     const workId = `work-${Math.random().toString(36).slice(2)}`;
     const { holdId } = await authorizeCoinHold(db, { gameId, workId, maximumMicroUnits: HOLD, idempotencyKey: `test:${gameId}:${workId}`, turn });
+    heldForTest.push(holdId);
     return holdId;
   };
   /** Ages a hold past any sweep's cutoff, as a long call would. */
@@ -154,19 +162,26 @@ describe.skipIf(TEST_DATABASE_URL === null)("coin holds owned by a durable turn"
       const final = await statusOf(holdId);
       const wallet = await walletOf(turn.walletId);
       expect(wallet.heldMicrocredits).toBe(0n);
-      if (final === "settled") {
-        // The settlement won the lock: nothing else gave anything back.
-        expect(expired).toBe(0);
-        expect(wallet.availableMicrocredits).toBe(FUNDED - 400n);
-      } else {
-        expect(["expired", "released"]).toContain(final);
-        expect(expired).toBeLessThanOrEqual(1);
-        expect(await releasesOf(holdId)).toBe(1);
-        expect(wallet.availableMicrocredits).toBe(FUNDED);
-      }
+      expect(results[3]?.status).toBe("rejected");
+      expect(["expired", "released"]).toContain(final);
+      expect(expired).toBeLessThanOrEqual(1);
+      expect(await releasesOf(holdId)).toBe(1);
+      expect(wallet.availableMicrocredits).toBe(FUNDED);
     }
   });
 
+  it("refuses settlement after the owning attempt loses its lease", async () => {
+    const turn = await turnInFlight();
+    const holdId = await hold(turn.gameId, { burstId: turn.burstId, attempt: turn.lease.attempt });
+    await loseLease(turn.burstId);
+    await expect(settle(holdId)).rejects.toThrow("no longer owns this coin hold");
+    expect(await statusOf(holdId)).toBe("active");
+    await releaseCoinHold(db, holdId);
+    expect(await releasesOf(holdId)).toBe(1);
+    const wallet = await walletOf(turn.walletId);
+    expect(wallet.availableMicrocredits).toBe(FUNDED);
+    expect(wallet.heldMicrocredits).toBe(0n);
+  });
   it("judges a hold with no turn by its age: kept while a call could still run, expired after", async () => {
     const turn = await turnInFlight();
     const young = await hold(turn.gameId);

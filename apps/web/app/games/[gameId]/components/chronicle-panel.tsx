@@ -24,13 +24,6 @@ import type { EntityKey } from "@chronica/shared";
  * produces prose about precision it does not have.
  */
 
-const KIND_LABEL: Readonly<Record<string, string>> = {
-  polity: "power",
-  province: "place",
-  character: "person",
-  force: "army",
-};
-
 const tagKey = (tag: { readonly kind: string; readonly id: string }): string => `${tag.kind}:${tag.id}`;
 
 function LedgerBody({ body }: { readonly body: string }) {

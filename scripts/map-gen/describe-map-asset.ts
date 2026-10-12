@@ -11,7 +11,12 @@ import { fileURLToPath } from 'node:url';
 import { polygonsOf } from './map-geometry';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
-const bytes = readFileSync(join(ROOT, 'apps/web/public/maps/punic-wars-provinces.geojson'));
+const assetPath = join(ROOT, 'apps/web/public/maps/punic-wars-provinces.geojson');
+// The served asset and its checksum must be identical on Windows and Unix.
+// Keep generated JSON in LF form before recording its exact bytes.
+const original = readFileSync(assetPath);
+const bytes = Buffer.from(original.toString('utf8').replace(/\r\n/g, '\n'));
+if (!original.equals(bytes)) writeFileSync(assetPath, bytes);
 const geojson = JSON.parse(bytes.toString('utf8')) as { features: { geometry: { type: string; coordinates: unknown } }[] };
 
 const box = [Infinity, Infinity, -Infinity, -Infinity];
