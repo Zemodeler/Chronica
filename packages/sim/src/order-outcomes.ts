@@ -1,5 +1,5 @@
 import { formatWorldDate, letterTally, letterTallyInWords, spentForOrderPart, type ScenarioClock } from "@chronica/shared";
-import { goalEvidence, orderPartLabel, orderPartStatus, procedureReasonOf, type OrderPart, type WorldState } from "@chronica/shared";
+import { goalEvidence, orderPartLabel, orderPartStatus, procedureReasonOf, type OrderPart, type OrderPartStatus, type WorldState } from "@chronica/shared";
 import type { ChronicleEntry } from "./chronicle";
 import { refOfPart, whyNothingSetAside } from "./order-money";
 import { refusalInPeriodWords } from "./order-lines";
@@ -37,19 +37,67 @@ export function motionOf(world: WorldState, part: OrderPart): WorldState["materi
   return undefined;
 }
 
+/** What a part is told as, with the evidence that raised it, if any (`toldOutcome`). */
+export interface ToldOutcome {
+  readonly status: OrderPartStatus;
+  /** The engine's own reading, before any linked evidence. */
+  readonly reckoned: OrderPartStatus;
+  readonly raised: { readonly name: string; readonly locationId: string } | undefined;
+  readonly appointed: { readonly name: string } | undefined;
+  /** A work found only by its words: shown as a possible answer, never credited. */
+  readonly mayAnswer: WorldState["projects"][number] | undefined;
+}
+
+/**
+ * What a part is told as.
+ *
+ * The engine's reading (`orderPartStatus`) is the answer. It is raised to
+ * "done" only by evidence tied to this very part: an army the part itself
+ * made (a `force` work ref of the actor's own power) standing under the name
+ * asked for, or the named man commanding or holding a post in such an army. A
+ * name or a post anywhere in the world proves nothing: "raise an army called
+ * X" read done because a foreign power already had an X, and "appoint Y" read
+ * done because Y held an unrelated seat. A part refused or failed is never
+ * raised. A work found by its words alone is never the part's work.
+ */
+export function toldOutcome(world: WorldState, part: OrderPart, actorId: string): ToldOutcome {
+  const reckoned = orderPartStatus(world, part);
+  const unmatched = reckoned === "unanswered" || reckoned === "carried_unverified";
+  const actorPolityId = world.characters.find((character) => character.id === actorId)?.polityId ?? null;
+  const linked = unmatched ? linkedForces(world, part, actorPolityId) : [];
+  const raised = linked.length === 0 ? undefined : namedForceRaised({ ...world, material: { ...world.material, forces: linked } }, part.said);
+  const appointed = linked.length === 0 || raised !== undefined ? undefined : appointmentInForces(world, part.said, linked);
+  const order = unmatched && raised === undefined && appointed === undefined ? world.orders.find((candidate) => candidate.parts.includes(part)) : undefined;
+  const mayAnswer = order === undefined ? undefined : projectBegunFor(world, part.said, order.givenAtStep, actorId, actorPolityId);
+  return { status: raised !== undefined || appointed !== undefined ? "achieved" : reckoned, reckoned, raised, appointed, mayAnswer };
+}
+
+/** The armies this part itself made, of the actor's own power. */
+function linkedForces(world: WorldState, part: OrderPart, actorPolityId: string | null): WorldState["material"]["forces"] {
+  if (actorPolityId === null) return [];
+  const ids = new Set(part.workRefs.filter((ref) => ref.kind === "force").map((ref) => ref.id));
+  return world.material.forces.filter((force) => ids.has(force.id) && force.polityId === actorPolityId);
+}
+
+/** "Appoint X as its legate": X commands, or holds a post in, one of these armies. */
+function appointmentInForces(world: WorldState, said: string, forces: WorldState["material"]["forces"]): { readonly name: string } | undefined {
+  const person = personNamedForAppointment(world, said);
+  if (person === undefined) return undefined;
+  return forces.some((force) => force.commanderCharacterId === person.id || (force.posts ?? []).some((post) => post.characterId === person.id)) ? { name: person.name } : undefined;
+}
+
+/** A work begun on or after the order's day, by the actor or his power, sharing the part's words. */
+function projectBegunFor(world: WorldState, said: string, givenAtStep: number, actorId: string, actorPolityId: string | null): WorldState["projects"][number] | undefined {
+  const candidates = world.projects.filter((project) => project.startedAtStep >= givenAtStep
+    && (project.sponsorEntityRef.id === actorId || (actorPolityId !== null && project.sponsorEntityRef.id === actorPolityId)));
+  return candidates.length === 0 ? undefined : projectForWords({ ...world, projects: candidates }, said);
+}
+
 /** One part's line: what it came to, in the engine's words. */
 export function lineOf(world: WorldState, part: OrderPart, actorId: string, clock?: ScenarioClock): string {
-  const reckoned = orderPartStatus(world, part);
-  // "Raise a second army called Legio II": when an army of that name stands in the world, the part is done,
-  // whatever work the engine did or did not match to it.
-  const raised = namedForceRaised(world, part.said);
-  // A work begun for the words of this part ("construct the road") that the engine never tied to it is still its work.
-  const unmatched = reckoned === "unanswered" || reckoned === "carried_unverified";
-  const begun = unmatched && raised === undefined ? projectForWords(world, part.said) : undefined;
-  const appointed = unmatched ? appointmentMade(world, part.said) : undefined;
-  const status = (raised !== undefined || appointed !== undefined) && (unmatched || reckoned === "failed") ? "achieved" : begun !== undefined ? "under_way" : reckoned;
+  const { status, reckoned, raised, appointed, mayAnswer } = toldOutcome(world, part, actorId);
   const project = part.workRefs.find((ref) => ref.kind === "project");
-  const work = project === undefined ? begun : world.projects.find((candidate) => candidate.id === project.id) ?? begun;
+  const work = project === undefined ? undefined : world.projects.find((candidate) => candidate.id === project.id);
   const next = work?.milestones.find((milestone) => milestone.status === "pending");
   const how = status === "under_way" && work !== undefined
     ? `: ${work.label}${next === undefined ? "" : `, next ${lowerFirst(next.label)}`}`
@@ -96,7 +144,9 @@ export function lineOf(world: WorldState, part: OrderPart, actorId: string, cloc
   // The verifier's "Check:" is for the audit, not for the player.
   const shownNote = part.note === null || /^Check:/.test(part.note) ? null
     : part.note.replace(/(?:Not all of it: )?It could not be carried out as written\.?/, "Part of it could not be done as asked.").replace(/;\s*Part of it could not be done as asked\./, "; part of it could not be done as asked.");
-  const note = `${paid}${envelope}${shownNote === null ? "" : ` (${shownNote})`}`;
+  // Found by its words alone: said as a possibility, never as the part's work.
+  const possible = mayAnswer === undefined ? "" : ` (a work begun since may answer it, not tied to this order: ${mayAnswer.label})`;
+  const note = `${paid}${envelope}${shownNote === null ? "" : ` (${shownNote})`}${possible}`;
   return `"${part.said}" -- ${lapsed ? "lapsed" : orderPartLabel(status, part, world)}${evidence}${on}${how}${letters}${motionWords}${reason}${note}.`.replace(/\.\.$/, ".");
 }
 
@@ -116,12 +166,22 @@ export function projectForWords(world: WorldState, said: string): WorldState["pr
   return world.projects.find((project) => project.status !== "completed" && [...wordsOf(project.label)].filter((word) => wanted.has(word)).length >= Math.min(2, wanted.size));
 }
 
-/** "Appoint Gnaeus Cornelius Blasio as its legate": done when that man commands a force, holds a post in one, or holds a seat. */
-export function appointmentMade(world: WorldState, said: string): { readonly name: string } | undefined {
+/** The man an appointing part names ("Appoint Gnaeus Cornelius Blasio as its legate"), when he is in the world. */
+function personNamedForAppointment(world: WorldState, said: string): WorldState["characters"][number] | undefined {
   if (!/^(?:and\s+|then\s+)?(?:appoint|name|make|install|put)\b/i.test(said.trim())) return undefined;
-  const wanted = /\b(?:appoint|name|make|install|put)\s+(?:the\s+)?([A-Z][\w'’-]*(?:\s+[A-Z][\w'’-]*){0,4})/.exec(said)?.[1]?.trim().toLowerCase();
+  // The verb in either case ("Appoint ..." opens most parts), the name by its capitals.
+  const wanted = /\b(?:[Aa]ppoint|[Nn]ame|[Mm]ake|[Ii]nstall|[Pp]ut)\s+(?:the\s+)?([A-Z][\w'’-]*(?:\s+[A-Z][\w'’-]*){0,4})/.exec(said)?.[1]?.trim().toLowerCase();
   if (wanted === undefined) return undefined;
-  const person = world.characters.find((character) => character.name.toLowerCase() === wanted || character.name.toLowerCase().startsWith(wanted));
+  return world.characters.find((character) => character.name.toLowerCase() === wanted || character.name.toLowerCase().startsWith(wanted));
+}
+
+/**
+ * Whether the man an appointing part names holds any post or seat anywhere. Not evidence the
+ * part was done (he may have held it before, or somewhere else): `toldOutcome` reads only the
+ * armies the part itself made. Kept for callers that ask the plain question.
+ */
+export function appointmentMade(world: WorldState, said: string): { readonly name: string } | undefined {
+  const person = personNamedForAppointment(world, said);
   if (person === undefined) return undefined;
   const holds = world.material.forces.some((force) => force.commanderCharacterId === person.id || (force.posts ?? []).some((post) => post.characterId === person.id))
     || world.material.officeSeats.some((seat) => seat.status === "held" && seat.holderCharacterId === person.id);
@@ -204,12 +264,34 @@ export function withOrderOutcomes(
  */
 export function claimsItDone(body: string, status: ReturnType<typeof orderPartStatus>): boolean {
   if (status === "achieved") return false;
-  if (DONE_WORDS.test(body)) return true;
+  if (assertsWords(body, DONE_WORDS)) return true;
   // Said begun with nothing begun: a part under way, allowed or waiting may say it started (1.7).
-  return NOTHING_BEGUN.has(status) && BEGUN_WORDS.test(body);
+  return NOTHING_BEGUN.has(status) && assertsWords(body, BEGUN_WORDS);
 }
 
-const DONE_WORDS = /\b(arrived|landed|crossed over|made the crossing|reached|was completed|were completed|was carried out|were carried out|accomplished|achieved|succeeded|was done|stands now in|now stood in|was killed|were killed|was slain|were slain|was destroyed|were destroyed|was annihilated|were annihilated|was found and killed|were found and killed|was taken|were taken|was captured|was seized|fell to|was appointed|were appointed|was installed|was paid|were paid|was signed|was concluded|was ratified|was delivered|were delivered)\b/i;
-const BEGUN_WORDS = /\b(began|had begun|was begun|were begun|was started|were started|commenced|got under way|set out)\b/i;
+/**
+ * Whether a passage says, without denying it, what the words name. "The
+ * legion never arrived at Messana" says the opposite of arriving, and is
+ * the passage telling the truth. A word list and a few words of negation
+ * before it: a guard against the common overclaims, not a reading of
+ * meaning. A sentence it cannot read is let through, not trusted.
+ */
+export function assertsWords(body: string, words: RegExp): boolean {
+  const pattern = new RegExp(words.source, "gi");
+  for (const sentence of body.split(/(?<=[.!?;])\s+/)) {
+    for (const match of sentence.matchAll(pattern)) {
+      // The clause it stands in, up to the word: "...but the legion never" before "arrived".
+      const before = sentence.slice(0, match.index).split(/[,;:]|\b(?:but|and|while|although|though|whereas)\b/i).at(-1) ?? "";
+      if (!NEGATED.test(before)) return true;
+    }
+  }
+  return false;
+}
+
+/** Words that deny what follows in the same clause: "never arrived", "had not yet landed", "failed to reach". */
+const NEGATED = /\b(?:never|not|no|nor|neither|without|nobody|none|cannot|failed to|unable to|yet to|no longer)\b|n't\b/i;
+
+const DONE_WORDS = /\b(arrived|landed|made landfall|came ashore|put ashore|went ashore|disembarked|set foot (?:on|in)|crossed over|crossed the strait|made the crossing|reached|marched into|entered the city|was completed|were completed|was finished|were finished|was carried out|were carried out|accomplished|achieved|succeeded|was done|stands now in|now stood in|was killed|were killed|was slain|were slain|was destroyed|were destroyed|was annihilated|were annihilated|was wiped out|were wiped out|was put to the sword|were put to the sword|was found and killed|were found and killed|was taken|were taken|was captured|were captured|was seized|were seized|fell to|surrendered to|opened (?:its|their) gates|was appointed|were appointed|was installed|took up (?:his|the) post|was paid|were paid|was handed over|were handed over|was signed|was concluded|was ratified|was sealed|was delivered|were delivered)\b/i;
+const BEGUN_WORDS = /\b(began|had begun|was begun|were begun|was started|were started|commenced|got under way|set out|set sail|put to sea|broke ground|was launched|were launched)\b/i;
 /** Statuses with nothing yet set going in the world. */
 const NOTHING_BEGUN: ReadonlySet<ReturnType<typeof orderPartStatus>> = new Set(["unanswered", "refused", "failed", "blocked", "pending", "acknowledged", "stalled"]);

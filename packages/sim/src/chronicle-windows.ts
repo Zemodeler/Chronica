@@ -1,4 +1,4 @@
-import { diffWorlds, findOrderPart, orderPartStatus, type Fact, type Office, type OrderPartyRef, type ScenarioClock, type WorldState } from "@chronica/shared";
+import { diffWorlds, findOrderPart, type Fact, type Office, type OrderPartyRef, type ScenarioClock, type WorldState } from "@chronica/shared";
 import type { BattleAccount } from "./battle";
 import type { WindowSnapshot } from "./burst";
 import {
@@ -18,7 +18,7 @@ import {
 } from "./chronicle";
 import type { SimModelPort } from "./ports";
 import { DECISION_EVENTS } from "./cognition-policy";
-import { lineOf } from "./order-outcomes";
+import { lineOf, toldOutcome } from "./order-outcomes";
 
 /**
  * The record, written window by window while the burst runs.
@@ -115,7 +115,7 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
     // Where each part of an order stands when the window closes (`lineOf`).
     orderOutcome: (partKey: string) => {
       const found = findOrderPart(world, partKey);
-      return found === null ? null : { line: lineOf(world, found.part, found.order.actorCharacterId), status: orderPartStatus(world, found.part) };
+      return found === null ? null : { line: lineOf(world, found.part, found.order.actorCharacterId), status: toldOutcome(world, found.part, found.order.actorCharacterId).status };
     },
   });
 

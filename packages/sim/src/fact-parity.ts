@@ -1,4 +1,5 @@
 import type { OrderPartyRef, WorldState } from "@chronica/shared";
+import { assertsWords } from "./order-outcomes";
 
 /**
  * Whether a fact the model wrote claims something the world does not show
@@ -7,10 +8,11 @@ import type { OrderPartyRef, WorldState } from "@chronica/shared";
  * the answer's acts left; one the world contradicts is dropped before it can
  * reach the Chronicle, and the reason goes to the burst's skipped list.
  *
- * Conservative on purpose: only the claims a table below can read, only when
- * the fact names the things to check them against. Anything else passes.
+ * Conservative on purpose: only the claims a table below can read, said
+ * without a denial ("never arrived" claims nothing), and only when the fact
+ * names the things to check them against. Anything else passes.
  */
-const ARRIVED = /\b(arrived|landed|crossed over|made the crossing|reached)\b/i;
+const ARRIVED = /\b(arrived|landed|made landfall|came ashore|went ashore|disembarked|crossed over|made the crossing|reached)\b/i;
 const TAKEN = /\b(captured|seized|fell to|was taken|were taken|surrendered)\b/i;
 const APPOINTED = /\b(was appointed|were appointed|was installed|was elected|was named (?:as )?(?:the )?(?:new )?[a-z]+)\b/i;
 
@@ -28,13 +30,13 @@ export function factContradictsState(world: WorldState, fact: ClaimingFact, grou
   const places = [...refs("province"), ...refs("settlement")].map(provinceOf).filter((id): id is string => id !== null);
 
   const forces = refs("force");
-  if (ARRIVED.test(text) && forces.length === 1 && places.length > 0 && world.material.forces.some((force) => force.id === forces[0]!.id)) {
+  if (assertsWords(text, ARRIVED) && forces.length === 1 && places.length > 0 && world.material.forces.some((force) => force.id === forces[0]!.id)) {
     const ground = groundOfForce(forces[0]!.id);
     if (!places.some((place) => ground.has(place))) return `says ${forces[0]!.id} arrived, but it is not at ${places[0]!}`;
   }
 
   const polities = refs("polity");
-  if (TAKEN.test(text) && polities.length === 1 && places.length === 1) {
+  if (assertsWords(text, TAKEN) && polities.length === 1 && places.length === 1) {
     const province = world.map.provinces.find((candidate) => candidate.id === places[0]);
     const settlement = province?.settlements.find((candidate) => fact.affectedRefs.some((ref) => ref.id === candidate.id));
     const holder = settlement === undefined ? province?.controllerPolityId : settlement.controllerPolityId;
@@ -43,7 +45,7 @@ export function factContradictsState(world: WorldState, fact: ClaimingFact, grou
 
   const people = refs("character");
   const offices = refs("office");
-  if (APPOINTED.test(text) && people.length === 1 && offices.length === 1) {
+  if (assertsWords(text, APPOINTED) && people.length === 1 && offices.length === 1) {
     const held = world.material.officeSeats.some((seat) => seat.officeId === offices[0]!.id && seat.status === "held" && seat.holderCharacterId === people[0]!.id);
     if (!held) return `says ${people[0]!.id} was appointed to ${offices[0]!.id}, but the seat is not his`;
   }

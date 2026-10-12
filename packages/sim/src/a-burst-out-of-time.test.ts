@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
-import { ScenarioDefinitionSchema, WorldStateSchema, type WorldState } from "@chronica/shared";
+import { OrderAttemptSchema, ScenarioDefinitionSchema, WorldStateSchema, type WorldState } from "@chronica/shared";
 import { DEFAULT_BUDGET, runSimulationBurst, type BurstInput } from "./burst";
 import { createRequestLedger, meteredPort } from "./request-ledger";
 import { withACast } from "./askable-test-kit";
@@ -104,5 +104,29 @@ describe("a burst given one allowance for every request", () => {
     expect(result.skipped.some((skip) => skip.stage === "cognition" && /request allowance is spent/.test(skip.reason))).toBe(true);
     // The historian's share is untouched.
     expect(ledger.canSpend("compose_chronicle", 2)).toBe(true);
+  });
+});
+
+describe("a burst whose time runs out after its first round", () => {
+  // The time running out is the processing, not anybody's choice: whoever was
+  // put a question and is left unasked is owed his turn, said to be owed for
+  // want of time, and nothing put to him is answered against him for it.
+  it("owes a turn to the man a request waits on, for want of time, and leaves his request open", async () => {
+    const asked: SimOperation[] = [];
+    const base = world();
+    const recipient = base.cast.members[0]!.characterId;
+    const attempt = OrderAttemptSchema.parse({
+      id: "attempt-waiting", actionId: "action-waiting", issuerRef: { kind: "character", id: "marcus-atilius" }, recipientRef: { kind: "character", id: recipient },
+      authorityCheck: { authorized: true, grant: null, standing: null, reason: "asked" }, instruction: "Send word of the harbour at Rhegium.", status: "issued", issuedAtStep: base.elapsedStep,
+    });
+    const result = await runSimulationBurst(input(port(asked), {
+      world: { ...base, orderAttempts: [...base.orderAttempts, attempt] },
+      outOfTime: () => asked.includes("simulate_cognition"),
+    }));
+    const unasked = result.skipped.some((skip) => /the turn's time is spent/.test(skip.reason));
+    expect(unasked).toBe(true);
+    const owed = result.world.owed.find((entry) => entry.characterId === recipient);
+    expect(owed?.cause).toBe("time");
+    expect(result.world.orderAttempts.find((candidate) => candidate.id === "attempt-waiting")?.status).not.toBe("refused");
   });
 });

@@ -1,5 +1,6 @@
 import type { FactProposal, OrderPartyRef, WorldDelta, WorldState } from "@chronica/shared";
 import type { RejectedDelta } from "./apply/context";
+import { asClaim } from "./apply/fill-gaps";
 import type { SimModelPort } from "./ports";
 import { reconcileFacts } from "./reconcile-facts";
 import { repairDeltas } from "./repair-deltas";
@@ -90,8 +91,10 @@ export function unanswered(refused: readonly RejectedDelta[], correctedOps: read
  * One reconciliation for a round: every person's facts that name what was
  * refused, against everything refused, in one call. Each man's handles are
  * told apart by his place in the round, so two people's "spent" are two facts.
- * What the call withdraws is gone; what it rewrites is rewritten; a call that
- * fails leaves the facts as written, as a single reconciliation always has.
+ * What the call withdraws is gone; what it rewrites is rewritten; a fact it
+ * did not settle -- the call failed, its answer could not be read, or it was
+ * not shown every refusal -- is kept as somebody's report (`asClaim`), never
+ * as the event: a refused act is not promoted into history by a failed call.
  */
 export async function reconcileTheRound(input: {
   readonly port: SimModelPort;
@@ -106,9 +109,12 @@ export async function reconcileTheRound(input: {
   const refused = [...new Set(input.held.flatMap((entry) => entry.refused))];
   const reconciled = await reconcileFacts({ port: input.port, facts: tagged, refused });
   const facts: FactProposal[][] = input.held.map(() => []);
+  const unresolved = new Set(reconciled.unresolved);
   for (const fact of reconciled.facts) {
     const found = byTag.get(fact.localId);
-    if (found !== undefined) facts[found.at]!.push({ ...found.fact, summary: fact.summary });
+    if (found === undefined) continue;
+    const kept = { ...found.fact, summary: fact.summary };
+    facts[found.at]!.push(unresolved.has(fact.localId) ? asClaim(kept) : kept);
   }
   return { facts, calls: reconciled.calls, failure: reconciled.failure };
 }

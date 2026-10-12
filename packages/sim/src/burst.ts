@@ -58,7 +58,7 @@ import {
   goalsMet,
   orderPartRef,
   findOrderPart,
-  MAX_OWED_BURSTS,
+  owedBurstsAllowed,
   BINDING_ANSWER_DAYS,
   REQUESTED_ANSWER_DAYS,
   capOrders,
@@ -1994,7 +1994,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       modelCalls += reconciled.calls;
       if (reconciled.failure !== null) parseFailures.push(`fact reconciliation: ${reconciled.failure}`);
       const kept = new Set(reconciled.facts.map((fact) => fact.localId));
-      const rewritten = new Map(reconciled.facts.map((fact) => [fact.localId, fact]));
+      // What the reconciliation left unsettled is somebody's report, never the event.
+      const unsettled = new Set(reconciled.unresolved);
+      const rewritten = new Map(reconciled.facts.map((fact) => [fact.localId, unsettled.has(fact.localId) ? asClaim(fact) : fact]));
+      if (unsettled.size > 0) skipped.push({ stage: "reconcile", reason: `${unsettled.size} fact(s) naming what was refused could not be settled; kept as reports` });
       const asked = new Set(naming.map((fact) => fact.localId));
       happened = aboutRealThings.flatMap((fact) => (!asked.has(fact.localId) ? [fact] : kept.has(fact.localId) ? [rewritten.get(fact.localId)!] : []));
     }
@@ -3428,12 +3431,12 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
    * forgotten, and the next thing that read the world held their silence
    * against them.
    */
-  const oweTurns = (actors: readonly { readonly characterId: string }[], whyOf: (id: string) => string | undefined): void => {
+  const oweTurns = (actors: readonly { readonly characterId: string }[], whyOf: (id: string) => string | undefined, cause: "budget" | "time" | "round" = "budget"): void => {
     const fresh = actors.flatMap((actor) => {
       const why = whyOf(actor.characterId);
       if (why === undefined || world.owed.some((entry) => entry.characterId === actor.characterId)) return [];
       owedThisBurst.add(actor.characterId);
-      return [{ characterId: actor.characterId, why: why.slice(0, 300), sinceStep: world.elapsedStep, bursts: 0 }];
+      return [{ characterId: actor.characterId, why: why.slice(0, 300), sinceStep: world.elapsedStep, bursts: 0, cause }];
     });
     if (fresh.length > 0) world = { ...world, owed: [...world.owed, ...fresh].slice(-40) };
   };
@@ -4207,7 +4210,15 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // The order read has already spent the turn's time: the first round asks only those the order is waiting on, and whom the early questions already covered.
     const lateStart = hops === 1 && input.outOfTime?.() === true;
     const gated = rushed ? [] : lateStart ? fresh.filter((actor) => orderPeople.has(actor.characterId) || dueWhy.has(actor.characterId) || owesAnAnswer.has(actor.characterId) || (prefetch.current?.ids.has(actor.characterId) ?? false)) : hops === 1 ? fresh : eventful.length > 0 ? eventful : quietForDays >= budget.newChainAfterDays ? fresh : [];
-    if (rushed && fresh.length > 0) skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: the turn's time is spent; ${fresh.length} left unasked and the days pass on the engine alone` });
+    if (rushed && fresh.length > 0) {
+      skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: the turn's time is spent; ${fresh.length} left unasked and the days pass on the engine alone` });
+      // Those with something of their own to decide -- an order of the ruler's, a step due, a letter to
+      // answer -- are owed their turn: the time running out is the processing, not their choice.
+      oweTurns(fresh, (id) => dueWhy.get(id) ?? (orderPeople.has(id) ? "an order of the ruler's he holds" : owesAnAnswer.has(id) ? "a request put to him he has not answered" : undefined), "time");
+    }
+    if (lateStart && gated.length < fresh.length) {
+      oweTurns(fresh.filter((actor) => !gated.includes(actor)), (id) => dueWhy.get(id), "time");
+    }
     if (!rushed && gated.length < fresh.length) {
       skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: nothing that calls for a decision (${fresh.length - gated.length} left unasked until news of weight, a due step or ${budget.newChainAfterDays} quiet days)` });
     }
@@ -4227,7 +4238,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // the rest are owed their turn, the player's people having been put first.
     const roundCap = budget.maxAskedPerRound ?? MAX_ASKED_PER_ROUND;
     const asking = (callCap - budgetCalls() === 1 ? candidates.slice(0, 8) : room < 3 ? candidates.slice(0, 8 * Math.max(0, room)) : candidates).slice(0, roundCap);
-    if (asking.length < candidates.length) oweTurns(candidates.filter((actor) => !asking.includes(actor)), (id) => dueWhy.get(id));
+    if (asking.length < candidates.length) oweTurns(candidates.filter((actor) => !asking.includes(actor)), (id) => dueWhy.get(id), "round");
     if (reserved && asking.length < fresh.length) {
       skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: the last calls are kept for the order; ${fresh.length - asking.length} others left unasked` });
       oweTurns(fresh.filter((actor) => !asking.includes(actor)), (id) => dueWhy.get(id));
@@ -4436,13 +4447,14 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
 
   if (playerDecision !== null) stopReason = "player_decision";
   // Whoever is still owed a turn at the end has waited one burst more; after
-  // `MAX_OWED_BURSTS` the world stops waiting for him.
+  // `MAX_OWED_BURSTS` the world stops waiting for him (longer while he holds
+  // an open part of an order: `owedBurstsAllowed`).
   const owedBefore = world.owed;
   world = {
     ...world,
     owed: world.owed
       .map((entry) => (owedThisBurst.has(entry.characterId) ? entry : { ...entry, bursts: entry.bursts + 1 }))
-      .filter((entry) => entry.bursts < MAX_OWED_BURSTS),
+      .filter((entry) => entry.bursts < owedBurstsAllowed(world, entry)),
   };
   // And what was put to him is answered for him, rather than waiting on a
   // turn that will not come: dropped, his requests used to wait for ever (E14).

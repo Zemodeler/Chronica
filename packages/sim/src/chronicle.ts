@@ -1810,6 +1810,13 @@ Write the passage again: say plainly where it stands, and tell the rest of the m
     if (entry !== null && entry.quote === null && quoted !== null && quoted.index === index) {
       entry = { ...entry, quote: { line: quoted.utterance.line, speaker: quoted.utterance.speaker, occasion: quoted.utterance.occasion } };
     }
+    // A quotation printed as the passage's own voice says no more than the world shows: a man's
+    // recorded boast that the legion landed stands under a part that did not land only in his
+    // facts, never as the entry's headline words (the body and title are held to it above).
+    if (entry !== null && entry.quote !== null && thread.outcome !== null && claimsItDone(entry.quote.line, thread.outcome.status)) {
+      overstated += 1;
+      entry = { ...entry, quote: null };
+    }
     results[index] = entry;
     handOut();
   });

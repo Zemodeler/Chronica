@@ -207,12 +207,40 @@ export const OwedTurnSchema = z
     sinceStep: ElapsedStepSchema,
     /** How many bursts have ended with him still owed. */
     bursts: z.number().int().nonnegative().default(0),
+    /**
+     * Why he was not asked: the request allowance or call budget was spent
+     * (`budget`), the turn's time ran out (`time`), or the round was full
+     * (`round`). Always the processing, never his choice: an owed turn is not
+     * a refusal, and nothing he was asked is answered against him for it
+     * until the world stops waiting (`owedBurstsAllowed`). Absent on old saves.
+     */
+    cause: z.enum(["budget", "time", "round"]).optional(),
   })
   .strict();
 export type OwedTurn = z.infer<typeof OwedTurnSchema>;
 
 /** A man is owed his turn for this many bursts, and then the world stops waiting. */
 export const MAX_OWED_BURSTS = 2;
+/**
+ * A man holding an open part of the player's order waits longer: the order is
+ * the player's business, and two interrupted turns used to have it answered
+ * for him by the rules, as though he had chosen. Still bounded, so a world
+ * that is always short of calls does not wait for ever.
+ */
+export const MAX_OWED_ORDER_BURSTS = 6;
+
+/** How many bursts an owed turn is kept for: longer while he holds an open part of an order. */
+export function owedBurstsAllowed(world: Pick<WorldState, "orderAttempts" | "orders">, entry: Pick<OwedTurn, "characterId">): number {
+  const holdsAnOpenPart = world.orderAttempts.some((attempt) => attempt.recipientRef.id === entry.characterId
+    && ["issued", "received", "delayed", "accepted"].includes(attempt.status)
+    && attempt.servesRef !== null
+    && (() => {
+      const match = /^(.*)-p(\d+)$/.exec(attempt.servesRef);
+      const part = match === null ? undefined : world.orders.find((order) => order.id === match[1])?.parts[Number(match[2])];
+      return part !== undefined && part.closedAtStep === null;
+    })());
+  return holdsAnOpenPart ? MAX_OWED_ORDER_BURSTS : MAX_OWED_BURSTS;
+}
 
 /** Whether somebody is owed a turn the world has not given him. */
 export function isOwedATurn(world: Pick<WorldState, "owed">, characterId: string): boolean {
