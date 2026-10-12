@@ -192,7 +192,16 @@ export const chronicleCheckpoints = pgTable("chronicle_checkpoints", {
   stopReason: text("stop_reason").notNull(),
   readAt: timestamp("read_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (table) => [index("chronicle_checkpoints_game_idx").on(table.gameId, table.toInstantSortKey, table.ordinal)]);
+}, (table) => [
+  index("chronicle_checkpoints_game_idx").on(table.gameId, table.toInstantSortKey, table.ordinal),
+  // The order the record is read in, newest first, with the id as the last
+  // tie so a page boundary never falls between two rows that sort as one (0043).
+  index("chronicle_checkpoints_reading_idx").on(table.gameId, table.toInstantSortKey.desc(), table.createdAt.desc(), table.ordinal.desc(), table.id.desc()),
+  // A burst's passages are entered once: a commit replayed after a lost
+  // acknowledgement cannot write them twice (0043; created only where the
+  // stored record already holds to it, so an old save is never refused).
+  uniqueIndex("chronicle_checkpoints_burst_ordinal_idx").on(table.burstId, table.ordinal).where(sql`${table.burstId} IS NOT NULL`),
+]);
 
 /** Threads of history the player has chosen to follow: marks on the calendar line. */
 export const followedThreads = pgTable("followed_threads", {
@@ -213,3 +222,96 @@ export const playerDecisions = pgTable("player_decisions", {
   resolvedAt: timestamp("resolved_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [index("player_decisions_game_status_idx").on(table.gameId, table.status)]);
+
+/**
+ * A turn as durable work (0043): the order as it was given, and who is
+ * carrying it out.
+ *
+ * Turns used to run inside the web process that took the order, and a turn
+ * whose process died was simply failed. Now the request writes the burst row
+ * and this row together and returns; a worker -- in the web process or its
+ * own -- leases the job, renews the lease while it works, and commits under
+ * the lease it holds. A lease that lapses (the worker died, or stopped
+ * getting anywhere) is taken up again by any worker, a bounded number of
+ * times, and every write of the old holder is refused from then on.
+ *
+ * One row per burst, keyed by it. A burst with no job -- a letter, a peace
+ * table, a terminal script -- is the old in-process kind and is reaped the
+ * old way.
+ */
+export const turnJobStatus = pgEnum("turn_job_status", ["queued", "leased", "committed", "failed"]);
+
+export const turnJobs = pgTable("turn_jobs", {
+  burstId: uuid("burst_id").primaryKey().references(() => simulationBursts.id, { onDelete: "cascade" }),
+  gameId: uuid("game_id").notNull().references(() => games.id, { onDelete: "cascade" }),
+  status: turnJobStatus("status").notNull().default("queued"),
+  /** The order as given (`TurnInput` in apps/web/lib/turn-input.ts), read again by whichever worker takes the job. */
+  input: jsonb("input").notNull().$type<unknown>(),
+  inputVersion: integer("input_version").notNull().default(1),
+  /** The world's revision when the order was given. Evidence only: each attempt commits against the revision it read. */
+  baseRevision: integer("base_revision").notNull(),
+  /** Leases taken so far; the fencing token every write of an attempt carries. */
+  attempts: integer("attempts").notNull().default(0),
+  maxAttempts: integer("max_attempts").notNull().default(3),
+  availableAt: timestamp("available_at", { withTimezone: true }).notNull().defaultNow(),
+  leaseOwner: text("lease_owner"),
+  leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+  /** The attempt whose commit was kept, and the world revision it wrote. */
+  committedAttempt: integer("committed_attempt"),
+  committedRevision: integer("committed_revision"),
+  /** Work owed after the commit that the commit does not carry (conversations opened by those who now seek the player). */
+  followupsPending: boolean("followups_pending").notNull().default(false),
+  lastError: text("last_error"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("turn_jobs_claim_idx").on(table.status, table.availableAt),
+  index("turn_jobs_lease_idx").on(table.status, table.leaseExpiresAt),
+  index("turn_jobs_game_idx").on(table.gameId, table.status),
+]);
+
+/** Each lease of a job: who held it, and how it ended ("running", "committed", "failed", "retry", "lease_expired", "stuck", "interrupted", "lease_lost"). */
+export const turnJobAttempts = pgTable("turn_job_attempts", {
+  burstId: uuid("burst_id").notNull().references(() => turnJobs.burstId, { onDelete: "cascade" }),
+  attempt: integer("attempt").notNull(),
+  worker: text("worker").notNull(),
+  outcome: text("outcome").notNull().default("running"),
+  error: text("error"),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  endedAt: timestamp("ended_at", { withTimezone: true }),
+}, (table) => [uniqueIndex("turn_job_attempts_burst_attempt_idx").on(table.burstId, table.attempt)]);
+
+/**
+ * Every model request an attempt made, before and after it was made.
+ *
+ * `started` is written before the provider is asked, so a worker that dies
+ * mid-call leaves a row that says so; the next lease marks it `uncertain` --
+ * the provider may or may not have done (and billed) the work, and nothing
+ * here pretends to know. `answered` keeps the answer until the job ends, so a
+ * later attempt asking the very same thing (same operation, same prompts, the
+ * same nth time) is handed it back (`replayed_from`) instead of asking and
+ * paying again. Answers are dropped when the job ends; the rows stay as the
+ * account of what was asked.
+ */
+export const turnCallStatus = pgEnum("turn_call_status", ["started", "answered", "failed", "uncertain"]);
+
+export const turnJobCalls = pgTable("turn_job_calls", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  burstId: uuid("burst_id").notNull().references(() => turnJobs.burstId, { onDelete: "cascade" }),
+  attempt: integer("attempt").notNull(),
+  operation: text("operation").notNull(),
+  /** sha256 of operation, system prompt and user message. The prompts themselves are not kept. */
+  requestHash: text("request_hash").notNull(),
+  /** Which asking of this same request within the attempt: the first, the second... */
+  occurrence: integer("occurrence").notNull(),
+  status: turnCallStatus("status").notNull().default("started"),
+  /** The answered call of an earlier attempt this one was served from, without a provider call. */
+  replayedFrom: bigint("replayed_from", { mode: "number" }),
+  response: text("response"),
+  error: text("error"),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  endedAt: timestamp("ended_at", { withTimezone: true }),
+}, (table) => [
+  uniqueIndex("turn_job_calls_attempt_request_idx").on(table.burstId, table.attempt, table.requestHash, table.occurrence),
+  index("turn_job_calls_request_idx").on(table.burstId, table.requestHash, table.occurrence),
+]);

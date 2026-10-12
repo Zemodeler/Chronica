@@ -7,7 +7,8 @@
     "dev": "next dev --turbopack",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "worker": "tsx worker/turn-worker.ts"
   },
   "dependencies": {
     "@chronica/ai": "0.0.0",
