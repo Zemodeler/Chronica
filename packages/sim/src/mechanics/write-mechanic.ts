@@ -41,6 +41,8 @@ export interface WriteMechanicInput {
   /** The owner as the model was shown them: the burst's slice for the order's actor, a portrait for anybody else. */
   readonly ownerText: string;
   readonly refs: ReadableRefs;
+  /** Remaining rule-writing calls, including a correction of an unreadable answer. */
+  readonly maxCalls?: number;
 }
 
 export interface WriteMechanicResult {
@@ -79,6 +81,7 @@ export async function writeMechanic(input: WriteMechanicInput): Promise<WriteMec
     const first = await attempt(message);
     if (first.success) return { draft: first.data.mechanic, calls, failure: null };
     const complaints = first.error.issues.slice(0, 4).map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ");
+    if ((input.maxCalls ?? 2) < 2) return { draft: null, calls, failure: complaints };
     const second = await attempt(`${message}\n\nYour previous answer was refused: ${complaints}. Write it again, corrected.`);
     if (second.success) return { draft: second.data.mechanic, calls, failure: null };
     return { draft: null, calls, failure: second.error.issues.slice(0, 4).map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ") };

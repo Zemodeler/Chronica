@@ -4,7 +4,7 @@ import { WorldDeltaSchema, WorldStateSchema, campaignOf, ensureProvinceMaterial,
 import { applyDeltas } from "./apply/apply-deltas";
 import { ensureConstitutions } from "./constitutions";
 import { decideStatecraft } from "./statecraft";
-import { aMonth, context, definition, forceOf, inputFor, placed, withMen } from "./war-plan-kit";
+import { aMonth as runMonth, context, definition, forceOf, inputFor, placed, withMen } from "./war-plan-kit";
 
 /**
  * The allies' contingents keep a safe campaign.
@@ -33,7 +33,20 @@ function opening(day: number): WorldState {
   });
   const applied = applyDeltas(world, [muster], context(world, LUCANIAN));
   const made = applied.world.material.forces.find((force) => force.name === "Contingent of Lucanians")!;
-  return { ...applied.world, material: { ...applied.world.material, forces: applied.world.material.forces.map((force) => (force.id === made.id ? { ...force, id: CONTINGENT } : force)) } };
+  return WorldStateSchema.parse({ ...applied.world, material: {
+    ...applied.world.material,
+    forces: applied.world.material.forces.map((force) => (force.id === made.id ? { ...force, id: CONTINGENT } : force)),
+    accounts: applied.world.material.accounts.map((account) => (account.owner.kind === "force" && account.owner.id === made.id
+      ? { ...account, owner: { ...account.owner, id: CONTINGENT } } : account)),
+  } });
+}
+
+/** Only a valid starting world and a valid applied result can establish follower behavior. */
+function aMonth(world: WorldState): ReturnType<typeof runMonth> {
+  expect(WorldStateSchema.safeParse(world).success).toBe(true);
+  const result = runMonth(world);
+  expect(WorldStateSchema.safeParse(result.world).success).toBe(true);
+  return result;
 }
 
 /** Rome's plan and the consul's orders, written in by hand so the test does not depend on what Rome's own rules choose. */
@@ -106,6 +119,7 @@ describe("the allies' contingents keep a safe campaign", () => {
 
   it("decides the same month twice from the same world", () => {
     const start = romeSends(placed(opening(120), ROMAN_ARMY, RHEGIUM), "siege", RHEGIUM);
+    expect(WorldStateSchema.safeParse(start).success).toBe(true);
     const once = decideStatecraft(inputFor(start));
     const again = decideStatecraft(inputFor(start));
     expect(JSON.stringify(lucanian(again))).toBe(JSON.stringify(lucanian(once)));

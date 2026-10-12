@@ -278,8 +278,8 @@ export const DEFAULT_BUDGET: SimulationBudget = {
   maxHops: 64,
   maxAmbientOnlyRounds: 1,
   newChainAfterDays: 10,
-  // Two rules a burst: an order rarely sets more than one thing going, and
-  // the world's own doings get the second. Counted apart from `maxModelCalls`.
+  // Two calls a burst, with at most one for the world's own doings; the
+  // other is reserved for the order. Counted apart from `maxModelCalls`.
   maxMechanicCalls: 2,
 };
 
@@ -1143,6 +1143,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   /** How far into `newFacts` the rules have looked, so an `on_fact` rule sees each fact once. */
   let factsSeenByMechanics = 0;
   let mechanicCalls = 0;
+  let worldMechanicCalls = 0;
   const closeWindow = (final = false): void => {
     // Far news that is not worth the telling stays with the powers it
     // happened to (`far-news.ts`): the Chronicle reads only what reached us.
@@ -2884,13 +2885,19 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         skipped.push({ stage: "mechanic", reason: `${entity.id}: ${mechanicCalls} call(s) for rules already made this burst (of ${budget.maxMechanicCalls}); it stands without one` });
         continue;
       }
+      if (!candidate.ofTheOrder && worldMechanicCalls >= 1) {
+        skipped.push({ stage: "mechanic", reason: `${entity.id}: the world's rule-writing call is spent; the remaining allowance is for the player's order` });
+        continue;
+      }
       // The slice without its directives to the world: a rule for one man's
       // pursuit has no use for the countries to be peopled or the season's stirrings.
       const ownerText = ownerCharacterId !== null && ownerCharacterId === (input.actorRef.kind === "character" ? input.actorRef.id : null) && sliceText.length > 0
         ? withoutDirectives(sliceText)
         : ownerCharacterId === null ? `The power ${owner.id}.` : renderCharacterPortrait(ownerCharacterId, world.characters.find((character) => character.id === ownerCharacterId)?.name ?? ownerCharacterId, world, input.clock);
-      const written = await writeMechanic({ port: input.port, world, entity, act: candidate.delta, actText, ownerText, refs });
+      const maxCalls = Math.min(budget.maxMechanicCalls - mechanicCalls, candidate.ofTheOrder ? 2 : 1 - worldMechanicCalls);
+      const written = await writeMechanic({ port: input.port, world, entity, act: candidate.delta, actText, ownerText, refs, maxCalls });
       mechanicCalls += written.calls;
+      if (!candidate.ofTheOrder) worldMechanicCalls += written.calls;
       if (written.failure !== null) parseFailures.push(`mechanic for ${entity.id}: ${written.failure}`);
       if (written.draft === null) {
         audit.push({ actorRef, op: candidate.delta.op, kind: "mechanic_refused", ofTheOrder: candidate.ofTheOrder, attempt: candidate.attempt, reason: `${entity.id}: ${written.failure === null ? "the writer judged it no rule" : "the writer's answer could not be read"}`, delta: candidate.delta });

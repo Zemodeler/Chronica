@@ -116,6 +116,23 @@ describe("a kept act becomes a rule the engine runs", () => {
     expect(result.mechanicCalls).toBe(0);
     expect(balance(result.world, "leptines-purse")).toBeLessThanOrEqual(balance(opening(), "leptines-purse"));
   });
+
+  it("keeps both rule-writing calls available for arrangements of the player's order", async () => {
+    const second = { ...TOLL, localId: "second_toll", label: "A second toll on the coast road" };
+    const port = scripted([answer([TOLL, second]), JSON.stringify({ deltas: [TOLL, second] })], [RULE, RULE]);
+    const result = await runSimulationBurst(burst(port, "I set up two tolls on the coast road.", opening(), { budget: DEFAULT_BUDGET }));
+    expect(result.mechanicCalls).toBe(2);
+    expect(result.world.genericEntities.filter((entity) => entity.mechanic?.origin === "written")).toHaveLength(2);
+  });
+
+  it("does not spend a correction call beyond the remaining rule-writing allowance", async () => {
+    const port = scripted([answer([TOLL]), JSON.stringify({ deltas: [TOLL] })], ["{}", RULE]);
+    const result = await runSimulationBurst(burst(port, "I set up a toll on the coast road."));
+    expect(port.calls.filter((call) => call === "write_mechanic")).toHaveLength(1);
+    expect(result.mechanicCalls).toBe(1);
+    expect(result.world.genericEntities.find((entity) => entity.label === TOLL.label)?.mechanic).toBeUndefined();
+    expect(result.parseFailures.some((failure) => failure.startsWith("mechanic for"))).toBe(true);
+  });
 });
 
 /**
