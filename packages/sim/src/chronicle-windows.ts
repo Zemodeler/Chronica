@@ -1,4 +1,4 @@
-import { diffWorlds, findOrderPart, orderPartStatus, type Fact, type Office, type OrderPartyRef, type ScenarioClock, type WorldState } from "@chronica/shared";
+import { diffWorlds, findOrderPart, type Fact, type Office, type OrderPartyRef, type ScenarioClock, type WorldState } from "@chronica/shared";
 import type { BattleAccount } from "./battle";
 import type { WindowSnapshot } from "./burst";
 import {
@@ -18,7 +18,7 @@ import {
 } from "./chronicle";
 import type { SimModelPort } from "./ports";
 import { DECISION_EVENTS } from "./cognition-policy";
-import { lineOf } from "./order-outcomes";
+import { lineOf, toldOutcome } from "./order-outcomes";
 
 /**
  * The record, written window by window while the burst runs.
@@ -102,7 +102,7 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
   const composing: Promise<readonly ChronicleEntry[]>[] = [];
   let publishing: Promise<void> = Promise.resolve();
 
-  const viewsOf = (world: WorldState) => ({
+  const viewsOf = (world: WorldState, worldAtOpen: WorldState = world) => ({
     polityOfCharacter: (id: string) => world.characters.find((character) => character.id === id)?.polityId ?? null,
     nameOf: (ref: OrderPartyRef) => nameOfSubject(world, ref),
     describePerson: whoIsWho(world, offices),
@@ -112,10 +112,18 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
     campaignIds: campaignOf(world, observer.id, observerPolityId),
     // Where everybody is when the window closes, for the road news travels.
     world,
-    // Where each part of an order stands when the window closes (`lineOf`).
+    // Where each part of an order stands when the window closes (`lineOf`, `toldOutcome`), and
+    // where it stood when the window opened: a passage telling what was so at an event within
+    // the window is not an overclaim because the world moved on by its close.
     orderOutcome: (partKey: string) => {
       const found = findOrderPart(world, partKey);
-      return found === null ? null : { line: lineOf(world, found.part, found.order.actorCharacterId), status: orderPartStatus(world, found.part) };
+      if (found === null) return null;
+      const opened = findOrderPart(worldAtOpen, partKey);
+      return {
+        line: lineOf(world, found.part, found.order.actorCharacterId),
+        status: toldOutcome(world, found.part, found.order.actorCharacterId, found.order).status,
+        before: opened === null ? null : toldOutcome(worldAtOpen, opened.part, opened.order.actorCharacterId, opened.order).status,
+      };
     },
   });
 
@@ -184,7 +192,7 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
         utterances,
         battleAccounts,
         significanceByFactId: input.untold === undefined ? window.significanceByFactId : new Map([...input.untold.significanceByFactId, ...window.significanceByFactId]),
-        ...viewsOf(window.worldAfter),
+        ...viewsOf(window.worldAfter, window.worldBefore),
         orderFactIds,
         changes: diffWorlds(window.worldBefore, window.worldAfter, offices),
         // What this burst has already said counts as said: a thread told in an
