@@ -94,8 +94,9 @@ const customs = new Map<string, number>();
 const line = (label: string, readings: Map<string, Reading>): void => {
   console.log(`\n${label}`);
   console.log("polity           provs     people   treasury  income/yr  grain%  devMean  devSd  short/hubs  customs/yr  level%  prem");
+  const isStart = label.startsWith("START ");
   for (const [id, r] of readings) {
-    console.log(`${id.padEnd(16)} ${String(r.provinces).padStart(5)} ${String(Math.round(r.people)).padStart(10)} ${String(Math.round(r.treasury)).padStart(10)} ${String(Math.round(r.income)).padStart(10)} ${String(Math.round(r.grainBps / 100)).padStart(7)} ${String(Math.round(r.devMean)).padStart(8)} ${String(Math.round(r.devSpread)).padStart(6)} ${`${r.short}/${r.hubs}`.padStart(10)} ${String(Math.round(r.customs)).padStart(11)} ${String(Math.round(r.level / 100)).padStart(7)} ${String(r.premium).padStart(5)}`);
+    console.log(`${id.padEnd(16)} ${String(r.provinces).padStart(5)} ${String(Math.round(r.people)).padStart(10)} ${String(Math.round(r.treasury)).padStart(10)} ${(isStart ? "-" : String(Math.round(r.income))).padStart(10)} ${(isStart ? "-" : String(Math.round(r.grainBps / 100))).padStart(7)} ${String(Math.round(r.devMean)).padStart(8)} ${String(Math.round(r.devSpread)).padStart(6)} ${`${r.short}/${r.hubs}`.padStart(10)} ${String(Math.round(r.customs)).padStart(11)} ${String(Math.round(r.level / 100)).padStart(7)} ${String(r.premium).padStart(5)}`);
   }
 };
 const snapshot = (): Map<string, Reading> => new Map(chosen.map((id) => [id, read(world, id, income.get(id) ?? 0, customs.get(id) ?? 0)]));
