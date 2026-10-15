@@ -54,6 +54,15 @@ describe("the hand adapter", () => {
     await expect(reply).resolves.toMatchObject({ content: '{"facts": []}' });
   });
 
+  it("reads an answer saved with a byte-order mark, as Windows editors and PowerShell save UTF-8", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "hand-"));
+    const adapter = createHandAdapter({ dir, pollMs: 10, timeoutMs: 500 });
+    const stem = handStem("reconcile_facts", "with a mark");
+    const reply = adapter.call("reconcile_facts", "S", "with a mark");
+    writeFileSync(path.join(dir, `${stem}.json`), '﻿{"withdraw": [], "rewrite": []}');
+    await expect(reply).resolves.toMatchObject({ content: '{"withdraw": [], "rewrite": []}' });
+  });
+
   it("returns a tool step's calls with their arguments", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "hand-"));
     const adapter = createHandAdapter({ dir, pollMs: 10 });

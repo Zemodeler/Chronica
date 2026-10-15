@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { kindAskedFor, verifyPart } from "./order-verifier";
 
 describe("the order verifier", () => {
+  it("takes speaking for a question already before the chamber as asking it (consul-run-issues M8)", () => {
+    // Flagged, the part was asked again, and a second motion on the same prorogation failed where the first carried.
+    expect(verifyPart({ said: "Ask the Senate to prorogue my command for another year", ops: ["political_support_set"], handedOn: false })).toBeNull();
+  });
+
   it("passes acts of the kind the words ask for", () => {
     expect(verifyPart({ said: "Carry Legio I to Messana in the Roman Navy", ops: ["force_modify"], handedOn: false })).toBeNull();
     expect(verifyPart({ said: "Hire twenty galleys", ops: ["service_contract_open"], handedOn: false })).toBeNull();

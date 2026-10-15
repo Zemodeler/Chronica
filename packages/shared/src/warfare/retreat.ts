@@ -14,7 +14,8 @@ import { isWaterCrossing } from "./sea";
  * the Carthaginians it had just fled could follow it there. An army falls back
  * toward its own: its own power's ground first, then a friend's, then ground
  * nobody is fighting over; toward its depots and its walls; away from where
- * the enemy stands. Into the enemy's hands only when every road leads there.
+ * the enemy stands. Into the enemy's ground only when every road leads there, and never onto
+ * the enemy's men: with every road blocked by them, there is no retreat (`null`).
  *
  * A retreat is a march, not a step: it goes on province after province until
  * it has put a reference province's distance between the army and the field,
@@ -68,8 +69,11 @@ function nextRetreatStep(world: WorldState, force: Force, fromProvinceId: string
       if (structure.supplyRadius > 0) score += 30;
       if (structure.defensiveEffectsBps > 0) score += 20;
     }
-    // Away from the enemy: his armies standing there, and his ground beyond it.
-    if (world.material.forces.some((other) => other.locationId === provinceId && hostile(other.polityId))) score -= 80;
+    // Never onto the enemy's men: a road that leads only into another of his armies is no road, and the army stands and
+    // fights. Fleeing into a province where the foe already stood let a beaten legion run in a circle round two Roman
+    // armies for a year (consul-run-issues H3).
+    if (world.material.forces.some((other) => other.locationId === provinceId && hostile(other.polityId) && other.personnel.some((group) => group.fit > 0))) return [];
+    // Away from his ground beyond it.
     for (const { provinceId: beyond } of adjacentTo(world, provinceId)) {
       if (!visited.has(beyond) && enemyHeld(beyond)) score -= 10;
     }

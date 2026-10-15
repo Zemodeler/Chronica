@@ -11,8 +11,10 @@
  * `--free` leaves the war with Carthage unopened: the report then says whether, and when, the rules went to it of themselves, and what stood in Sicily.
  */
 import { writeFileSync } from "node:fs";
+import { readBoard } from "../packages/sim/src/board";
+import { WAR_AT, bigMoveCandidates } from "../packages/sim/src/statecraft";
 import { punicWarsScenario } from "@chronica/db";
-import { ScenarioDefinitionSchema, WorldStateSchema, WorldDeltaSchema, ensureProvinceMaterial, fitStrengthOf, isNavalForce, formatWorldDate, type WorldState } from "@chronica/shared";
+import { readDepartments, stableHash, ScenarioDefinitionSchema, WorldStateSchema, WorldDeltaSchema, ensureProvinceMaterial, fitStrengthOf, isNavalForce, formatWorldDate, type WorldState } from "@chronica/shared";
 import { DEFAULT_BUDGET, applyDeltas, auditMoney, combineAudits, emptyAudit, auditInWords, createIdFactory, runSimulationBurst, type SimModelPort } from "@chronica/sim";
 
 const args = process.argv.slice(2);
@@ -49,6 +51,19 @@ const priorIssued = new Map<string, number>();
 const free = args.includes("--free");
 /** --free: what the age's dated things bring about at the strait, said once each as it comes (the war of Syracuse on the Mamertines, their letters, the garrison in Messana, the motions on war with Carthage). */
 const strait = new Set<string>();
+/** --rome-diag: how Rome weighs a war on Carthage every third month from day 2,200: the score, its rank among the world's moves, whether the month's roll comes, and who stands ahead of it. */
+function romeAgainstCarthage(w: WorldState): void {
+  const rulers = readDepartments(w);
+  const rulerOf = (id: string) => rulers.rulers(id).find((r) => r.alive && r.id !== actor);
+  const input = { world: w, gameId: "war-sanity", excludedPolityIds: new Set([actorPolity]), playedByModel: new Set<string>(), playerCharacterId: actor, nearPlayer: null, pressures: definition.historicalPressures, warfare: definition.warfare, offices: definition.government.offices, clock: definition.clock };
+  const all = bigMoveCandidates(input as never, readBoard(w), rulerOf, (id) => rulerOf(id) !== undefined && id !== actorPolity, actorPolity).sort((a, b) => b.score - a.score || a.polityId.localeCompare(b.polityId));
+  const idx = all.findIndex((c) => c.polityId === "rome" && c.neighbour.polityId === "carthage");
+  const mine = all[idx];
+  const day = w.instant.day;
+  const rolled = mine !== undefined && mine.score >= WAR_AT && stableHash(["war-sanity", "statecraft", String(Math.floor(day / 30)), "rome", "carthage", "declare_war", "comes"]) % 12 < Math.min(6, 1 + Math.floor((mine.score - WAR_AT) / 5));
+  const ahead = all.slice(0, Math.max(0, idx)).filter((c) => [c.polityId, c.neighbour.polityId].some((id) => id === "rome" || id === "carthage")).map((c) => `${c.polityId}->${c.neighbour.polityId}:${c.score.toFixed(0)}`);
+  console.log(`  rome-diag day ${day}: rome ruler ${rulerOf("rome")?.name ?? "NONE"}, carthage ruler ${rulerOf("carthage")?.name ?? "NONE"}, rome at war with ${w.polityAgreements.filter((a) => a.kind === "war" && a.status === "active" && [a.polityId, a.otherPolityId].includes("rome")).map((a) => (a.polityId === "rome" ? a.otherPolityId : a.polityId)).join(",") || "nobody"}; rome->carthage ${mine === undefined ? "NOT A CANDIDATE" : `rank ${idx}, score ${mine.score.toFixed(0)}, roll ${rolled ? "comes" : "does not come"}`}; ahead: ${ahead.join(", ") || "none"}`);
+}
 function watchTheStrait(w: WorldState): void {
   const say = (key: string, line: string): void => { if (!strait.has(key)) { strait.add(key); console.log(`  >> day ${w.instant.day} (${formatWorldDate(w.instant, definition.clock)}): ${line}`); } };
   for (const a of w.polityAgreements) if (a.kind === "war" && [a.polityId, a.otherPolityId].includes("mamertines")) say(`war ${a.id}`, `war ${a.polityId} / ${a.otherPolityId} (${a.status})`);
@@ -97,6 +112,7 @@ for (let month = 0; month < years * 12; month += 1) {
   total = combineAudits(total, auditMoney(before, world));
   if (args.includes("--losses")) tallyLosses(world, year);
   if (free) watchTheStrait(world);
+  if (free && args.includes("--rome-diag") && world.instant.day >= 2_200 && month % 3 === 0) romeAgainstCarthage(world);
   const snap = args.find((a) => a.startsWith("--snapshot="))?.split("=")[1];
   const snapDay = Number(args.find((a) => a.startsWith("--snapshot-day="))?.split("=")[1] ?? "0");
   if (snap !== undefined && snapDay > 0 && world.instant.day >= snapDay && !strait.has("snapshot")) { strait.add("snapshot"); writeFileSync(snap, JSON.stringify(world)); console.log(`  >> world written to ${snap} on day ${world.instant.day}`); }

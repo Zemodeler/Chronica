@@ -164,6 +164,11 @@ export const PolityAgreementSchema = z
     /** For a trade pact or an embargo: what the markets read of it (`tradeTermsBetween`). */
     trade: TradeTermsSchema.optional(),
     sinceStep: ElapsedStepSchema,
+    /**
+     * How many years it had already stood when the world began: a foedus of 299 BC is thirty years old in 270, though its
+     * `sinceStep` is the first day. Read where an agreement's age counts, as an ally's habit of following (`unionScore`).
+     */
+    heldYearsAtStart: z.number().int().nonnegative().max(1_000).optional(),
     /** A dated truce ends by itself; everything else runs until somebody ends it. */
     untilStep: ElapsedStepSchema.nullable().default(null),
     /** The letter that produced it, where one did. */
@@ -497,4 +502,14 @@ export function customsOn(terms: TradeBetween, ownRateBps: number, good: GoodId)
   if (terms.pact === null) return ownRateBps;
   if (terms.pact.exempt.includes(good)) return 0;
   return terms.pact.tariffCapBps === null ? ownRateBps : Math.min(ownRateBps, terms.pact.tariffCapBps);
+}
+
+/**
+ * Whose ground an army takes from an enemy: its own power's, or -- an ally by foedus, with no war or peace of its own,
+ * fighting its leader's war -- its leader's. The Picene and Samnite levies Rome called against the Messapians took Brundisium
+ * and three Messapian districts for the Picentes and the Samnites (consul-run-issues M5).
+ */
+export function takerFor(agreements: readonly PolityAgreement[], polityId: string, enemyId: string): string {
+  const leader = leaderOf(agreements, polityId);
+  return leader !== null && leader !== enemyId && atWar(agreements, leader, enemyId) ? leader : polityId;
 }

@@ -231,9 +231,18 @@ function stripeTile(colour: string): HTMLCanvasElement | OffscreenCanvas | null 
   const known = stripeTiles.get(colour);
   if (known !== undefined) return known;
   const size = OCCUPIED_STRIPE_PX;
-  const tile = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(size, size) : typeof document !== "undefined" ? Object.assign(document.createElement("canvas"), { width: size, height: size }) : null;
-  const paint = tile?.getContext("2d");
-  if (tile == null || paint == null) return null;
+  let tile: HTMLCanvasElement | OffscreenCanvas;
+  let paint: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+  if (typeof OffscreenCanvas !== "undefined") {
+    tile = new OffscreenCanvas(size, size);
+    paint = tile.getContext("2d");
+  } else if (typeof document !== "undefined") {
+    tile = Object.assign(document.createElement("canvas"), { width: size, height: size });
+    paint = tile.getContext("2d");
+  } else {
+    return null;
+  }
+  if (paint === null) return null;
   paint.strokeStyle = colour;
   paint.lineWidth = OCCUPIED_STRIPE_WIDTH_PX;
   paint.lineCap = "square";

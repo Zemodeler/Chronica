@@ -69,6 +69,22 @@ describe("capital succession", () => {
     expect(reconcileCapitals(settled)).toBe(settled);
   });
 
+  it("keeps one provisional seat a province, taken back rather than made again (consul-run-issues)", () => {
+    let world = opening();
+    for (const city of world.map.provinces.flatMap((province) => province.settlements).filter((city) => city.controllerPolityId === polityId)) world = hold(world, city.id, "rome");
+    const first = reconcileCapitals(world);
+    const seatId = capital(first).capitalSettlementId!;
+    // The seat taken: the government moves to ground the enemy does not stand in, not to a second "Seat at" beside the first.
+    const lost = reconcileCapitals(hold(first, seatId, "rome"));
+    const second = capital(lost).capitalSettlementId!;
+    expect(second).not.toBe(seatId);
+    // The first seat won back and the second lost: the first serves again, and is not made anew.
+    const back = reconcileCapitals(hold(hold(lost, seatId, polityId), second, "rome"));
+    expect(capital(back).capitalSettlementId).toBe(seatId);
+    const seats = back.map.provinces.flatMap((province) => province.settlements).filter((city) => city.id.startsWith("capital-seat"));
+    expect(new Set(seats.map((city) => city.provinceId)).size).toBe(seats.length);
+  });
+
   it("does not designate a capital for an ended polity", () => {
     const world = opening();
     const ended = { ...world, map: { ...world.map, polities: world.map.polities.map((polity) => polity.id === polityId ? { ...polity, endedAtStep: 1 } : polity) } };

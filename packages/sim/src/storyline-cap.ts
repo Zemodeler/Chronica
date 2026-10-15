@@ -97,3 +97,14 @@ export function sweepThreadsOverTheCap(
 ): { readonly storylines: WorldStoryline[]; readonly closed: WorldStoryline[] } {
   return setAside(world, storylines, "world", WORLD_THREAD_CAP, atStep, "Set aside unresolved: the world had more threads than it could follow, and this one had gone longest untouched.");
 }
+
+/**
+ * Room for a thread the world was told to open: a seed's own thread, asked for by the narrator in the same prompt. Refused
+ * for want of room, the prompt's own demand came back as a friction (consul-run-issues M2); the stalest of the world's threads
+ * gives way to it instead, as one does for an order's.
+ */
+export function makeRoomForASeed(world: WorldState, atStep: number, title: string): WorldState {
+  const why = `Set aside unresolved: the world could not follow more threads, and "${title}" began.`.slice(0, 480);
+  const set = setAside(world, world.storylines, "world", WORLD_THREAD_CAP - 1, atStep, why);
+  return set.closed.length === 0 ? world : { ...world, storylines: set.storylines };
+}

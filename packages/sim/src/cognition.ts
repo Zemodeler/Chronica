@@ -573,6 +573,10 @@ const placeOf = (world: WorldState, provinceId: string): string =>
  * Armies within a couple of days' ride are the kind of thing scouts, merchants and
  * rumour make known; further off, what they know is what they have been told.
  */
+/** Whether a force is ships, whose strength counts hulls (a transport carries a hundred and twenty men, a warship thirty). */
+export const countsShips = (force: { readonly personnel: readonly { readonly categoryId: string }[] }): boolean =>
+  force.personnel.length > 0 && force.personnel.every((group) => /ship|transport|hull|galley|trireme|quinquereme/i.test(group.categoryId));
+
 function describeWars(character: Character, world: WorldState): string[] {
   if (character.polityId === null) return [];
   const polityId = character.polityId;
@@ -592,10 +596,19 @@ function describeWars(character: Character, world: WorldState): string[] {
     return `Their power is at war with ${polityName(enemy)} [${enemy}]${allies.length === 0 ? "" : ", and the allies who follow it"}${days === null ? "" : `, and has been for ${days} days`}${war === undefined ? "" : `: ${war.terms}`}. It stands at ${standing.score} of 100 for them -- ${how}${standing.parts.length === 0 ? "" : ` (${standing.parts.join("; ")})`}.`;
   });
   const own = world.material.forces.filter((force) => force.commanderCharacterId === character.id || force.controllerCharacterId === character.id);
-  const from = [...new Set([character.locationProvinceId, ...own.map((force) => force.locationId)].filter((id): id is string => id !== null))];
+  // Near whom: the man himself, or which of his forces. "Here, in the same province" measured from an eighteen-man
+  // flotilla while the consul and his legions stood a march away sent the legions the wrong way (consul-run-issues H5).
+  const from: { readonly at: string; readonly who: string }[] = [
+    ...(character.locationProvinceId === null ? [] : [{ at: character.locationProvinceId, who: "him" }]),
+    ...own.map((force) => ({ at: force.locationId, who: force.name })),
+  ];
   const near = world.material.forces
     .filter((force) => enemies.includes(force.polityId))
-    .map((force) => ({ force, km: Math.min(...from.map((here) => kmBetween(world, here, force.locationId, ENEMY_NEAR_KM) ?? Infinity)) }))
+    .map((force) => {
+      const measured = from.map((origin) => ({ who: origin.who, km: kmBetween(world, origin.at, force.locationId, ENEMY_NEAR_KM) ?? Infinity }))
+        .sort((a, b) => a.km - b.km || Number(b.who === "him") - Number(a.who === "him"))[0];
+      return { force, km: measured?.km ?? Infinity, who: measured?.who ?? "him" };
+    })
     .filter((entry) => entry.km <= ENEMY_NEAR_KM)
     .sort((a, b) => a.km - b.km)
     .slice(0, 6);
@@ -638,11 +651,12 @@ function describeWars(character: Character, world: WorldState): string[] {
     // Counted as the player's own scouts would count them (`estimateMen`): by
     // eye where they stand in the same province, by report a day or two
     // off -- never the true muster, which a portrait printed to the man.
-    lines.push("Enemy forces near them:", ...near.map(({ force, km }) => {
+    lines.push("Enemy forces near them:", ...near.map(({ force, km, who }) => {
       const fit = force.personnel.reduce((sum, category) => sum + category.fit, 0);
       const seenThisWeek = Math.floor(world.elapsedStep / 7);
       const count = estimateMen(fit, km === 0 ? "own_eyes" : "report", 0, [force.id, character.id, seenThisWeek]).label;
-      const where = km === 0 ? "here, in the same province" : `about ${describeKm(km)} off`;
+      // Named only when it is one of his forces and not the man himself: the prompt is at the size it may be.
+      const where = km === 0 ? (who === "him" ? "here, in the same province" : `here, with ${who}`) : `about ${describeKm(km)} ${who === "him" ? "off" : `from ${who}`}`;
       return `  - ${force.name} [${force.id}] of ${polityName(force.polityId)} — ${count} at ${placeOf(world, force.locationId)}, ${where}`;
     }));
   }
@@ -676,7 +690,7 @@ function describeMeans(character: Character, world: WorldState): string[] {
       "Forces answering to them:",
       ...commanded.map((force) => {
         const fit = force.personnel.reduce((sum, category) => sum + category.fit, 0);
-        return `  - ${force.name} [${force.id}] — ${fit} men at ${placeOf(world, force.locationId)}, morale ${Math.round(force.moraleBps / 100)}/100, ${force.provisionStatus}`;
+        return `  - ${force.name} [${force.id}] — ${fit} ${countsShips(force) ? "ships" : "men"} at ${placeOf(world, force.locationId)}, morale ${Math.round(force.moraleBps / 100)}/100, ${force.provisionStatus}`;
       }),
     );
   }

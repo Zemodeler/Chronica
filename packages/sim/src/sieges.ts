@@ -1,6 +1,7 @@
 import { lessonsOfSieges } from "./state-lessons";
 import {
   takenBy,
+  takerFor,
   sackTheMarket,
   sellCaptives,
   STORMED_CAPTIVE_SHARE,
@@ -348,14 +349,16 @@ export function pressSieges(given: WorldState, toDay: number, options: PressSieg
     if (pressureBps >= 10_000) {
       // The gates open. The city, and with its last city the province, to the
       // besiegers; the garrison lays down its arms.
+      // Taken for the besieger's leader where it is an ally fighting its leader's war (consul-run-issues M5).
+      const owner = takerFor(world.polityAgreements, siege.besiegerPolityId, siege.defenderPolityId);
       provinces = provinces.map((candidate) => {
         if (candidate.id !== siege.provinceId) return candidate;
         const settlements = candidate.settlements.map((city) => (siege.settlementId === null || city.id === siege.settlementId
-          ? { ...city, controllerPolityId: siege.besiegerPolityId }
+          ? { ...city, controllerPolityId: owner }
           : city));
-        const allTaken = settlements.every((city) => city.controllerPolityId === siege.besiegerPolityId);
+        const allTaken = settlements.every((city) => city.controllerPolityId === owner);
         // Taken in a war, the province is occupied, not owned: the peace decides whose it is.
-        return { ...candidate, settlements, ...(allTaken ? { ...takenBy(candidate, siege.besiegerPolityId, world.polityAgreements), controlFirmnessBps: Math.min(candidate.controlFirmnessBps, 3_000), lostBy: { polityId: siege.defenderPolityId, atStep: toDay } } : {}) };
+        return { ...candidate, settlements, ...(allTaken ? { ...takenBy(candidate, owner, world.polityAgreements), controlFirmnessBps: Math.min(candidate.controlFirmnessBps, 3_000), lostBy: { polityId: siege.defenderPolityId, atStep: toDay } } : {}) };
       });
       // A cruel or wrathful commander sacks a city that did not yield on
       // terms: its men killed, its women and children sold (`sackCities`).

@@ -4,7 +4,6 @@ import { CUSTOMARY_TAX_BURDEN, ScenarioDefinitionSchema, WorldStateSchema, ensur
 import { createIdFactory } from "./ports";
 import { runDeterministicTick } from "./tick";
 import { withMiddlingManagers } from "./middling-managers";
-import { keepingSpent } from "./keeping-test-kit";
 
 /**
  * "Double the tributum." "Triple it."
@@ -26,17 +25,18 @@ function aYearOf(world: WorldState) {
   const monthly: number[] = [];
   const facts: string[] = [];
   for (let month = 1; month <= 12; month += 1) {
-    const before = current.material.accounts.find((account) => account.id === "rome-treasury")!.balance;
-    const expenses = current.material.obligations
-      .filter((obligation) => obligation.active && obligation.payerAccountId === "rome-treasury")
-      .reduce((sum, obligation) => sum + obligation.amount, 0);
+    const knownTransactions = new Set(current.material.transactions.map((transaction) => transaction.id));
     const ticked = runDeterministicTick({ world: current, toDay: month * 30, ids: createIdFactory(`tax-${month}`), warfare: definition.warfare });
     expect(WorldStateSchema.safeParse(ticked.world).success).toBe(true);
-    const was = current;
     current = ticked.world;
-    const after = current.material.accounts.find((account) => account.id === "rome-treasury")!.balance;
-    // (What the state paid the same month to keep itself, the upkeep and the costs of government, is not a tax lost: added back, 2026-10-08.)
-    monthly.push(after - before + expenses + keepingSpent(was, current, "rome"));
+    // Collections are income receipts, not the net change of the chest plus
+    // nominal wages: the army's stoppage stays in the chest, and a quaestor's
+    // diversion is expenditure rather than a reduction of tax collected.
+    monthly.push(current.material.transactions
+      .filter((transaction) => !knownTransactions.has(transaction.id)
+        && transaction.destinationAccountId === "rome-treasury"
+        && transaction.cause.kind === "scheduled_income")
+      .reduce((sum, transaction) => sum + transaction.amount, 0));
     facts.push(...ticked.factProposals.map((fact) => String(fact.kind)));
   }
   return { world: current, monthly, facts };
@@ -73,14 +73,12 @@ describe("taxes the land can bear", () => {
     // The tributum and the land rents, as authored: 500 000 a month at the opening of v52 (160 000 before the factor of 3.1). The
     // allies pay no tribute (v32); two of the rents come from land Rome took
     // from the Bruttians and Samnites.
-    // What Rome levies at home is gathered by the Treasury of Saturn (v35):
-    // four quaestors nobody named and two centuries of the work, at 60 --
-    // three in a hundred more than a middling hand. The rents from the
-    // Bruttians' and Samnites' country are paid, not gathered.
-    const treasury = 1 + ((60 - 50) / 50) * 0.15;
-    // Rhegium and its country are now the Campanians', in a war with Rome, so they no longer pay Rome's tax: some 16 000 a month less (5 183 before v52).
-    // The Treasury's officers are men with tempers: what they are like at the work shaves some 2 400 off the middling hand's 60 (762 before v52); 18 379 in all with Rhegium.
-    expect(year.monthly[0]).toBe(Math.round(306_000 * treasury) + Math.round(102_000 * treasury) + 46_000 + 46_000 - 18_379);
+    // The Treasury of Saturn's effective tax-roll skill is 58, including its
+    // officers' tempers. Foreign rents are paid rather than gathered. Neither
+    // the army's retained pay nor the quaestors' diversions changes collections.
+    expect(readDepartments(opening()).skill({ kind: "polity", id: "rome" }, "tax_roll")).toBe(58);
+    const treasury = 1 + ((58 - 50) / 50) * 0.15;
+    expect(year.monthly[0]).toBe(Math.round(306_000 * treasury) + Math.round(102_000 * treasury) + 46_000 + 46_000);
   });
 
   it("does not collect a tenfold tributum: the collectors raise what the land can bear, and say so", () => {

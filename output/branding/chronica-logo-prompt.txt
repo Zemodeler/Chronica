@@ -1,0 +1,9 @@
+Generated using the built-in image generation tool.
+
+Use case: logo-brand
+Asset type: final transparent logo for Chronica, a historical grand-strategy roleplaying game where players write orders and read a chronicle.
+Primary request: Create one polished, distinctive logo combining a restrained emblem and the exact wordmark "CHRONICA".
+Style: elegant classical inscription meets literary humanist typography, premium historical game identity, flat vector-like precision. Emblem: a bold open circular C with a subtly integrated stylus/quill incision, evoking an ancient personal seal and the act of writing history. Simple, coherent silhouette, recognizable at small size. Avoid literal clock faces.
+Composition: one horizontal lockup, emblem on left, wordmark on right, optically balanced spacing; centered with generous transparent margin. Wordmark in beautifully drawn classical serif uppercase, controlled moderate tracking, readable and meticulously kerned. Exact text CHRONICA, no other text.
+Color palette: warm bronze #B98B4A throughout, appropriate for placement on soot-brown #15110D. Flat single-color artwork, solid opaque strokes.
+Constraints: genuinely transparent background; only the emblem and wordmark. No mockup, background panel, drop shadows, gradients, 3D, metallic texture, laurel wreath, crown, shield, ornamental clutter, tagline, watermark or extra variants.

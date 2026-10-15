@@ -62,7 +62,7 @@ describe("what the player's government can see of the world", () => {
   it("tells the world plainly which countries have nobody in them", () => {
     const text = renderWorldSlice(slice());
     expect(text).toContain("COUNTRIES WITH NOBODY IN THEM");
-    expect(text).toContain("Give each of them the people and forces they plainly ought to have");
+    expect(text).toContain("Give each of them what it lacks, now");
   });
 
   it("stays small enough to send", () => {

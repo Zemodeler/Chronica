@@ -1,4 +1,4 @@
-import { atWar, fitStrengthOf, kmFromAny, takenBy, type FactProposalDraft, type WorldState } from "@chronica/shared";
+import { atWar, fitStrengthOf, kmFromAny, takenBy, takerFor, type FactProposalDraft, type WorldState } from "@chronica/shared";
 import { safeLocalId } from "./safe-local-id";
 
 /**
@@ -67,14 +67,16 @@ export function occupyOpenCountry(world: WorldState, toDay: number): { world: Wo
     const taker = takenBy_.get(province.id);
     if (taker === undefined) return province;
     const holder = province.controllerPolityId!;
+    // An ally fighting its leader's war holds the ground for its leader (consul-run-issues M5).
+    const owner = takerFor(world.polityAgreements, taker.polityId, holder);
     const entry = held.get(taker.id) ?? { force: taker, names: [], from: new Set<string>() };
     entry.names.push(province.name);
     entry.from.add(holder);
     held.set(taker.id, entry);
     return {
       ...province,
-      ...takenBy(province, taker.polityId, world.polityAgreements),
-      settlements: province.settlements.map((settlement) => (settlement.controllerPolityId === holder || settlement.controllerPolityId === null ? { ...settlement, controllerPolityId: taker.polityId } : settlement)),
+      ...takenBy(province, owner, world.polityAgreements),
+      settlements: province.settlements.map((settlement) => (settlement.controllerPolityId === holder || settlement.controllerPolityId === null ? { ...settlement, controllerPolityId: owner } : settlement)),
       controlFirmnessBps: Math.min(province.controlFirmnessBps, 2_000),
       lostBy: { polityId: holder, atStep: toDay },
     };

@@ -271,7 +271,7 @@ function CoinNote({ coin }: { readonly coin: NonNullable<BooksView["coin"]> }) {
   return (
     <p className="books__coin">
       The treasury holds {coin.name}, {Math.round(coin.silverBps / 100)} in a hundred of an Attic drachma's silver to the unit
-      {debased && <>, struck down from {Math.round(coin.standardBps / 100)}</>}. Prices at home stand at {Math.round(coin.priceLevelBps / 100)} in a hundred of ordinary
+      {debased && <>, struck down from {Math.round(coin.standardBps / 100)}{coin.silverBps * 4 < coin.standardBps * 3 && <> (billon now, silver with bronze in it)</>}</>}. Prices at home stand at {Math.round(coin.priceLevelBps / 100)} in a hundred of ordinary
       {dearer && <span className="is-short"> (dearer, and still following the coin)</span>}.
       {Math.abs(premium) >= 50 && <> Among the money-changers it fetches {Math.abs(Math.round(premium / 100))} in a hundred {premium > 0 ? "above" : "below"} its silver.</>}
     </p>

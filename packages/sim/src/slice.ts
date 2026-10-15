@@ -10,7 +10,7 @@ import { armyInWords, serviceInWords } from "./army-words";
 import { findPolityGaps } from "./population";
 import { distancesFrom, placeIndex, provinceIdsIn, provincesNamedIn } from "./place-index";
 import type { NarratorSeed } from "./narrator";
-import { renderCharacterPortrait } from "./cognition";
+import { countsShips, renderCharacterPortrait } from "./cognition";
 import { isManagementWorry } from "./management-talk";
 import { isOpenIntent, mostPressingFirst } from "./intents";
 import { ruleInWords } from "./mechanics/mechanic-words";
@@ -208,6 +208,8 @@ export interface WorldSlice {
     readonly holding: boolean;
     /** What it is made of and how good it is, in a line, for whoever answers for it. */
     readonly make: string | null;
+    /** What its strength counts: men, or -- a fleet -- ships. */
+    readonly unit?: "men" | "ships";
   }[];
   /**
    * Places, with what stands in them.
@@ -609,6 +611,8 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       plan: reachesForce(force.id) && force.battlePlan != null ? force.battlePlan.rationale.slice(0, 160) : null,
       holding: force.hold === true,
       make: reachesForce(force.id) ? armyInWords(world, force) : null,
+      // A fleet's strength is its hulls: "Allied Greek hulls -- 18 men" was eighteen ships (consul-run-issues M18).
+      unit: countsShips(force) ? "ships" as const : "men" as const,
     }));
 
   // Every place the order might need to name, by the id it must name it by --
@@ -1445,10 +1449,11 @@ export function renderWorldSlice(slice: WorldSlice): string {
   ]);
   section("MILITARY", slice.military.map((force) => {
     const where = `at ${force.location} [${force.locationId}], under ${force.commander}${force.ranks.length === 0 ? "" : `, with ${force.ranks.join(", ")} in the ranks`}`;
-    if (force.banded) return `${force.name} [${force.id}] — about ${force.strength} men ${where}`;
+    const unit = force.unit ?? "men";
+    if (force.banded) return `${force.name} [${force.id}] — about ${force.strength} ${unit} ${where}`;
     const short = force.paperStrength !== null && force.strength < force.paperStrength ? ` of ${force.paperStrength} on the books` : "";
     const fed = force.provisions === null || force.provisions === "provisioned" ? "" : `, ${force.provisions} of supply`;
-    return `${force.name} [${force.id}] — ${force.strength} men${short} ${where}, morale ${force.morale}/100${fed}${force.holding ? ", under orders to hold" : ""}${force.make === null ? "" : `; ${force.make}`}${force.plan === null ? "" : `; if attacked: ${force.plan}`}`;
+    return `${force.name} [${force.id}] — ${force.strength} ${unit}${short} ${where}, morale ${force.morale}/100${fed}${force.holding ? ", under orders to hold" : ""}${force.make === null ? "" : `; ${force.make}`}${force.plan === null ? "" : `; if attacked: ${force.plan}`}`;
   }));
   section("PLANS STANDING", slice.standingPlans.map((plan) =>
     `${plan.label} [${plan.id}] — ${plan.effect === "spring_trap" ? "prepared, and springs by itself" : "waiting to raise the alarm"}, in ${plan.where}`));
@@ -1634,7 +1639,8 @@ export function renderWorldSlice(slice: WorldSlice): string {
         const land = gap.land.length === 0 ? "" : ` Their land: ${gap.land.join("; ")}.`;
         return `  ${gap.name} [${gap.polityId}] holds land but has ${missing === "" ? "nobody" : `no ${missing}`} — ${gap.why}.${land}`;
       }),
-      "  Give each of them the people and forces they plainly ought to have, now.",
+      // Only what it lacks: a power with a ruler and no army was given a second ruler (consul-run-issues M4).
+      "  Give each of them what it lacks, now: a leader, forces, or both.",
       "",
     );
   }
@@ -1652,7 +1658,8 @@ export function renderWorldSlice(slice: WorldSlice): string {
       lines.push(
         `  (seed ${seed.key}) ${seed.why}`,
         `  ${seed.brief}`,
-        `  Scale: ${seed.severity}.${seed.oneShot ? " This one runs its course; it needs no thread." : ` Open its thread with "storyline_open" carrying seedKey "${seed.key}".`}`,
+        // A turn of a thread already open is advanced, not opened again: asked for both, an answer made two threads of one matter (consul-run-issues M1).
+        `  Scale: ${seed.severity}.${seed.oneShot ? " This one runs its course; it needs no thread." : seed.archetype === "arc_beat" ? " Its thread is already open: advance it, and open no other." : ` Open its thread with "storyline_open" carrying seedKey "${seed.key}".`}`,
         ...(seed.repeated ? ["  This was asked before and did not happen. It happens now."] : []),
         ...(seed.secret
           ? [`  It is a secret. Every fact of it is "private" with "knownToRefs" naming only those in it; its thread is "private"; nothing of it appears in narrativeSummary, frictions or a playerDecision.`]

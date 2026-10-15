@@ -286,6 +286,23 @@ export function deriveCommandGrants(forces: MaterialWorldState["forces"], atStep
         grantedAtStep: atStep,
       }),
     );
+    // And the man it answers to, where he is not its commander: the proconsul whose legate and tribunes lead the
+    // detachments of his army was "beyond his authority" in giving them orders (consul-run-issues M9).
+    if (force.controllerCharacterId != null && force.controllerCharacterId !== force.commanderCharacterId) {
+      grants.push(
+        AuthorityGrantSchema.parse({
+          id: `control:${force.id}`,
+          holder: { kind: "character", id: force.controllerCharacterId },
+          source: "command",
+          sourceRef: force.id,
+          domain: "military",
+          scope: { kind: "force", id: force.id },
+          powers: ["command"],
+          standing: "lawful",
+          grantedAtStep: atStep,
+        }),
+      );
+    }
   }
   return grants;
 }

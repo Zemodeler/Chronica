@@ -88,6 +88,7 @@ import { raiseLevy } from "./levies";
 import { lapseAilments } from "./ailments";
 import { reviewPowers } from "./polity-end";
 import { settleUnionOffers } from "./submission";
+import { settlePeaceByRule } from "./peace-by-rule";
 import { betweenHarvests, reviewTheLand } from "./economy";
 import { payCustoms } from "./customs";
 import { keepMerchantHouses } from "./merchant-houses";
@@ -137,7 +138,7 @@ const projectConflictsInto = (world: WorldState): WorldState => ({ ...world, con
 /**
  * Everything that happens because time passed, and for no other reason.
  *
- * VISION §7 is explicit that there is no reason to invoke a model to calculate
+ * VISION Â§7 is explicit that there is no reason to invoke a model to calculate
  * a monthly surplus: once a tax is established, collecting it is arithmetic.
  * The same is true of army pay, and of a recruitment project reaching the date
  * its next milestone falls due. This is that half of the world.
@@ -329,11 +330,12 @@ export function runDeterministicTick(given: TickInput): TickResult {
 
   const balanceOf = (accountId: string): number => accounts.find((account) => account.id === accountId)?.balance ?? 0;
   const credit = (accountId: string, amount: number): void => {
-    accounts = accounts.map((account) => (account.id === accountId ? { ...account, balance: Math.max(0, account.balance + amount) } : account));
+    // A balance is whole units: a fractional sum from any one source (a share of a share) once wrote a world that would not load, and the day was lost with it.
+    accounts = accounts.map((account) => (account.id === accountId ? { ...account, balance: Math.max(0, Math.round(account.balance + amount)) } : account));
   };
   const nextLocalId = (prefix: string): string => `${prefix}_${(localId += 1)}`;
 
-  // ── Income ────────────────────────────────────────────────────────────
+  // â”€â”€ Income â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   //
   // Collected silently. A treasury that fills as expected is not history, and
   // a fact per tax payment would drown every Chronicle in bookkeeping.
@@ -456,7 +458,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
       const gap = route === undefined ? undefined : bestGapGood(input.world, route.fromProvinceId, route.toProvinceId);
       const premium = gap === undefined ? 10_000 : tradePremiumBps(gap.fromBps, gap.toBps);
       // And it earns little where the war has reached either end: ground at
-      // war, occupied, or under blockade (docs/plans/a-living-world.md §10).
+      // war, occupied, or under blockade (docs/plans/a-living-world.md Â§10).
       // A grain merchant feels Egypt's war in his ledger.
       const disrupted = route === undefined ? 10_000 : Math.min(...[route.fromProvinceId, route.toProvinceId].map((provinceId) => routeOpenBps(input.world, provinceId)));
       // A power's own tax rolls are written at the rate it has chosen for its
@@ -513,7 +515,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
     return periods === 0 ? source : { ...source, nextDueStep: due };
   });
 
-  // ── Obligations ───────────────────────────────────────────────────────
+  // â”€â”€ Obligations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   //
   // Paid in priority order, so that when money runs short it is the least
   // important creditor who goes unpaid rather than whichever happened to be
@@ -638,7 +640,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
   if (collected > 0 || paid > 0) notes.push(`Revenue of ${collected} was collected and ${paid} paid out in standing obligations.`);
 
   /**
-   * Debt that stops being served (VISION §20).
+   * Debt that stops being served (VISION Â§20).
    *
    * Servicing itself is already an obligation and needs nothing here. What does
    * need saying is that a creditor is a person: a state that has missed three
@@ -680,7 +682,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
     : obligations.map((obligation) => (defaultedObligationIds.has(obligation.id) ? { ...obligation, active: false } : obligation));
 
   /**
-   * What unpaid wages do to an army (VISION §6, §7).
+   * What unpaid wages do to an army (VISION Â§6, Â§7).
    *
    * `Force.payArrearsPeriods` was never written and the scenario's own
    * `arrearsMoralePeriods` / `arrearsDesertionPeriods` were read by nobody, so
@@ -775,11 +777,11 @@ export function runDeterministicTick(given: TickInput): TickResult {
     };
   });
 
-  // ── Projects ──────────────────────────────────────────────────────────
+  // â”€â”€ Projects â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   //
   // A milestone whose date has arrived completes, and pays its cost. This is
   // what makes a four-month recruitment actually produce legions rather than
-  // scheduling them forever (VISION §17).
+  // scheduling them forever (VISION Â§17).
   const sponsorAccountId = (sponsor: WorldState["projects"][number]["sponsorEntityRef"]): string | undefined =>
     accounts.find((account) => account.owner.kind === sponsor.kind && account.owner.id === sponsor.id)?.id;
 
@@ -1320,7 +1322,11 @@ export function runDeterministicTick(given: TickInput): TickResult {
   // Who has held what, written down before any term ends -- so the man whose
   // year ran out today is remembered as having held it.
   // An ally offered union and unable, or slow, to answer is answered by rule, before silence is counted (`submission.ts`).
-  const recovered = settlePeaceTalks(settleUnionOffers(recordTenures(materialAdvanced, input.toDay), input.toDay, facts));
+  // And terms of peace the player's power offers a power nobody plays, by the rule the peace table prices them by (`peace-by-rule.ts`).
+  const unionsSettled = settleUnionOffers(recordTenures(materialAdvanced, input.toDay), input.toDay, facts);
+  const offeringPolity = input.playerCharacterId == null ? null : unionsSettled.characters.find((character) => character.id === input.playerCharacterId)?.polityId ?? null;
+  const recovered = settlePeaceTalks(input.warfare === undefined ? unionsSettled
+    : settlePeaceByRule(unionsSettled, input.toDay, facts, { offices: input.government?.offices ?? [], warfare: input.warfare, ids: input.ids, gameId: "tick", playerPolityId: offeringPolity }));
 
   // Collectors who came back short. Once a tick per power, not per payment:
   // it is the kind of thing a government hears about and has to answer for.
@@ -1342,7 +1348,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
 
   // Recovery itself is not news. A province crossing into real hunger or real
   // disorder is: it is the kind of thing a government hears about and has to
-  // answer for, and it is where VISION §6's numbers start to bite.
+  // answer for, and it is where VISION Â§6's numbers start to bite.
   //
   // One report a power per review, not one a province: with thousands of
   // provinces a bad season is a country's news. Only provinces something is
@@ -1605,7 +1611,16 @@ export function runDeterministicTick(given: TickInput): TickResult {
 
   // A truce with a term ends the day its term does, whether or not anybody
   // remembers it. One that ends only when somebody says so is a peace.
-  const polityAgreements = expireDatedAgreements(agreements, input.toDay);
+  // What the union and peace settlement did to the agreements (`recovered`) stands: an ally taken into the state ended its
+  // foedus there, and the list kept from the start of the tick put it back (consul-run-issues M7).
+  const settledIds = new Set(input.world.polityAgreements.map((agreement) => agreement.id));
+  const activeAtStart = new Set(input.world.polityAgreements.filter((agreement) => agreement.status === "active").map((agreement) => agreement.id));
+  const endedInSettlement = new Map(recovered.polityAgreements.filter((agreement) => agreement.status !== "active" && activeAtStart.has(agreement.id)).map((agreement) => [agreement.id, agreement]));
+  const openedInSettlement = recovered.polityAgreements.filter((agreement) => !settledIds.has(agreement.id) && !agreements.some((kept) => kept.id === agreement.id));
+  const polityAgreements = expireDatedAgreements([
+    ...agreements.map((agreement) => (agreement.status === "active" && endedInSettlement.has(agreement.id) ? endedInSettlement.get(agreement.id)! : agreement)),
+    ...openedInSettlement,
+  ], input.toDay);
   for (const agreement of polityAgreements) {
     const before = recovered.polityAgreements.find((candidate) => candidate.id === agreement.id);
     if (before?.status === "active" && agreement.status === "ended") {

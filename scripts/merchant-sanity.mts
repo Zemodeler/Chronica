@@ -11,7 +11,7 @@
  * 120 drachmae a year. No provider is called.
  */
 import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
-import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, ensureProvinceMaterial, estateTerms, type WorldState } from "@chronica/shared";
+import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, ensureProvinceMaterial, estateTerms, ventureTerms, type WorldState } from "@chronica/shared";
 import { applyDeltas, createIdFactory } from "@chronica/sim";
 import { runDeterministicTick } from "../packages/sim/src/tick";
 
@@ -33,7 +33,9 @@ const purseOf = (world: WorldState): number => world.material.accounts.find((acc
 function worth(world: WorldState, landCost: number, house: boolean): number {
   const out = world.material.ventures.filter((venture) => venture.ownerCharacterId === MAN && venture.status === "running").reduce((sum, venture) => sum + (venture.cargo?.cost ?? 0), 0);
   void house;
-  return purseOf(world) + out + landCost;
+  // What he owes the seller on a cargo bought on credit (`payOrBorrow`) is no part of what he is worth: a venture of 76,650 bought with 36,000 down is 40,650 of debt.
+  const owed = world.material.loans.filter((loan) => loan.status === "active" && loan.borrowerAccountId === "curius-purse").reduce((sum, loan) => sum + loan.outstanding, 0);
+  return purseOf(world) + out + landCost - owed;
 }
 
 /** His worth at each year's end, as a list. */
@@ -91,7 +93,9 @@ run("estate", (world, seed) => {
 for (const [name, to] of [["capua", PUNIC_IDS.capua], ["syracuse", PUNIC_IDS.syracuse], ["carthage", PUNIC_IDS.carthage]] as const) {
   run(`trade-${name}`, (world, seed) => {
     const result = applyDeltas(world, [WorldDeltaSchema.parse({ op: "trade_venture_open", localId: "run", title: `Grain to ${name}`, ownerCharacterRef: MAN, fromProvinceId: PUNIC_IDS.rome, toProvinceId: to, band: "marked", paidFromAccountRef: "curius-purse", reason: "A cargo." })], context(seed));
-    return { world: result.world, landCost: 0, house: false };
+    // A land venture has no cargo to count: what he paid for it is an asset that returns a share a month, as an estate's price is (a cargo's cost is counted while it is out).
+    const bought = result.world.material.ventures.at(-1);
+    return { world: result.world, landCost: bought?.cargo === undefined ? ventureTerms(world, bought!.fromProvinceId, bought!.toProvinceId, "marked")!.price : 0, house: false };
   });
 }
 run("firm", (world, seed) => {

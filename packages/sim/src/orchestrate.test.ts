@@ -145,6 +145,7 @@ describe("an answer with one bad line in it", () => {
     expect(result.output.deltas[0]!.op).toBe("legitimacy_shift");
     // And it says what it threw away, so a field that keeps appearing here can
     // be traced back to the prompt or the schema.
-    expect(result.salvaged).toEqual(["deltas.1"]);
+    expect(result.salvaged).toHaveLength(1);
+    expect(result.salvaged[0]).toMatch(/^deltas\.1 \(belief_set\): /);
   });
 });

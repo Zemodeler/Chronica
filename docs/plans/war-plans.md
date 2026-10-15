@@ -16,7 +16,7 @@ a model is asked about nothing, and only a man the model plays may overwrite it.
   leads them), `posture` (`attrition`, `decisive`, `defend`), an optional `navalPlan` (`escort`, `blockade`, `seek_fleet`),
   `aimsSetAtStep` (the last time the plan was rebuilt) and `aimsChangedAtStep` (the last time the set of aims differed), and who laid it.
 - **`CampaignPlan`** (one per army): the `objective` (a province or an enemy army), the `mode` (`seek_battle`, `refuse`, `siege`, `raid`,
-  `garrison`, `winter`), the base it is fed from and the fallback it gives way to, who sent it (`issuedByCharacterId`), and the day the
+  `garrison`, `winter`, `shadow`), the base it is fed from and the fallback it gives way to, who sent it (`issuedByCharacterId`), and the day the
   orders run out. Plans name provinces and armies, never roads: the road is found when the army marches.
 
 They are written by two acts, `war_plan_set` and `campaign_plan_set` (`packages/shared/src/sim/war-plan-deltas.ts`, applied in
@@ -32,8 +32,8 @@ Once a month the head of each power at war builds, or carries on, the plan of ea
 1. **Aims** from what he can see: ground of his own that the enemy holds (`worthOf`: a town, a capital, our own ground lost), the enemy
    armies that he could beat, ground to hold where an enemy army stands or is near the capital, and peace where the war has worn the people
    (`warWeariness`) or gone against him (`warStanding`). Each aim is scored by worth for the march; one already held is worth a third more,
-   so the plan is not changed for a trifle. A war's aims are only its own enemy's ground (`alliesLedBy`), and the bigger enemy has the
-   first claim on the armies.
+   so the plan is not changed for a trifle. A war's aims are only its own enemy's ground (`alliesLedBy`). Where a power is at war with two
+   enemies the armies are shared by what each war has at stake, each keeping a reserve (`two-fronts.ts`, "War gaps closed").
 2. **Theatres** by clustering the aims (350 km, at most three), the main effort to the one with most aim value per km marched.
 3. **Posture** by the odds and the ruler's nature (`dispositionOf`: nerve, greed, fear): `defend` on his own ground when he is not the
    stronger or when he is much the weaker, `decisive` when he is the stronger by a fifth and has the stomach, `attrition` otherwise.
@@ -134,22 +134,97 @@ touched. The orchestrator is not shown the two acts (his armies ignore plans); a
 - *Raid and harass*: Hamilcar from Eryx: aims of kind `raid`, mode `raid`, `force_raid` every month the ground still has something.
 - *Siege and blockade*: Agrigentum 262: mode `siege` with works, a fleet's `blockade`.
 - *Naval*: Mylae, Ecnomus: `seek_fleet`; Regulus 256: an aim over water with the fleets as `escort`.
-- *Shadow and cut supply*: an army ordered `refuse` keeps a town in the enemy's way; not a separate mode yet (see open decisions).
+- *Shadow and cut supply*: Fabius against Hannibal: mode `shadow`, the army kept in sight and between the enemy and his bread; the engine cuts the foragers and the far convoys of the army shadowed ("War gaps closed").
 
 ## Tests
 
 `a-war-has-aims-and-a-main-effort`, `a-consul-keeps-to-his-theatre`, `a-cautious-general-holds-his-towns`, `a-bold-general-seeks-the-battle`,
 `a-defender-chooses-the-ground`, `a-general-obeys-his-heads-order`, `a-cast-general-overrides-the-plan`, `a-besieger-starves-or-storms`, `a-consular-army-marches-within-a-month`,
 `a-new-consul-takes-up-the-plan`, `an-impossible-order-is-replaced`, `rome-builds-a-fleet-by-decree`, `the-corvus-makes-boarding`, `messana-calls-and-rome-answers`,
-`an-army-winters-in-a-town`, `a-fleet-escorts-and-blockades`, `war-plans-are-deterministic`, and a ten-army plan within a time bound in
+`an-army-winters-in-a-town`, `a-fleet-escorts-and-blockades`, `a-careful-strategist-shadows-the-stronger-army`, `a-power-at-two-wars-keeps-a-reserve`, `a-war-plan-peace-aim-feeds-the-peace`, `a-war-the-age-dates`, `war-plans-are-deterministic`, and a ten-army plan within a time bound in
 `a-thousand-provinces`. `npm run sanity:war` (`scripts/war-sanity.mts`) runs the Punic opening model-less with a Rome-Carthage war
 opened at month 6 and reports per year the wars, battles, sieges, march orders and flips, plan shifts, naval moves, men under arms and
 the cpu of the month.
 
+## War gaps closed
+
+Six gaps the audit and the playtests left open, closed here. Every rule is deterministic (`stableHash`), and no model is asked.
+
+### 1. Shadowing an army to cut its supply (`a-shadowing-army.ts`, `a-shadowed-army-goes-hungry.ts`)
+
+A new mode, `shadow`, whose object is an enemy army. The rule gives it to a general who is a strategist (skill 60) and no rash man (boldness not twenty above caution, caution at
+least 40) against an army half as strong again as his own (`STRONGER_BY` 1.3) that stands within sight (600 km) on ground its own side does not hold, so that there is something to cut it
+from. A plain careful man, with no skill, keeps his town and refuses battle as before. He goes to a post within a march and a half (300 km, `SHADOW_KM`) of the enemy, near his own marching
+and on his own ground, and between the enemy and the nearest town of the enemy's side; he fights only where the odds are plainly his (the bar is that of an army that refuses, 1.4 times what a
+sure man wants), falls back before an army that is too many, and where his post is on enemy ground he harries it (`force_raid`) while it has anything left. The order lapses when the
+enemy goes into ground his side holds (it feeds on its own country, and there is nothing to cut), when he is no longer half as strong again (a tenth, once ordered), or when the shadow falls below a
+thousand men (a screen of horse is no shadow).
+
+The cut is the engine's (`keepTheField`), so that it is the same for the model's armies as for the rules': while an army is shadowed by an enemy army of a thousand or more within `SHADOW_KM`
+it forages nothing (as if penned in its camp) and a depot more than a province away does not reach it. It keeps its bread where it stands on a friendly province or at a depot in its own
+province. So an army of the enemy ranging ground that is not his must carry thirty days' bread and, when it is eaten, goes short, then starves (`STARVING_AFTER_DAYS`, the ordinary hunger). Sources:
+Polybius 3.90-94 and Livy 22.12 (Fabius keeping to the hills, cutting off foragers, Hannibal unable to find corn or a quiet road). It is not on the model's list of modes (the schema line is
+unchanged to keep the prompt ceilings); a model that writes `shadow` is obeyed. Test: `a-careful-strategist-shadows-the-stronger-army`.
+
+### 2. Two fronts (`two-fronts.ts`)
+
+A power at war with two enemies divides its armies. A war's claim is the enemy's men in the field by the hundred, plus the worth of the ground of ours that he holds, plus 45 for each of his armies
+standing on our ground; where there are as many armies as wars, each war that has a claim keeps an army (the reserve for the second war), the greater claim the stronger one, the lesser the nearest to its
+enemy; the rest go where the claim per army is greatest. An army already at work in a war (its orders name the war) stays while the share allows, so the split is not changed month to month. A single
+war gets every army, as before. Rome with two armies, at war with Carthage and with the Campanians of Rhegium, now plans both wars with an army. Test: `a-power-at-two-wars-keeps-a-reserve`.
+
+### 3. The aim of peace feeds the peace (`a-war-ends-for-what-it-was-for.ts`, `peacesByRule`)
+
+A war plan with `sue_for_peace` is an asking. The other side hears it: where the asker has the better of the war (or both ask) the other gives in; where the asker has the worse, the winner grants it when he
+is wearied (three parts in five of the weariness at which both are spent) or when the asking has stood a quarter of a year (120 days). Peace is then made as every peace is (the Senate where the constitution says
+so). The terms are what the war was for: the ground of the loser's that the winner holds and that his plan names to take (`take_province`, `raid`), dearest first, as much as the loser will give up for peace
+(`willingToGive`), and, where the war has gone well (score 25 or more) and there is room, an indemnity of a tenth of what the loser can pay, three years running. Ground held that the plan did not name
+stays as it is; a winner who went to war only to hold what was his takes no ground. An ordinary peace on the score alone (spent, ahead, stale) is made as before, and a dictated surrender is not changed.
+Test: `a-war-plan-peace-aim-feeds-the-peace`.
+
+### 4. The imperium may lay a plan (`constitutions.ts`)
+
+`IMPERIUM` (and so `RULER`) names `war_plan_set` and `campaign_plan_set`: a model-played consul's plan and orders are the office's own business, not a breach. (The scenario's hand-written
+offices keep their own lists.)
+
+### 5. Attrition
+
+The playtest showed the consular army of 17,500 falling to 8,400 in the third year of a forced war. `npm run sanity:war -- 3 --losses [--trace=<armyId>]` now breaks the men a power's armies lose into battle (`battle_death`, `wounds_death`),
+hunger, sickness and desertion, year by year, from the armies' own histories, and traces one army month by month (men, bread, place, orders).
+
+What it found, before any tuning (the Roman field army 17,390, 9,072 and 5,026 at the three Februaries): in year 2, hunger took 2,846 dead and 4,245 deserted, sickness 338 and battle 27, so nine in ten of the 8,300 men lost went to hunger and to the desertion it
+caused; in year 3, hunger 1,314 and battle 601. Battle and sickness were not the cause: the field took a few in the hundred of the army in a year, and the camp fever of `keepTheField` (a hundredth of the men a time) one or two in the hundred a summer, ordinary for the age. The hunger was. An army with no bread
+lost four in a thousand of its men a day (twelve in the hundred a month, a third in three months), and six in ten of that were deserters, whatever their oath.
+
+Tuned, in `campaign.ts` and only there. The loss of an army that has run out of bread is a quarter of a per cent a day (`STARVING_LOSS_PER_DAY`, seven and a half in the hundred a month). Hannibal's army, by Polybius 3.35 and 3.56, went from some 38,000 foot and 8,000 horse at the Rhone to
+20,000 and 6,000 on reaching Italy, five months or so later: about a tenth of its men a month, for battles, cold, the Alps and hunger together. Twelve in the hundred a month for hunger alone, in an army that was fed until its bread ran out, was beyond that. And the share of the loss that slips away rather than dies is a quarter
+for an army that is paid and whose men are sworn (the Roman soldier's oath and the cudgelling to death for desertion, Polybius 6.21 and 6.37; no Roman army of the age is said to have dissolved of it, though several went hungry, as at Agrigentum in 262, Polybius 1.18), and six in ten for an army whose pay is owed
+it (the hired hosts of Carthage, Polybius 1.66-67). The ceilings of battle, wounds and sickness are as they were. How many men hunger takes is the rate and how long it lasts; the length is the war's orders (an army that stays in country it has stripped), which are not tuned.
+
+After the tuning (with the shadow, the two fronts and the dated war), the same run: the Roman field army 17,720 at the opening, 17,383 after a year, 13,705 after two and 10,737 after three (a fifth of its men a year in the second and the third). Year 1: hunger 86, sickness 350, battle 24. Year 2: battle 1,523 and wounds 705 (the year's fighting),
+hunger 590, sickness 497. Year 3: hunger 2,589, sickness 379. What is left of the hunger in year 3 is an army wintering in Sicilian country it has stripped without bread from the sea: the rules do not yet feed an army from its own fleet lying off the coast (the engine does, where the hulls lie with it, `sourceOf` "sea"). That is an open decision below, and not tuned away.
+
+### 6. The war starts by rule around 264 (`a-dated-war.ts`, `punic-wars-mamertines.ts`)
+
+A scenario pressure may now carry `happens` (`shared/world/scenario.ts`): a thing the age dates, done by the rules once on the first monthly reckoning on or after its day (and for a year after, if undone),
+never to a power the player rules, and never offered to the narrator. It may open a war, lay a defeat on the beaten side's armies (a share of the men and of their spirit, with the war it begins, once), put a garrison in a
+province, and have a people write for help; each is done by the man whose it is (the ruler opens a war or raises a garrison; the people's spokesman writes), only where it is not already so. Three dated things
+(`docs/plans/scenario-notes-war-gaps.md`): Hiero beats the Mamertines at the Longanus (day 1,995, 16 August 265 BCE; Syracuse is at war with the Mamertines and their garrison of 1,400 loses three in ten
+of its men and a quarter of its spirit; Polybius 1.9); the Mamertines write to Rome and to Carthage (264; the rules' own call for help, `decideCallsForHelp`, does it a month after the defeat, while the people are
+hard pressed, and the dated letter, day 2,210 (March 264), is the fallback where nobody has written; Polybius 1.10-11); a Carthaginian garrison of 1,500 enters Messana (day 2,230, April 264; Polybius 1.11).
+A fourth entry, `carthage-in-the-strait`, is only the age's lean: Rome's score for war on Carthage rises by twice its weight (12) while Carthage has men in Messana's province and the two are at peace. Nothing opens
+the war of Rome and Carthage: it is the old way (appetite, fear, cause), with the cause the appeal gives, the Senate that hesitates and the people who vote (`the-appeal-goes-to-the-people.ts`). Test:
+`a-war-the-age-dates`; the sanity run is `npm run sanity:war -- 7 --free`.
+
+What the first sanity run found (`--free`, seven years, with the dated things and nothing else): the dated things were done on their days (Syracuse at war with the Mamertines on day 2,010, the first reckoning after the defeat; the Mamertines' letters to Rome and Carthage on day 2,040; the garrison in Messana on day 2,250, 28 April 264), the Mamertines became Rome's allies by the rules' own answer to the letter, and Rome went to no war with Carthage in seven years. The reason was not the odds or the Senate: the board (`board.ts`) reads a power's neighbours as the powers it borders and
+those it distrusts or claims ground of, and Rome and Carthage share no border, so Rome never weighed a war on Carthage at all; `bigMoveCandidates` over a snapshot of the world on day 2,280 had no candidate of Rome's against Carthage. Now a power whose army stands on the ground of a friend of ours (an ally or a protected people, never our own bloc or one of our friends) is one of our rivals within reach, `rivalsOf`, whether or not it borders us.
+Over the same snapshot Rome's score against Carthage is then 100 (the bar is `WAR_AT`, 60): the age's lean (+24), the appeal of the Mamertines (+18 and up, `theAppealBehind`), a rival at war elsewhere, its strength twice Carthage's as Rome sees it, and a bold consul. A score is a chance a month, not a trigger (a twelfth for every five points over the bar, up to six twelfths), and the war is the Senate's to make, or the people's where the Senate refuses. Test: `a-power-on-an-allys-ground-is-a-rival`.
+
+WAR_START_PLACEHOLDER
+
 ## Open decisions
 
-- A power at war with two enemies at once gives the bigger enemy the first claim on the armies; the smaller war's plan is made and has
-  few or no armies. A split by distance would be better.
-- The shadowing of an army to cut its supply is not a mode of its own.
-- The constitutions' lists of what a magistrate may do (`IMPERIUM`) do not name the two acts: a model-played consul writes them as the
-  world's own business, not as a breach.
+- A power with fewer armies than wars gives them to the greater claims only; the others are planned without any.
+- The scenario's hand-written office lists (`punic-wars-scenario.ts`) do not carry the two acts; the constitutions' (`IMPERIUM`) do.
+- A model's schema line of campaign modes does not list `shadow` (prompt ceilings).
+- No rule sends an army to winter or range where its own fleet can feed it from the sea (the engine feeds an army whose ships lie with it); the third year's hunger of a consular army in Sicily is that.

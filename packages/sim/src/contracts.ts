@@ -53,6 +53,25 @@ export function keepContracts(world: WorldState, toDay: number): { world: WorldS
       continue;
     }
     next = endContract(next, contract, unpaid ? "lapsed" : "ended", toDay);
+    // A company of the employer's own that is not paid does not go home: it has nowhere to go but the road, and the arrears are its to collect (Sicca, 241).
+    // It is held by no power and answers to the man who leads it; its own country's land is as much its prey as any other's.
+    const revolting = unpaid && contract.role === "mercenary" && contract.forceId !== null && contract.forceWas !== null && contract.forceWas.polityId === employerPolityOf(world, contract);
+    if (revolting) {
+      const company = next.material.forces.find((force) => force.id === contract.forceId);
+      if (company !== undefined && company.outlaw !== true) {
+        next = { ...next, material: { ...next.material, forces: next.material.forces.map((force) => (force.id === company.id ? { ...force, outlaw: true } : force)) } };
+        facts.push({
+          localId: safeLocalId(`mercenary_revolt_${contract.id}`).slice(0, 60),
+          kind: "mercenary_revolt",
+          summary: `${company.name} will not go home unpaid: ${name(contract.employeeCharacterId)}'s men have taken the road with their arms and what is owed them (${pay!.arrears} behind), and answer now to nobody in ${next.map.polities.find((polity) => polity.id === contract.forceWas!.polityId)?.name ?? "their old country"}.`.slice(0, 600),
+          affectedRefs: [{ kind: "force", id: company.id }, { kind: "polity", id: contract.forceWas!.polityId }],
+          visibility: "public",
+          discoveryState: "public",
+          knowableInDays: 0,
+          significance: 75,
+        });
+      }
+    }
     // A house that was not paid for the bread it sent is out of what it laid out, and it is written against it.
     if (unpaid && contract.role === "victualler" && contract.victuals != null) {
       const memory = economyOf(next);

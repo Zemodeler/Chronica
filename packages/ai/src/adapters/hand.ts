@@ -47,6 +47,14 @@ export function handStem(operation: string, asked: string): string {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * An answer file as written by hand, without the byte-order mark Windows editors and PowerShell's UTF-8 put in front of it:
+ * JSON.parse refuses the mark, and the run waited on an answer that was already there (consul-run-issues T1).
+ */
+function readAnswer(answerPath: string): string {
+  return readFileSync(answerPath, "utf8").replace(/^﻿/, "");
+}
+
 async function answerFor(options: HandAdapterOptions, operation: AiOperation, system: string, asked: string): Promise<string> {
   const { dir } = options;
   mkdirSync(dir, { recursive: true });
@@ -54,7 +62,7 @@ async function answerFor(options: HandAdapterOptions, operation: AiOperation, sy
   const stem = handStem(operation, options.respond ? JSON.stringify([namespace, system, asked]) : asked);
   const answerPath = path.join(dir, `${stem}.json`);
   if (existsSync(answerPath)) {
-    const cached = readFileSync(answerPath, "utf8");
+    const cached = readAnswer(answerPath);
     try { JSON.parse(cached); return cached; } catch { /* Ignore interrupted/invalid cached answers. */ }
   }
 
@@ -86,7 +94,7 @@ async function answerFor(options: HandAdapterOptions, operation: AiOperation, sy
     if (existsSync(answerPath)) {
       // Written by hand, so possibly caught half-written: a file that does not
       // yet parse is read again rather than handed on.
-      const text = readFileSync(answerPath, "utf8");
+      const text = readAnswer(answerPath);
       try {
         JSON.parse(text);
         return text;

@@ -318,23 +318,30 @@ export function fightRound(input: FightInput, engagementId: string, day: number,
     record({ seenForceIds: [...new Set([...engagement.seenForceIds, ...attackersNow.map((force) => force.id), ...defenders.map((force) => force.id)])].slice(-32) });
   }
 
-  // Outnumbered three to one, a commander does not wait to be destroyed.
+  // Outnumbered three to one, a commander does not wait to be destroyed -- unless he is caught: a camp stormed or a night
+  // attack ordered for today falls on him before he can go. A legion of 2,700 slipped away from 17,000 Romans ten times in a
+  // year, because the manoeuvre that should have pinned it was tried only after it had gone (consul-run-issues H3).
+  const pinning = (world.engagements.find((candidate) => candidate.id === engagement.id) ?? engagement).manoeuvre;
+  const pinnedToday = pinning?.kind === "storm_camp" || pinning?.kind === "night_attack";
   const weakSide = attackWeight < defendWeight * WITHDRAWS_BELOW ? attacking : defendWeight < attackWeight * WITHDRAWS_BELOW ? defenders : null;
-  if (weakSide !== null) {
+  if (weakSide !== null && !(weakSide === defenders && pinnedToday)) {
     const strongSide = weakSide === attacking ? defenders : attacking;
     const to = retreatRoute(world, weakSide[0]!, engagement.provinceId, new Set(strongSide.map((force) => force.polityId)));
     if (to !== null) {
       const going = new Set(weakSide.map((force) => force.id));
+      // The pursuit takes its toll of the rear: more for the worse odds, and more where the pursuers have horse.
+      const odds = weight(strongSide) / Math.max(1, weight(weakSide));
+      const cutDown = pursuitLosses(odds, horseShare(strongSide, rules));
       world = {
         ...world,
         material: {
           ...world.material,
           forces: world.material.forces.map((force) => (going.has(force.id)
-            ? { ...force, locationId: to, positionId: null, fatigueBps: Math.min(10_000, force.fatigueBps + 1_000) }
+            ? { ...losses(force, cutDown, day, engagement.id), locationId: to, positionId: null, fatigueBps: Math.min(10_000, force.fatigueBps + 1_000), moraleBps: Math.max(0, force.moraleBps - PURSUIT_MORALE_BPS) }
             : force)),
         },
       };
-      facts.push(fact("withdrew", "force_withdrew", `${names(weakSide)}, outnumbered three to one, would not stand against ${names(strongSide)} at ${where}, and fell back into ${provinceName(world, to)}.`, [...weakSide, ...strongSide], 55));
+      facts.push(fact("withdrew", "force_withdrew", `${names(weakSide)}, outnumbered three to one, would not stand against ${names(strongSide)} at ${where}, and fell back into ${provinceName(world, to)}${cutDown > 0 ? `, losing ${Math.round(cutDown * 100)} in a hundred of its men to the pursuit` : ""}.`, [...weakSide, ...strongSide], 55));
       world = end("withdrew", weakSide === attacking ? "defender" : "attacker");
       const taken = takeTheCamp(world, strongSide, weakSide, engagement.provinceId, day);
       facts.push(...taken.facts.map((drafted) => ({ ...drafted, localId: safeLocalId(`${drafted.localId}_${engagement.id}`).slice(0, 60) })));
@@ -449,12 +456,14 @@ export function fightRound(input: FightInput, engagementId: string, day: number,
   const wouldRefuse = offered && (playerSide === "defender" && refusable && engagement.playerStance !== null
     ? engagement.playerStance === "refuse"
     : !acceptsBattle(world, defenders, attackWeight, defendWeight));
-  const disheartened = wouldRefuse && defenders.reduce((sum, force) => sum + force.moraleBps, 0) / defenders.length < REFUSAL_BREAKS_BELOW;
+  // A camp being stormed today is not left by night: the stormers are already at the rampart (consul-run-issues H3).
+  const disheartened = !forcePitched && wouldRefuse && defenders.reduce((sum, force) => sum + force.moraleBps, 0) / defenders.length < REFUSAL_BREAKS_BELOW;
   if (disheartened) {
     const to = retreatRoute(world, defenders[0]!, engagement.provinceId, new Set(attacking.map((force) => force.polityId)));
     if (to !== null) {
       const going = new Set(defenders.map((force) => force.id));
-      world = { ...world, material: { ...world.material, forces: world.material.forces.map((force) => (going.has(force.id) ? { ...force, locationId: to, positionId: null, fatigueBps: Math.min(10_000, force.fatigueBps + 1_000) } : force)) } };
+      const cutDown = pursuitLosses(attackWeight / Math.max(1, defendWeight), horseShare(attacking, rules));
+      world = { ...world, material: { ...world.material, forces: world.material.forces.map((force) => (going.has(force.id) ? { ...losses(force, cutDown, day, engagement.id), locationId: to, positionId: null, fatigueBps: Math.min(10_000, force.fatigueBps + 1_000) } : force)) } };
       facts.push(fact("gave_up_the_camp", "force_withdrew", `${names(defenders)}, disheartened after refusing battle day after day, left ${defenders.length === 1 ? "its" : "their"} camp at ${where} by night and fell back into ${provinceName(world, to)}, leaving the field to ${names(attacking)}.`, [...defenders, ...attacking], 60));
       world = end("withdrew", "attacker");
       const taken = takeTheCamp(world, attacking, defenders, engagement.provinceId, day);
@@ -697,6 +706,18 @@ function horseShare(side: readonly Force[], rules: ScenarioWarfareRules): number
     .filter((group) => (rules.troopCategories.find((category) => category.id === group.categoryId)?.mobilityBps ?? 0) >= 8_000)
     .reduce((men, group) => men + group.fit, 0), 0);
   return horse / all;
+}
+
+/** What a withdrawal costs the morale of the men who make it, in basis points. */
+const PURSUIT_MORALE_BPS = 600;
+/**
+ * The share of a withdrawing side cut down by the pursuit: stragglers, the baggage guard, the wounded left behind. A few in a
+ * hundred at even odds, more the worse the odds and the more horse the pursuers have, never more than an eighth. A retreat
+ * that cost nothing let a small army run before a large one for a year (consul-run-issues H3).
+ */
+export function pursuitLosses(odds: number, pursuersHorse: number): number {
+  const share = 0.02 + Math.max(0, odds - 1) * 0.01 + Math.max(0, Math.min(1, pursuersHorse)) * 0.06;
+  return Math.min(0.12, Math.round(share * 1_000) / 1_000);
 }
 
 /** A share of a force's men lost, written into its history against the fight. */

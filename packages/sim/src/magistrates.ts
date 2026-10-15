@@ -32,6 +32,7 @@ import {
 import { readBoard, type PowerReading } from "./board";
 import { defianceOf } from "./insubordination";
 import { readTheBooks, grainStress, motionsByPower, qualityOf, weigh, type Asked, type Books, type Matter } from "./fiscal-officers";
+import { coinIsMoved, debaseStepFor, strainOf, taxTriedFirst, DEBASE_COOLDOWN_DAYS } from "./fiscal-strain";
 import { grainPrice } from "./grain";
 import { housesFor, monthlyBill, victuallerOf } from "./army-victualling";
 import { suppliedByDelegation } from "./supply-plan";
@@ -530,20 +531,26 @@ const theCensors: Routine = (cx) => {
 const theMint: Routine = (cx) => {
   const { world, polity, books } = cx;
   const reading = cx.board.get(polity.id);
-  if (reading === undefined || reading.wars.length === 0 || books.arrears <= 0 || books.owed <= 0 || books.balance / books.owed >= 0.5 || since(cx, "mint") < REST_DAYS.mint) return null;
+  if (reading === undefined || books.owed <= 0 || since(cx, "mint") < REST_DAYS.mint) return null;
+  const strain = strainOf(world, books, polity.id);
+  if (!coinIsMoved(strain, books.arrears > 0)) return null;
   const coinage = coinagesOf(world).find((candidate) => candidate.issuerPolityId === polity.id);
   if (coinage === undefined || coinage.silverBps < standardOf(coinage) * 0.6) return null;
+  // However the last change was made (the fiscal officer's pass or this one), the mint changes the coin no oftener than a year.
+  const struckLast = coinage.history.at(-1);
+  if (struckLast !== undefined && cx.day - struckLast.atStep < DEBASE_COOLDOWN_DAYS) return null;
   const rate = economyOf(world).taxPolicies.find((policy) => policy.polityId === polity.id)?.rateBps ?? 0;
-  if (rate < 1_800) return null;
+  if (!taxTriedFirst(strain, rate >= 1_800)) return null;
+  const step = debaseStepFor(strain);
   const mine = chargeHolders(world, polity.id, "coinage", cx.offices).filter((holder) => holder.grade === "by_the_body" && holder.basis !== "other");
   const holder = mine[0];
   if (holder === undefined) return null;
   const man = world.characters.find((character) => character.id === holder.characterId);
   if (man === undefined || !isFree(cx.input, man) || willing(cx, man, "mint", "mint", true) !== null) return null;
   const matter: Matter = {
-    kind: "mint", act: "coinage", magnitude: 1_500, concerns: ["coinage"], label: `${coinage.name} be struck with less silver`,
+    kind: "mint", act: "coinage", magnitude: -step, concerns: ["coinage"], label: `${coinage.name} be struck with less silver`,
     text: `the war has emptied the chest and the pay is behind`, why: `mint: ${coinage.name} struck lighter`,
-    deltas: [delta({ op: "coinage_debase", coinageId: coinage.id, targetSilverBps: null, stepBps: -1_500, reason: `${man.name} has the mint strike lighter coin: the war has emptied the chest.`.slice(0, 240) })],
+    deltas: [delta({ op: "coinage_debase", coinageId: coinage.id, targetSilverBps: null, stepBps: step, reason: `${man.name} has the mint strike lighter coin: the war has emptied the chest.`.slice(0, 240) })],
   };
   const weighed = ask(cx, man, matter, "mint");
   if (weighed === "own") return { man, kind: "mint", text: `had the mint strike ${coinage.name} lighter, for the war has emptied the chest`, why: matter.why, deltas: matter.deltas, speaks: true, significance: 55 };
@@ -622,7 +629,8 @@ export function decideMagistrates(input: MagistrateInput, already: readonly Stat
     return live.has(polityId);
   };
   const decisions: StatecraftDecision[] = [];
-  const fiscalCoin = new Set(already.filter((decision) => decision.deltas.some((entry) => entry.op === "coinage_debase")).map((decision) => decision.polityId));
+  // The fiscal officer's own act, or his motion to the chamber that holds the mint: the same matter is not put twice in a month.
+  const fiscalCoin = new Set(already.filter((decision) => decision.deltas.some((entry) => entry.op === "coinage_debase" || (entry.op === "political_procedure_open" && /struck with less silver/.test(entry.label)))).map((decision) => decision.polityId));
 
   const served = suppliedByDelegation(world, input.playerCharacterId, day);
   for (const polity of [...world.map.polities].sort((a, b) => a.id.localeCompare(b.id))) {

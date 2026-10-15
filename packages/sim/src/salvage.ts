@@ -33,6 +33,8 @@ export interface SchemaComplaint {
   readonly code?: string | undefined;
   readonly path: readonly PropertyKey[];
   readonly keys?: readonly string[] | undefined;
+  /** The schema's own words for it, carried into the record of what was dropped. */
+  readonly message?: string | undefined;
 }
 
 export interface Salvaged {
@@ -77,6 +79,19 @@ export function salvageAgainst(value: unknown, complaints: readonly SchemaCompla
       continue;
     }
 
+    // A field written null where the schema wants a value or nothing is a thing not said, and is left out: a ruler made with
+    // "faith": null was dropped whole, and the army that named him raised under a stand-in (consul-run-issues M3). Were the
+    // field required, the next round finds it missing and drops the line as before.
+    const last = complaint.path.at(-1);
+    if (complaint.message !== undefined && /received null/.test(complaint.message) && typeof last === "string") {
+      const parent = complaint.path.slice(0, -1);
+      const key = show(parent);
+      const existing = strips.get(key) ?? { path: parent, keys: new Set<string>() };
+      existing.keys.add(last);
+      strips.set(key, existing);
+      continue;
+    }
+
     // The innermost array this sits in. Innermost on purpose: a bad reference
     // inside a fact should cost the reference, not the fact.
     let cut = -1;
@@ -103,7 +118,19 @@ export function salvageAgainst(value: unknown, complaints: readonly SchemaCompla
     for (const index of drop.indices) removed.add(show([...drop.path, index]));
   }
 
-  const dropped = [...removed];
+  // Each lost line with what it was and why: "dropped worldDeltas.3" alone hid that a ruler was lost to a null faith, and
+  // the forces that named him were raised under a placeholder (consul-run-issues M3, L3).
+  const why = (key: string): string => {
+    const drop = [...drops.values()].find((candidate) => [...candidate.indices].some((index) => show([...candidate.path, index]) === key));
+    const index = drop === undefined ? undefined : [...drop.indices].find((candidate) => show([...drop.path, candidate]) === key);
+    const element = drop === undefined || index === undefined ? undefined : at(value, [...drop.path, index]);
+    const op = typeof element === "object" && element !== null && typeof (element as { op?: unknown }).op === "string" ? ` (${(element as { op: string }).op})` : "";
+    const said = [...new Set(complaints
+      .filter((complaint) => complaint.message !== undefined && (show(complaint.path) === key || show(complaint.path).startsWith(`${key}.`)))
+      .map((complaint) => `${show(complaint.path).slice(key.length + 1) || "it"}: ${complaint.message}`))].slice(0, 2).join("; ");
+    return `${key}${op}${said === "" ? "" : `: ${said}`}`.slice(0, 240);
+  };
+  const dropped = [...removed].map(why);
   for (const [key, strip] of strips) {
     if (removed.has(key)) continue;
     dropped.push(`${key}: ${[...strip.keys].join(", ")}`);

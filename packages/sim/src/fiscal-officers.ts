@@ -32,6 +32,7 @@ import {
 } from "@chronica/shared";
 import { convenersOf } from "./apply/asking";
 import { bodyHasRoom } from "./bodies";
+import { debaseStepFor, coinIsMoved, strainOf, taxTriedFirst, DECREE_STRAIN, REFORM_COVER_MONTHS } from "./fiscal-strain";
 import { purseOfHouse } from "./merchant-houses";
 import { modelHasActedOnTheBooks } from "./played-ruler-books";
 import type { StatecraftDecision, StatecraftInput } from "./statecraft";
@@ -569,15 +570,23 @@ export function decideFiscal(input: Pick<StatecraftInput, "world" | "gameId" | "
 
     // ── Coin ───────────────────────────────────────────────────────────
     const coinage = coinagesOf(world).find((candidate) => candidate.issuerPolityId === polity.id);
-    if (coinage !== undefined && since("coinage") >= COINAGE_COOLDOWN_OWN_DAYS) {
+    // The year between two strikes is read off the coin's own history as well as the log: a change by the man at the mint counts.
+    const lastStruck = coinage?.history.at(-1);
+    if (coinage !== undefined && since("coinage") >= COINAGE_COOLDOWN_OWN_DAYS && (lastStruck === undefined || day - lastStruck.atStep >= COINAGE_COOLDOWN_OWN_DAYS)) {
       const standard = standardOf(coinage);
-      if (extremis && (rateAtCeiling || taxWait < TAX_COOLDOWN_DAYS) && coinage.silverBps >= standard * 0.6) {
+      // The strain on the power (`fiscal-strain.ts`): the coin moves when it is past the threshold in a war, and the tax has been tried first (or the case is desperate).
+      const strain = strainOf(world, book, polity.id);
+      const coinStep = debaseStepFor(strain);
+      // A decree of the chamber that holds the mint, not yet carried out, is carried out while the strain is anywhere near what moved it: the strain wavers month to month about the line.
+      const decreed = mine.some((procedure) => procedure.outcome === "passed" && /struck with less silver/.test(procedure.label) && (procedure.resolvedAtStep ?? 0) >= day - DECREE_LAPSES_DAYS);
+      const wanted = coinIsMoved(strain, book.arrears > 0) && taxTriedFirst(strain, rateAtCeiling || taxWait < TAX_COOLDOWN_DAYS);
+      if ((wanted || (decreed && strain.score >= DECREE_STRAIN && (strain.atWar || strain.revolt))) && coinage.silverBps >= standard * 0.6) {
         submit({
-          kind: "coinage", act: "coinage", magnitude: 1_500, concerns: ["coinage"], label: `${coinage.name} be struck with less silver`,
-          deltas: [delta({ op: "coinage_debase", coinageId: coinage.id, targetSilverBps: null, stepBps: -1_500, reason: `${officer.name} has the mint strike lighter coin: the war has emptied the chest.`.slice(0, 240) })],
+          kind: "coinage", act: "coinage", magnitude: -coinStep, concerns: ["coinage"], label: `${coinage.name} be struck with less silver`,
+          deltas: [delta({ op: "coinage_debase", coinageId: coinage.id, targetSilverBps: null, stepBps: coinStep, reason: `${officer.name} has the mint strike lighter coin: the war has emptied the chest.`.slice(0, 240) })],
           why: `coinage: struck ${coinage.name} lighter (the war has emptied the chest)`, text: `had the mint strike ${coinage.name} lighter, for the war has emptied the chest and the soldiers' pay is behind`,
         });
-      } else if (!atWar && cover >= 6 && coinage.silverBps < standard * 0.92) {
+      } else if (!atWar && cover >= REFORM_COVER_MONTHS && coinage.silverBps < standard * 0.92) {
         const cost = Math.round((coinageStock(world, coinage.id) * 0.3 * 1_000) / 10_000);
         if (book.balance >= 2 * cost) {
           submit({

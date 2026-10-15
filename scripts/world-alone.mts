@@ -30,6 +30,7 @@ const BIG = /^(province_occupied|war_declared|war_cause|revolt|alliance_made|all
 
 let world = ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
 let refused = 0;
+const refusals: string[] = [];
 const kinds = new Map<string, number>();
 for (let month = 0; month < months; month += 1) {
   const result = await runSimulationBurst({
@@ -41,6 +42,7 @@ for (let month = 0; month < months; month += 1) {
   world = result.world;
   const rejected = result.audit.filter((entry) => entry.kind === "world" || entry.kind === "reference" || entry.kind === "ignored");
   refused += rejected.length;
+  for (const entry of rejected) refusals.push(`${formatWorldDate(world.instant, definition.clock)} ${entry.op}: ${(entry.reason ?? "").slice(0, 200)}`);
   for (const fact of result.newFacts) kinds.set(fact.kind, (kinds.get(fact.kind) ?? 0) + 1);
   if (quiet) continue;
   console.log(`\n== ${formatWorldDate(world.instant, definition.clock)}: ${result.newFacts.length} facts, ${rejected.length} refused`);
@@ -62,6 +64,7 @@ console.log(`  powers that acted by rule: ${new Set(log.map((entry) => entry.pol
 console.log(`  sieges laid: ${kinds.get("siege_laid") ?? 0}, cities given up: ${kinds.get("siege_ended") ?? 0}, provinces occupied: ${kinds.get("province_occupied") ?? 0}, raids: ${kinds.get("province_raided") ?? 0}, powers ended: ${kinds.get("polity_ended") ?? 0}`);
 console.log(`  provinces held by somebody other than their owner now: ${world.map.provinces.filter((province) => province.ownerPolityId != null && province.ownerPolityId !== province.controllerPolityId).length}`);
 console.log(`  acts the applier refused: ${refused}`);
+for (const line of refusals.slice(0, 20)) console.log(`    REFUSED ${line}`);
 if (saveAt !== null) {
   // A world that will not load is never saved as though it would (E1).
   const loadable = WorldStateSchema.safeParse(world);

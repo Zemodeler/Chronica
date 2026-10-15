@@ -1,4 +1,5 @@
 import { explicitOrderGoals, missionGoals, preserveDestination } from "./mission-intent";
+import { placeNamed } from "./place-named";
 import {
   addMinutes,
   readDepartments,
@@ -613,7 +614,8 @@ export function givenItsDestination<T extends { readonly output: OrchestratorOut
     if (force === undefined) continue;
     const fromGoals = output.intent.parts.flatMap((other) => other.goals).find((goal) => goal.kind === "force_at" && goal.ref === force.id && typeof goal.at === "string")?.at ?? null;
     const named = marches.map((part) => part.said.toLowerCase())
-      .map((text) => world.map.provinces.find((province) => province.id !== force.locationId && (text.includes(province.name.toLowerCase()) || province.settlements.some((settlement) => text.includes(settlement.name.toLowerCase()))))?.id ?? null)
+      // A place named as a whole word, never a name inside another word (consul-run-issues H1).
+      .map((text) => { const place = placeNamed(world, text)?.provinceId ?? null; return place === force.locationId ? null : place; })
       .find((id) => id !== null) ?? null;
     const place = fromGoals ?? named;
     if (place === null || place === force.locationId || !world.map.provinces.some((province) => province.id === place)) continue;
@@ -653,7 +655,8 @@ export function approachFirst<T extends { readonly output: OrchestratorOutput }>
   const parts = [...output.intent.parts];
   for (const entry of wanted) {
     const moveAt = deltas.length;
-    deltas.push({ op: "force_modify", forceRef: entry.forceId, name: null, locationId: entry.provinceId, positionId: null, newPosition: null, payObligationRef: null, battlePlan: null, reason: "March to where the order has it act." } as unknown as WorldDelta);
+    // Only the march: a null name left the army nameless and the world refused the whole batch (consul-run-issues H2).
+    deltas.push(WorldDeltaSchema.parse({ op: "force_modify", forceRef: entry.forceId, locationId: entry.provinceId, reason: "March to where the order has it act." }));
     const marchPart = parts.length;
     const province = world.map.provinces.find((candidate) => candidate.id === entry.provinceId)?.name ?? "the place";
     parts.push({ said: `March ${entry.forceName} to ${province}.`, acts: [moveAt], goals: [], spend: null, factLocalIds: [], whyNot: null } as unknown as OrchestratorOutput["intent"]["parts"][number]);
@@ -1725,7 +1728,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     for (const reason of behind.dropped) skipped.push({ stage: "engine_facts", reason });
     // Another state's routine government is not the world's to carry (`the-orchestrator-keeps-out.ts`): set aside, and counted.
     const statedWorldActs = [...(proposal.worldDeltas ?? []), ...(proposal.worldDeltas === undefined ? [] : behind.acts)];
-    const keptOut = actsForTheWorld && proposal.worldDeltas !== undefined
+    // The officers' own acts (a power's fiscal pass and its magistrates, `pass.sanctioned`) are the state's own business, not the world's written for another state.
+    const keptOut = actsForTheWorld && proposal.worldDeltas !== undefined && pass.sanctioned === undefined
       ? keepOutOfOtherStatesBooks(world, statedWorldActs, { playerId: input.actorRef.kind === "character" ? input.actorRef.id : null, playerPolityId: input.actorPolityId ?? null })
       : { kept: statedWorldActs, setAside: [] as { delta: WorldDelta; reason: string }[] };
     for (const { reason } of keptOut.setAside) skipped.push({ stage: "officers", reason });
@@ -2608,7 +2612,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       parseFailures.push(failure);
       // Loud, and the clock is not carried past it (see the loop): a silent skip let months go by with nothing ticking.
       tickFailure ??= failure;
-      console.error(`[chronica] ${failure}`);
+      // Which account, and what it held before the tick: a fractional balance is one sum somewhere that was never rounded.
+      const fractional = ticked.world.material.accounts.filter((account) => !Number.isInteger(account.balance)).slice(0, 3)
+        .map((account) => `${account.id} ${account.balance} (was ${world.material.accounts.find((before) => before.id === account.id)?.balance ?? "new"})`);
+      console.error(`[chronica] ${failure}${fractional.length === 0 ? "" : `; fractional: ${fractional.join(", ")}`}`);
       return;
     }
     // The tick writes without the applier's per-act checks, so what it left
@@ -3267,6 +3274,12 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         ...priorGoals.filter((goal): goal is Extract<OrderGoal, { kind: "answer_from" }> => goal.kind === "answer_from")
           .map((goal) => ({ kind: "letter_answered" as const, messageId: goal.messageId, answer: part.whenAnswered ?? "any" })),
       ];
+      // A part that marches and fights on arrival in one breath -- a march project and a held engage -- waits on its own march;
+      // with nothing to wait on, its held acts were dropped and the army arrived to stand beside the enemy (consul-run-issues M12).
+      if ((part.deferredActs ?? []).length > 0 && dependencies.length === 0) {
+        dependencies.push(...[...mine.flatMap((act) => act.goals ?? []), ...merged.goals]
+          .filter((goal): goal is Extract<OrderGoal, { kind: "force_at" }> => goal.kind === "force_at" && goalMet(world, goal) === "not_yet").slice(0, 1));
+      }
       if (/^(once|after)\b/i.test(part.said) && dependencies.length === 0) dependencies.push(...own.flatMap((act) => act.goals ?? []).filter((goal): goal is Extract<OrderGoal, { kind: "force_at" }> => goal.kind === "force_at" && goalMet(world, goal) === "not_yet").slice(0, 1));
       const futureName = part.whenForceExists ?? (/when.*punitive.*(raised|ready)/i.test(part.said) ? "punitive" : null);
       if (futureName !== null && actorPolityId !== null) dependencies.push({ kind: "force_named", name: futureName, polityId: actorPolityId });

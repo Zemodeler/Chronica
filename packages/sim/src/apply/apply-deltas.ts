@@ -220,7 +220,7 @@ import { enemyFleetOff, perilsOfTheRoad } from "../crossings";
 import { diplomaticAnswererOf } from "../letters";
 import { moneyMadeBetween, newIssues } from "./what-a-batch-did";
 import { journeysOf, onTheWayTo, settledCourse, shoreItMakesFor, turnOnTheRoad, wasTurnedOnTheRoad } from "./marches";
-import { WORLD_THREAD_CAP, makeRoomForTheOrder, worldThreadsFull } from "../storyline-cap";
+import { WORLD_THREAD_CAP, makeRoomForASeed, makeRoomForTheOrder, worldThreadsFull } from "../storyline-cap";
 import { admitCandidacy } from "../candidacy";
 import { benefactionPayer, giveToThePeople } from "./benefaction";
 import { foundHouseByOrder } from "../house-founding";
@@ -3478,7 +3478,7 @@ function applyOne(
       // Raised where something trains people -- an academy, a war school --
       // and it shows. Bands the world gave still win: it said what he is.
       const trained = recruitSkillBiasIn(created.world, provinceId);
-      const faith = delta.faith === undefined ? null : faithNamed(created.world, delta.faith, atStep, id);
+      const faith = delta.faith == null ? null : faithNamed(created.world, delta.faith, atStep, id);
       const withTraits = (faith?.world ?? created.world).characters.map((character) => {
         if (character.id !== id) return character;
         const skills = trained === 0
@@ -4805,11 +4805,13 @@ function applyOne(
       // before it and the prompt asks for threads to be closed. The order's own
       // thread is never refused (E24): a seed taken up is the world's, though.
       const ordersOwn = context.actsForTheWorld !== true || (context.forTheOrder === true && delta.seedKey === null);
-      if (!ordersOwn && worldThreadsFull(world)) {
+      // A seed's own thread makes room for itself: the prompt that asked for it is the world's own (consul-run-issues M2).
+      const seeded = !ordersOwn && delta.seedKey !== null && worldThreadsFull(world);
+      if (!ordersOwn && !seeded && worldThreadsFull(world)) {
         reject(`The world is already following ${WORLD_THREAD_CAP} threads of its own; close one before opening another.`);
       }
       const id = mint("storyline", delta.localId);
-      const roomy = ordersOwn ? makeRoomForTheOrder(world, atStep, delta.title) : world;
+      const roomy = ordersOwn ? makeRoomForTheOrder(world, atStep, delta.title) : seeded ? makeRoomForASeed(world, atStep, delta.title) : world;
       return {
         ...roomy,
         storylines: [
@@ -4926,7 +4928,7 @@ function applyOne(
       }
 
       // A conversion, or a faith founded by the man who now holds it.
-      const believes = delta.faith === undefined ? null : faithNamed(world, delta.faith, atStep, characterId);
+      const believes = delta.faith == null ? null : faithNamed(world, delta.faith, atStep, characterId);
       if (believes !== null) world = believes.world;
 
       const lifted = new Set(delta.removeStatuses);
@@ -7149,17 +7151,20 @@ type TreatyClause = NonNullable<Extract<WorldDelta, { op: "agreement_open" }>["c
  */
 export function servesInTerms(world: WorldState, terms: string, partyId: string, otherPartyId: string, clauses: readonly TreatyClause[]): TreatyClause[] {
   if (!/\b(serv(e|es|ed|ing|ice)|enlist\w*|taken into|enters?|pass(es)? (in)?to)\b/i.test(terms)) return [];
-  const words = (text: string): string[] => text.toLowerCase().split(/[^\p{L}]+/u).filter((word) => word.length > 3 && !["legion", "army", "force", "host", "company", "field"].includes(word));
-  const said = new Set(words(terms).map((word) => word.slice(0, 6)));
+  // A power giving itself up is taken whole, its army with it; nothing passes into its service.
+  const submitting = new Set(clauses.flatMap((clause) => (clause.kind === "submission" ? [clause.polityId] : [])));
+  const plain = (text: string): string => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  const said = plain(terms);
   return world.material.forces
     .filter((force) => force.polityId === partyId || force.polityId === otherPartyId)
     .filter((force) => !clauses.some((clause) => clause.kind === "force_transfer" && clause.forceRef === force.id))
+    .filter((force) => !submitting.has(force.polityId === partyId ? otherPartyId : partyId))
     .filter((force) => {
-      const own = words(force.name.replace(/\bof\b.*$/i, ""));
-      // Its name, and then within a few words the service: "the Campanian
-      // legion serves", not a Roman army merely named beside it.
-      return own.length > 0 && own.every((word) => said.has(word.slice(0, 6)))
-        && new RegExp(`${own.at(-1)!.slice(0, 6)}\\p{L}*\\s+(\\S+\\s+){0,4}(serv|enlist|enter|pass|taken)`, "iu").test(terms);
+      const own = plain(force.name.replace(/\bof\b.*$/i, ""));
+      // Its whole name, and then within a few words the service: "the Campanian legion serves". A word of its name was not
+      // enough: "Roman" in "give yourselves up to the Roman people; your ground passes to Rome" handed the Roman field army to
+      // the Campanians it had just beaten (consul-run-issues, found replaying the fixes).
+      return own.length > 0 && new RegExp(`(^| )${own.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} (\\S+ ){0,4}(serv|enlist|enter|pass|taken)`, "u").test(said);
     })
     .slice(0, 2)
     .map((force) => ({ kind: "force_transfer" as const, forceRef: force.id, toPolityId: force.polityId === partyId ? otherPartyId : partyId }));

@@ -100,14 +100,15 @@ const AUTHORED_POLITY_IDS: ReadonlySet<string> = new Set(["rome", "carthage", "s
  * but Rome's. That is the whole bargain, and it is what the engine enforces.
  */
 const alliedItaly: readonly (readonly [string, number, string, number, string])[] = [
-  ["etruscan-cities", 0, "Each Etruscan city made its own peace with Rome after 280, and sends men to Rome's wars.", 0, "Allied since the peaces of the 280s; Volsinii's nobles fear their own people more than Rome."],
-  ["umbrians", 0, "Allied since Camerinum's treaty of 310: men for Rome's wars, no war or peace of their own.", 25, "Old allies, with a Latin colony at Narnia to watch the road."],
-  ["picentes", 0, "Allied since 299: men for Rome's wars, no war or peace of their own.", -30, "Hemmed in by Roman colonies at Hadria and on the Gallic coast, and close to rising."],
-  ["marsi-paeligni", 0, "Allied since 304: the Marsi, Paeligni, Marrucini and Vestini send men to Rome's wars.", 40, "Rome's steadiest allies in the mountains."],
-  ["samnites", 0, "Bound to Rome after defeat in 290 and again in 272: men for Rome's wars, no war or peace of their own.", -40, "Beaten twice in twenty years and robbed of land for Roman colonies; some still fight on."],
-  ["lucanians", 0, "Bound to Rome after defeat in 272: men for Rome's wars, no war or peace of their own.", -25, "Pyrrhus's allies until two years ago; Paestum and Venusia now watch them."],
-  ["bruttians", 0, "Bound to Rome after defeat in 272, when they gave up half the Sila forest.", -40, "Stripped of half their forest, and neighbours to the Campanians of Rhegium."],
-  ["apulian-cities", 0, "Tarentum surrendered in 272 and keeps its own laws under a Roman garrison; Arpi and the Daunians have been allies since 326. All send men and ships to Rome's wars.", -15, "Tarentum has a Roman garrison in its citadel and remembers Pyrrhus."],
+  // The second figure is the year BC the foedus dates from, so its age at the start is read as the age it was (`heldYearsAtStart`).
+  ["etruscan-cities", 280, "Each Etruscan city made its own peace with Rome after 280, and sends men to Rome's wars.", 0, "Allied since the peaces of the 280s; Volsinii's nobles fear their own people more than Rome."],
+  ["umbrians", 310, "Allied since Camerinum's treaty of 310: men for Rome's wars, no war or peace of their own.", 25, "Old allies, with a Latin colony at Narnia to watch the road."],
+  ["picentes", 299, "Allied since 299: men for Rome's wars, no war or peace of their own.", -30, "Hemmed in by Roman colonies at Hadria and on the Gallic coast, and close to rising."],
+  ["marsi-paeligni", 304, "Allied since 304: the Marsi, Paeligni, Marrucini and Vestini send men to Rome's wars.", 40, "Rome's steadiest allies in the mountains."],
+  ["samnites", 272, "Bound to Rome after defeat in 290 and again in 272: men for Rome's wars, no war or peace of their own.", -40, "Beaten twice in twenty years and robbed of land for Roman colonies; some still fight on."],
+  ["lucanians", 272, "Bound to Rome after defeat in 272: men for Rome's wars, no war or peace of their own.", -25, "Pyrrhus's allies until two years ago; Paestum and Venusia now watch them."],
+  ["bruttians", 272, "Bound to Rome after defeat in 272, when they gave up half the Sila forest.", -40, "Stripped of half their forest, and neighbours to the Campanians of Rhegium."],
+  ["apulian-cities", 326, "Tarentum surrendered in 272 and keeps its own laws under a Roman garrison; Arpi and the Daunians have been allies since 326. All send men and ships to Rome's wars.", -15, "Tarentum has a Roman garrison in its citadel and remembers Pyrrhus."],
 ];
 
 /**
@@ -344,7 +345,7 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
       { id: "childhood", label: "childhood", minAgeYears: 0, maxAgeYears: 14, mortalityRatePerYearBps: 200, incapacityRatePerYearBps: 20, recoveryRatePerYearBps: 5_000 },
       { id: "young", label: "youth", minAgeYears: 15, maxAgeYears: 29, mortalityRatePerYearBps: 120, incapacityRatePerYearBps: 60, recoveryRatePerYearBps: 5_000 },
       { id: "prime", label: "prime", minAgeYears: 30, maxAgeYears: 44, mortalityRatePerYearBps: 180, incapacityRatePerYearBps: 90, recoveryRatePerYearBps: 4_000 },
-      { id: "late", label: "later years", minAgeYears: 45, maxAgeYears: 54, mortalityRatePerYearBps: 330, incapacityRatePerYearBps: 160, recoveryRatePerYearBps: 3_000 },
+      { id: "late", label: "middle years", minAgeYears: 45, maxAgeYears: 54, mortalityRatePerYearBps: 330, incapacityRatePerYearBps: 160, recoveryRatePerYearBps: 3_000 },
       { id: "elder", label: "old age", minAgeYears: 55, maxAgeYears: 64, mortalityRatePerYearBps: 700, incapacityRatePerYearBps: 320, recoveryRatePerYearBps: 2_000 },
       { id: "great-age", label: "great age", minAgeYears: 65, maxAgeYears: null, mortalityRatePerYearBps: 1_400, incapacityRatePerYearBps: 600, recoveryRatePerYearBps: 1_200 },
     ],
@@ -898,13 +899,14 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
   // Rome is already at war with the men holding Rhegium: the Senate has
   // resolved the matter be ended, and the army is marching. Saying so in state
   // is what lets the assault happen at all.
-  polityAgreements: [...alliedItaly.map(([polityId, since, terms]) => ({
+  polityAgreements: [...alliedItaly.map(([polityId, foundedBc, terms]) => ({
     id: `foedus-${polityId}`,
     kind: "foedus",
     polityId,
     otherPolityId: "rome",
     terms,
-    sinceStep: since,
+    sinceStep: 0,
+    heldYearsAtStart: Math.max(0, foundedBc - 270),
     untilStep: null,
     sourceMessageId: null,
     status: "active",

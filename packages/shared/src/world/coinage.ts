@@ -280,10 +280,18 @@ export function faceAmount(silverUnits: number, coinage: Pick<Coinage, "silverBp
   return Math.round((silverUnits * REFERENCE_SILVER_BPS) / coinage.silverBps);
 }
 
+/** A coin struck down this far (a quarter of its silver gone, or more) is billon, silver debased with bronze, and not silver any more: Carthage's by the end of the Mercenary War. */
+export const BILLON_BELOW_BPS = 7_500;
+
+/** Whether a coinage has been struck down to billon, against the silver it was struck at. */
+export function isBillon(coinage: Pick<Coinage, "silverBps" | "standardBps">): boolean {
+  return coinage.silverBps * 10_000 < standardOf(coinage) * BILLON_BELOW_BPS;
+}
+
 /** A coinage in a few words: its name, what it holds of silver against its standard, and what it fetches. */
 export function coinageInWords(coinage: Coinage): string {
   const content = Math.round((100 * coinage.silverBps) / standardOf(coinage));
   const premium = coinage.premiumBps === 0 ? "" : `, ${coinage.premiumBps > 0 ? "at a premium of" : "at a discount of"} ${Math.abs(Math.round(coinage.premiumBps / 100))}% to its silver`;
   const prices = coinage.priceLevelBps === 10_000 ? "" : `, prices at ${(coinage.priceLevelBps / 100).toFixed(0)}% of ordinary`;
-  return `${coinage.name} (${content}% of its standard silver${premium}${prices})`;
+  return `${coinage.name} (${isBillon(coinage) ? "billon, " : ""}${content}% of its standard silver${premium}${prices})`;
 }

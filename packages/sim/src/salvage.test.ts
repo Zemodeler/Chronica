@@ -27,7 +27,9 @@ describe("keeping the answer and losing the bad line", () => {
     };
     const read = readWithSalvage(answer)!;
     expect(read.data.deltas).toEqual([{ op: "move" }, { op: "pay" }]);
-    expect(read.dropped).toEqual(["deltas.1"]);
+    expect(read.dropped).toHaveLength(1);
+    // The path, the act, and why: what the run log needs to say (consul-run-issues M3).
+    expect(read.dropped[0]).toMatch(/^deltas\.1 \(pay\): kind: /);
   });
 
   it("costs a bad reference its fact's reference, not the fact", () => {
@@ -39,7 +41,8 @@ describe("keeping the answer and losing the bad line", () => {
     };
     const read = readWithSalvage(answer)!;
     expect(read.data.facts).toEqual([{ summary: "The fleet sailed.", affectedRefs: [{ kind: "character" }] }]);
-    expect(read.dropped).toEqual(["facts.0.affectedRefs.1"]);
+    expect(read.dropped).toHaveLength(1);
+    expect(read.dropped[0]).toMatch(/^facts\.0\.affectedRefs\.1: kind: /);
   });
 
   it("strips an unrecognised key rather than dropping what it was attached to", () => {

@@ -144,15 +144,35 @@ export function closeBook(world: WorldState, book: Book): WorldState {
   return { ...world, economy: { ...economyOf(world), markets } };
 }
 
-/** What cuts a hub off: a siege laid to it, an enemy sitting on it, or a fleet off its harbour. */
+/**
+ * How long a city taken by siege stays cut off from the country round it: the lines are raised, the carters come back and the conqueror feeds the town
+ * (Rhegium, taken in 270 BC, stayed a famine for a year after its capture because an occupied hub was shut for as long as it was occupied).
+ */
+export const TAKEN_CITY_CUT_OFF_DAYS = 60;
+
+/** The sieges that took a city, by the province they took. */
+function takenBySiege(world: WorldState): ReadonlyMap<string, { readonly startedAtStep: number; readonly endedAtStep: number }> {
+  const taken = new Map<string, { startedAtStep: number; endedAtStep: number }>();
+  for (const siege of world.sieges) {
+    if (siege.status !== "taken" || siege.endedAtStep === null) continue;
+    const known = taken.get(siege.provinceId);
+    if (known === undefined || siege.endedAtStep > known.endedAtStep) taken.set(siege.provinceId, { startedAtStep: siege.startedAtStep, endedAtStep: siege.endedAtStep });
+  }
+  return taken;
+}
+
+/** What cuts a hub off: a siege laid to it, an enemy sitting on it (for a season after it was taken by siege), or a fleet off its harbour. */
 export function cutOffHubs(world: WorldState, hubs: readonly string[]): ReadonlySet<string> {
   const sieged = new Set(world.sieges.filter((siege) => siege.status === "active").map((siege) => siege.provinceId));
   const blockaded = new Set(world.blockades.filter((blockade) => blockade.status === "active").map((blockade) => blockade.provinceId));
   const wanted = new Set(hubs);
   const cut = new Set<string>();
+  const day = world.instant.day;
+  // A city the siege took, and that has been held since for a season, is opened: the conqueror brings bread, and the country sends its carts.
+  const settled = new Set([...takenBySiege(world)].filter(([, siege]) => day - siege.endedAtStep >= TAKEN_CITY_CUT_OFF_DAYS).map(([provinceId]) => provinceId));
   for (const province of world.map.provinces) {
     if (!wanted.has(province.id)) continue;
-    if (sieged.has(province.id) || blockaded.has(province.id) || (province.controllerPolityId !== null && isOccupied(province))) cut.add(province.id);
+    if (sieged.has(province.id) || blockaded.has(province.id) || (province.controllerPolityId !== null && isOccupied(province) && !settled.has(province.id))) cut.add(province.id);
   }
   return cut;
 }
@@ -171,6 +191,19 @@ export interface MonthInput {
 }
 
 const clamp = (value: number, [low, high]: readonly [number, number]): number => Math.max(low, Math.min(high, value));
+
+/** Grain the country held back from a hub while its siege lay over a harvest, brought in once the town is opened (the share of the crop the carters would not take through the lines). */
+function cartsOfTheSiege(siege: { readonly startedAtStep: number; readonly endedAtStep: number } | undefined, input: MonthInput, monthlyMade: number): number {
+  if (siege === undefined || input.clock === undefined) return 0;
+  const sinceEnd = input.day - siege.endedAtStep;
+  if (sinceEnd < TAKEN_CITY_CUT_OFF_DAYS || sinceEnd >= TAKEN_CITY_CUT_OFF_DAYS + MONTH_DAYS) return 0;
+  const harvestOn = (year: number): number => dayOfCalendarDate({ ...calendarYearOf(year), month: input.harvestMonth, day: 1 }, input.clock!);
+  const first = astronomicalYearOf(calendarDateOf({ day: siege.startedAtStep, minute: 0 }, input.clock));
+  const last = astronomicalYearOf(calendarDateOf({ day: siege.endedAtStep, minute: 0 }, input.clock));
+  let straddled = false;
+  for (let year = first; year <= last; year += 1) if (harvestOn(year) >= siege.startedAtStep && harvestOn(year) <= siege.endedAtStep) straddled = true;
+  return straddled ? monthlyMade * 12 * (1 - CUT_OFF_INFLOW) : 0;
+}
 
 /**
  * One month of every market, and the food each province eats as a result.
@@ -198,6 +231,7 @@ export function marketMonth(book: Book, input: MonthInput): void {
   }
   const toHarvest = monthsToHarvest(input.day, input.clock, input.harvestMonth);
   const calendar = input.clock !== undefined;
+  const taken = takenBySiege(input.world);
   // The clerks of each hub's power keep its weights and measures and its hoarders in check (the `markets` charge).
   const reader = readDepartments(input.world);
   for (const hubId of geography.hubs) {
@@ -220,6 +254,8 @@ export function marketMonth(book: Book, input: MonthInput): void {
         ? 0
         : made[index]! * (spec.supplyElasticity === 0 ? 1 : clamp(Math.pow(priceRatio, spec.supplyElasticity), SUPPLY_RESPONSE_RANGE)) * (cut ? CUT_OFF_INFLOW : 1);
       let stock = hub.stock[index]! + inflow;
+      // The month a taken city is opened, the crop the carters held back through the siege comes in (a harvest that fell inside it was cut to a quarter).
+      if (index === GRAIN && calendar) stock += cartsOfTheSiege(taken.get(hubId), input, made[index]!);
       const eaten = Math.min(stock, wanted);
       stock -= eaten;
       // A besieged, occupied or blockaded hub is stripped by whoever lies about it.

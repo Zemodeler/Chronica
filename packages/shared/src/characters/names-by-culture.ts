@@ -141,6 +141,14 @@ export function aNameFor(polityId: string, role: string, used: ReadonlySet<strin
     const name = pool.second === undefined ? first : `${first} ${pool.second[stableHash([polityId, role, "second", attempt]) % pool.second.length]!}`;
     if (!used.has(name)) return name;
   }
-  return `${pool.first[0]!} of the ${polityId}`;
+  // A people with few names tells men apart by their fathers'. "Arkamani of the kush xapit5" was what a small pool
+  // came to once it ran dry: the power's id, and a caller's suffix after it (consul-run-issues L1).
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    const first = pool.first[stableHash([polityId, role, "son", attempt]) % pool.first.length]!;
+    const father = pool.first[stableHash([polityId, role, "father", attempt]) % pool.first.length]!;
+    const name = `${first} son of ${father}`;
+    if (first !== father && !used.has(name)) return name;
+  }
+  return `${pool.first[0]!} the Younger`;
 }
 

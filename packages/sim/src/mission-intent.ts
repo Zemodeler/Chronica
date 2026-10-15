@@ -45,13 +45,21 @@ export function explicitOrderGoals(world: WorldState, said: string, original: st
  * it: "the ships at Syracuse" in another part once sent a field army there.
  */
 export function namedDestination(world: WorldState, text: string, goingOnly = false): string | null {
-  const normalized = normalizeName(text);
+  // A force's own name is not a place to send it: "Legio I at Rhegium attacks the Campanians" was read as a march to Rhegium,
+  // and the order failed for not getting there though its battle was won (consul-run-issues M13).
+  const named = world.material.forces.map((force) => normalizeName(force.name)).filter((name) => name.split(" ").length > 1).sort((a, b) => b.length - a.length);
+  const normalized = named.reduce((said, name) => ` ${said} `.split(` ${name} `).join(" ").trim().replace(/\s+/g, " "), normalizeName(text));
   const words = normalized.split(/\s+/);
+  // Whole words only: "Decius" is not Cius, nor "Bruttium" Tium -- a man hunted
+  // and a province stayed in once sent armies to Bithynia and Paphlagonia.
+  const padded = ` ${normalized} `;
+  const wordAt = (name: string): number => { const at = padded.indexOf(` ${name} `); return at < 0 ? -1 : at; };
+  const capitalised = new Set(text.split(/[^\p{L}]+/u).filter((word) => /^\p{Lu}/u.test(word)).map(normalizeName));
   // A name after "of" or "from" says where something is or comes from -- "the
   // garrison of Messana" -- not where it is going; nor does one after "hold"
   // or "leave": the men left to hold Messana are what stays behind.
   const origin = (name: string): boolean => {
-    const at = normalized.indexOf(name);
+    const at = wordAt(name);
     if (at < 0) return false;
     const before = normalized.slice(0, at).trim().split(/\s+/);
     const after = normalized.slice(at + name.length).trim().split(/\s+/)[0] ?? "";
@@ -62,8 +70,9 @@ export function namedDestination(world: WorldState, text: string, goingOnly = fa
   const matches = world.map.provinces.flatMap((province) => province.settlements.filter((settlement) => {
     const name = normalizeName(settlement.name);
     if (name.length <= 3) return false;
-    if (normalized.includes(name)) return !origin(name);
-    return name.split(" ").length === 1 && words.some((word, index) => word.length > 3 && spelledAlike(word, name)
+    if (wordAt(name) >= 0) return !origin(name);
+    // A misspelling is forgiven only in a word written as a name: "stop" is not Stob.
+    return name.split(" ").length === 1 && words.some((word, index) => word.length > 3 && capitalised.has(word) && spelledAlike(word, name)
       && (goingOnly ? GOING.has(words[index - 1] ?? "") : !STAYING.has(words[index - 1] ?? "")));
   }).map(() => province.id));
   const unique = [...new Set(matches)];

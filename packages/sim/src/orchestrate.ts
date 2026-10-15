@@ -110,8 +110,8 @@ How to answer well. Twelve principles say how to use the fields; a case not name
    worth. Prefer what is already listed. Keep to history: where a people or city had a known leader in this decade he leads it; invent only where history left no name, never borrowing a famous one.
 
 5. Countries are full of people. Every power listed under COUNTRIES WITH
-   NOBODY IN THEM gets, in this answer, a ruler of its own culture and the
-   forces it would plainly field, under its own polityId. 
+   NOBODY IN THEM gets, in this answer, what it lacks: a ruler of its own
+   culture, the forces it would field, under its own polityId.
 
 6. What takes time is a project, and a project produces something. Its
    "completionOutcome" is what exists when the last milestone falls -- a force,
@@ -463,7 +463,9 @@ export function quietOrchestration(): OrchestrateResult {
 async function orchestrateFirst(port: SimModelPort, slice: WorldSlice, kindOf: KindOf = () => null): Promise<OrchestrateResult> {
   const lines = splitOrder(slice.order);
   if (lines.length < 2 || slice.answeredDecision !== null) return orchestrateWhole(port, slice, kindOf);
-  const results = await Promise.all(lines.map((line) => orchestrateWhole(port, { ...slice, order: line }, kindOf)));
+  // The world's own business -- what stirs, who is missing, what falls due -- goes with the first line only: put to every
+  // line, it was done once a line, and a split order made two threads, two rulers and two armies of one seed (consul-run-issues H6).
+  const results = await Promise.all(lines.map((line, index) => orchestrateWhole(port, index === 0 ? { ...slice, order: line } : { ...slice, order: line, seeds: [], populationGaps: [], dueEvents: [] }, kindOf)));
   const failed = results.flatMap((result, index) => result.parseFailure === null ? [] : [index]);
   if (failed.length === results.length) return { ...results[0]!, calls: results.reduce((total, result) => total + result.calls, 0) };
   const output = mergeOrchestrations(results.map((result) => result.output));
@@ -580,8 +582,10 @@ export async function orchestrate(port: SimModelPort, slice: WorldSlice, kindOf:
   if (first.parseFailure !== null || slice.order === null || slice.answeredDecision !== null) return first;
   const flagged = partsNotCarriedOut(first.output).slice(0, 2);
   if (flagged.length === 0) return first;
+  // Asked again about one part, and about nothing else: the world's seeds were done in the first answer.
   const retries = await Promise.all(flagged.map((part) => orchestrateWhole(port, {
     ...slice,
+    seeds: [], populationGaps: [], dueEvents: [],
     order: part.said + "\n\n(An earlier answer did not carry this out" + (part.why === null ? "" : ": " + part.why) + ". It is possible. Do the steps it needs and then the act itself; do not refuse it for policy, war, custom or want of authority -- write the act, and the engine decides whether it stands or is an overreach -- and do not substitute another act." + capabilityHints(part.said).map((hint) => " What the engine can do: " + hint).join("") + ")",
   }, kindOf)));
   let output = first.output;

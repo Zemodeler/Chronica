@@ -50,16 +50,27 @@ export function reconcileCapitals(world: WorldState): WorldState {
       capital = remaining[0]?.id ?? null;
       // A power holding countryside after losing every city still needs a seat.
       if (capital === null) {
-        const home = provinces.filter((province) => province.controllerPolityId === polity.id)
+        // Not where its old seat stands in another's hands: the enemy that took the town holds it.
+        const seatHeldAgainst = (provinceId: string): boolean => {
+          const seat = byId.get(boundedId("capital-seat", polity.id, provinceId));
+          return seat !== undefined && seat.controllerPolityId !== polity.id;
+        };
+        const home = provinces.filter((province) => province.controllerPolityId === polity.id && !seatHeldAgainst(province.id))
           .sort((a, b) => b.controlFirmnessBps - a.controlFirmnessBps || (b.areaKm2 ?? 0) - (a.areaKm2 ?? 0) || a.id.localeCompare(b.id))[0];
         if (home) {
           capital = boundedId("capital-seat", polity.id, home.id);
-          let suffix = 0;
-          while (byId.has(capital)) capital = boundedId("capital-seat", polity.id, home.id, ++suffix);
-          const seat = { id: capital, name: `Seat at ${home.name}`.slice(0, 120), kind: "town" as const, provinceId: home.id, controllerPolityId: polity.id, size: 6, fortificationLevel: 0 };
-          provinces = provinces.map((province) => province.id === home.id ? { ...province, settlements: [...province.settlements, seat] } : province);
-          byId.set(capital, seat);
-          cities.push(seat);
+          const before = byId.get(capital);
+          if (before !== undefined) {
+            // The seat it kept here before, in its hands again: one seat a province, not a new one each time the ground
+            // changes hands -- a legion run in circles through Bruttium left a string of "Seats" behind it.
+            const seatId = capital;
+            if (former?.includes(seatId)) former = former.filter((id) => id !== seatId);
+          } else {
+            const seat = { id: capital, name: `Seat at ${home.name}`.slice(0, 120), kind: "town" as const, provinceId: home.id, controllerPolityId: polity.id, size: 6, fortificationLevel: 0 };
+            provinces = provinces.map((province) => province.id === home.id ? { ...province, settlements: [...province.settlements, seat] } : province);
+            byId.set(capital, seat);
+            cities.push(seat);
+          }
         }
       }
     }
