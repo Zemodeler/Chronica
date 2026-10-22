@@ -12,7 +12,7 @@ import path from "node:path";
 import { createHandAdapter } from "@chronica/ai";
 import { punicWarsScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, formatWorldDate, ordersUnderWay, type Fact, type WorldState } from "@chronica/shared";
-import { DEFAULT_BUDGET, armyInWords, orderOutcomeLines, runSimulationBurst, serviceInWords, type PendingEvent, type SimModelPort } from "@chronica/sim";
+import { DEFAULT_BUDGET, armyInWords, factsForPlayer, lineOf, orderOutcomeLines, runSimulationBurst, serviceInWords, type PendingEvent, type SimModelPort } from "@chronica/sim";
 
 const args = process.argv.slice(2);
 const option = (name: string, fallback: string): string => {
@@ -92,7 +92,12 @@ for (const entry of result.audit.filter((candidate) => candidate.kind !== "mecha
 for (const rejected of result.frictions) say(`  friction: ${rejected.line.slice(0, 220)}`);
 if (result.parseFailures.length > 0) say(`  unreadable: ${result.parseFailures.join(" | ")}`);
 if (result.salvaged.length > 0) say(`  dropped to keep the answer: ${result.salvaged.join(", ")}`);
-if (result.orderRecordId !== null) for (const line of orderOutcomeLines(world, result.orderRecordId)) say(`  order: ${line}`);
+if (result.orderRecordId !== null) {
+  // A one-part order carried out is answered by its passage in the game; a hand run has none, so it is told here as done.
+  const told = orderOutcomeLines(world, result.orderRecordId);
+  const record = world.orders.find((candidate) => candidate.id === result.orderRecordId);
+  for (const line of told.length > 0 || record === undefined ? told : record.parts.map((part) => lineOf(world, part, record.actorCharacterId, definition.clock))) say(`  order: ${line}`);
+}
 for (const item of ordersUnderWay(world, player, definition.government.offices, definition.clock)) say(`  under way${item.stalled ? " (stalled)" : ""}: ${item.label} -- ${item.detail}`);
 // Letters the player's power must answer, and those it is waiting on: a run that cannot see them answers none (consul-run-issues T3).
 for (const message of world.diplomacy.filter((candidate) => candidate.status === "awaiting_reply" && polity !== null && (candidate.toPolityId === polity || candidate.fromPolityId === polity))) {
@@ -108,8 +113,8 @@ for (const force of world.material.forces.filter((candidate) => candidate.comman
   const make = armyInWords(world, force);
   say(`  army: ${force.name} at ${force.locationId}${make === null ? "" : ` -- ${make}`}`);
 }
-const facts = [...result.newFacts].sort((a, b) => (result.significanceByFactId.get(b.id) ?? 0) - (result.significanceByFactId.get(a.id) ?? 0));
-say(`  facts (${facts.length}; most significant first):`);
+const facts = factsForPlayer(result.newFacts, result.significanceByFactId, world, player, polity, definition.government.offices);
+say(`  facts (${facts.length}; what touches you first, then by weight):`);
 for (const fact of facts.slice(0, Number(option("facts", "25")))) say(`   [${result.significanceByFactId.get(fact.id) ?? 0}] ${fact.kind}: ${fact.summary.slice(0, 260)}`);
 if (result.playerDecision !== null) say(`  player decision (answer with --decide <id>): ${result.playerDecision.prompt} | ${result.playerDecision.options.map((entry) => `${entry.id}: ${entry.label}`).join(" | ")}`.slice(0, 900));
 const loadable = WorldStateSchema.safeParse(world);

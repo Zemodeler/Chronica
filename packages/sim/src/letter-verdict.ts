@@ -131,12 +131,22 @@ function decide(world: WorldState, message: DiplomaticMessage, answerer: Charact
     const accepted = losing || tired >= (proposes.has("truce") && !proposes.has("peace") ? TRUCE_AT : PEACE_AT - 10) + reluctance;
     return done(accepted, accepted ? "peace_accept" : "peace_refuse", accepted ? (losing ? "losing" : "tired") : d.pride >= 0.6 ? "not_beaten" : "none", accepted ? "tired or beaten" : "not beaten");
   }
+  // A pact not to make war is weighed as a quiet border: the frightened and the sociable take it, the proud who bear a grudge
+  // do not. It had no counsel at all, and the answerer was left to guess (hand run, Hieron's pact: M5).
+  if (proposes.has("non_aggression") && !proposes.has("alliance")) {
+    const needed = -15 - 20 * (d.fear - 0.5) - 15 * (d.sociability - 0.5) + 10 * suspicious - liking / 6 - bias;
+    const accepted = !unforgiven && trust >= needed;
+    return done(accepted, accepted ? "peace_accept" : "peace_refuse", accepted ? "friendship" : unforgiven ? "distrust" : "no_quarrel", accepted ? "a quiet border" : unforgiven ? "an old grievance" : "no reason to bind ourselves");
+  }
   if (proposes.has("alliance")) {
     const sharedEnemy = warsOf(world.polityAgreements, message.toPolityId).some((enemy) => warsOf(world.polityAgreements, message.fromPolityId).includes(enemy));
     // The sociable and the frightened look for friends; the proud and self-sufficient want more before they bind themselves.
-    const needed = 20 - 30 * (d.sociability - 0.5) - 20 * (d.fear - 0.5) - liking / 4 + 15 * suspicious - 8 * generous - bias;
-    const accepted = trust >= needed || (trust >= needed - 20 && sharedEnemy);
-    return done(accepted, accepted ? "alliance_accept" : "alliance_refuse", accepted ? (sharedEnemy ? "common_enemy" : "friendship") : d.honour >= 0.7 ? "honour" : "no_quarrel", accepted ? "a friend" : "no quarrel of ours", { matter: sharedEnemy ? "our common enemy" : "those who threaten us" });
+    // A power whose own government has named its want of a friend as a high worry, and means to seek a protector, is not
+    // told "no quarrel of ours" by its counsellors when a protector writes (hand run, Mettius: M5).
+    const lonely = (world.polityOutlooks.find((outlook) => outlook.polityId === message.toPolityId)?.concerns ?? []).some((concern) => /\bno (?:ally|friend|protector)\b/i.test(concern.label) && concern.level === "high");
+    const needed = 20 - 30 * (d.sociability - 0.5) - 20 * (d.fear - 0.5) - liking / 4 + 15 * suspicious - 8 * generous - bias - (lonely ? 25 : 0);
+    const accepted = trust >= needed || (trust >= needed - 20 && (sharedEnemy || lonely));
+    return done(accepted, accepted ? "alliance_accept" : "alliance_refuse", accepted ? (sharedEnemy ? "common_enemy" : "friendship") : d.honour >= 0.7 ? "honour" : "no_quarrel", accepted ? (lonely && !sharedEnemy ? "a protector at need" : "a friend") : "no quarrel of ours", { matter: sharedEnemy ? "our common enemy" : "those who threaten us" });
   }
   if (message.kind === "military_aid_request") {
     const accepted = trust >= 40 - 30 * (d.honour - 0.5) - 20 * (d.sociability - 0.5) - liking / 3 + 10 * suspicious - 15 * generous - bias && warsOf(world.polityAgreements, message.toPolityId).length === 0;

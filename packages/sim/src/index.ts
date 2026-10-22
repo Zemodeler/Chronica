@@ -11,6 +11,7 @@ export * from "./deadlines";
 export * from "./chronicle";
 export * from "./order-outcomes";
 export * from "./chronicle-windows";
+export * from "./report-facts";
 export * from "./conversation";
 export * from "./initiative";
 export * from "./population";

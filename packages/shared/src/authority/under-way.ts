@@ -126,6 +126,8 @@ export function ordersUnderWay(
   // with the reason. The latest order's parts that came to nothing are here
   // too, so an order is never answered only in prose.
   const shown = new Set(items.map((item) => item.key.replace(/^(project|march):/, "")));
+  // A pursuit an order recorded is that order's own line, and is not listed a second time beneath it.
+  const orderTexts = new Set<string>();
   const latest = [...world.orders].reverse().find((order) => order.actorCharacterId === characterId);
   for (const order of world.orders) {
     if (order.actorCharacterId !== characterId) continue;
@@ -150,6 +152,7 @@ export function ordersUnderWay(
       const why = (status === "refused" ? procedureReasonOf(world, part) : null) ?? part.refusal ?? part.whyNot ?? procedureReasonOf(world, part);
       // What a held act waits on, said as the ledger says it (`waitingUntil`).
       const until = waitingUntil(world, part);
+      orderTexts.add(order.text);
       const stateLabel = until !== null ? `Waiting until ${until}` : upperFirst(orderPartLabel(status, part, world));
       const tally = letterTally(world, part);
       items.push({
@@ -240,7 +243,7 @@ export function ordersUnderWay(
 
   // What an order set the player (or the power they speak for) to doing.
   for (const entity of world.genericEntities) {
-    if (entity.kind !== "pursuit" || "retiredAtStep" in entity.attributes) continue;
+    if (entity.kind !== "pursuit" || "retiredAtStep" in entity.attributes || (typeof entity.attributes.order === "string" && orderTexts.has(entity.attributes.order))) continue;
     const owner = entity.ownerRef;
     const yours = owner !== null && ((owner.kind === "character" && owner.id === characterId)
       || (governs && owner.kind === "polity" && owner.id === station.polityId));

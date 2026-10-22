@@ -158,6 +158,7 @@ import {
   nearestShore,
   tradeAddresseeFinder,
   tradeTermsInWords,
+  promiseFormOf,
 } from "@chronica/shared";
 import { dutyGoals, impliedUndertakings, offerMetadata } from "../treaty-duties";
 import { findInvariantViolations } from "../invariants";
@@ -2625,9 +2626,21 @@ function applyOne(
         serviceTerms: delta.serviceTerms,
       };
       if (source !== undefined) {
-        const drawn = Math.min(delta.authorizedStrength, source.personnel.reduce((sum, group) => sum + group.fit, 0));
+        // Men of the kind asked for, and only those: eight hundred marines are not drawn out of a fleet
+        // that holds nothing but ships, and an order for them does not take every hull for want of marines.
+        const troopKinds = warfareWith(world, context.warfare).troopCategories;
+        const navalKind = (id: string): boolean => troopKinds.some((kind) => kind.id === id && "naval" in kind && kind.naval === true);
+        const wantsNaval = "naval" in category && category.naval === true;
+        const fits = source.personnel.filter((group) => group.fit > 0);
+        if (delta.categoryId !== undefined && fits.length > 0 && fits.every((group) => navalKind(group.categoryId) !== wantsNaval)) {
+          const held = [...new Set(fits.map((group) => troopKinds.find((kind) => kind.id === group.categoryId)?.label.toLowerCase() ?? group.categoryId))].join(", ");
+          reject(`${source.name} holds no ${category.label.toLowerCase()} to give: it is made up of ${held}.`);
+        }
+        const wantsKind = delta.categoryId !== undefined && source.personnel.some((group) => group.categoryId === delta.categoryId);
+        const pool = wantsKind ? source.personnel.map((group) => (group.categoryId === delta.categoryId ? group : { ...group, fit: 0 })) : source.personnel;
+        const drawn = Math.min(delta.authorizedStrength, pool.reduce((sum, group) => sum + group.fit, 0));
         if (drawn <= 0) reject(`${source.name} has no men left to give.`);
-        const shares = proportionalDraw(source.personnel, drawn);
+        const shares = proportionalDraw(pool, drawn);
         const taken = source.personnel.map((group, index) => ({ ...group, fit: shares[index]!, unavailable: [] })).filter((group) => group.fit > 0);
         const remaining = source.personnel.map((group, index) => ({ ...group, fit: group.fit - shares[index]! }));
         const emptied = remaining.every((group) => group.fit <= 0);
@@ -7332,7 +7345,11 @@ function carryOutClauses(
         const id = instrument?.fromPolityId === polityId ? instrument.fromCharacterId : instrument?.toPolityId === polityId ? instrument.toCharacterId : null;
         return world.characters.find((character) => character.id === id && character.alive && character.polityId === polityId) ?? null;
       };
-      const promisor = rulerOf(world, by, government) ?? representativeOf(by);
+      // The man who can keep it: the one who signed, where he commands men of that power (a fleet that is to shelter
+      // a city is his, not the suffete's); otherwise the head of the government.
+      const signer = representativeOf(by);
+      const signerCommands = signer !== null && world.material.forces.some((force) => force.polityId === by && (force.commanderCharacterId === signer.id || force.controllerCharacterId === signer.id));
+      const promisor = (signerCommands ? signer : null) ?? rulerOf(world, by, government) ?? signer;
       const beneficiary = rulerOf(world, otherOf(by), government) ?? representativeOf(otherOf(by));
       if (promisor === null || beneficiary === null) reject(`An undertaking is somebody's word: ${promisor === null ? name(by) : name(otherOf(by))} has nobody at its head to give or take it.`, "reference");
       // Safe passage is kept when the protected garrison actually leaves
@@ -7350,11 +7367,14 @@ function carryOutClauses(
           id: context.ids.next("commitment"),
           promisorCharacterId: promisor.id,
           beneficiaryCharacterId: beneficiary.id,
-          actionKind: clause.duty,
+          // A duty written as "other" that is plainly a sheltering or an aid is kept by men standing beside the one
+          // sheltered (`keptOnTheRecord`); left "other" it could never be seen to be kept.
+          actionKind: clause.duty === "other" && /\b(shelter|protect|defend|guard|come to (?:his|her|their) aid|aid (?:him|her|them|her against))\b/i.test(clause.what) ? "protection" : clause.duty,
           description: `Under the treaty: ${clause.what}`.slice(0, 400),
           ...(completionGoals === undefined ? {} : { completionGoals }),
           conditions: "",
-          form: "do" as const,
+          // "Will not make war" is kept by holding back, not by an act (`promises.ts`).
+          form: promiseFormOf({ description: `Under the treaty: ${clause.what}` }),
           requiredOfficeId: null,
           requiredResource: null,
           visibility: "public" as const,

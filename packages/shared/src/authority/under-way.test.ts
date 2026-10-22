@@ -67,6 +67,17 @@ describe("what the player's orders are doing", () => {
     expect(items.find((item) => item.key === "pursuit:pursuit-1")?.label).toBe("Defending Sicily");
   });
 
+  it("does not list the pursuit an order recorded a second time under the order itself", () => {
+    const state = world();
+    const player = consul(state);
+    const text = "Ask the general to march.";
+    const order = { id: "order-1", actorCharacterId: player.id, text, givenAtStep: state.elapsedStep, parts: [{ said: "Ask the general to march", goals: [], metAtOrder: false, workRefs: [], refusal: null, refusedAtStep: null, actsCarried: 0, actsDone: 0, actsRefused: 0, note: null, whyNot: null, factIds: [], stages: [], spend: null, attribution: "tagged", closedAtStep: null }] };
+    const pursuit = GenericEntitySchema.parse({ id: "pursuit-2", kind: "pursuit", label: "Ask the army to march.", ownerRef: { kind: "character", id: player.id }, attributes: { order: text, sinceDay: state.elapsedStep }, provinceId: null, createdAtStep: state.elapsedStep });
+    const items = ordersUnderWay({ ...state, orders: [...state.orders, order] as never, genericEntities: [...state.genericEntities, pursuit] }, player.id, offices, clock);
+    expect(items.filter((item) => item.key.startsWith("order:order-1"))).toHaveLength(1);
+    expect(items.some((item) => item.key === "pursuit:pursuit-2")).toBe(false);
+  });
+
   it("does not show a man another man's undertakings", () => {
     const state = world();
     const player = consul(state);
