@@ -209,7 +209,7 @@ export function consequencesOfUsurping(world: WorldState, actorId: string, usurp
   facts.push({
     localId: safeLocalId(`usurped_${actorId}_${act}`).slice(0, 60),
     kind: "act_usurped",
-    summary: `${actor.name}, ${officeOf}, ${what} on his own word, without the ${chamber?.name ?? "chamber"}. It is done, and the city holds it unlawful: his colleagues, the tribunes and the senators will not forget it, the ${chamber?.name ?? "chamber"} will vote him nothing for it, and he will answer for it when his office ends.${strife ? ` The city is in uproar.` : ""}`.slice(0, 600),
+    summary: `${actor.name}, ${officeOf}, ordered that ${what} on his own word, without the ${chamber?.name ?? "chamber"}. It is done, and the city holds it unlawful: his colleagues, the tribunes and the senators will not forget it, the ${chamber?.name ?? "chamber"} will vote him nothing for it, and he will answer for it when his office ends.${strife ? ` The city is in uproar.` : ""}`.slice(0, 600),
     affectedRefs: [{ kind: "character", id: actorId }, { kind: "polity", id: polityId }, ...(chamber === undefined ? [] : [{ kind: "institution" as const, id: chamber.id }])],
     visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 30 + gravity * 10,
   });

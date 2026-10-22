@@ -62,6 +62,8 @@ describe("a routine order needs no model", () => {
       "Raise 3000 men and feed them.",
       "Find supply for my army. Then conquer Sicily.",
       "Set the tribute high.",
+      // A letter about grain and an army is a letter, not the bread of one's own garrison.
+      "Write to the consul: we will sell grain to the Roman army, and ask Rome's friendship in return.",
       "",
     ]) expect(match(text), text).toBeNull();
     expect(clausesOf("Hold the army. Find supply for it.")).toHaveLength(2);

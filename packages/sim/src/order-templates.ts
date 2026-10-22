@@ -178,7 +178,13 @@ const SUPPLY = /\b(?:supply|supplies|provision(?:s|ed|ing)?|victual(?:s|ling)?|f
 const ARMY_NOUN = /\b(?:army|armies|legions?|troops|soldiers|men|host|force|forces|garrison|camp)\b/i;
 const NOT_AN_ARMY_SUPPLY = /\b(?:city|town|people|plebs|poor|citizens|market|markets|dole|rome(?:\s+itself)?|price|prices|famine|stores? of the city|granar(?:y|ies))\b/i;
 
+/** A letter or an offer to another power, whose army and grain are the matter of the letter and not an army of his to feed. */
+const A_LETTER_OR_AN_OFFER = /^\s*(?:please\s+)?(?:write|send|ask|tell|inform|answer|reply|offer|propose|sell)\b|\b(?:sell|sells|selling|offer|offers)\b[^.]*\b(?:to|for)\s+the\s+(?:\w+\s+)?(?:army|legions?|host)\b/i;
+
 function supplyClause(world: WorldState, playerId: string, text: string, warfare?: ScenarioWarfareRules): Clause | null {
+  // "Write to the consul: Messana will sell grain to the Roman army" is a letter, not bread for one's own garrison (a playtest had
+  // it read as the garrison's provisioning, voted by the Assembly and reported done, with no letter sent).
+  if (A_LETTER_OR_AN_OFFER.test(text)) return null;
   if (!SUPPLY.test(text) || NOT_AN_ARMY_SUPPLY.test(text.replace(/\brome\b/gi, "")) && !ARMY_NOUN.test(text)) return null;
   if (!ARMY_NOUN.test(text) && armyNamed(world, playerId, text, warfare, { forSupply: true }).force === null) return null;
   // "supply" the noun (a supply of grain) without an army to feed is not this.

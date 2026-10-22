@@ -5644,7 +5644,7 @@ function applyOne(
       emitFact(letterFact(world, {
         localId: safeLocalId(`letter_${messageId}`),
         kind: "letter_sent",
-        summary: `${characterName(world, senderId)} wrote for ${polityName(world, letterFromId)} to ${recipientId === null ? polityName(world, letterToId) : `${characterName(world, recipientId)} of ${polityName(world, letterToId)}`}: "${delta.subject}". ${delta.terms}`,
+        summary: `${characterName(world, senderId)} wrote for ${polityName(world, letterFromId)} to ${recipientId === null ? polityName(world, letterToId) : characterName(world, recipientId).endsWith(` of ${polityName(world, letterToId)}`) ? characterName(world, recipientId) : `${characterName(world, recipientId)} of ${polityName(world, letterToId)}`}: "${delta.subject}". ${delta.terms}`,
         fromPolityId: letterFromId,
         toPolityId: letterToId,
         characterIds: [senderId, ...(recipientId === null ? [] : [recipientId])],
@@ -5941,6 +5941,27 @@ function applyOne(
           polityAgreements: world.polityAgreements.map((agreement) => (agreement.id === standing.id
             ? { ...agreement, terms: delta.terms.slice(0, 600), trade: delta.trade, sourceMessageId: sourceMessageId ?? agreement.sourceMessageId,
               untilStep: delta.forDays === null ? agreement.untilStep : atStep + delta.forDays }
+            : agreement)),
+        };
+      }
+      // A truce accepted over the one that runs is its extension: it goes on to the later of the two dates. Refusing it as "already
+      // standing" left the old truce to lapse on its day, after the letter had been told as agreed (a playtest, twice).
+      if (standing !== undefined && delta.kind === "truce" && standing.untilStep !== null) {
+        const until = delta.forDays === null ? null : atStep + delta.forDays;
+        emitFact({
+          localId: safeLocalId(`truce_extended_${delta.localId}`).slice(0, 60),
+          kind: "treaty_amended",
+          summary: `${polityName(world, partyId)} and ${polityName(world, otherPartyId)} extended the truce between them${until === null ? "" : `, now to run until day ${until}`}.`.slice(0, 600),
+          affectedRefs: [{ kind: "polity", id: partyId }, { kind: "polity", id: otherPartyId }],
+          visibility: delta.visibility === "private" ? "polity" : "public",
+          discoveryState: delta.visibility === "private" ? "polity" : "public",
+          knowableInDays: 0,
+          significance: 45,
+        });
+        return {
+          ...world,
+          polityAgreements: world.polityAgreements.map((agreement) => (agreement.id === standing.id
+            ? { ...agreement, sourceMessageId: sourceMessageId ?? agreement.sourceMessageId, untilStep: until === null ? null : Math.max(until, agreement.untilStep ?? 0) }
             : agreement)),
         };
       }

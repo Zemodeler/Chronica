@@ -62,7 +62,11 @@ export function lineOf(world: WorldState, part: OrderPart, actorId: string, cloc
   const settledAt = part.refusedAtStep ?? part.stages.reduce<number | null>((latest, stage) => stage.failedAtStep === null ? latest : Math.max(latest ?? 0, stage.failedAtStep), null);
   const on = clock === undefined || settledAt === null || (status !== "refused" && status !== "failed" && status !== "partly_done") ? "" : ` on ${formatWorldDate({ day: settledAt, minute: 0 }, clock)}`;
   // A vote that has been counted says why it failed; the refusal written before it was put ("authorization is pending") is stale by then.
-  const why = refusalInPeriodWords(world, part, actorId, (status === "refused" ? procedureReasonOf(world, part) : null) ?? part.refusal ?? part.whyNot ?? procedureReasonOf(world, part));
+  // A siege laid and lifted is failed with nothing else said (a playtest: `"Lay siege to Syracuse..." -- failed.` beside the facts
+  // that it was laid and then raised). Say what happened to it, as far as the record shows.
+  const raisedSiege = status === "failed" ? part.workRefs.filter((ref) => ref.kind === "siege").map((ref) => world.sieges.find((candidate) => candidate.id === ref.id)).find((siege) => siege?.status === "lifted") : undefined;
+  const siegeWhy = raisedSiege === undefined ? null : "the siege was raised before the city fell: the besiegers are no longer before its walls";
+  const why = refusalInPeriodWords(world, part, actorId, (status === "refused" ? procedureReasonOf(world, part) : null) ?? part.refusal ?? part.whyNot ?? procedureReasonOf(world, part) ?? siegeWhy);
   const reason = why === null || status === "achieved" || status === "under_way" ? "" : `: ${sentencesWithin(withoutRecordIds(why.replace(/\s+/g, " ")), 320)}`;
   // A motion is said as what it came to, with the count the body gave: carried, failed or lapsed.
   const motion = motionOf(world, part);

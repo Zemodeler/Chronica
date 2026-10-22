@@ -248,6 +248,15 @@ export function competenceGate(input: GateInput): Gate | null {
   // The chamber has carried it: the vote is the authority, and the act is recorded as done.
   if (context.sanctionedDeltas?.has(input.written) === true) return null;
   const actor = world.characters.find((character) => character.id === context.actorRef.id && character.alive);
+  // Men bought out of nowhere for his own power's army (no army they are drawn from) are a draw on the chest as much as a payment is:
+  // the chamber that will not open it to a man who defied it does not hire for him either (a playtest hired 1,000 men the turn after
+  // the walls were refused for exactly that).
+  if (delta.op === "force_reinforce" && delta.fromForceRef === null && actor !== undefined && usurpedLately(world, actor.id)) {
+    const force = world.material.forces.find((candidate) => candidate.id === (resolve(delta.forceRef) ?? delta.forceRef));
+    if (force !== undefined && force.polityId === actor.polityId) {
+      return { kind: "refuse", reason: `The ${world.material.institutions.find((institution) => institution.polityId === force.polityId && institution.advisory !== true)?.name ?? "chamber"} will not open the public chest to ${actor.name}, who did what it had not allowed: the money for hired men is not his to draw until it has forgiven him.` };
+    }
+  }
   const gated = gatedAct(delta, world, resolve, actor?.polityId ?? null);
   if (gated === null) return null;
   // A man acts for his own power only; another's is judged where it always was (`nobodyListens`).

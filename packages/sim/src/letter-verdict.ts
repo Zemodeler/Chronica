@@ -146,7 +146,7 @@ function decide(world: WorldState, message: DiplomaticMessage, answerer: Charact
     const lonely = (world.polityOutlooks.find((outlook) => outlook.polityId === message.toPolityId)?.concerns ?? []).some((concern) => /\bno (?:ally|friend|protector)\b/i.test(concern.label) && concern.level === "high");
     const needed = 20 - 30 * (d.sociability - 0.5) - 20 * (d.fear - 0.5) - liking / 4 + 15 * suspicious - 8 * generous - bias - (lonely ? 25 : 0);
     const accepted = trust >= needed || (trust >= needed - 20 && (sharedEnemy || lonely));
-    return done(accepted, accepted ? "alliance_accept" : "alliance_refuse", accepted ? (sharedEnemy ? "common_enemy" : "friendship") : d.honour >= 0.7 ? "honour" : "no_quarrel", accepted ? (lonely && !sharedEnemy ? "a protector at need" : "a friend") : "no quarrel of ours", { matter: sharedEnemy ? "our common enemy" : "those who threaten us" });
+    return done(accepted, accepted ? "alliance_accept" : "alliance_refuse", accepted ? (sharedEnemy ? "common_enemy" : "friendship") : d.honour >= 0.7 ? "honour" : sharedEnemy ? "distrust" : "no_quarrel", accepted ? (lonely && !sharedEnemy ? "a protector at need" : "a friend") : sharedEnemy ? "no trust enough to bind ourselves, enemy or no" : "no quarrel of ours", { matter: sharedEnemy ? "our common enemy" : "those who threaten us" });
   }
   if (message.kind === "military_aid_request") {
     const accepted = trust >= 40 - 30 * (d.honour - 0.5) - 20 * (d.sociability - 0.5) - liking / 3 + 10 * suspicious - 15 * generous - bias && warsOf(world.polityAgreements, message.toPolityId).length === 0;

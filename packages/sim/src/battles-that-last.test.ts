@@ -220,6 +220,17 @@ describe("turning points", () => {
     expect(engagement.pitchedRounds).toBe(1);
   });
 
+  it("storms the camp when the attacker, already refused for days, answers 'offer battle'", () => {
+    const sieged = days(attack(facing({ hieronCaution: 90 })).world, 3).world;
+    const open = sieged.engagements.find((candidate) => candidate.status === "open")!;
+    expect(open.seeking).toBe("battle");
+    const waiting = { ...sieged, engagements: sieged.engagements.map((candidate) => (candidate.id === open.id ? { ...candidate, awaiting: { kind: "hungry" as const, side: "attacker" as const, askedAtStep: sieged.elapsedStep } } : candidate)) };
+    const answered = answerEngagement(waiting, "gaius-genucius", "fight-fight", waiting.elapsedStep + 1).world;
+    const released = answered.engagements.find((candidate) => candidate.id === open.id)!;
+    expect(released.awaiting).toBeNull();
+    expect(released.manoeuvre).toMatchObject({ kind: "storm_camp", side: "attacker" });
+  });
+
   it("keeps to the camp when he answers with an order instead", () => {
     const offered = offer(facing({ hieronCaution: 70 })).world;
     const answered = answerEngagement(offered, "hieron-ii", null, offered.elapsedStep + 1).world;

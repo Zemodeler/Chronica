@@ -150,7 +150,12 @@ export function answerEngagement(world: WorldState, player: string | null, answe
     awaiting: null,
     // He answers for today: the fight goes on from here, not from the day it stopped.
     lastRoundStep: Math.max(engagement.lastRoundStep, day - 1),
-    ...(action === "fight" ? (attacking ? { seeking: "battle" as const } : { playerStance: "fight" as const }) : {}),
+    // An attacker who has been offering battle and been refused day after day is not answered by offering it again: "Offer
+    // battle" is then the camp stormed, which takes the fight the other side will not give (a playtest asked the same question
+    // three times, the answer changing nothing, until a hand-written storm_camp ended it).
+    ...(action === "fight" ? (attacking
+      ? { seeking: "battle" as const, ...(engagement.seeking === "battle" && engagement.rounds > 0 && engagement.manoeuvre === null && mine[0] !== undefined ? { manoeuvre: { kind: "storm_camp" as const, side: "attacker" as const, byForceId: mine[0].id } } : {}) }
+      : { playerStance: "fight" as const }) : {}),
     ...(action === "refuse" && !attacking ? { playerStance: "refuse" as const } : {}),
   };
   let next: WorldState = { ...world, engagements: world.engagements.map((candidate) => (candidate.id === engagement.id ? released : candidate)) };

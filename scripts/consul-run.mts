@@ -11,7 +11,7 @@ import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writ
 import path from "node:path";
 import { createHandAdapter } from "@chronica/ai";
 import { punicWarsScenario } from "@chronica/db";
-import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, formatWorldDate, ordersUnderWay, type Fact, type WorldState } from "@chronica/shared";
+import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, formatWorldDate, isDelivered, ordersUnderWay, type Fact, type WorldState } from "@chronica/shared";
 import { DEFAULT_BUDGET, armyInWords, factsForPlayer, lineOf, orderOutcomeLines, runSimulationBurst, serviceInWords, type PendingEvent, type SimModelPort } from "@chronica/sim";
 
 const args = process.argv.slice(2);
@@ -100,18 +100,23 @@ if (result.orderRecordId !== null) {
 }
 for (const item of ordersUnderWay(world, player, definition.government.offices, definition.clock)) say(`  under way${item.stalled ? " (stalled)" : ""}: ${item.label} -- ${item.detail}`);
 // Letters the player's power must answer, and those it is waiting on: a run that cannot see them answers none (consul-run-issues T3).
-for (const message of world.diplomacy.filter((candidate) => candidate.status === "awaiting_reply" && polity !== null && (candidate.toPolityId === polity || candidate.fromPolityId === polity))) {
+// A letter still on the road has not reached the desk: it is not listed as one to answer, for it cannot be answered yet.
+for (const message of world.diplomacy.filter((candidate) => candidate.status === "awaiting_reply" && polity !== null && (candidate.toPolityId === polity || candidate.fromPolityId === polity) && (candidate.toPolityId !== polity || isDelivered(candidate, world.elapsedStep)))) {
   const theirs = message.toPolityId === polity;
   const other = world.map.polities.find((candidate) => candidate.id === (theirs ? message.fromPolityId : message.toPolityId))?.name ?? (theirs ? message.fromPolityId : message.toPolityId);
   const due = message.replyDueByStep === null ? "" : `, answer due ${formatWorldDate({ day: message.replyDueByStep, minute: 0 }, definition.clock)}`;
   say(`  letter ${theirs ? "to answer" : "awaiting reply"} [${message.id}] ${message.kind} ${theirs ? "from" : "to"} ${other}: ${message.subject}${due}`);
+  // What it says: a letter whose terms are not shown cannot be answered.
+  if (theirs && message.terms.trim() !== "") say(`      "${message.terms.slice(0, 400)}"`);
 }
 for (const due of result.deadlines) say(`  DEADLINE ${due.kind} from ${world.map.polities.find((candidate) => candidate.id === due.otherPolityId)?.name ?? due.otherPolityId}: ${due.subject}${due.dueStep === null ? "" : `, due ${formatWorldDate({ day: due.dueStep, minute: 0 }, definition.clock)}`}${due.onRefusal === null ? "" : ` (else ${due.onRefusal.replaceAll("_", " ")})`}`);
 const me = world.characters.find((character) => character.id === player);
 if (me !== undefined) { const placed = serviceInWords(world, me); if (placed !== null) say(`  in the ranks: ${placed}`); }
 for (const force of world.material.forces.filter((candidate) => candidate.commanderCharacterId === player || candidate.memberCharacterIds.includes(player))) {
   const make = armyInWords(world, force);
-  say(`  army: ${force.name} at ${force.locationId}${make === null ? "" : ` -- ${make}`}`);
+  const fit = force.personnel.reduce((sum, row) => sum + row.fit, 0);
+  const place = world.map.provinces.find((province) => province.id === force.locationId)?.name ?? force.locationId;
+  say(`  army: ${force.name} at ${place} -- ${fit} fit, morale ${Math.round(force.moraleBps / 100)}/100${make === null ? "" : `; ${make}`}`);
 }
 const facts = factsForPlayer(result.newFacts, result.significanceByFactId, world, player, polity, definition.government.offices);
 say(`  facts (${facts.length}; what touches you first, then by weight):`);
