@@ -1,6 +1,8 @@
 import { hiringGroups } from "./action-groups";
 import { adoptIntoGens } from "../adoption";
 import {
+  SOLDIER_PAY_PER_THOUSAND,
+  WARSHIP_PAY_PER_HULL,
   serveInArmy,
   bestGapGood,
   takenBy,
@@ -3122,6 +3124,11 @@ function applyOne(
         troopCategories: minted === null ? world.troopCategories : [...world.troopCategories, minted],
         material: {
           ...base.material,
+          // Men hired to an army are paid as the army is: its pay grows with them (a hired host of three thousand was
+          // taken on for a bounty and never drew a drachma of wages, hand run of 2026-10-22).
+          obligations: delta.fromForceRef !== null || force.payObligationId === null ? base.material.obligations : base.material.obligations.map((obligation) => (obligation.id === force.payObligationId
+            ? { ...obligation, amount: obligation.amount + Math.max(1, Math.ceil(joining * (delta.categoryId === "warship" ? WARSHIP_PAY_PER_HULL : SOLDIER_PAY_PER_THOUSAND / 1_000))) }
+            : obligation)),
           forces: forces.map((candidate) => (candidate.id === forceId
             ? {
               ...candidate,

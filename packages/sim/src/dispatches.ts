@@ -112,7 +112,7 @@ const VOICES: Readonly<Record<Tone, readonly [string, string]>> = {
   blunt: ["To you, plainly.", "That is how it stands."],
   threatening: ["To you, and I would have you hear it.", "I will not answer for what follows if it is ignored."],
   pleading: ["To my lord, in some distress.", "I beg you, help us."],
-  cold: ["To the commander of Rome's government.", "I have done my duty in telling you."],
+  cold: ["To the head of the government.", "I have done my duty in telling you."],
   evasive: ["To my lord, on a small matter.", "No doubt it will resolve itself."],
 };
 
@@ -131,6 +131,9 @@ export function menInWords(men: number): string {
   if (men >= 15) return String(Math.round(men / 10) * 10);
   return men <= 0 ? "none" : "a handful";
 }
+
+/** Ships are weighed against ships and men against men: a squadron commander never reports fourteen hundred of theirs to his forty hulls. */
+const isFleetOf = (force: Force): boolean => force.personnel.length > 0 && force.personnel.every((group) => /ship|galley|hull|fleet|transport/i.test(group.categoryId));
 
 function concernsOf(world: WorldState, playerId: string, playerPolityId: string): Concern[] {
   const day = world.instant.day;
@@ -153,7 +156,7 @@ function concernsOf(world: WorldState, playerId: string, playerPolityId: string)
       found.push({ matter: "wavering", key: `wavering:${force.id}`, sender, urgency: 60, place, what: force.moraleBps < 3_500 ? "morale is low" : "the ranks are loosening", body: "" });
     }
     // An enemy close by, with more men than we have here.
-    const near = world.material.forces.find((other) => enemies.has(other.polityId) && other.outlaw !== true && other.locationId === force.locationId && fitStrengthOf(other) > fitStrengthOf(force) * 1.4);
+    const near = world.material.forces.find((other) => enemies.has(other.polityId) && other.outlaw !== true && other.locationId === force.locationId && isFleetOf(other) === isFleetOf(force) && fitStrengthOf(other) > fitStrengthOf(force) * 1.4);
     if (near !== undefined) {
       found.push({ matter: "outnumbered", key: `outnumbered:${force.id}`, sender, urgency: 85, place, what: `perhaps ${menInWords(fitStrengthOf(near))} of theirs to ${fitStrengthOf(force) <= 0 ? "none of ours" : `our ${menInWords(fitStrengthOf(force))}`}`, body: "" });
     }

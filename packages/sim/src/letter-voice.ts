@@ -74,7 +74,8 @@ export interface Dispatch {
 /** "Clepsina writes: ..." with the saying of it taken off: the report is then put under his name once, not twice. */
 export function withoutWrites(text: string, _name?: string): string {
   let rest = text.trim();
-  const prefix = /^[A-Z][\w'’-]*(?:\s+[A-Z][\w'’-]*){0,5}\s+writes:\s*/;
+  // "Leptines of Syracuse writes:" and "Hanno son of Gisgo writes:" are names too: the lowercase joins are let through.
+  const prefix = /^[A-Z][\w'’-]*(?:\s+(?:of|the|son|de|ben|bar|[A-Z][\w'’-]*)){0,6}\s+writes:\s*/;
   while (prefix.test(rest)) rest = rest.replace(prefix, "");
   return rest;
 }

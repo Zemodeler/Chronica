@@ -118,7 +118,7 @@ import { NEVER_PUBLISHED, OWN_BUSINESS_FLOOR, type NarrativeLine, type Utterance
 import { buildWorldSlice, renderWorldSlice, type AnsweredDecision, type SliceEvent } from "./slice";
 import { successionDecision, takeUpTheHouse } from "./mortality";
 import { answerEngagement, engagementDecision } from "./engagement-decisions";
-import { answerSiege, siegeDecision } from "./siege-decisions";
+import { SIEGE_OPTION_PREFIX, answerSiege, siegeDecision } from "./siege-decisions";
 import { commandersFollowTheirArmies } from "./commanders-in-the-field";
 import { fieldDecision, playerPlight, resolveFieldPerils } from "./field-perils";
 import { factsNamingRefusals, reconcileFacts } from "./reconcile-facts";
@@ -281,6 +281,9 @@ export const DEFAULT_BUDGET: SimulationBudget = {
 /** The model calls a burst over this many days may spend (`baseModelCalls`), never past `maxModelCalls`. */
 /** Facts that end an "until something happens" burst: word the player has been waiting for or must act on. */
 const HAPPENED_TO_THE_PLAYER: ReadonlySet<string> = new Set(["delegate_report", "order_wait_review", "order_resumed", "order_stage_failed", "insubordination"]);
+
+/** What the player's own power cannot be left to find out a quarter late: it is attacked, loses a province or a city, or has its peace broken. */
+const THREATS_TO_THE_PLAYERS_POWER: ReadonlySet<string> = new Set(["war_declared", "rising", "city_taken", "province_control_change", "treaty_breached", "civil_war"]);
 
 export function callCapFor(budget: SimulationBudget, spanDays: number): number {
   return Math.min(budget.maxModelCalls, budget.baseModelCalls + Math.ceil(Math.max(0, spanDays) / Math.max(1, budget.modelCallDays)));
@@ -4420,6 +4423,17 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       stopReason = "salient_event";
       break;
     }
+    // A war made on the player's own power, a province of theirs risen or taken: the world does not run on past it
+    // unasked (hand run of 2026-10-22: a kingdom lost sixteen provinces in a burst the king never stopped for).
+    if (spanned >= 1 && input.actorPolityId != null && newFacts.slice(factsAtStart).some((fact) => {
+      const polities = fact.affectedEntities.filter((entity) => entity.kind === "polity");
+      if (!polities.some((entity) => entity.id === input.actorPolityId)) return false;
+      // Done to them, not by them: the power named first is the one acting. Unrest is their own country's, so it is theirs first.
+      return fact.kind === "province_unrest" ? polities[0]?.id === input.actorPolityId : THREATS_TO_THE_PLAYERS_POWER.has(fact.kind) && polities[0]?.id !== input.actorPolityId;
+    })) {
+      stopReason = "salient_event";
+      break;
+    }
     if (sprungThisBurst) {
       stopReason = "watch_condition";
       break;
@@ -4437,6 +4451,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       break;
     }
   }
+
+  // A question about a siege that the burst itself answered (the storm carried, the gates opened) is not put again:
+  // the report used to end on "Storm it, or keep the lines?" over a city that lay open.
+  if (playerDecision !== null && playerDecision.options.some((option) => option.id.startsWith(SIEGE_OPTION_PREFIX)) && siegeDecision(world, playerId) === undefined) playerDecision = null;
 
   // The player is dead, and nothing else that happened this burst is the
   // question any more. This pre-empts whatever the orchestrator asked, because

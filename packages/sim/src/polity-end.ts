@@ -324,7 +324,15 @@ function rise(world: WorldState, provinceId: string, atStep: number, ids: IdFact
 
   // Who leads it: the man who swore to restore it, else a man of its people.
   let next = world;
-  let leaderId = world.characters.find((character) => character.alive && character.ambitions.some((ambition) => ambition.status === "active" && ambition.targetId === wanted))?.id ?? null;
+  // Only a man who stands for that power may lead it: an ambition AGAINST it ("peace" with it, "revenge" on it) is not a wish to rise for
+  // it, and a living officer of another standing power is never carried over to its side (a king would lead risings against his own crown).
+  const standsFor = (character: WorldState["characters"][number]): boolean => {
+    if (character.polityId === wanted) return true;
+    const home = world.map.polities.find((candidate) => candidate.id === character.polityId);
+    return home === undefined || !isStanding(home);
+  };
+  let leaderId = world.characters.find((character) => character.alive && standsFor(character)
+    && character.ambitions.some((ambition) => ambition.status === "active" && ambition.targetId === wanted && ambition.kind !== "peace" && ambition.kind !== "revenge"))?.id ?? null;
   if (leaderId === null) {
     const made = createCanonicalNpc(next, {
       characterId: ids.next("character"),
