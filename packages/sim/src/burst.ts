@@ -118,6 +118,7 @@ import { NEVER_PUBLISHED, OWN_BUSINESS_FLOOR, type NarrativeLine, type Utterance
 import { buildWorldSlice, renderWorldSlice, type AnsweredDecision, type SliceEvent } from "./slice";
 import { successionDecision, takeUpTheHouse } from "./mortality";
 import { answerEngagement, engagementDecision } from "./engagement-decisions";
+import { deadlinesFor, newDeadlines, type Deadline } from "./deadlines";
 import { SIEGE_OPTION_PREFIX, answerSiege, siegeDecision } from "./siege-decisions";
 import { commandersFollowTheirArmies } from "./commanders-in-the-field";
 import { fieldDecision, playerPlight, resolveFieldPerils } from "./field-perils";
@@ -531,6 +532,8 @@ export interface BurstResult {
   readonly battleAccounts: readonly BattleAccount[];
   readonly breaches: readonly AuthorityBreach[];
   readonly playerDecision: PlayerDecision | null;
+  /** What the player's power has been given a day to answer, and truces about to lapse, soonest first (`deadlines.ts`). */
+  readonly deadlines: readonly Deadline[];
   readonly parseFailures: readonly string[];
   /**
    * What the engine dropped out of otherwise good answers to spare a repair
@@ -4434,6 +4437,12 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       stopReason = "salient_event";
       break;
     }
+    // An ultimatum or a demand put to the player's power, or a truce about to run out: it carries a day, and the burst
+    // does not run past it unasked.
+    if (spanned >= 1 && newDeadlines(input.world, world, input.actorPolityId ?? null).length > 0) {
+      stopReason = "salient_event";
+      break;
+    }
     if (sprungThisBurst) {
       stopReason = "watch_condition";
       break;
@@ -4529,6 +4538,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     battleAccounts,
     breaches,
     playerDecision,
+    deadlines: deadlinesFor(world, input.actorPolityId ?? null),
     parseFailures,
     salvaged,
     skipped: placesDropped <= FACT_PLACES_TOLD ? skipped : [...skipped, { stage: "fact_places", reason: `and ${placesDropped - FACT_PLACES_TOLD} more fact(s) named a place none of their armies stands at or is bound for` }],

@@ -7,6 +7,7 @@ export * from "./attention";
 export * from "./orchestrate";
 export * from "./cognition";
 export * from "./burst";
+export * from "./deadlines";
 export * from "./chronicle";
 export * from "./order-outcomes";
 export * from "./chronicle-windows";

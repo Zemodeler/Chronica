@@ -101,6 +101,7 @@ for (const message of world.diplomacy.filter((candidate) => candidate.status ===
   const due = message.replyDueByStep === null ? "" : `, answer due ${formatWorldDate({ day: message.replyDueByStep, minute: 0 }, definition.clock)}`;
   say(`  letter ${theirs ? "to answer" : "awaiting reply"} [${message.id}] ${message.kind} ${theirs ? "from" : "to"} ${other}: ${message.subject}${due}`);
 }
+for (const due of result.deadlines) say(`  DEADLINE ${due.kind} from ${world.map.polities.find((candidate) => candidate.id === due.otherPolityId)?.name ?? due.otherPolityId}: ${due.subject}${due.dueStep === null ? "" : `, due ${formatWorldDate({ day: due.dueStep, minute: 0 }, definition.clock)}`}${due.onRefusal === null ? "" : ` (else ${due.onRefusal.replaceAll("_", " ")})`}`);
 const me = world.characters.find((character) => character.id === player);
 if (me !== undefined) { const placed = serviceInWords(world, me); if (placed !== null) say(`  in the ranks: ${placed}`); }
 for (const force of world.material.forces.filter((candidate) => candidate.commanderCharacterId === player || candidate.memberCharacterIds.includes(player))) {
