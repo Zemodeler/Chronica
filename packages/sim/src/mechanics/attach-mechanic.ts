@@ -73,10 +73,13 @@ const NOT_A_RULE = /pursuit|letter|message|petition|correspondence|request|appea
  * or its name; nor anything kept from an act the engine already prices -- a
  * venture, an estate or an income kept as an arrangement pays by its own
  * effect, and a rule on it would be a second price for the same business.
- * What was kept from the model's own arrangement is still its own.
+ * What was kept from the model's own arrangement is still its own. Nor a
+ * census: the censors' rule takes it every lustrum and the lectio and the
+ * close of office read it, so a written rule would be a second keeper (two
+ * Italian censuses in one season cost two calls for nothing).
  */
 export function worthARule(entity: { readonly kind: string; readonly label: string }, keptFrom: string | null): boolean {
-  if (entity.kind === "law" || entity.kind === "pursuit") return false;
+  if (entity.kind === "law" || entity.kind === "pursuit" || entity.kind === "census") return false;
   if (NOT_A_RULE.test(entity.kind) || NOT_A_RULE.test(entity.label)) return false;
   if (keptFrom !== null && keptFrom !== "generic_entity_create" && keptFrom !== "project_create") return false;
   return true;

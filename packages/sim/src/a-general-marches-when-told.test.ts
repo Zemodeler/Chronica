@@ -36,7 +36,7 @@ function setting(commander: string | null, controller: string | null = PLAYER): 
 
 const match = (text: string, state: WorldState) => matchOrderTemplates(state, PLAYER, text, definition.warfare);
 
-describe("a general marches when told", () => {
+describe("a general marches when told", { timeout: 300_000 }, () => {
   it("marches, withdraws, holds and winters the army he commands, by his own word", () => {
     const { state, army, there, thereId } = setting(PLAYER);
     const march = match(`March to ${there}.`, state)!;

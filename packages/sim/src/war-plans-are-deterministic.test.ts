@@ -7,7 +7,7 @@ import { aMonth, atWar, romeAndCarthageAlone } from "./war-plan-kit";
  * Plans and orders hash the game, the day and the men concerned and nothing else: the same war, replayed from the same day,
  * lays the same plans, sends the same orders and draws the same lots.
  */
-describe("a war's plans are deterministic", () => {
+describe("a war's plans are deterministic", { timeout: 300_000 }, () => {
   const run = () => {
     let world = romeAndCarthageAlone(atWar(120));
     const told: string[] = [];

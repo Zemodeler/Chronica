@@ -1,3 +1,4 @@
+import type { MoneyObligation } from "@chronica/shared";
 import { hiringGroups } from "./action-groups";
 import { adoptIntoGens } from "../adoption";
 import {
@@ -864,6 +865,21 @@ function fillHirePay(world: WorldState, deltas: readonly WorldDelta[], context: 
     if (paid >= hireFloorPerMonth(category) * months) continue; // it keeps at least one, and the captain brings what it keeps
     (delta as { advance: number }).advance = Math.max(0, owed - delta.monthlyPay * months);
   }
+}
+
+/**
+ * The pay of men nobody pays. Every levy path made its force with no pay obligation, so three thousand men were added to
+ * Epirus in a fortnight and the treasury never changed (loop 3, E-C; Rhegium's "nobody has undertaken to pay them"): the pay of
+ * new men falls on their power's treasury, and on the army's own chest where the power has none.
+ */
+function pledgePay(world: WorldState, polityId: string, forceName: string, men: number, atStep: number, ids: { next(prefix: string): string }, fallbackAccountId: string): { obligation: MoneyObligation; payerAccountId: string } {
+  const treasury = world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === polityId && account.status === "active");
+  const payerAccountId = treasury?.id ?? fallbackAccountId;
+  const amount = Math.max(1, Math.ceil(men * SOLDIER_PAY_PER_THOUSAND / 1_000));
+  return {
+    payerAccountId,
+    obligation: { id: ids.next("obligation"), kind: "army_pay", label: `The pay of ${forceName}`.slice(0, 120), payerAccountId, amount, cadenceSteps: 30, nextDueStep: atStep + 30, priority: 900, arrears: 0, missedPeriods: 0, active: true },
+  };
 }
 
 export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], given: ApplyContext): ApplyResult {
@@ -2700,6 +2716,8 @@ function applyOne(
       const levied = levy.world;
       // Paid from a man's own purse, it is his band and not the state's.
       const paidByAMan = payerAccountId !== null && world.material.accounts.find((account) => account.id === payerAccountId)?.owner.kind === "character";
+      const chestId = context.ids.next("account");
+      const pledged = payObligationId === null && delta.outlaw !== true ? pledgePay(levied, forcePolityId, delta.name, levy.men, atStep, context.ids, chestId) : null;
       const force = {
         id,
         name: delta.name,
@@ -2717,7 +2735,7 @@ function applyOne(
         fatigueBps: 0,
         provisionStatus: "provisioned" as const,
         provisionedThroughStep: atStep + 90,
-        payObligationId,
+        payObligationId: pledged === null ? payObligationId : pledged.obligation.id,
         payArrearsPeriods: 0,
         ...service,
         history: [],
@@ -2729,7 +2747,7 @@ function applyOne(
       // take, and an order about an army's own money has to be routed through
       // somebody's purse instead.
       const chest = {
-        id: context.ids.next("account"),
+        id: chestId,
         owner: { kind: "force" as const, id },
         currencyId: world.material.currency.id,
         balance: 0,
@@ -2742,6 +2760,7 @@ function applyOne(
           ...levied.material,
           forces: [...levied.material.forces, force],
           accounts: [...levied.material.accounts, chest],
+          obligations: pledged === null ? levied.material.obligations : [...levied.material.obligations, pledged.obligation],
         },
       };
     }
@@ -3123,6 +3142,10 @@ function applyOne(
         arriving = mustering(delta.categoryId, delta.label, joining, atStep, context.ids.next("levy"), musterRateFor(world, force.polityId));
       }
 
+      // Men hired to a force that has nobody paying it are paid from now: its power's treasury takes the wage.
+      const forceChest = base.material.accounts.find((account) => account.owner.kind === "force" && account.owner.id === forceId);
+      const pledgedForHires = delta.fromForceRef === null && force.payObligationId === null && forceChest !== undefined && force.outlaw !== true
+        ? pledgePay(base, force.polityId, force.name, joining, atStep, context.ids, forceChest.id) : null;
       const existing = force.personnel.find((category) => category.categoryId === delta.categoryId && category.label === delta.label);
       const personnel = existing === undefined
         ? [...force.personnel, { categoryId: delta.categoryId, label: delta.label, fit: arriving.fit, unavailable: [...arriving.unavailable] }]
@@ -3140,12 +3163,14 @@ function applyOne(
           ...base.material,
           // Men hired to an army are paid as the army is: its pay grows with them (a hired host of three thousand was
           // taken on for a bounty and never drew a drachma of wages, hand run of 2026-10-22).
-          obligations: delta.fromForceRef !== null || force.payObligationId === null ? base.material.obligations : base.material.obligations.map((obligation) => (obligation.id === force.payObligationId
+          obligations: pledgedForHires !== null ? [...base.material.obligations, pledgedForHires.obligation]
+            : delta.fromForceRef !== null || force.payObligationId === null ? base.material.obligations : base.material.obligations.map((obligation) => (obligation.id === force.payObligationId
             ? { ...obligation, amount: obligation.amount + Math.max(1, Math.ceil(joining * (delta.categoryId === "warship" ? WARSHIP_PAY_PER_HULL : SOLDIER_PAY_PER_THOUSAND / 1_000))) }
             : obligation)),
           forces: forces.map((candidate) => (candidate.id === forceId
             ? {
               ...candidate,
+              ...(pledgedForHires === null ? {} : { payObligationId: pledgedForHires.obligation.id }),
               personnel,
               // The establishment follows the men, as it does when they are
               // lost: an army of four thousand that takes in eight hundred is

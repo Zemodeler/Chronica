@@ -26,6 +26,7 @@ export * from "./order-outcome";
 export * from "./elections";
 export * from "./plans";
 export * from "./peace";
+export * from "./command-report";
 export * from "./peace-table";
 export * from "./money-audit";
 export * from "./polity-end";

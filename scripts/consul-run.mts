@@ -12,7 +12,7 @@ import path from "node:path";
 import { createHandAdapter } from "@chronica/ai";
 import { punicWarsScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, formatWorldDate, isDelivered, ordersUnderWay, type Fact, type WorldState } from "@chronica/shared";
-import { DEFAULT_BUDGET, armyInWords, factsForPlayer, lineOf, orderOutcomeLines, runSimulationBurst, serviceInWords, type PendingEvent, type SimModelPort } from "@chronica/sim";
+import { DEFAULT_BUDGET, armyInWords, commandReport, forceNameWithoutBirthplace, factsForPlayer, lineOf, orderOutcomeLines, runSimulationBurst, serviceInWords, type PendingEvent, type SimModelPort } from "@chronica/sim";
 
 const args = process.argv.slice(2);
 const option = (name: string, fallback: string): string => {
@@ -123,8 +123,10 @@ for (const force of world.material.forces.filter((candidate) => candidate.comman
   const make = armyInWords(world, force);
   const fit = force.personnel.reduce((sum, row) => sum + row.fit, 0);
   const place = world.map.provinces.find((province) => province.id === force.locationId)?.name ?? force.locationId;
-  say(`  army: ${force.name}${force.name.endsWith(String(place)) ? "" : ` at ${place}`} -- ${fit} fit, morale ${Math.round(force.moraleBps / 100)}/100${make === null ? "" : `; ${make}`}`);
+  const shown = forceNameWithoutBirthplace(world, force.name);
+  say(`  army: ${shown}${shown.endsWith(String(place)) ? "" : ` at ${place}`} -- ${fit} fit, morale ${Math.round(force.moraleBps / 100)}/100${make === null ? "" : `; ${make}`}`);
 }
+for (const line of commandReport(world, player, definition.clock)) say(line);
 const facts = factsForPlayer(result.newFacts, result.significanceByFactId, world, player, polity, definition.government.offices);
 say(`  facts (${facts.length}; what touches you first, then by weight):`);
 for (const fact of facts.slice(0, Number(option("facts", "25")))) say(`   [${result.significanceByFactId.get(fact.id) ?? 0}] ${fact.kind}: ${fact.summary.slice(0, 260)}`);

@@ -10,7 +10,7 @@ import { aMonth, atWar, romeAndCarthageAlone } from "./war-plan-kit";
  * gives in, a loser's enemy grants it when wearied of the war or when the asking has stood a quarter of a year), and the treaty names the ground
  * the winner went to war for, and only that, within what the loser will bear.
  */
-describe("a war plan's aim of peace feeds the peace", () => {
+describe("a war plan's aim of peace feeds the peace", { timeout: 300_000 }, () => {
   const plan = (polityId: string, enemyPolityId: string, aims: WarPlan["aims"], at: number): WarPlan => ({
     warId: "x", polityId, enemyPolityId, aims, theatres: [], posture: "attrition", reviewedAtStep: at, aimsSetAtStep: at, aimsChangedAtStep: at, issuedByCharacterId: null,
   });

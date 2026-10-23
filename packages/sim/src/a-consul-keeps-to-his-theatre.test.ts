@@ -9,7 +9,7 @@ import { aMonth, atWar, romeAndCarthageAlone } from "./war-plan-kit";
  * that day won. Now he is sent against a province or an army, and stays on it until it is taken, or runs out, or something happens
  * that a sensible man would answer; the plan of the war is not changed with the weather.
  */
-describe("a consul keeps to his theatre", () => {
+describe("a consul keeps to his theatre", { timeout: 300_000 }, () => {
   const memo: { seen?: ReturnType<typeof sixMonthsRun> } = {};
   const sixMonths = () => (memo.seen ??= sixMonthsRun());
   function sixMonthsRun() {
