@@ -1315,7 +1315,8 @@ function applyUngroupedDeltas(world: WorldState, deltas: readonly WorldDelta[], 
       && (delta.op !== "order_attempt_decide" || current.orderAttempts !== previous.orderAttempts);
     applied.push({ delta, written, authority, ofTheOrder, changed, madeMoney: moneyMadeBetween(previous, current) });
     if (changed && assumed.length > 0) assumptions.push({ delta, assumed, ofTheOrder });
-    if (changed) factProposals.push(...emitted);
+    // A letter suppressed as an unchanged offer changes nothing, but its writer is told it was not sent again.
+    factProposals.push(...(changed ? emitted : emitted.filter((fact) => fact.kind === "letter_not_resent")));
     battleAccounts.push(...emittedAccounts);
     if (changed && answerable && !authority.authorized) breaches.push({ delta, reason: authority.reason });
     // A letter over the government's name from a man who cannot bind it is
@@ -5490,7 +5491,9 @@ function applyOne(
         reject(`${force.name} is in ${where}, not ${province.name}: it has to be there to raid it. March it in first.`);
       }
       const polityName = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
-      if (province.controllerPolityId === force.polityId && force.outlaw !== true) {
+      // Ground the force holds by conquest is not "its own land": the farmers on it still belong to the power it took it from.
+      const takenFrom = province.ownerPolityId != null && province.ownerPolityId !== force.polityId && atWar(world.polityAgreements, force.polityId, province.ownerPolityId);
+      if (province.controllerPolityId === force.polityId && force.outlaw !== true && !takenFrom) {
         // Said as what did not happen, and who ordered it. Written as a maxim
         // -- "burning its farms is not a raid" -- a historian turned the
         // refusal into the man condemning the burning he had ordered.
@@ -5527,7 +5530,7 @@ function applyOne(
         shareBps: raidShareBps(force, warfareWith(world, context.warfare)),
         ...(intoAccountId === undefined ? {} : { intoAccountId }),
       });
-      const victims = province.controllerPolityId === null ? "its people" : `the ${polityName(province.controllerPolityId)}`;
+      const victims = takenFrom ? `the ${polityName(province.ownerPolityId!)}` : province.controllerPolityId === null ? "its people" : `the ${polityName(province.controllerPolityId)}`;
       emitFact({
         localId: safeLocalId(`raid_${forceId}`),
         kind: "province_raided",
@@ -5628,6 +5631,19 @@ function applyOne(
         // Idempotent success, so repairs cannot turn suppression into a new
         // letter. References still resolve, but this is no progress for a plan.
         assignedIds.set(delta.localId, redundant.id);
+        // Said to its writer: the second letter was a no-op, and an order that "came to nothing" without a word of why (burst 7 of the
+        // Hanno run, twice) left a player who had been refused by silence unable to tell that asking in the same words is not allowed.
+        const leftAs = redundant.status === "awaiting_reply" ? "still awaits an answer" : redundant.status === "answered" ? `was answered${redundant.answer === undefined || redundant.answer === null ? "" : ` (${redundant.answer})`}` : `ended as ${redundant.status}`;
+        emitFact({
+          localId: safeLocalId(`letter_not_resent_${delta.localId}`).slice(0, 60),
+          kind: "letter_not_resent",
+          summary: `${characterName(world, senderId)} had already written "${redundant.subject}" to ${recipientId === null ? polityName(world, letterToId) : characterName(world, recipientId)} on day ${redundant.sentAtStep}, and that letter ${leftAs}; nothing has changed, so it was not sent again. Asking again in new words, or after something has changed, is another letter.`.slice(0, 600),
+          affectedRefs: [{ kind: "character", id: senderId }, { kind: "polity", id: letterFromId }, { kind: "polity", id: letterToId }],
+          visibility: "polity",
+          discoveryState: "polity",
+          knowableInDays: 0,
+          significance: 30,
+        });
         return world;
       }
       const previous = world.diplomacy.find((message) => sameNegotiation(message, proposed));
@@ -5789,7 +5805,9 @@ function applyOne(
       };
       // "Let us discuss peace", accepted: the two sides sit down at the table (`world/peace-table.ts`).
       const replied: WorldState = message.kind === "peace_talks" && delta.answer === "accepted" ? openPeaceTable(repliedBeforeTable, message, atStep) : repliedBeforeTable;
-      const answerer = message.toCharacterId ?? diplomaticAnswererOf(world, message.toPolityId, context.offices, message.fromCharacterId);
+      // The words are the hand that wrote them: a censor answering for Rome is not the consul the letter was addressed to.
+      const actorHand = context.actorRef.kind === "character" ? world.characters.find((character) => character.id === context.actorRef.id && character.polityId === message.toPolityId) : undefined;
+      const answerer = actorHand !== undefined && actorHand.id !== message.fromCharacterId ? actorHand.id : message.toCharacterId ?? diplomaticAnswererOf(world, message.toPolityId, context.offices, message.fromCharacterId);
       const how = { accepted: "accepted", refused: "refused", countered: "answered with terms of its own", ignored: "let pass unanswered" }[delta.answer];
       // One person writing back to another is not a power answering a power:
       // "Rome answered with terms of its own Rome's letter" was a friend's reply.
@@ -6040,6 +6058,23 @@ function applyOne(
           significance: embargo ? 50 : 40,
         });
       }
+      // An alliance, a protectorate or any other pact is news the moment it is made: an acceptance by letter once made one that nobody
+      // was told of (Messana's alliance with Rhegium, its protectorate under Carthage: only a "letter_answered" at weight 35 said so).
+      const PACT_WORDS: Readonly<Record<string, string>> = {
+        alliance: "an alliance", protectorate: "a protectorate", non_aggression: "a pact of non-aggression", military_access: "a pact of military access", tributary: "a tributary peace", truce: "a truce",
+      };
+      if (PACT_WORDS[delta.kind] !== undefined && delta.visibility !== "private") {
+        emitFact({
+          localId: safeLocalId(`pact_made_${delta.localId}`).slice(0, 60),
+          kind: delta.kind === "alliance" ? "alliance_made" : "treaty_made",
+          summary: `${polityName(world, partyId)} and ${polityName(world, otherPartyId)} have made ${PACT_WORDS[delta.kind]}: ${delta.terms}`.slice(0, 600),
+          affectedRefs: [{ kind: "polity", id: partyId }, { kind: "polity", id: otherPartyId }],
+          visibility: delta.visibility === "polity" ? "polity" : "public",
+          discoveryState: delta.visibility === "polity" ? "polity" : "public",
+          knowableInDays: 0,
+          significance: 60,
+        });
+      }
       // What the treaty makes happen, carried out as it is made.
       // Duties the terms speak of and no clause carries -- a withdrawal, a
       // restoration -- are made the party's undertaking, to be judged by the ground.
@@ -6286,7 +6321,7 @@ function applyOne(
       let got: ReturnType<typeof breadWhereItStands>;
       try {
         if (delta.how === "convoy") {
-          if (delta.fromProvinceId === null) reject("A convoy is sent from somewhere: name the province (\"fromProvinceId\").");
+          if (delta.fromProvinceId === null) reject("The convoy had no place to sail from. Give the order again and say which town or district the grain is shipped from.");
           got = sendConvoy(world, force, delta.fromProvinceId, delta.days, atStep, context.ids);
         } else {
           got = breadWhereItStands(world, force, delta.how, delta.days, atStep);

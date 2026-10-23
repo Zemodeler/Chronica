@@ -155,8 +155,29 @@ function projectOverlay(world: WorldState, viewerCharacterId: string | null, off
       selected: false,
       movement: null,
     })),
-    conflicts: world.conflicts,
+    conflicts: visibleConflicts(world.conflicts, new Set(sighted.keys()), new Set(world.map.provinces.flatMap((province) => province.settlements.map((settlement) => settlement.id)))),
   });
+}
+
+/**
+ * The conflicts a viewer can see: only armies they can sight appear on the map,
+ * so a battle or siege is shown with the sighted armies alone, and dropped when
+ * nothing of one side is in sight. Far-off wars the viewer knows nothing of
+ * must never stop the map (or the whole page) from loading.
+ */
+function visibleConflicts(conflicts: WorldState["conflicts"], sighted: ReadonlySet<string>, settlementIds: ReadonlySet<string>): WorldState["conflicts"] {
+  const battles = conflicts.battles.flatMap((battle) => {
+    const participantForceIds = battle.participantForceIds.filter((id) => sighted.has(id));
+    const attackerForceIds = battle.attackerForceIds.filter((id) => sighted.has(id));
+    if (!participantForceIds.some((id) => !attackerForceIds.includes(id))) return [];
+    return [{ ...battle, participantForceIds, attackerForceIds }];
+  });
+  const sieges = conflicts.sieges.flatMap((siege) => {
+    const invadingForceIds = siege.invadingForceIds.filter((id) => sighted.has(id));
+    if (invadingForceIds.length === 0 || !settlementIds.has(siege.settlementId)) return [];
+    return [{ ...siege, invadingForceIds, defendingForceIds: siege.defendingForceIds.filter((id) => sighted.has(id)) }];
+  });
+  return { ...conflicts, battles, sieges };
 }
 
 export function projectWorldView(world: WorldState, meta: WorldViewMeta, viewerCharacterId: string): GameWorldView {

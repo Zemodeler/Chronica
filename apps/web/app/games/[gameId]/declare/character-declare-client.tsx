@@ -193,7 +193,7 @@ export function CharacterDeclareClient({ gameId, gameTitle, dateLabel, scenarioI
                   {(hasIllustratedStarters || people.length > 0) && (
                     <section className="declare__people" aria-labelledby="declare-people">
                       <h2 id="declare-people">People of this world</h2>
-                      {hasIllustratedStarters && <p>Choose a starting point, then make it your own in the box above.</p>}
+                      <p>Choosing a name only fills the box above. Press “Research this character” to take them{empty ? ", which needs coins in your wallet" : ""}; you can change the words first.</p>
                       {hasIllustratedStarters && <ul className="declare__illustrated">
                         {ILLUSTRATED_STARTERS.map((starter) => (
                           <li key={starter.label}>

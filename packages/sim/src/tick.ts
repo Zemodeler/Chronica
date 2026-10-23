@@ -1879,7 +1879,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
   // moment to change a government is told it is there.
   const society = input.government === undefined
     ? { world: tenure.world, facts: [] as readonly FactProposalDraft[] }
-    : reviewSociety({ world: tenure.world, government: input.government, warfare: input.warfare, toDay: input.toDay, ids: input.ids });
+    : reviewSociety({ world: tenure.world, government: input.government, warfare: input.warfare, toDay: input.toDay, ids: input.ids, playerCharacterId: input.playerCharacterId ?? null });
   const opened = input.government === undefined
     ? society.world
     : raiseOpenings({ world: society.world, government: input.government, toDay: input.toDay, ...(input.playerCharacterId === undefined ? {} : { playerCharacterId: input.playerCharacterId }) });

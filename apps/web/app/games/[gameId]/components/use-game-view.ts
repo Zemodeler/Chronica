@@ -336,8 +336,12 @@ export function useGameView(gameId: string, initialRevision?: string): GameViewC
   }, [gameId, start]);
 
   const choose = useCallback(async (decisionId: string, optionId: string) => {
-    await start(`/api/games/${gameId}/decisions/${decisionId}`, { optionId });
-  }, [gameId, start]);
+    // The question is answered the moment the answer is sent: the card goes at once, and comes back
+    // only if the server says a new one is open once the burst is read back.
+    setCommitted((current) => (current.decision === null ? current : { ...current, decision: null }));
+    const sent = await start(`/api/games/${gameId}/decisions/${decisionId}`, { optionId });
+    if (!sent) await refresh();
+  }, [gameId, start, refresh]);
 
   const markRead = useCallback(async (entryIds?: readonly string[]) => {
     if (entryIds !== undefined && entryIds.length === 0) return;

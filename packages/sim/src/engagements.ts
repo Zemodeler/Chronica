@@ -43,7 +43,7 @@ import { safeLocalId } from "./safe-local-id";
  *   a few dead. Accepted, it is a pitched battle, fought whole by the resolver;
  *   one that ends with neither line broken goes on the next day.
  * - It ends when one side is driven from the field, has left it, falls back
- *   outnumbered three to one, or -- the attacking side -- is put on hold.
+ *   outnumbered three to one (not a defender ordered to hold), or -- the attacking side -- is put on hold.
  *
  * Who accepts battle is decided here by rule until the commanders themselves
  * are asked at the moments that matter (phase 3): a general with an army to
@@ -324,7 +324,10 @@ export function fightRound(input: FightInput, engagementId: string, day: number,
   const pinning = (world.engagements.find((candidate) => candidate.id === engagement.id) ?? engagement).manoeuvre;
   const pinnedToday = pinning?.kind === "storm_camp" || pinning?.kind === "night_attack";
   const weakSide = attackWeight < defendWeight * WITHDRAWS_BELOW ? attacking : defendWeight < attackWeight * WITHDRAWS_BELOW ? defenders : null;
-  if (weakSide !== null && !(weakSide === defenders && pinnedToday)) {
+  // A garrison ordered to hold stands where it is, whatever the odds: "hold the walls" means it does not fall back (a held
+  // legion left its only city eleven times in one run, losing 6 in a hundred of its men each time).
+  const standsOnHold = weakSide === defenders && defenders.length > 0 && defenders.every((force) => force.hold === true);
+  if (weakSide !== null && !(weakSide === defenders && pinnedToday) && !standsOnHold) {
     const strongSide = weakSide === attacking ? defenders : attacking;
     const to = retreatRoute(world, weakSide[0]!, engagement.provinceId, new Set(strongSide.map((force) => force.polityId)));
     if (to !== null) {

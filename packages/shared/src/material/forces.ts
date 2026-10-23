@@ -193,6 +193,11 @@ export function musterTheForces(
     return account?.owner.kind === "force" && account.owner.id === forceId;
   };
 
+  const chestBalanceOf = (obligationId: string | null): number | null => {
+    const payer = obligationOf(obligationId)?.payerAccountId;
+    return payer === undefined ? null : world.material.accounts.find((candidate) => candidate.id === payer)?.balance ?? null;
+  };
+
   const ownPolity = characterId === null
     ? null
     : world.characters.find((character) => character.id === characterId)?.polityId ?? null;
@@ -256,6 +261,7 @@ export function musterTheForces(
           obligationOf(force.payObligationId),
           force.payArrearsPeriods,
           paysItself(force.id, force.payObligationId),
+          chestBalanceOf(force.payObligationId),
         ),
         changeExplanation: explainChange(force, world.elapsedStep),
         locationLabel: provinceName(force.locationId),

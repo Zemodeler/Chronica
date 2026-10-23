@@ -197,7 +197,8 @@ export function ballotsOfBloc(
     // The day's mood: each seat's own, on each question, larger in the impulsive.
     const mood = ((stableHash([seat.id, procedure.id, "mood"]) % 2_001) / 1_000 - 1) * (4 + 12 * (1.2 - temperament.discipline / 100));
     let lean = together[index]!;
-    const said = seat.characterId === null ? undefined : ownWords.get(seat.characterId);
+    // A man who moved the question votes for it, unless he has said otherwise since (a playtest's own motion was voted against by its mover).
+    const said = seat.characterId === null ? undefined : ownWords.get(seat.characterId) ?? (seat.characterId === procedure.sponsorCharacterId ? "support" : undefined);
     if (said === "support") lean = Math.max(lean, bloc.yesThreshold + 5) + 10;
     else if (said === "oppose") lean = Math.min(lean, bloc.noThreshold - 5) - 10;
     lean = Math.max(-100, Math.min(100, Math.round(lean)));

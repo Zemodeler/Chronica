@@ -3,6 +3,8 @@ import {
   LOOSE_COHESION_BPS,
   adjacentTo,
   agreementsBetween,
+  alliesLedBy,
+  leaderOf,
   deriveRelationDimension,
   familyLinksOf,
   isNavalForce,
@@ -568,10 +570,22 @@ function chooseAdversary(
       .map((war) => (war.polityAId === polityId ? war.polityBId : war.polityAId)),
   );
 
+  // Nobody is sent to war with a follower by foedus: a power's own followers and the followers of another leader make their
+  // wars and peaces through that leader (a seed set Rome against the Apulian cities, put the war in a censor's name and called
+  // every other ally of Rome to arms against its own sister; another set Carthage against the Etruscan cities, Rome's followers).
+  const kin = new Set<string>(alliesLedBy(world.polityAgreements, polityId));
+  const leader = leaderOf(world.polityAgreements, polityId);
+  // A follower by foedus makes no war of its own, and nobody else can pick one with it: send no seed that needs it either way.
+  if (leader !== null) return null;
+  for (const polity of world.map.polities) {
+    const itsLeader = leaderOf(world.polityAgreements, polity.id);
+    if (itsLeader !== null && itsLeader !== polityId) kin.add(polity.id);
+  }
+  alreadyFighting.forEach((id) => kin.add(id));
   const neighbours = new Set<string>();
   for (const { provinceId: side } of adjacentTo(world, provinceId)) {
     const controller = controllerOf.get(side) ?? null;
-    if (controller === null || controller === polityId || alreadyFighting.has(controller)) continue;
+    if (controller === null || controller === polityId || kin.has(controller)) continue;
     neighbours.add(controller);
   }
   // Nothing across this particular border: take any power that borders the
@@ -582,7 +596,7 @@ function chooseAdversary(
       const outward = ownProvinceIds.has(edge.from) ? edge.to : ownProvinceIds.has(edge.to) ? edge.from : null;
       if (outward === null) continue;
       const controller = controllerOf.get(outward) ?? null;
-      if (controller === null || controller === polityId || alreadyFighting.has(controller)) continue;
+      if (controller === null || controller === polityId || kin.has(controller)) continue;
       neighbours.add(controller);
     }
   }

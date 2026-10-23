@@ -370,7 +370,17 @@ export function splitOrder(order: string | null): string[] {
   // Split only where the order is a list of commands. A plan told as a story -- "He would light fires... Once satisfied he
   // would begin the retreat" -- is one order, its sentences leaning on each other, and cut apart each would lose the others.
   const commands = (units: string[]): boolean => units.length >= 2 && units.filter((unit) => COMMAND_START.test(unit)).length >= Math.ceil(units.length * 0.75);
-  const units = lines.length >= 2 && commands(lines) ? lines : commands(sentences) ? sentences : [order];
+  const split = lines.length >= 2 && commands(lines) ? lines : commands(sentences) ? sentences : [order];
+  // A sentence that is not a command ("Messana is mine and the garrison is beaten.") is what the command after it leans on, not an order
+  // of its own: sent apart it cost a model call and came back as "a statement, not an order" with news that was nobody's order.
+  const units: string[] = [];
+  let context = "";
+  for (const unit of split) {
+    if (!COMMAND_START.test(unit)) { context = context === "" ? unit : `${context}\n${unit}`; continue; }
+    units.push(context === "" ? unit : `${context}\n${unit}`);
+    context = "";
+  }
+  if (context !== "") { if (units.length > 0) units[units.length - 1] += `\n${context}`; else units.push(context); }
   if (units.length < 2) return [order];
   const chunks: string[] = [];
   for (const line of units) {

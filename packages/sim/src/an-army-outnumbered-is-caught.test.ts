@@ -48,6 +48,17 @@ describe("an army outnumbered three to one", () => {
     expect(fled.engagements.find((engagement) => engagement.openedByForceId === "roman-field-army")?.endedBy).toBe("withdrew");
   });
 
+  it("does not fall back when it was ordered to hold the ground", () => {
+    const world = outnumbered();
+    const held: WorldState = {
+      ...world,
+      material: { ...world.material, forces: world.material.forces.map((force) => (force.id === "syracusan-army" ? { ...force, hold: true } : force)) },
+    };
+    const stood = attack(held).world;
+    expect(where(stood, "syracusan-army")).toBe(LATIUM);
+    expect(stood.engagements.find((engagement) => engagement.openedByForceId === "roman-field-army")?.endedBy).not.toBe("withdrew");
+  });
+
   it("is caught when its camp is stormed that day, and must fight", () => {
     const stormed = attack(outnumbered(), "storm_camp").world;
     const engagement = stormed.engagements.find((candidate) => candidate.openedByForceId === "roman-field-army");

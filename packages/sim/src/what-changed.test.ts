@@ -26,7 +26,7 @@ describe("what a turn changed", () => {
       },
     };
     const lines = whatChanged({ before, after, polityId: "rome", characterId: null });
-    expect(lines.some((line) => line.startsWith("Treasury:") && line.includes("(-500)"))).toBe(true);
+    expect(lines.some((line) => line.startsWith("Treasury:") && line.includes("(−500)"))).toBe(true);
     expect(lines.some((line) => line.includes(`${legion.name} moved from`) && line.includes(other.name))).toBe(true);
     expect(whatChangedEntry({ before, after, polityId: "rome", characterId: null }, 7)!.kind).toBe("recorded");
   });

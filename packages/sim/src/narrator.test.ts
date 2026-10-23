@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario, punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 
 const MESSANA = PUNIC_IDS.messana;
-import { WorldStateSchema, ensureProvinceMaterial, type WorldState } from "@chronica/shared";
+import { WorldStateSchema, ensureProvinceMaterial, leaderOf, type WorldState } from "@chronica/shared";
 import { decideNarratorSeed, decideNarratorSeeds, livePressures, readTension, recordSeedOffered, recordSeedOutcome, recordSeedsOffered, seedWasTaken, type NarratorInput } from "./narrator";
 
 const small = (): WorldState => WorldStateSchema.parse(structuredClone(firstPunicWarScenario.initialWorld));
@@ -271,6 +271,25 @@ describe("how much stirs in a season", () => {
     // Both parties are named by id, so the orchestrator never invents one.
     expect(found.brief).toContain(found.target.otherPolityId!);
     expect(found.brief).toContain(found.target.polityId!);
+  });
+
+  it("never sets a power against the league it belongs to", () => {
+    // A seed once put Rome at war with the Apulian cities, which follow Rome by foedus, and the war was written in a censor's name.
+    const world = large();
+    const wars = Array.from({ length: 400 }, (_, index) =>
+      decideNarratorSeeds(input(later(world, 45), { gameId: `game-kin-${index}` })))
+      .flat()
+      .filter((seed) => seed.archetype === "war");
+    expect(wars.length).toBeGreaterThan(0);
+    for (const seed of wars) {
+      const [a, b] = [seed.target.polityId!, seed.target.otherPolityId!];
+      const leaderOfA = leaderOf(world.polityAgreements, a);
+      const leaderOfB = leaderOf(world.polityAgreements, b);
+      expect(leaderOfA === b || leaderOfB === a || (leaderOfA !== null && leaderOfA === leaderOfB)).toBe(false);
+      // A follower makes no war of its own, so none is sent against one (or from one) by a seed.
+      expect(leaderOfA).toBeNull();
+      expect(leaderOfB).toBeNull();
+    }
   });
 
   it("goes on making ordinary business while a war is on", () => {

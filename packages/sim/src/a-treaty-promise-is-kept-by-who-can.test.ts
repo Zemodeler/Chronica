@@ -8,7 +8,7 @@ import { settleRatifications } from "./ratification";
 import type { ApplyContext } from "./apply/context";
 
 /**
- * Hand run as Hannibal Gisco (docs/reports/2026-10-22-hannibal-gisco-3y-hand-run.md, H2): every treaty undertaking was
+ * Hand run as Hannibal Gisco (docs/reports/hand-run-reports.md, H2): every treaty undertaking was
  * written as a thing to do and owed by the head of government, so "Carthage will not make war on Syracuse" was marked
  * broken in a peace, and "the fleet will shelter Messana" was marked broken with the fleet in Messana's harbour.
  */

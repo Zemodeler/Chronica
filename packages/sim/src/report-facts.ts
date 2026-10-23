@@ -6,7 +6,7 @@ import type { Office } from "@chronica/shared";
  * The facts a burst's report leads with, for the player it is written for.
  *
  * Ranked by weight alone, a 300-fact season led with other powers' elections and lustrum counts, and nothing the player's own
- * hands, treaties, ships or ground had done (docs/reports/2026-10-22-hannibal-gisco-3y-hand-run.md, H3). What touches the
+ * hands, treaties, ships or ground had done (docs/reports/hand-run-reports.md, H3). What touches the
  * player's own side comes first, then what touches the war or the orders they have set going, then the rest, each by weight.
  */
 export function factsForPlayer(

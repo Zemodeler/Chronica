@@ -517,7 +517,12 @@ export async function commitBurst(db: ChronicaDatabase, commit: BurstCommit): Pr
       await tx.insert(deltaAudit).values(commit.audit.map((entry) => ({ ...entry, gameId: commit.gameId, burstId: commit.burstId })));
     }
 
-    if (commit.decision !== undefined) {
+    // The answer that closes a question must not be followed by the same question: the player has just
+    // answered it, and a second card with the same words is the card they already answered.
+    const answered = commit.resolvesDecision === undefined || commit.decision === undefined
+      ? undefined
+      : (await tx.select({ prompt: playerDecisions.prompt }).from(playerDecisions).where(eq(playerDecisions.id, commit.resolvesDecision.id)).limit(1))[0];
+    if (commit.decision !== undefined && answered?.prompt !== commit.decision.prompt) {
       await tx.insert(playerDecisions).values({
         gameId: commit.gameId,
         burstId: commit.burstId,

@@ -102,6 +102,7 @@ import { decideDispatches } from "./dispatches";
 import { VOICE_CAP, lettersToVoice, voiceLetters } from "./letter-voice";
 import { DECISION_EVENTS, createCognitionPolicy, marchingCommanders, playerInterests } from "./cognition-policy";
 import { materializeFacts } from "./facts";
+import { factsOfRefusedActs } from "./facts-of-refused-acts";
 import { answerByTemper } from "./insubordination";
 import { answerForTheSilent } from "./requests";
 import { stanceOfPart } from "./stance";
@@ -701,6 +702,45 @@ function holdForArrival<T extends { readonly output: OrchestratorOutput }>(orche
       ...part,
       acts: part.acts.filter((at) => moved.has(at)).map((at) => moved.get(at)!),
       ...(mine.length === 0 ? {} : { deferredActs: [...(part.deferredActs ?? []), ...mine].slice(0, 6) }),
+    };
+  });
+  return { ...orchestration, output: { ...output, deltas, intent: { ...output.intent, parts } } };
+}
+
+/**
+ * A "then march on Messana" that has nothing to wait for goes now.
+ *
+ * Written as a held act of a part whose earlier parts hold no arrival and no letter, the march found nothing to wait on but its own
+ * result and sat "waiting until the force reaches Messana" for ninety days (a playtest, round 5). A march project held with no
+ * condition to meet is an act of its part: it is done when the order is.
+ */
+function releaseUngroundedMarches<T extends { readonly output: OrchestratorOutput }>(orchestration: T): T {
+  const { output } = orchestration;
+  const releasing: Array<{ readonly part: number; readonly delta: OrchestratorOutput["deltas"][number] }> = [];
+  for (const [index, part] of output.intent.parts.entries()) {
+    const marches = (part.deferredActs ?? []).filter((delta) => delta.op === "project_create" && delta.completionOutcome?.kind === "force_move");
+    if (marches.length === 0) continue;
+    if (part.whenForceExists != null || /^(once|after|when|on arrival)/i.test(part.said)) continue;
+    // What an earlier part could be waited on for: a goal it set, a force it moved, a letter it sent.
+    const waitedFor = (at: number): boolean => (output.intent.parts[at]?.goals ?? []).length > 0
+      || (output.intent.parts[at]?.acts ?? []).some((act) => {
+        const delta = output.deltas[act];
+        return delta !== undefined && ((delta.op === "project_create" && delta.completionOutcome?.kind === "force_move") || (delta.op === "force_modify" && delta.locationId !== undefined) || delta.op === "diplomatic_message_send");
+      });
+    const waitsOnSomething = (part.afterParts ?? []).filter((at) => at !== index).some(waitedFor);
+    if (waitsOnSomething) continue;
+    for (const delta of marches) releasing.push({ part: index, delta });
+  }
+  if (releasing.length === 0 || output.deltas.length + releasing.length > 24) return orchestration;
+  const deltas = [...output.deltas, ...releasing.map((entry) => entry.delta)];
+  const parts = output.intent.parts.map((part, index) => {
+    const mine = releasing.filter((entry) => entry.part === index);
+    if (mine.length === 0) return part;
+    const released = new Set(mine.map((entry) => entry.delta));
+    return {
+      ...part,
+      acts: [...part.acts, ...mine.map((entry) => output.deltas.length + releasing.indexOf(entry))],
+      deferredActs: (part.deferredActs ?? []).filter((delta) => !released.has(delta)),
     };
   });
   return { ...orchestration, output: { ...output, deltas, intent: { ...output.intent, parts } } };
@@ -1329,7 +1369,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
           ...part,
           closedAtStep: world.elapsedStep,
           note: ((orderPartStatus(world, part) === "carried_unverified"
-            ? `Lapsed: it was ordered, and in ${world.elapsedStep - order.givenAtStep} days nothing came to show what it came to`
+            ? `Lapsed: it was given and carried as an instruction, but in ${world.elapsedStep - order.givenAtStep} days nothing the record can check showed it held, so it is no longer kept. If it still matters, give it again and say what you want to see (for instance "keep the legion inside Rhegium")`
             : `Lapsed: nothing more was done for it in ${world.elapsedStep - order.givenAtStep} days`) + (part.note === null ? "" : `; ${part.note}`)).slice(0, 400),
         }),
       }),
@@ -2210,8 +2250,16 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // exactly as much as what the actor said they were doing.
     // Except the far powers' small business, which is nobody's news (L16).
     const worthWriting = (fact: FactProposalDraft): boolean => pass.factFloor === undefined || fact.significance >= pass.factFloor;
+    // A fact the model wrote for a part whose every act the engine refused
+    // told of what did not happen: "Hanno declared war" stood in every man's
+    // history beside "may not make war". The part says it was refused; the
+    // fact goes with the act.
+    const refusedActs = new Set(result.rejected.filter((rejection) => rejection.ofTheOrder === true && rejection.kind !== "reference")
+      .map((rejection) => proposal.deltas.indexOf(rejection.written ?? rejection.delta)).filter((at) => at >= 0));
+    const ofRefusedOnly = factsOfRefusedActs(proposal.intent?.parts ?? [], refusedActs);
+    const toldFacts = ofRefusedOnly.size === 0 ? keptSecret : keptSecret.filter((fact) => !ofRefusedOnly.has(fact.localId));
     const materialized = materializeFacts({
-      proposals: [...keptSecret.filter(worthWriting), ...result.factProposals.filter(worthWriting), ...breachFacts, ...insubordination, ...delayedReveals],
+      proposals: [...toldFacts.filter(worthWriting), ...result.factProposals.filter(worthWriting), ...breachFacts, ...insubordination, ...delayedReveals],
       now: world.instant,
       forces: world.material.forces,
       atStep: world.elapsedStep,
@@ -3282,9 +3330,12 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       ];
       // A part that marches and fights on arrival in one breath -- a march project and a held engage -- waits on its own march;
       // with nothing to wait on, its held acts were dropped and the army arrived to stand beside the enemy (consul-run-issues M12).
+      // ...but never on the arrival the held act is itself to bring about: a held "march on Messana" read as waiting until the force
+      // reached Messana, and sat there "since day 0" until it lapsed (a playtest, round 5).
+      const heldGoalKeys = new Set(heldFor.map((goal) => JSON.stringify(goal)));
       if ((part.deferredActs ?? []).length > 0 && dependencies.length === 0) {
         dependencies.push(...[...mine.flatMap((act) => act.goals ?? []), ...merged.goals]
-          .filter((goal): goal is Extract<OrderGoal, { kind: "force_at" }> => goal.kind === "force_at" && goalMet(world, goal) === "not_yet").slice(0, 1));
+          .filter((goal): goal is Extract<OrderGoal, { kind: "force_at" }> => goal.kind === "force_at" && goalMet(world, goal) === "not_yet" && !heldGoalKeys.has(JSON.stringify(goal))).slice(0, 1));
       }
       if (/^(once|after)\b/i.test(part.said) && dependencies.length === 0) dependencies.push(...own.flatMap((act) => act.goals ?? []).filter((goal): goal is Extract<OrderGoal, { kind: "force_at" }> => goal.kind === "force_at" && goalMet(world, goal) === "not_yet").slice(0, 1));
       const futureName = part.whenForceExists ?? (/when.*punitive.*(raised|ready)/i.test(part.said) ? "punitive" : null);
@@ -3598,7 +3649,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // An order the engine cannot read and the orchestrator could write nothing for is answered with what is open to him, not a promise (`an-order-the-engine-cannot-read.ts`).
     const honestly = <T extends { readonly output: OrchestratorOutput; readonly parseFailure: string | null }>(answer: T): T => answer.parseFailure !== null || input.continuation === true || input.answeredDecision !== undefined || playerId === null
       ? answer : withTheHonestReply(answer, input.orderText, { world, playerId, offices: input.offices, clock: input.clock, successionRules: input.successionRules, warfare: input.warfare });
-    const orchestration = holdForArrival((input.continuation === true || input.answeredDecision === undefined) && (input.orderText === null || input.orderText.trim() === "") ? quietOrchestration() : honestly(approachFirst(givenItsDestination(templated !== null ? { output: templated.output, calls: 0, parseFailure: null, salvaged: [] as string[], repairedFrom: null } : await orchestrate(input.port, slice, kindsIn(world)), world), world)));
+    const orchestration = releaseUngroundedMarches(holdForArrival((input.continuation === true || input.answeredDecision === undefined) && (input.orderText === null || input.orderText.trim() === "") ? quietOrchestration() : honestly(approachFirst(givenItsDestination(templated !== null ? { output: templated.output, calls: 0, parseFailure: null, salvaged: [] as string[], repairedFrom: null } : await orchestrate(input.port, slice, kindsIn(world)), world), world))));
     modelCalls += orchestration.calls;
     iterations += 1;
     if (orchestration.parseFailure !== null) parseFailures.push(orchestration.parseFailure);

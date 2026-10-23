@@ -29,7 +29,7 @@ import { runDeterministicTick } from "./tick";
 
 /**
  * Workstream 4 of the Codex hand-mode play-test (docs/reports/
- * 2026-10-03-codex-hand-playtest-triage.md): a consul who could not cross to
+ * hand-run-reports.md): a consul who could not cross to
  * Sicily, spend what the Senate voted, act as proconsul, leave a garrison, or
  * take an ally into the state.
  */

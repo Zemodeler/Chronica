@@ -11,10 +11,11 @@ import type { WorldState } from "@chronica/shared";
 /** A truce is told of this many days before it lapses. */
 export const TRUCE_WARNING_DAYS = 30;
 
-const DEMANDS: ReadonlySet<string> = new Set(["ultimatum", "tribute_demand"]);
+// A protest asks for an answer by a day too ("wanting an answer by 17 April"); a burst that ran past one let it lapse in silence.
+const DEMANDS: ReadonlySet<string> = new Set(["ultimatum", "tribute_demand", "protest"]);
 
 export interface Deadline {
-  readonly kind: "ultimatum" | "tribute_demand" | "truce_ends";
+  readonly kind: "ultimatum" | "tribute_demand" | "protest" | "truce_ends";
   /** The letter, or the agreement that lapses. */
   readonly id: string;
   readonly otherPolityId: string;
@@ -32,7 +33,7 @@ export function deadlinesFor(world: WorldState, polityId: string | null): readon
   for (const message of world.diplomacy) {
     if (message.status !== "awaiting_reply" || message.toPolityId !== polityId || !DEMANDS.has(message.kind)) continue;
     found.push({
-      kind: message.kind as "ultimatum" | "tribute_demand", id: message.id, otherPolityId: message.fromPolityId, subject: message.subject,
+      kind: message.kind as "ultimatum" | "tribute_demand" | "protest", id: message.id, otherPolityId: message.fromPolityId, subject: message.subject,
       dueStep: message.replyDueByStep, onRefusal: message.onRefusal ?? null,
     });
   }

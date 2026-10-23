@@ -170,7 +170,8 @@ export function CouncilPanel({
         {!busy && (
           <section className="desk__report">
             {latest.length === 0 ? (
-              <p className="quiet">Nothing has been recorded yet. Give an order and the world will answer.</p>
+              // Until the record has been read, an empty list means "not yet", not "nothing": a reload showed the empty-state words for a quarter of a minute.
+              <p className="quiet">{view.dateLabel === undefined ? "Reading the record…" : "Nothing has been recorded yet. Give an order and the world will answer."}</p>
             ) : (
               <p className="desk__latest">
                 <span className="desk__kicker">Since your last order</span>{" "}

@@ -125,6 +125,16 @@ function decide(world: WorldState, message: DiplomaticMessage, answerer: Charact
     return done(redress, redress ? "submit" : "defy", redress ? "weakness" : "none", redress ? "gave way" : threat ? "defied the threat" : "would not", { matter: message.subject }, redress);
   }
 
+  // A truce or a peace offered between two powers that are not at war is a quiet border, not a surrender: weighed as the pact not to make
+  // war is below, and refused for what it is ("no reason to bind ourselves"), not as "not beaten" by a power nobody is fighting (round 7:
+  // Epirus asked Macedon for a truce with no war between them, and the counsel read "no (not beaten)").
+  const atWarWithWriter = world.polityAgreements.some((agreement) => agreement.status === "active" && agreement.kind === "war"
+    && [agreement.polityId, agreement.otherPolityId].includes(message.toPolityId) && [agreement.polityId, agreement.otherPolityId].includes(message.fromPolityId));
+  if ((message.kind === "peace_offer" || proposes.has("peace") || proposes.has("truce")) && !atWarWithWriter && !proposes.has("alliance")) {
+    const needed = -15 - 20 * (d.fear - 0.5) - 15 * (d.sociability - 0.5) + 10 * suspicious - liking / 6 - bias;
+    const accepted = !unforgiven && trust >= needed;
+    return done(accepted, accepted ? "peace_accept" : "peace_refuse", accepted ? "friendship" : unforgiven ? "distrust" : "no_quarrel", accepted ? "a quiet border" : unforgiven ? "an old grievance" : "no reason to bind ourselves");
+  }
   if (message.kind === "peace_offer" || proposes.has("peace") || proposes.has("truce")) {
     const tired = warWeariness(world, message.toPolityId, message.fromPolityId).score;
     const losing = warStanding(world, message.toPolityId, message.fromPolityId).score <= -30;

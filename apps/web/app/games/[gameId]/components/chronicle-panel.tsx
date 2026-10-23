@@ -215,7 +215,9 @@ export function ChroniclePanel({ controller, onClose, side, focus = null }: {
                   ? "Nothing in the record touches that."
                   : unreadOnly !== null
                     ? "Nothing unread."
-                    : "Nothing has been recorded yet. Give an order and the world will answer."}
+                    : controller.view.dateLabel === undefined
+                      ? "Reading the record…"
+                      : "Nothing has been recorded yet. Give an order and the world will answer."}
               </p>
             ) : (
               <div ref={list}>

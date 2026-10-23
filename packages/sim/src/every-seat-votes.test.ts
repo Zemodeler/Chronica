@@ -41,6 +41,13 @@ describe("every seat of every chamber votes for itself", () => {
     expect(for_[0]!.choice).toBe("yes");
   });
 
+  it("has the man who moved a question vote for it, against his own bloc, unless he has since said otherwise", () => {
+    const mover = seat("abdmelqart", mind({}));
+    const moved = { id: "q1", sponsorCharacterId: "abdmelqart" } as PoliticalProcedure;
+    expect(ballotsOfBloc([mover], bloc, -60, moved, [], new Map())[0]!.choice).toBe("yes");
+    expect(ballotsOfBloc([mover], bloc, 60, moved, [], new Map([["abdmelqart", "oppose" as const]]))[0]!.choice).toBe("no");
+  });
+
   it("lets the faction a man belongs to pull his vote, without deciding it", () => {
     // Twenty men of mixed nature: the same pull moves most of them, and not all.
     const seats = Array.from({ length: 200 }, (_, i) => seat(`m${i}`, mind({ boldness: (i * 37) % 101, caution: (i * 53) % 101, sociability: (i * 29) % 101, discipline: (i * 17) % 101 })));

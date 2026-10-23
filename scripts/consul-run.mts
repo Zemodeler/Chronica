@@ -88,8 +88,10 @@ const out: string[] = [];
 const say = (line: string): void => { out.push(line); };
 say(`## Burst ${burstNo}: ${formatWorldDate(from, definition.clock)} to ${formatWorldDate(world.instant, definition.clock)}, stopped on ${result.stopReason}, ${result.modelCalls} model call(s).${orderText === null ? "" : ` ORDER: ${orderText}`}`);
 for (const skip of result.skipped.filter((entry) => entry.stage !== "mechanic")) say(`  skipped ${skip.stage}: ${skip.reason}`);
-for (const entry of result.audit.filter((candidate) => candidate.kind !== "mechanic_candidate")) say(`  audit ${entry.kind} ${entry.op} (${entry.actorRef?.id ?? "world"}): ${entry.reason.slice(0, 220)}`);
-for (const rejected of result.frictions) say(`  friction: ${rejected.line.slice(0, 220)}`);
+// Only the player's own refusals: another power's refused act (an ally's supply order, a rival's march) is not news to him.
+const mine = (actorId: string | undefined): boolean => actorId === undefined || actorId === player;
+for (const entry of result.audit.filter((candidate) => candidate.kind !== "mechanic_candidate" && mine(candidate.actorRef?.id))) say(`  audit ${entry.kind} ${entry.op} (${entry.actorRef?.id ?? "world"}): ${entry.reason.slice(0, 220)}`);
+for (const rejected of result.frictions.filter((candidate) => mine(candidate.actorRef?.id))) say(`  friction: ${rejected.line.slice(0, 220)}`);
 if (result.parseFailures.length > 0) say(`  unreadable: ${result.parseFailures.join(" | ")}`);
 if (result.salvaged.length > 0) say(`  dropped to keep the answer: ${result.salvaged.join(", ")}`);
 if (result.orderRecordId !== null) {
@@ -102,8 +104,13 @@ for (const item of ordersUnderWay(world, player, definition.government.offices, 
 // Letters the player's power must answer, and those it is waiting on: a run that cannot see them answers none (consul-run-issues T3).
 // A letter still on the road has not reached the desk: it is not listed as one to answer, for it cannot be answered yet.
 for (const message of world.diplomacy.filter((candidate) => candidate.status === "awaiting_reply" && polity !== null && (candidate.toPolityId === polity || candidate.fromPolityId === polity) && (candidate.toPolityId !== polity || isDelivered(candidate, world.elapsedStep)))) {
-  const theirs = message.toPolityId === polity;
-  const other = world.map.polities.find((candidate) => candidate.id === (theirs ? message.fromPolityId : message.toPolityId))?.name ?? (theirs ? message.fromPolityId : message.toPolityId);
+  // A letter the player wrote to a man of his own power is his, awaiting that man's reply, not one for him to answer.
+  const theirs = message.toPolityId === polity && message.fromCharacterId !== player;
+  const withinPower = message.fromPolityId === message.toPolityId;
+  const otherCharacterId = theirs ? message.fromCharacterId : message.toCharacterId;
+  const other = withinPower && otherCharacterId !== null && otherCharacterId !== undefined
+    ? world.characters.find((candidate) => candidate.id === otherCharacterId)?.name ?? otherCharacterId
+    : world.map.polities.find((candidate) => candidate.id === (theirs ? message.fromPolityId : message.toPolityId))?.name ?? (theirs ? message.fromPolityId : message.toPolityId);
   const due = message.replyDueByStep === null ? "" : `, answer due ${formatWorldDate({ day: message.replyDueByStep, minute: 0 }, definition.clock)}`;
   say(`  letter ${theirs ? "to answer" : "awaiting reply"} [${message.id}] ${message.kind} ${theirs ? "from" : "to"} ${other}: ${message.subject}${due}`);
   // What it says: a letter whose terms are not shown cannot be answered.
@@ -116,7 +123,7 @@ for (const force of world.material.forces.filter((candidate) => candidate.comman
   const make = armyInWords(world, force);
   const fit = force.personnel.reduce((sum, row) => sum + row.fit, 0);
   const place = world.map.provinces.find((province) => province.id === force.locationId)?.name ?? force.locationId;
-  say(`  army: ${force.name} at ${place} -- ${fit} fit, morale ${Math.round(force.moraleBps / 100)}/100${make === null ? "" : `; ${make}`}`);
+  say(`  army: ${force.name}${force.name.endsWith(String(place)) ? "" : ` at ${place}`} -- ${fit} fit, morale ${Math.round(force.moraleBps / 100)}/100${make === null ? "" : `; ${make}`}`);
 }
 const facts = factsForPlayer(result.newFacts, result.significanceByFactId, world, player, polity, definition.government.offices);
 say(`  facts (${facts.length}; what touches you first, then by weight):`);

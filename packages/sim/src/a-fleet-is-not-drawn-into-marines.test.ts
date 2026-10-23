@@ -5,7 +5,7 @@ import { applyDeltas } from "./apply/apply-deltas";
 import { createIdFactory } from "./ports";
 
 /**
- * Hand run as Hannibal Gisco (docs/reports/2026-10-22-hannibal-gisco-3y-hand-run.md, H1): "land eight hundred marines at
+ * Hand run as Hannibal Gisco (docs/reports/hand-run-reports.md, H1): "land eight hundred marines at
  * Messana" drew from a fleet that held 110 warships and no marines. The engine took every hull, called them a garrison and
  * said "the fleet is no more". Men are drawn only of the kind asked for; a fleet that has none refuses.
  */

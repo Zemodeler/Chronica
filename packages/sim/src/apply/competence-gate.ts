@@ -283,6 +283,10 @@ export function competenceGate(input: GateInput): Gate | null {
     case "by_the_body": {
       const body = may.body;
       if (body === null) return { kind: "refuse", reason: may.why };
+      // The chamber has already voted this money to him: spending it is the vote carried out, not a second question for the chamber.
+      if (spend && authority.authorized && authority.grant?.source === "law" && authority.grant.cap !== undefined) return null;
+      // A vote that is spent down says so, instead of moving the same money again.
+      if (spend && authority.grant === null && authority.reason.startsWith("The vote (")) return { kind: "refuse", reason: authority.reason };
       // Treaties are laid by the same path a war is (`layBeforeTheChamber`), which is how an unauthorised man's already go; only an authorised man's come here.
       const treaty = delta.op === "agreement_open" || delta.op === "agreement_close";
       if (treaty && !authority.authorized) return null;

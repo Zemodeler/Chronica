@@ -69,3 +69,6 @@ chronica-standards.zip
 
 # map generation inputs and outputs (scripts/map-gen)
 .map-gen-data/
+
+# Single hand-run reports: fold the ones worth keeping into docs/reports/hand-run-reports.md
+docs/reports/*-hand-run.md

@@ -31,6 +31,7 @@ import { grumbleAtOfficers } from "./grumbling";
 import { keepTheCourtRivalries } from "./court-rivalry";
 import { aimsFromState } from "./outlooks";
 import { sueForPeace } from "./sue-for-peace";
+import { ungarrisonedTowns } from "./ungarrisoned";
 import type { IdFactory } from "./ports";
 
 /**
@@ -841,6 +842,8 @@ export interface ReviewSocietyInput {
   readonly warfare?: ScenarioWarfareRules | undefined;
   readonly toDay: number;
   readonly ids: IdFactory;
+  /** The player's character, whose power must not write letters in his name unasked. */
+  readonly playerCharacterId?: string | null | undefined;
 }
 
 /** Once a month: remember, read every group, seat them, let the strong ones press, and write down what has become custom. */
@@ -898,9 +901,11 @@ export function reviewSociety(input: ReviewSocietyInput): { world: WorldState; f
   if (!opening) world = { ...world, polityOutlooks: aimsFromState(world, input.toDay) };
   // And a power tired of its war asks for an end to it.
   if (!opening) {
-    const sued = sueForPeace(world, input.toDay, input.ids);
+    const player = input.playerCharacterId == null ? undefined : world.characters.find((character) => character.id === input.playerCharacterId);
+    const sued = sueForPeace(world, input.toDay, input.ids, player?.polityId ?? null);
     world = sued.world;
     facts.push(...sued.facts);
+    facts.push(...ungarrisonedTowns(world, player?.polityId ?? null, input.toDay));
   }
   world = { ...world, society: { ...world.society, lastReviewStep: input.toDay } };
   return { world, facts: opening ? [] : facts };

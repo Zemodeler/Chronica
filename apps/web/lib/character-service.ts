@@ -342,7 +342,7 @@ function unplacedMessage(context: ScenarioContext): string {
   const last = context.unplaced[context.unplaced.length - 1];
   if (last?.status === "ambiguous") return `Several places on the map fit that description (${last.candidates.slice(0, 4).join("; ")}). Please say which town or region you mean.`;
   if (last?.status === "unknown") return "That place could not be found on the map. Please name a nearby town or region as it was known at the opening.";
-  return "The AI returned an unexpected response. Please try again.";
+  return "The historians' answer could not be used (it was incomplete or gave dates that do not fit the world). Nothing was charged for it; try again, perhaps with a few more words about who you are.";
 }
 
 function parseAiKnowledgebase(
@@ -391,10 +391,12 @@ function parseAiKnowledgebase(
 
   if (knowledgebase.origin !== "invented") {
     // Birth year must be known and before the scenario start.
-    if (knowledgebase.birthYearApprox === null) return null;
-    if (context.timelineStartYear !== null && knowledgebase.birthYearApprox > context.timelineStartYear) return null;
+    // The years are approximate and the prompt counts BC as plain negatives (270 BC = -270) while the
+    // clock is astronomical (270 BC = -269), so one year either way is not a contradiction.
+    if (knowledgebase.birthYearApprox === null) { console.warn("[ai] declaration refused: a real person needs a birth year."); return null; }
+    if (context.timelineStartYear !== null && knowledgebase.birthYearApprox > context.timelineStartYear + 1) { console.warn(`[ai] declaration refused: born ${knowledgebase.birthYearApprox}, after the opening (${context.timelineStartYear}).`); return null; }
     // If a death year is known, the character must not have died before the scenario start.
-    if (context.timelineStartYear !== null && knowledgebase.deathYearApprox !== null && knowledgebase.deathYearApprox < context.timelineStartYear) return null;
+    if (context.timelineStartYear !== null && knowledgebase.deathYearApprox !== null && knowledgebase.deathYearApprox < context.timelineStartYear - 1) { console.warn(`[ai] declaration refused: died ${knowledgebase.deathYearApprox}, before the opening (${context.timelineStartYear}).`); return null; }
   }
 
   // Only somebody actually here can be become; an id the model made up means

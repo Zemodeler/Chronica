@@ -39,7 +39,8 @@ describe("negotiations progress instead of restarting", () => {
     const repeated = apply(sent.world, [proposal({ subject: "Prompt consultation", terms: "Please provide five days advance notice before moving." })]);
     expect(repeated.rejected).toEqual([]);
     expect(repeated.world.diplomacy).toHaveLength(sent.world.diplomacy.length);
-    expect(repeated.factProposals).toEqual([]);
+    // The offer is suppressed all the same, and its writer is told so (loop 2: an order that "came to nothing" without a word of why).
+    expect(repeated.factProposals.map((fact) => fact.kind)).toEqual(["letter_not_resent"]);
     expect(repeated.applied[0]?.changed).toBe(false);
     expect(repeated.assignedIds.get("consultation")).toBe(sent.world.diplomacy.at(-1)!.id);
   });

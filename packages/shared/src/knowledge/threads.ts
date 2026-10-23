@@ -96,7 +96,8 @@ export function threadsYouSee(input: ThreadsInput): Readonly<Record<string, Thre
     const followed = input.followedIds.has(storyline.id);
     // A thread with nothing told of it is a thread the player has no way to
     // have heard of, unless they are in it or chose to follow it.
-    if (own.length === 0 && !followed && !storyline.participantIds.includes(characterId)) continue;
+    // A secret thread names its target among its participants, who has not heard of it: he is told of it by its entries, not by being in it.
+    if (own.length === 0 && !followed && (storyline.visibility === "private" || !storyline.participantIds.includes(characterId))) continue;
 
     const who = new Map<string, Linked>();
     for (const entry of own) {

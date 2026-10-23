@@ -73,7 +73,9 @@ function odds(mine: readonly Force[], theirs: readonly Force[], rules: ScenarioW
   if (ratio >= 1.15) return "You are the stronger";
   if (ratio > 0.87) return "The two sides are about even";
   if (ratio > 0.55) return "They are the stronger";
-  return "They have nearly twice your strength";
+  if (ratio > 0.4) return "They have nearly twice your strength";
+  if (ratio > 0.25) return "They outnumber you about three to one";
+  return "They outnumber you many times over";
 }
 
 const OPTIONS: Readonly<Record<TurningPointKind, readonly FightAction[]>> = {

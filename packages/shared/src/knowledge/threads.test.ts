@@ -59,6 +59,13 @@ describe("threads of history", () => {
     expect(threads(state, CONSUL, [])["quiet"]).toBeDefined();
   });
 
+  it("does not tell a man of a secret thread laid against him until something of it has been told to him", () => {
+    // A hidden move against the player lists him as a participant (he is its target), but he has not heard of it.
+    const state = withStoryline(world(), { id: "silver", title: "A rival's silver", participantIds: [KING, CONSUL], visibility: "private" });
+    expect(threads(state, CONSUL, [])["silver"]).toBeUndefined();
+    expect(threads(state, CONSUL, [entry("e1", ["silver"])])["silver"]).toBeDefined();
+  });
+
   it("says what is at stake only where the thread is public or the viewer is in it", () => {
     const state = withStoryline(world(), { id: "senate", title: "The Senate", participantIds: [CONSUL], visibility: "polity" });
     expect(threads(state, CONSUL, [entry("e1", ["senate"])])["senate"]?.stakes).not.toBeNull();

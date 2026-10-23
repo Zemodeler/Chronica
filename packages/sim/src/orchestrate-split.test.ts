@@ -40,6 +40,18 @@ describe("an order of several lines", () => {
   });
 });
 
+describe("an order that opens with a sentence of fact", () => {
+  it("keeps the statement with the command it leans on, and does not send it to the model as an order of its own", () => {
+    const order = "Messana is mine and the Mamertine garrison is beaten. Put a Syracusan garrison of a thousand men into Messana, and demand a tribute of twenty thousand a year from the Mamertines who still hold Coastal Sicelia. Write to Himilco son of Gisgo that Messana has fallen and I still want the treaty of non-aggression. Pay the army in full from the royal chest.";
+    const lines = splitOrder(order);
+    expect(lines.length).toBeGreaterThanOrEqual(2);
+    expect(lines.filter((line) => line.startsWith("Messana is mine"))).toHaveLength(1);
+    expect(lines.every((line) => !line.startsWith("Messana is mine") || line.includes("Put a Syracusan garrison"))).toBe(true);
+    expect(lines[0]).toContain("Messana is mine");
+    expect(lines[0]).toContain("Put a Syracusan garrison");
+  });
+});
+
 describe("an order written as one paragraph", () => {
   it("is split at its sentences", () => {
     const paragraph = "March towards the Campanian Legion and fight it. Hire 50 ships ready to transport Legio I to Messana. Send a letter to Messana telling them we shall be there soon. Raise a second army called Legio II with 5000 men and train them, organise the legion so that competent and loyal officers have more power.";

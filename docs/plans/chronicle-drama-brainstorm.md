@@ -14,7 +14,7 @@ Raw material for a plan. Nothing here is decided. Based on one Pax Historia samp
 
 ## 2. Orders versus results (from the existing audits)
 
-Sources: `docs/reports/270-bc-clepsina-run-audit-updated-2026-09-30.md`, `docs/reports/2026-10-03-codex-hand-playtest-triage.md`, `docs/plans/order-world-consistency.md`. Many faults were fixed afterwards; this is the failure pattern.
+Sources: `docs/reports/270-bc-clepsina-run-audit-updated-2026-09-30.md`, `docs/reports/hand-run-reports.md`, `docs/plans/order-world-consistency.md`. Many faults were fixed afterwards; this is the failure pattern.
 
 | Pattern | Example |
 |---|---|

@@ -4,7 +4,7 @@ import { WorldStateSchema, type DiplomaticMessage } from "@chronica/shared";
 import { letterVerdict } from "./letter-verdict";
 
 /**
- * Hand run as Hannibal Gisco (docs/reports/2026-10-22-hannibal-gisco-3y-hand-run.md, M5): Messana's spokesman, whose government
+ * Hand run as Hannibal Gisco (docs/reports/hand-run-reports.md, M5): Messana's spokesman, whose government
  * "seeks a protector before Syracuse closes on the city", was counselled "no (no quarrel of ours)" to Carthage's offer of shelter,
  * and Hieron was given no counsel at all on a pact not to make war.
  */

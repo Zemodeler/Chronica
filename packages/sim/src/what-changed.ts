@@ -24,7 +24,8 @@ export function whatChanged(input: WhatChangedInput): string[] {
   const currency = after.material.currency.name;
   const provinceName = (world: WorldState, id: string): string => world.map.provinces.find((province) => province.id === id)?.name ?? id;
   const money = (label: string, from: number, to: number): void => {
-    if (from !== to) lines.push(`${label}: ${from} to ${to} ${currency} (${to > from ? "+" : ""}${to - from}).`);
+    const say = (n: number): string => n.toLocaleString("en-US");
+    if (from !== to) lines.push(`${label}: ${say(from)} to ${say(to)} ${currency} (${to > from ? "+" : "−"}${say(Math.abs(to - from))}).`);
   };
   if (input.polityId !== null) money("Treasury", sumOf(before, "polity", input.polityId), sumOf(after, "polity", input.polityId));
   if (input.characterId !== null) money("Your purse", sumOf(before, "character", input.characterId), sumOf(after, "character", input.characterId));
