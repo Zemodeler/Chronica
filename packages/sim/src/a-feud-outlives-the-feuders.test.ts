@@ -103,7 +103,7 @@ describe("a feud in a letter", () => {
   const alliance = (from: string, to: string): DiplomaticMessage => ({
     id: "feud-letter", kind: "alliance_offer", fromPolityId: "rome", fromCharacterId: from, toPolityId: "rome", toCharacterId: to, subject: "An alliance", terms: "Let us stand together.",
     sentAtStep: 100, replyDueByStep: 160, status: "awaiting_reply", answer: null, answerText: null, answeredAtStep: null, inReplyToMessageId: null, visibility: "polity", onRefusal: null, proposes: ["alliance"],
-  } as DiplomaticMessage);
+  });
 
   it("finds the quarrel between two men of the gentes at feud, and none between others", () => {
     const quarrel = quarrelBetween(start, fabius.id, claudius.id)!;

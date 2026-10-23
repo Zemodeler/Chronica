@@ -136,7 +136,6 @@ export function menInWords(men: number): string {
 const isFleetOf = (force: Force): boolean => force.personnel.length > 0 && force.personnel.every((group) => /ship|galley|hull|fleet|transport/i.test(group.categoryId));
 
 function concernsOf(world: WorldState, playerId: string, playerPolityId: string): Concern[] {
-  const day = world.instant.day;
   const found: Concern[] = [];
   const provinceName = (id: string): string => world.map.provinces.find((province) => province.id === id)?.name ?? id;
   const enemies = new Set(enemiesOf(world.polityAgreements, playerPolityId));

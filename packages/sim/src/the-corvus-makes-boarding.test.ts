@@ -25,7 +25,7 @@ const withRomanFleet = (): WorldState => {
 const rulerOf = (world: WorldState) => (polityId: string) => world.characters.find((character) => character.polityId === polityId && character.alive && world.material.officeSeats.some((seat) => seat.holderCharacterId === character.id && /consul/.test(seat.officeId)));
 const boardingOf = (world: WorldState, forceId: string): number => {
   const force = forceOf(world, forceId);
-  const rules = warfareWith(world, { ...definition.warfare!, today: world.elapsedStep } as never);
+  const rules = warfareWith(world, { ...definition.warfare, today: world.elapsedStep } as never);
   return Math.max(...force.personnel.map((row) => readFormation(rules as never, force, row).boardingBps));
 };
 
@@ -44,7 +44,7 @@ describe("the corvus makes boarding", () => {
     expect(motion.op).toBe("political_procedure_open");
     expect(motion.label).toContain(CORVUS_MOTION);
     expect(motion.enacts.military.adopt![0]!.label).toBe("The corvus");
-    const moved = applyDeltas(world, [...asked.deltas], context(world, asked.actorCharacterId) as never);
+    const moved = applyDeltas(world, [...asked.deltas], context(world, asked.actorCharacterId));
     expect(moved.rejected).toEqual([]);
     const counted = holdVotes({ world: { ...moved.world, elapsedStep: DAY + 12 }, offices, toDay: DAY + 12, ids: createIdFactory("corvus") });
     const adopted = counted.world.doctrines.find((doctrine) => doctrine.polityId === "rome" && /corvus/iu.test(doctrine.label))!;

@@ -181,7 +181,7 @@ export async function answerALetterNow(input: LetterAnswerNowInput): Promise<Let
   const kept = {
     decidedOnDay: world.elapsedStep,
     comesOnDay,
-    deltas: acts.map((act) => ({ ...act }) as Record<string, unknown>),
+    deltas: acts.map((act) => ({ ...act })),
   };
   return {
     status: "decided",

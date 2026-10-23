@@ -12,7 +12,7 @@ const read = (state: WorldState, facts: Fact[] = [], characterId: string | null 
 const report = (state: WorldState, id: string, men: number, day = state.elapsedStep): Fact => FactSchema.parse({
   id, time: { day, minute: 0 }, atStep: day, kind: "sighting", summary: `Account ${id}`,
   visibility: "public", discovery: { state: "public", discoveredBy: [] },
-  forcesAsReported: [{ forceId: state.material.forces[0]!.id, men, locationId: state.characters.find((person) => person.id === "gaius-genucius")!.locationProvinceId! }],
+  forcesAsReported: [{ forceId: state.material.forces[0]!.id, men, locationId: state.characters.find((person) => person.id === "gaius-genucius")!.locationProvinceId }],
 });
 
 describe("office information from records the player can read", () => {

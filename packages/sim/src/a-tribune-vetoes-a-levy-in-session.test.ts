@@ -54,7 +54,7 @@ describe("a tribune vetoes a levy in session", () => {
     const { world, consul, tribunes } = levyBefore(["levy", "taxes", "war"], "Motion of a consul: that a levy of six legions be held and a war tax laid");
     let hated = world;
     for (const id of tribunes) hated = ill(hated, id, consul, -90);
-    const sat = keepTheBodies(input(hated, tribunes[0]!));
+    const sat = keepTheBodies(input(hated, tribunes[0]));
     expect(sat.world.material.supportPositions.some((p) => p.procedureId === "levy-1" && p.supporterId === tribunes[0])).toBe(false);
   });
 });

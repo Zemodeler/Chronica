@@ -60,7 +60,7 @@ function withCarthageHoldingSicily(world: WorldState): WorldState {
     characters.push({
       id: officer.id, name: officer.name, cultureId: "carthaginian", faithId: "faith-punic", dynastyId: null, locationProvinceId: officer.locationId, polityId: "carthage",
       ageYearsAtStart: officer.age, officeId: null, personalAccountId: `${officer.id}-purse`, skills, traits: ["disciplined"],
-      mind: deriveDefaultMind({ id: officer.id, officeId: null, skills: skills as never, ageYears: officer.age, cultureId: "carthaginian" }),
+      mind: deriveDefaultMind({ id: officer.id, officeId: null, skills: skills, ageYears: officer.age, cultureId: "carthaginian" }),
       healthBps: 8_800, prestigeBps: 3_500, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null,
     });
     accounts.push({ id: `${officer.id}-purse`, owner: { kind: "character", id: officer.id }, currencyId: "drachma", balance: 6_000, status: "active", visibility: "private" });

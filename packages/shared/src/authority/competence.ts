@@ -12,7 +12,6 @@ import {
   ACT_KINDS,
   ACT_WORDS,
   type ActKind,
-  type Charge,
   type ChargeRule,
   type CompetenceGrade,
 } from "./charge-vocabulary";
@@ -348,7 +347,7 @@ function spendingLine(read: Reading, body: BodyRef | null, months: number): Line
 function line(read: Reading, act: ActKind): ActCompetence {
   const { world, office, constitution } = read;
   const body = bodyFor(world, office.polityId, act, constitution, read.scenarioOffices);
-  const written: ChargeRule | undefined = (office.charge as Charge | undefined)?.[act];
+  const written: ChargeRule | undefined = (office.charge)?.[act];
   // An ally bound by foedus makes no war or peace but its leader's (apply-deltas holds it to it too): not its head, nor any magistrate of it.
   const bound = read.leader !== null && (act === "war" || act === "peace");
   const base: Line = bound ? { grade: "forbidden" } : written ?? derive(read, act, body);
@@ -367,7 +366,7 @@ function line(read: Reading, act: ActKind): ActCompetence {
   const shown = spendBody ?? body;
   const whoDecides = shown !== null ? `the ${shown.name.replace(/^thes+/iu, "")}` : read.rulerLabel !== null ? `the ${read.rulerLabel}` : "nobody";
   const whyBeyond = within === null ? "" : `${office.label} may ${ACT_WORDS[act]}${withinWords(act, within)}, and no further: more than that is ${beyond === "by_the_body" ? `laid before ${whoDecides}, and he may move it there` : `for ${whoDecides}`}.`;
-  const why = bound ? `${office.label} may not ${ACT_WORDS[act]}: ${nameOfPower(world, read.leader!)} makes the war and the peace of those bound to it by the foedus.` : sentence(office.label, act, grade, within, shown, read.rulerLabel);
+  const why = bound ? `${office.label} may not ${ACT_WORDS[act]}: ${nameOfPower(world, read.leader)} makes the war and the peace of those bound to it by the foedus.` : sentence(office.label, act, grade, within, shown, read.rulerLabel);
   return { act, grade, within, beyond, body: shown, why, whyBeyond };
 }
 

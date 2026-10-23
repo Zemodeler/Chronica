@@ -7,7 +7,7 @@ import { punicWarsScenario } from "./punic-wars-scenario";
  * Carthage keeps no parties at 270: the evidence is thin (the parties of Hanno the Great and the Barcids are of the 240s and after). But the data has a place for
  * a later scenario to author them, and the place works.
  */
-const world = (): WorldState => structuredClone(punicWarsScenario.initialWorld) as WorldState;
+const world = (): WorldState => structuredClone(punicWarsScenario.initialWorld);
 
 describe("Carthage has no parties at 270, and the data has a hook for a later scenario to write them", () => {
   it("authors none for the opening, and the opening holds no faction of Carthage's", () => {

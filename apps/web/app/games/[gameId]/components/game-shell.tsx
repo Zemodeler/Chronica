@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo, useRef, type PointerEvent } from "react";
-import { applyMapOverlayDelta, DynamicMapOverlaySchema, isGeoJsonMapDocument, MapOverlayDeltaSchema, type GeoJsonMap, type DynamicMapOverlay, type AgendaDestination, type TradeProposalKind, type MatterFocus, type RoomStates, MAP_CHANGE_KINDS } from "@chronica/shared";
+import { applyMapOverlayDelta, DynamicMapOverlaySchema, isGeoJsonMapDocument, MapOverlayDeltaSchema, type GeoJsonMap, type DynamicMapOverlay, type AgendaDestination, type TradeProposalKind, type RoomStates, MAP_CHANGE_KINDS } from "@chronica/shared";
 import type { RoomContents } from "../../../../lib/room-service";
 
 // A map document never changes at its version, so each version is downloaded
@@ -251,12 +251,6 @@ export function GameShell({
     },
     onOpenEntry: openChronicleEntry,
   }), [room, gameId, openChronicleEntry]);
-  // Matters in hand's way into the record: at the thread of the row chosen.
-  const openChronicleAt = useCallback((focus: MatterFocus) => {
-    openSurface("chronicle");
-    setChronicleFocus({ filter: focus, entryId: null });
-  }, [openSurface]);
-
   // The agenda's way to the sheet an item belongs to, at the page and the row.
   const goTo = useCallback((to: AgendaDestination) => {
     setPlace("office");

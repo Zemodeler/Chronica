@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { punicWarsScenario } from "@chronica/db";
 import {
   EMPTY_ECONOMY_MEMORY, ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, ensureProvinceMaterial, provinceTaxCapacity, taxBurdens,
-  type WorldDelta, type WorldState,
+  type WorldState,
 } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
@@ -35,7 +35,7 @@ const context = (actor: string): ApplyContext => ({
   actsForTheWorld: true,
 });
 const apply = (world: WorldState, deltas: readonly unknown[], actor = "hanno-carthage") =>
-  applyDeltas(world, deltas.map((delta) => WorldDeltaSchema.parse(delta) as WorldDelta), context(actor));
+  applyDeltas(world, deltas.map((delta) => WorldDeltaSchema.parse(delta)), context(actor));
 
 const initial = punicWarsScenario.initialWorld;
 const holderOf = (world: WorldState, id: string) => world.map.provinces.find((province) => province.id === id)!.controllerPolityId;

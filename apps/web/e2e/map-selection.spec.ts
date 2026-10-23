@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { punicWarsScenario } from "@chronica/db";
-import type { GeoJsonMapFeature, GeoJsonPosition } from "@chronica/shared";
+import type { GeoJsonPosition } from "@chronica/shared";
 import { computeViewBox } from "../app/games/[gameId]/components/geo-projection";
 import { PUNIC_WARS_MAP_ASSET_ID, builtInScenarioMap } from "../lib/built-in-scenario-maps";
 import { enterTheWorld, placeTab, theMap, waitForTheOffice } from "./fixture";
@@ -59,7 +59,7 @@ function gaetuliGround(): { provinceId: string; lon: number; lat: number } {
   const map = builtInScenarioMap(PUNIC_WARS_MAP_ASSET_ID)!;
   const held = new Set(punicWarsScenario.initialWorld.map.provinces.filter((province) => province.controllerPolityId === "gaetuli").map((province) => province.id));
   let best: { provinceId: string; lon: number; lat: number; area: number } | undefined;
-  for (const feature of map.features as GeoJsonMapFeature[]) {
+  for (const feature of map.features) {
     if (feature.properties.kind !== "province" || !held.has(String(feature.id))) continue;
     const g = feature.geometry;
     const polygons = g.type === "Polygon" ? [g.coordinates] : g.type === "MultiPolygon" ? g.coordinates : [];

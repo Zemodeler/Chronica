@@ -5,7 +5,6 @@ import { applyDeltas } from "./apply/apply-deltas";
 import { createIdFactory } from "./ports";
 import { keepPromises } from "./promises";
 import { settleRatifications } from "./ratification";
-import type { ApplyContext } from "./apply/context";
 
 /**
  * Hand run as Hannibal Gisco (docs/reports/hand-run-reports.md, H2): every treaty undertaking was
@@ -34,7 +33,7 @@ describe("a treaty's undertakings", () => {
     const waiting = accepted.world.diplomacy.find((message) => message.ratification?.status === "waiting");
     if (waiting === undefined) return accepted.world;
     const voted = { ...accepted.world, material: { ...accepted.world.material, politicalProcedures: accepted.world.material.politicalProcedures.map((procedure) => procedure.id === waiting.ratification!.procedureId ? { ...procedure, outcome: "passed" as const } : procedure) } };
-    return settleRatifications(voted, { now: voted.instant, actorRef: { kind: "character", id: "hannibal-gisco" }, offices: definition.government.offices, warfare: definition.warfare, ids: createIdFactory("ratify"), gameId: "keep-test", playerCharacterId: "hannibal-gisco" } as ApplyContext).world;
+    return settleRatifications(voted, { now: voted.instant, actorRef: { kind: "character", id: "hannibal-gisco" }, offices: definition.government.offices, warfare: definition.warfare, ids: createIdFactory("ratify"), gameId: "keep-test", playerCharacterId: "hannibal-gisco" }).world;
   };
 
   it("keeps a promise not to make war by holding back, and a sheltering by the man whose fleet it is", () => {

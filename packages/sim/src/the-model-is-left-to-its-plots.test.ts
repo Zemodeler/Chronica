@@ -50,7 +50,7 @@ const player = readDepartments(world).rulers("rome").find((candidate) => candida
 const ask = { actorId: ruler.id, playerId: player.id, playerPolityId: "rome" };
 const aProvince = world.map.provinces.find((province) => province.controllerPolityId === P)!.id;
 const chestOf = (polityId: string): string => world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === polityId)!.id;
-const purseOf = (id: string): string => world.characters.find((character) => character.id === id)!.personalAccountId!;
+const purseOf = (id: string): string => world.characters.find((character) => character.id === id)!.personalAccountId;
 
 const tax = parse({ op: "tax_policy_set", scope: "polity", polityId: P, regime: "tithe", rateBps: 1_400, reason: "test" });
 const debase = parse({ op: "coinage_debase", coinageId: "x", stepBps: -1_500, reason: "test" });
@@ -185,12 +185,10 @@ describe("what a ruler reads in his own section", () => {
 describe("a model's management act in a burst", () => {
   let skipped: readonly { stage: string; reason: string }[] = [];
   let asked = 0;
-  let calls = 0;
   beforeAll(async () => {
     // Every person asked proposes to raise his power's tax and, with it, to pay somebody off.
     const port: SimModelPort = {
       complete(operation, _system, userMessage) {
-        calls += 1;
         if (operation === "simulate_orchestrate") return Promise.resolve(JSON.stringify({ intent: { summary: "Wait.", domains: ["administration"] }, narrativeSummary: "w", deltas: [], facts: [], outcome: "continue" }));
         if (operation !== "simulate_cognition") return Promise.resolve("{}");
         const people = [...userMessage.matchAll(/^## .* \[([^\]]+)\]$/gm)].map((match) => match[1]!);

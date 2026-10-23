@@ -17,7 +17,7 @@ describe("a power on an ally's ground is a rival", () => {
   const opening = (): WorldState => ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
   const allied = (world: WorldState): WorldState => applyDeltas(world, [WorldDeltaSchema.parse({
     op: "agreement_open", localId: "rome-and-the-mamertines", kind: "alliance", polityId: "rome", otherPolityId: "mamertines", terms: "Rome and the Mamertines are allies.", forDays: null, sourceMessageRef: null, visibility: "public", reason: "Allies.",
-  })], context(world, "gaius-genucius") as never).world;
+  })], context(world, "gaius-genucius")).world;
   const sees = (world: WorldState): string[] => (readBoard(world).get("rome")?.neighbours ?? []).map((neighbour) => neighbour.polityId);
 
   it("is not one while nobody of ours stands where its army is", () => {

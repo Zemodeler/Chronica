@@ -11,7 +11,7 @@ import {
   withIncome,
   withWar,
 } from "./fiscal-test-kit";
-import { EXTREMIS_TAX_CEILING_BPS, PROJECTED_BURDEN_CEILING, TAX_COOLDOWN_DAYS, TAX_FLOOR_BPS, WAR_TAX_CEILING_BPS, decideFiscal, fiscalSliceLine } from "./fiscal-officers";
+import { EXTREMIS_TAX_CEILING_BPS, PROJECTED_BURDEN_CEILING, TAX_COOLDOWN_DAYS, WAR_TAX_CEILING_BPS, decideFiscal, fiscalSliceLine } from "./fiscal-officers";
 import { keepDepartments } from "./departments";
 
 /**

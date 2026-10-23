@@ -326,7 +326,7 @@ export function planTheWar(ctx: StrategyContext, enemy: string, war: PolityAgree
   const sameAims = existing !== undefined && sameAimSet(existing.aims, aims);
   const plan: WarPlan = {
     warId: war?.id ?? existing?.warId ?? "no-war", polityId, enemyPolityId: enemy, aims: aims.length === 0 ? existing?.aims ?? [] : aims, theatres: allotted,
-    posture: posture.posture, reviewedAtStep: day, aimsSetAtStep: day, aimsChangedAtStep: sameAims && existing!.posture === posture.posture ? existing!.aimsChangedAtStep : day,
+    posture: posture.posture, reviewedAtStep: day, aimsSetAtStep: day, aimsChangedAtStep: sameAims && existing.posture === posture.posture ? existing.aimsChangedAtStep : day,
     issuedByCharacterId: ctx.ruler.id,
     ...(existing?.navalPlan === undefined ? {} : { navalPlan: existing.navalPlan }),
   };

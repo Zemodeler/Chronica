@@ -39,7 +39,7 @@ export const FOLLOWS_PER_MISSED_PCT = 25;
 const MOST_FOLLOWS_PCT = 90;
 
 /** The chance, in a hundred, that a band follows its captain over. */
-export function followsHim(world: WorldState, force: Pick<Force, "id" | "payObligationId">, man: Pick<Character, "id">): number {
+export function followsHim(world: WorldState, force: Pick<Force, "id" | "payObligationId">, _man: Pick<Character, "id">): number {
   const pay = world.material.obligations.find((obligation) => obligation.id === force.payObligationId);
   return Math.min(MOST_FOLLOWS_PCT, FOLLOWS_PAID_PCT + FOLLOWS_PER_MISSED_PCT * (pay?.missedPeriods ?? 0));
 }

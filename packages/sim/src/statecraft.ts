@@ -1,7 +1,6 @@
 import {
   FactProposalSchema,
   PEACE_AT,
-  TRUCE_AT,
   WorldDeltaSchema,
   agreementsBetween,
   aptitude,
@@ -21,7 +20,6 @@ import {
   warPlanLine,
   warPlanOf,
   warWeariness,
-  warsOf,
   type Character,
   type DiplomaticMessage,
   type FactProposal,
@@ -1022,7 +1020,7 @@ export function commandersTemper(commander: Character | undefined): { readonly w
 }
 
 /** What a general who is not a ruler is shown of the war: his own orders and the head's plan, in one line. */
-function generalsLine(world: WorldState, characterId: string, nameOf: (id: string) => string): string[] {
+function generalsLine(world: WorldState, characterId: string, _nameOf: (id: string) => string): string[] {
   const force = world.material.forces.find((candidate) => (candidate.commanderCharacterId === characterId || candidate.controllerCharacterId === characterId) && fitStrengthOf(candidate) > 0);
   if (force === undefined) return [];
   const orders = campaignOf(world, force.id);

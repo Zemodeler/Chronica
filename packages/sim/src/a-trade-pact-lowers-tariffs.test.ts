@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { punicWarsScenario } from "@chronica/db";
-import { ScenarioDefinitionSchema, WorldDeltaSchema, customsOn, economyOf, tradeTermsBetween, type WorldState } from "@chronica/shared";
+import { ScenarioDefinitionSchema, WorldDeltaSchema, customsOn, tradeTermsBetween, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
 import { createIdFactory } from "./ports";

@@ -29,7 +29,7 @@ describe("a king has no accounts to render", () => {
     const found = (() => {
       for (let day = 400; day <= 760; day += 30) {
         const there = atDay(base, day);
-        const made = decideAudits({ ...fiscalInput(there, "rome"), warfare: undefined as never }).filter((d) => d.polityId === "ptolemaic-egypt");
+        const made = decideAudits({ ...fiscalInput(there, "rome"), warfare: undefined }).filter((d) => d.polityId === "ptolemaic-egypt");
         if (made.length > 0) return { day, made, there };
       }
       return undefined;
@@ -43,7 +43,7 @@ describe("a king has no accounts to render", () => {
     expect(done.world.audits.some((audit) => audit.status === "under_way" && audit.scope.id === "ptolemaic-egypt")).toBe(true);
     // Not twice in a season: once it is in the log, the next months have none.
     const logged = { ...done.world, statecraft: { ...done.world.statecraft, log: [...done.world.statecraft.log, { day: found!.day, polityId: "ptolemaic-egypt", actorCharacterId: decision!.actorCharacterId, act: "magistrate" as const, targetPolityId: null, why: decision!.why }] } };
-    expect(decideAudits({ ...fiscalInput(atDay(logged, found!.day + 30), "rome"), warfare: undefined as never }).filter((d) => d.polityId === "ptolemaic-egypt")).toEqual([]);
+    expect(decideAudits({ ...fiscalInput(atDay(logged, found!.day + 30), "rome"), warfare: undefined }).filter((d) => d.polityId === "ptolemaic-egypt")).toEqual([]);
   });
 
   it("judges an officer the audit found short, himself: put out and made to pay, the friend who spoke named", () => {
@@ -68,8 +68,8 @@ describe("a king has no accounts to render", () => {
 
   it("is the same on every run", () => {
     const base = fiscalOpening(400);
-    const a = decideAudits({ ...fiscalInput(atDay(base, 640), "rome"), warfare: undefined as never });
-    const b = decideAudits({ ...fiscalInput(atDay(structuredClone(base), 640), "rome"), warfare: undefined as never });
+    const a = decideAudits({ ...fiscalInput(atDay(base, 640), "rome"), warfare: undefined });
+    const b = decideAudits({ ...fiscalInput(atDay(structuredClone(base), 640), "rome"), warfare: undefined });
     expect(JSON.stringify(a)).toBe(JSON.stringify(b));
   });
 });

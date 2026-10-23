@@ -12,7 +12,7 @@ function letter(id: string, overrides: Partial<DiplomaticMessage> = {}): Diploma
     subject: "An ultimatum", terms: "Give back the ground within 30 days, or war.", sentAtStep: 100, replyDueByStep: 130,
     status: "awaiting_reply", answer: null, answerText: null, answeredAtStep: null, inReplyToMessageId: null, visibility: "polity", onRefusal: "war",
     ...overrides,
-  } as DiplomaticMessage;
+  };
 }
 
 /** A world in which the rules wrote these letters to Rome, the player's power, today. */

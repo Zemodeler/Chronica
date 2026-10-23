@@ -122,13 +122,13 @@ export function continueMissions(input: FieldworkInput): { world: WorldState; fa
         if (overtakenByLater(world, original.id, actor.id, new Set([army.id]), [quarry.name, quarry.name.split(/\s+of\s+/i)[0]!])) continue;
         const reference = (id: string): string => id;
         const deltas: WorldDelta[] = [];
-        if (army.hold === true) deltas.push({ op: "force_modify", forceRef: reference(army.id), hold: false, reason: `The order to destroy ${quarry.name} lifts the hold on ${army.name}.` } as WorldDelta);
+        if (army.hold === true) deltas.push({ op: "force_modify", forceRef: reference(army.id), hold: false, reason: `The order to destroy ${quarry.name} lifts the hold on ${army.name}.` });
         const journeys = world.projects.filter((project) => project.status === "in_progress" && project.completionOutcome?.kind === "force_move" && project.completionOutcome.forceId === army.id);
         const sentThere = journeys.some((project) => project.completionOutcome?.provinceId === quarry.locationId || project.completionOutcome?.embarkProvinceId === quarry.locationId);
         if (army.locationId !== quarry.locationId) {
-          if (!sentThere) deltas.push({ op: "force_modify", forceRef: reference(army.id), locationId: quarry.locationId, reason: `To find and destroy ${quarry.name}, as ordered.` } as WorldDelta);
+          if (!sentThere) deltas.push({ op: "force_modify", forceRef: reference(army.id), locationId: quarry.locationId, reason: `To find and destroy ${quarry.name}, as ordered.` });
         } else if (engagementOf(world.engagements, army.id) === undefined) {
-          deltas.push({ op: "force_engage", forceRef: reference(army.id), targetForceRef: reference(quarry.id), posture: "offer_battle", tactic: null, reason: `To destroy ${quarry.name}, as ordered.` } as WorldDelta);
+          deltas.push({ op: "force_engage", forceRef: reference(army.id), targetForceRef: reference(quarry.id), posture: "offer_battle", tactic: null, reason: `To destroy ${quarry.name}, as ordered.` });
         }
         if (deltas.length === 0) continue;
         const context = {
@@ -215,7 +215,7 @@ export function continueMissions(input: FieldworkInput): { world: WorldState; fa
 
       // 2. The march.
       if (mission.locationId !== province.id) {
-        const journeys = world.projects.filter((project) => project.status === "in_progress" && project.completionOutcome?.kind === "force_move" && project.completionOutcome.forceId === mission!.id);
+        const journeys = world.projects.filter((project) => project.status === "in_progress" && project.completionOutcome?.kind === "force_move" && project.completionOutcome.forceId === mission.id);
         if (journeys.length > 0) {
           const known = new Set(part.workRefs.filter((ref) => ref.kind === "project").map((ref) => ref.id));
           const fresh = journeys.filter((project) => !known.has(project.id));
@@ -264,7 +264,7 @@ export function continueMissions(input: FieldworkInput): { world: WorldState; fa
         continue;
       }
       for (const wall of walled) {
-        const standing = world.sieges.some((siege) => siege.status === "active" && siege.forceId === mission!.id && siege.provinceId === province.id && siege.settlementId === wall.id);
+        const standing = world.sieges.some((siege) => siege.status === "active" && siege.forceId === mission.id && siege.provinceId === province.id && siege.settlementId === wall.id);
         if (standing) continue;
         const siegeId = input.ids.next("siege");
         world = { ...world, sieges: [...world.sieges, {

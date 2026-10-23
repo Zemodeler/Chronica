@@ -19,7 +19,7 @@ const appealLetter = (world: WorldState): DiplomaticMessage => ({
   id: "msg-messana-appeal", kind: "military_aid_request", fromPolityId: "mamertines", fromCharacterId: "mamertine-spokesman", toPolityId: "rome", toCharacterId: null,
   subject: "Messana asks Rome for help", terms: "The Mamertines ask Rome to take Messana under its protection against the Carthaginians in the citadel.", sentAtStep: world.elapsedStep - 20,
   replyDueByStep: null, status: "awaiting_reply", answer: null, answerText: null, answeredAtStep: null, inReplyToMessageId: null, visibility: "polity",
-} as DiplomaticMessage);
+});
 
 /** A Carthaginian company in Messana: the garrison that came when the Mamertines asked. */
 function withGarrisonInMessana(world: WorldState): WorldState {
@@ -34,7 +34,7 @@ const refused = (world: WorldState): PoliticalProcedure => ({
   label: "Motion of Gaius Genucius: that war be made on Carthage", eligibilityRequirementIds: [], eligibleParticipantIds: [], stage: "resolved", resolutionMechanism: "vote",
   openedAtStep: world.elapsedStep - 15, deadlineStep: world.elapsedStep - 5, resolvedAtStep: world.elapsedStep - 5, visibility: "public", voteRecordId: null, outcome: "failed",
   outcomeReason: null, sourceEventIds: [], resultingEventIds: [], concerns: ["war"],
-} as PoliticalProcedure);
+});
 
 /** The assembly's blocs set to want a war, or not. */
 const minded = (world: WorldState, support: number): WorldState => ({

@@ -5,14 +5,12 @@ import {
   fitStrengthOf,
   isNavalForce,
   isWinterMonth,
-  kmFrom,
   passagePlanFor,
   type Character,
   type Force,
   type CampaignMode,
   type CampaignPlan,
   type StatecraftAct,
-  type WarAim,
   type WarPlan,
   type WarTheatre,
   type WorldDelta,
@@ -34,7 +32,6 @@ import { safeLocalId } from "./safe-local-id";
  * a stronger army before him, his bread gone, the object taken, the siege relieved. Nothing is chosen anew each month.
  */
 
-const BY_LAND = { passable: (edge: { readonly crossing: string }) => edge.crossing !== "sea_lane" && edge.crossing !== "strait" };
 /** Odds an army takes battle at, as before: beaten odds, and on its own ground to drive an invader off. */
 const ATTACK_ODDS = 1.3;
 const DEFEND_ODDS = 0.9;

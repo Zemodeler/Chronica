@@ -7,7 +7,7 @@ import type { Books } from "../material/books";
 import { GOVERNMENT_FORM_IN_WORDS, chamberHolds, type ChamberPower } from "../political-parts";
 import { SPENDING_YEAR_DAYS } from "../world/act-marks";
 import { formatWorldDate, type ScenarioClock } from "../world/clock";
-import { leverDefinition, readDepartments, type LeverId } from "../world/departments";
+import { leverDefinition, readDepartments } from "../world/departments";
 import type { WorldState } from "../world/world-state";
 import type { Administration } from "./administration";
 import { ACT_KINDS, ACT_WORDS, type ActKind, type CompetenceGrade } from "./charge-vocabulary";
@@ -597,7 +597,7 @@ function stoppersOf(ctx: Context, scenarioOffices: readonly Office[]): Map<ActKi
   return found;
 }
 
-function chargeOf(ctx: Context, office: Office, seat: WorldState["material"]["officeSeats"][number], scenarioOffices: readonly Office[], options: OfficeViewOptions): ChargeView | null {
+function chargeOf(ctx: Context, office: Office, seat: WorldState["material"]["officeSeats"][number], scenarioOffices: readonly Office[], _options: OfficeViewOptions): ChargeView | null {
   const competence = competenceOf(ctx.world, office.id, scenarioOffices);
   const rule = ctx.rules.get(office.successionRuleId);
   const chambers = chambersOf(ctx.world, ctx.polityId);
@@ -629,8 +629,8 @@ function chargeOf(ctx: Context, office: Office, seat: WorldState["material"]["of
     for (const lever of department.levers) {
       if (seenLevers.has(lever)) continue;
       seenLevers.add(lever);
-      const skill = Math.round(reader.skill({ kind: "polity", id: ctx.polityId }, lever as LeverId));
-      levers.push({ lever, words: leverDefinition(lever as LeverId).words, skill, skillWords: skillWords(skill), byRule: BY_RULE[lever] ?? null });
+      const skill = Math.round(reader.skill({ kind: "polity", id: ctx.polityId }, lever));
+      levers.push({ lever, words: leverDefinition(lever).words, skill, skillWords: skillWords(skill), byRule: BY_RULE[lever] ?? null });
     }
   }
   const department = departments[0] === undefined ? null : { key: departments[0].id, name: departments[0].name };

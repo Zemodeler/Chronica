@@ -27,7 +27,7 @@ export function atWar(day = 90): WorldState {
   let world = ensureConstitutions({ world: ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0), government: { offices: definition.government.offices, successionRules: definition.government.successionRules }, toDay: day });
   world = { ...world, instant: { ...world.instant, day }, elapsedStep: day };
   const open = WorldDeltaSchema.parse({ op: "agreement_open", localId: "kit-war", kind: "war", polityId: "carthage", otherPolityId: "rome", terms: "The war for Sicily.", forDays: null, sourceMessageRef: null, visibility: "public", reason: "War." });
-  return applyDeltas(world, [open], context(world, PLAYER) as never).world;
+  return applyDeltas(world, [open], context(world, PLAYER)).world;
 }
 
 export const context = (world: WorldState, actor: string, gameId = "war-plan-kit") => ({
@@ -49,7 +49,7 @@ export function aMonth(world: WorldState, over: Partial<StatecraftInput> = {}): 
   const facts: string[] = [];
   for (const decision of decisions) {
     if (decision.deltas.length === 0) continue;
-    const applied = applyDeltas(next, [...decision.deltas], context(next, decision.actorCharacterId) as never);
+    const applied = applyDeltas(next, [...decision.deltas], context(next, decision.actorCharacterId));
     facts.push(...applied.factProposals.map((fact) => fact.summary));
     next = applied.world;
   }
@@ -102,7 +102,7 @@ export function strategyCtx(world: WorldState, polityId: string, enemies: readon
 export function aSiegeLaid(world: WorldState): WorldState {
   const before = placed(world, "roman-field-army", "afr-9sdex");
   const lay = WorldDeltaSchema.parse({ op: "siege_lay", localId: "kit-siege", forceRef: "roman-field-army", settlementId: null, reason: "The siege is laid." });
-  return applyDeltas(before, [lay], context(before, "gaius-genucius") as never).world;
+  return applyDeltas(before, [lay], context(before, "gaius-genucius")).world;
 }
 
 /** The first day of a winter, and of a summer, in the scenario's own calendar. */

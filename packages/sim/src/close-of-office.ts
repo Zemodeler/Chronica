@@ -86,7 +86,7 @@ export const CLEARED_STANDING_BPS = 150;
 /** The most findings a power's accounts make in a month, and the log's marks. */
 export const FINDINGS_A_MONTH = 1;
 
-const fact = (raw: Record<string, unknown>): FactProposalDraft => FactProposalSchema.parse(raw) as unknown as FactProposalDraft;
+const fact = (raw: Record<string, unknown>): FactProposalDraft => FactProposalSchema.parse(raw);
 
 const monthOf = (day: number): number => Math.floor(day / MONTH);
 

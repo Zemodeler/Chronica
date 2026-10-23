@@ -296,7 +296,7 @@ describe("the words of the age", () => {
     const { world: there, id } = privateMan(world);
     for (const [from, who] of [[world, CONSUL], [world, QUAESTOR], [world, TRIBUNE], [world, SUFFETE], [world, ELDER], [world, KING], [there, id]] as const) {
       const view = read(who, from);
-      const text = JSON.stringify(view, (_key, value) => (typeof value === "string" ? value : value)).replace(/"[a-zA-Z]+":/g, " ");
+      const text = JSON.stringify(view, (_key, value: unknown) => (typeof value === "string" ? value : value)).replace(/"[a-zA-Z]+":/g, " ");
       expect(modernWordsIn(text), who).toEqual([]);
       for (const draft of view.drafts) expect(modernWordsIn(`${draft.direct ?? ""} ${draft.laid ?? ""} ${draft.note}`), draft.key).toEqual([]);
     }

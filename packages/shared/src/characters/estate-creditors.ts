@@ -120,10 +120,10 @@ export function payTheCreditors(input: CreditorsInput): CreditorsResult {
     : world.material.accounts.find((account) => account.owner.kind === kind && account.owner.id === id && account.status === "active" && !held.has(account.id)));
 
   // ── What he owed, and what he left ────────────────────────────────────────
-  const claims: Claim[] = loans.map((loan) => {
+  const claims: Claim[] = loans.map((loan): Claim => {
     const to = loan.lenderKind === "foreign" ? null : accountOf(loan.lenderKind, loan.lenderId);
     const pledged = loan.collateralHoldingId !== null && input.holdingIds.includes(loan.collateralHoldingId);
-    return { loan, left: loan.outstanding, to, tier: pledged ? 1 : loan.lenderKind === "polity" ? 2 : 3 } as Claim;
+    return { loan, left: loan.outstanding, to, tier: pledged ? 1 : loan.lenderKind === "polity" ? 2 : 3 };
   }).sort((a, b) => a.loan.id.localeCompare(b.loan.id));
   const balances = new Map(input.accounts.map((account) => [account.id, Math.max(0, account.balance)]));
   const coin = [...balances.values()].reduce((sum, balance) => sum + balance, 0);

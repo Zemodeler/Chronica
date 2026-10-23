@@ -7,7 +7,7 @@ import { stockedWorld } from "./grain-test-kit";
 import { decideMagistrates } from "./magistrates";
 import { forcesUnder, matchOrderTemplates, supplyDelegateOf } from "./order-templates";
 import type { SimModelPort, SimOperation } from "./ports";
-import { CONTRACT_FROM_MEN, chestOfPower, planSupply } from "./supply-plan";
+import { CONTRACT_FROM_MEN, planSupply } from "./supply-plan";
 
 /**
  * Find supply for my army (the user's rule, 2026-10-08): "Orders from a player should still be automatic: an order like 'find supply for my army' should automatically

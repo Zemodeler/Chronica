@@ -34,7 +34,7 @@ describe("the people vote the war", () => {
     const done = ratifyTheWar(inputOf(world));
     const entity = done.world.genericEntities.find((e) => e.kind === "ratification")!;
     expect(entity.attributes).toMatchObject({ carried: true, procedureId: "motion-war" });
-    expect(Number(entity.attributes!["yes"])).toBeGreaterThan(Number(entity.attributes!["no"]));
+    expect(Number(entity.attributes["yes"])).toBeGreaterThan(Number(entity.attributes["no"]));
     expect(legit(done.world)).toBeGreaterThan(legit(world));
     expect(done.facts[0]!.kind).toBe("war_ratified");
     expect(done.facts[0]!.summary).toMatch(/ratified what the Senate had carried, by \d+ to \d+/);
@@ -68,7 +68,7 @@ describe("the people vote the war", () => {
 
   it("counts the people who stayed behind: the men under arms do not vote", () => {
     const { world } = motion(minded(base, 100));
-    const present = (w: WorldState) => Number(ratifyTheWar(inputOf(w)).world.genericEntities.find((e) => e.kind === "ratification")!.attributes!["present"]);
+    const present = (w: WorldState) => Number(ratifyTheWar(inputOf(w)).world.genericEntities.find((e) => e.kind === "ratification")!.attributes["present"]);
     const field = world.map.provinces.find((p) => p.controllerPolityId === "rome" && !p.settlements.some((s) => s.id === world.map.polities.find((x) => x.id === "rome")!.capitalSettlementId))!.id;
     const template = world.material.forces.find((f) => f.polityId === "rome")!;
     const armies = Array.from({ length: 20 }, (_, n) => ({ ...template, id: `levy-${n}`, polityId: "rome", locationId: field, personnel: template.personnel.map((p) => ({ ...p, fit: 20_000 })) }));

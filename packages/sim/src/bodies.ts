@@ -87,7 +87,7 @@ export function cityIsOpen(world: WorldState, polityId: string): boolean {
   return !world.sieges.some((siege) => siege.status === "active" && siege.provinceId === province.id && siege.defenderPolityId === polityId);
 }
 
-const fact = (raw: Record<string, unknown>): FactProposalDraft => FactProposalSchema.parse(raw) as unknown as FactProposalDraft;
+const fact = (raw: Record<string, unknown>): FactProposalDraft => FactProposalSchema.parse(raw);
 
 export interface BodiesInput {
   readonly world: WorldState;
@@ -412,7 +412,7 @@ export function consultTheFriends(world: WorldState, polityId: string, ruler: Ch
     id: `consult-${polityId}`, type: "council_deliberation", institutionId: council.id, sponsorCharacterId: ruler.id, subjectKind: "polity", subjectId: polityId, label: `Motion of ${ruler.name}: that ${matter.label}`.slice(0, 200),
     eligibilityRequirementIds: [], eligibleParticipantIds: [], stage: "gathering_support", resolutionMechanism: "vote", openedAtStep: world.elapsedStep, deadlineStep: world.elapsedStep,
     resolvedAtStep: null, visibility: "polity", voteRecordId: null, outcome: null, outcomeReason: null, sourceEventIds: [], resultingEventIds: [], concerns: [...matter.concerns],
-  } as PoliticalProcedure;
+  };
   const record = countVote("forecast", sketch, council, blocLeanings(world, sketch, council), world.elapsedStep);
   const against = record.outcome === "failed";
   if (!against) return { against: false, heeds: false, council, cost: null };

@@ -155,7 +155,7 @@ describe("a promise to put a question", () => {
     id: "c1", promisorCharacterId: "gnaeus-cornelius", beneficiaryCharacterId: CONSUL, actionKind: "political_support", description, conditions: "",
     requiredOfficeId: null, requiredResource: null, visibility: "private", sourceEventId: "e1", breachPressureKind: "humiliation",
     status: "pending", createdAtStep: 0, reviewAtStep: 6, resolvedAtStep: null, resolutionReason: null,
-  } as Commitment);
+  });
 
   it("is his to keep, not an occasion that lapses", () => {
     const world = { ...opening(), elapsedStep: 6, instant: { day: 6, minute: 0 }, commitments: [promise("I will carry the Sicilian matter before the Senate and seek its decree.")] };

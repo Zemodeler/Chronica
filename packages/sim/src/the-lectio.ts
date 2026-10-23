@@ -41,7 +41,7 @@ export const LECTIO_WINDOW_DAYS = 150;
 export const THEFT_HELD_DAYS = 1_800;
 
 const MONTH = 30;
-const fact = (raw: Record<string, unknown>): FactProposalDraft => FactProposalSchema.parse(raw) as unknown as FactProposalDraft;
+const fact = (raw: Record<string, unknown>): FactProposalDraft => FactProposalSchema.parse(raw);
 
 export interface Reading {
   readonly score: number;

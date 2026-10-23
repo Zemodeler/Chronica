@@ -26,7 +26,6 @@ describe("a government month", () => {
     const t1 = performance.now();
     const sat = keepTheBodies({ world, offices: government.offices, successionRules: government.successionRules, toDay: 240 });
     const bodies = performance.now() - t1;
-    // eslint-disable-next-line no-console
     console.log(`a government month: magistrates ${magistrates.toFixed(1)} ms (${first.length} decisions), bodies ${bodies.toFixed(1)} ms`);
     expect(magistrates).toBeLessThan(250);
     expect(bodies).toBeLessThan(250);
@@ -39,7 +38,6 @@ describe("a government month", () => {
     const t = performance.now();
     decideStatecraft(base);
     const all = performance.now() - t;
-    // eslint-disable-next-line no-console
     console.log(`the world's whole monthly pass (statecraft with the books and the magistrates): ${all.toFixed(1)} ms`);
     expect(all).toBeLessThan(1_500);
   });

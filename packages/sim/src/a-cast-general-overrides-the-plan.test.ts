@@ -23,7 +23,7 @@ describe("a general the model plays overrides the plan", () => {
   const given = WorldDeltaSchema.parse({
     op: "campaign_plan_set", forceRef: "second-legion", mode: "siege", objectiveProvinceId: target.id, baseProvinceId: null, fallbackProvinceId: null, days: 120, reason: "Gaius sends the second legion against Carthage's town.",
   });
-  const written = applyDeltas(world, [given], context(world, "gaius-genucius") as never);
+  const written = applyDeltas(world, [given], context(world, "gaius-genucius"));
 
   it("is written by the same act and held to the same bounds", () => {
     const plan = written.world.campaigns.find((entry) => entry.forceId === "second-legion")!;
@@ -31,7 +31,7 @@ describe("a general the model plays overrides the plan", () => {
     expect(plan.expiresStep).toBe(world.elapsedStep + 120);
     // No longer than a campaign, and only on ground that is there.
     expect(WorldDeltaSchema.safeParse({ ...given, days: 400 }).success).toBe(false);
-    const nowhere = applyDeltas(world, [WorldDeltaSchema.parse({ ...given, objectiveProvinceId: "no-such-place" })], context(world, "gaius-genucius") as never);
+    const nowhere = applyDeltas(world, [WorldDeltaSchema.parse({ ...given, objectiveProvinceId: "no-such-place" })], context(world, "gaius-genucius"));
     expect(nowhere.rejected.length).toBe(1);
     expect(nowhere.world.campaigns.some((entry) => entry.forceId === "second-legion")).toBe(false);
   });

@@ -723,7 +723,7 @@ function withFoundingPeople<T extends {
         : character));
   const familyLinks = [...((raw as { familyLinks?: readonly unknown[] }).familyLinks ?? []), ...families.familyLinks];
   // And the noble families (v56): every Roman is of a gens, the missing living members are added, the fasti are written into the gentes' honours.
-  const kin = seatGentes(everybody as Record<string, unknown>[], familyLinks as Record<string, unknown>[]);
+  const kin = seatGentes(everybody, familyLinks as Record<string, unknown>[]);
   return {
     ...raw,
     gentes: kin.gentes,

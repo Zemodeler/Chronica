@@ -61,7 +61,7 @@ describe("how a man's own quirks and his liking for the writer decide an answer"
   const request = (kind: DiplomaticMessage["kind"], proposes: DiplomaticMessage["proposes"]): DiplomaticMessage => ({
     id: "q-1", kind, fromPolityId: asker, fromCharacterId: "writer-1", toPolityId: answererPolity, toCharacterId: "answerer-1", subject: "A request", terms: "x",
     sentAtStep: 0, replyDueByStep: 400, status: "awaiting_reply", answer: null, answerText: null, answeredAtStep: null, inReplyToMessageId: null, visibility: "polity", proposes,
-  } as DiplomaticMessage);
+  });
 
   /** An answerer whose mind is exactly the middle of everything, so only what is varied here varies. */
   function answerer(id: string, relation: number | null): Character {

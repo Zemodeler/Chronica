@@ -23,11 +23,11 @@ export function clipOverlong(world: WorldState): { readonly world: WorldState; r
     if (!copy) { current = structuredClone(current); copy = true; }
     for (const issue of tooLong) {
       const maximum = Number((issue as { maximum?: number | bigint }).maximum);
-      let holder: any = current;
-      for (const key of issue.path.slice(0, -1)) holder = holder?.[key as string | number];
+      let holder = current as Record<string | number, unknown> | null | undefined;
+      for (const key of issue.path.slice(0, -1)) holder = holder?.[key as string | number] as Record<string | number, unknown> | null | undefined;
       const last = issue.path[issue.path.length - 1] as string | number | undefined;
       if (holder === undefined || holder === null || last === undefined || typeof holder[last] !== "string" || !Number.isFinite(maximum)) return null;
-      const text: string = holder[last];
+      const text = holder[last];
       holder[last] = `${text.slice(0, Math.max(1, maximum - 1)).trimEnd()}…`.slice(0, maximum);
       clipped.push(issue.path.map(String).join("."));
     }

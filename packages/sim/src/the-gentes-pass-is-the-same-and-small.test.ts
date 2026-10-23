@@ -43,7 +43,6 @@ describe("the gentes pass is the same and small", () => {
     times.sort((a, b) => a - b);
     const median = times[Math.floor(times.length / 2)]!;
     const worst = times[times.length - 1]!;
-    // eslint-disable-next-line no-console
     console.log(`gentes pass: ${start.gentes.length} gentes, ${start.characters.length} characters, median ${median.toFixed(2)} ms, worst ${worst.toFixed(2)} ms`);
     expect(median).toBeLessThan(25);
     expect(worst).toBeLessThan(150);

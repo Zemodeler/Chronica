@@ -92,5 +92,5 @@ export function withTheHonestReply<T extends { readonly output: OrchestratorOutp
   const parts = output.intent.parts.length === 0
     ? [{ said, acts: [], goals: [], spend: null, factLocalIds: [], whyNot: reply }]
     : output.intent.parts.map((part) => ({ ...part, whyNot: reply }));
-  return { ...orchestration, output: { ...output, narrativeSummary: reply, intent: { ...output.intent, parts } } as OrchestratorOutput };
+  return { ...orchestration, output: { ...output, narrativeSummary: reply, intent: { ...output.intent, parts } } };
 }

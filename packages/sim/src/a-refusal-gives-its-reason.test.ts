@@ -56,7 +56,7 @@ describe("a refusal", () => {
     const attempt = { id: "att-1", actionId: "act-1", issuerRef: { kind: "character" as const, id: PLAYER }, recipientRef: { kind: "character" as const, id: "gnaeus-cornelius" }, claimedAuthorityGrantId: null,
       authorityCheck: { authorized: false, grant: null, standing: null, reason: "" }, instruction: "Find bread.", standing: "request" as never, status: "refused" as const,
       recipientDecisionReason: "Lucius Julius is nobody he owes a hearing.", issuedAtStep: 1, decidedAtStep: 2, consequenceFactRefs: [], servesRef: null, answerDueByStep: 10 };
-    const said = refusalInPeriodWords({ ...world, orderAttempts: [attempt as never] }, { said: "Find supply for the army.", workRefs: [{ kind: "order_attempt", id: "att-1" }] }, PLAYER, null);
+    const said = refusalInPeriodWords({ ...world, orderAttempts: [attempt] }, { said: "Find supply for the army.", workRefs: [{ kind: "order_attempt", id: "att-1" }] }, PLAYER, null);
     expect(said).toBe("Lucius Julius is nobody he owes a hearing.");
   });
 });

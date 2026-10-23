@@ -52,7 +52,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  * JSON.parse refuses the mark, and the run waited on an answer that was already there (consul-run-issues T1).
  */
 function readAnswer(answerPath: string): string {
-  return readFileSync(answerPath, "utf8").replace(/^﻿/, "");
+  return readFileSync(answerPath, "utf8").replace(/^\uFEFF/, "");
 }
 
 async function answerFor(options: HandAdapterOptions, operation: AiOperation, system: string, asked: string): Promise<string> {

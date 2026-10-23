@@ -43,7 +43,7 @@ describe("a treaty's withdrawal and restoration are duties, not prose", () => {
     expect(withdraw).toContainEqual(expect.objectContaining({ kind: "force_withdrawn", forceId: "campanian-legion" }));
     expect(withdraw.every((goal) => goalMet(world, goal) === "not_yet")).toBe(true);
     const restore = dutyGoals(world, "Restore Rhegium to Roman Republic", CAMPANIANS, ROME)!;
-    expect(restore).toEqual([expect.objectContaining({ kind: "control", polityId: ROME, settlementId: expect.any(String) })]);
+    expect(restore).toEqual([expect.objectContaining({ kind: "control", polityId: ROME, settlementId: expect.any(String) as unknown })]);
     expect(goalMet(world, restore[0]!)).toBe("not_yet");
   });
 

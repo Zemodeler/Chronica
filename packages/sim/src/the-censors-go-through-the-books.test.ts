@@ -10,7 +10,7 @@ import { holderOf, withTheft } from "./accounts-test-kit";
  * At the lustrum the censors open the books of the Treasury of Saturn for two months, and on suspicion (the chest short of what the roll promised) too; never
  * twice in the season, never while the same books are being read, never of their own. What the audit finds the praetor brings as a case (`a-praetor-hears-the-case`).
  */
-const audits = (world: WorldState, day: number) => decideAudits({ ...fiscalInput(atDay(world, day), "carthage"), warfare: undefined as never }).filter((d) => d.polityId === "rome");
+const audits = (world: WorldState, day: number) => decideAudits({ ...fiscalInput(atDay(world, day), "carthage"), warfare: undefined }).filter((d) => d.polityId === "rome");
 const census = (world: WorldState, at: number): WorldState => ({
   ...world, genericEntities: [...world.genericEntities, GenericEntitySchema.parse({ id: "census-rome-test", kind: "census", label: "The census of Rome", ownerRef: { kind: "polity", id: "rome" }, attributes: { atStep: at, counted: 1_100_000, by: "manius-curius" }, createdAtStep: at })],
 });

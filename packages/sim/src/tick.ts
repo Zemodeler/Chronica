@@ -35,7 +35,6 @@ import {
   aimsAtWar,
   leaderOf,
   settleOrphanedOccupations,
-  isOccupied,
   warsOf,
   openWar,
   threatWaitsOnAttack,

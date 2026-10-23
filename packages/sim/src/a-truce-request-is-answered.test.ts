@@ -15,7 +15,7 @@ describe("a truce request is answered", () => {
   const sent = (replyWithinDays: number | null) => applyDeltas(world, [WorldDeltaSchema.parse({
     op: "diplomatic_message_send", localId: "truce-ask", kind: "peace_offer", fromPolityId: "rhegium-campanians", fromCharacterRef: "decius-vibellius", toPolityId: "rome", toCharacterRef: null,
     subject: "A truce for Rhegium", terms: "The men of Rhegium ask for a truce, that they may bury their dead and treat.", replyWithinDays, inReplyToRef: null, visibility: "polity", proposes: ["truce"], reason: "They are hard pressed.",
-  })], context(world, "decius-vibellius") as never);
+  })], context(world, "decius-vibellius"));
 
   it("has a term of its own when its writer named none", () => {
     const message = sent(null).world.diplomacy.find((candidate) => candidate.subject === "A truce for Rhegium")!;

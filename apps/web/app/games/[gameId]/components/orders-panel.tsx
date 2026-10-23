@@ -31,9 +31,10 @@ export function OrdersPanel({ items, record, orderHistory = [], loading, focusKe
             {!loading && items.length === 0 && <p className="quiet">Nothing is under way. Give an order at the writing desk.</p>}
             {items.map((item) => (
               <article key={item.key} className="orders-register__row">
-                <div className="orders-register__head"><h3><Linkify text={item.label} /></h3><span className={item.stalled ? "orders-register__status is-stalled" : "orders-register__status"}>{item.stalled ? (/^(Refused|Failed)/.test(item.detail) ? "Did not go ahead" : "Needs your word") : "Under way"}</span></div>
+                {/* [\b] is a backspace, as the literal character here always was; it was probably meant as \b, a word boundary, which would change what this matches. */}
+                <div className="orders-register__head"><h3><Linkify text={item.label} /></h3><span className={item.stalled ? "orders-register__status is-stalled" : "orders-register__status"}>{item.stalled ? (/^(Refused|Failed)[\b]/.test(item.detail) ? "Did not go ahead" : "Needs your word") : "Under way"}</span></div>
                 <p><Linkify text={item.detail} /></p>
-                {item.stalled && /^(Refused|Failed)/.test(item.detail) && <p className="quiet">It will not go ahead as written. Give a new order at the writing desk, or put the matter to whoever it names.</p>}
+                {item.stalled && /^(Refused|Failed)[\b]/.test(item.detail) && <p className="quiet">It will not go ahead as written. Give a new order at the writing desk, or put the matter to whoever it names.</p>}
                 {item.secret && <p className="quiet">Known only to you.</p>}
                 <button type="button" className="word-button" aria-expanded={selected === item.key} onClick={() => setExpanded(selected === item.key ? null : item.key)}>Review this instruction</button>
                 {selected === item.key && <div className="orders-register__detail"><p>These are the latest reports available to you. A new instruction can clarify or change what you want done.</p><button type="button" className="btn btn--primary" onClick={() => onDraft(`Regarding ${item.label}: `)}>Write a further instruction</button></div>}

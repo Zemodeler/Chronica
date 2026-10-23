@@ -316,7 +316,7 @@ export function stockTheHarvest(world: WorldState, crops: ReadonlyMap<string, nu
     const target = (12 + GRAIN_RESERVE_MONTHS) * hub.demand[GRAIN]!;
     hub.stock[GRAIN] = Math.min(hub.stock[GRAIN]! + crop, MAX_STOCK_MONTHS * Math.max(1, hub.demand[GRAIN]!));
     hub.target[GRAIN] = target;
-    hub.price[GRAIN] = priceBpsFrom(GOODS[GRAIN]!, hub.stock[GRAIN]!, target);
+    hub.price[GRAIN] = priceBpsFrom(GOODS[GRAIN]!, hub.stock[GRAIN], target);
   }
   return closeBook(world, book);
 }

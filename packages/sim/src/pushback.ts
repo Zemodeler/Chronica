@@ -145,7 +145,6 @@ export function reviewPushback(world: WorldState, playerPolityId: string | null,
       }
     }
   }
-  const alarmOf = (from: string, toward: string): number => alarm.find((entry) => entry.polityId === from && entry.towardPolityId === toward)?.level ?? 0;
 
   // ── Reputation: a broken peace costs trust all round ───────────────────
   let stances: PolityStance[] = [...world.polityStances];

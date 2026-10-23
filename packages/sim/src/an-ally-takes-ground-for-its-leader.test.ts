@@ -8,7 +8,7 @@ import { occupyOpenCountry, SIEGE_NEEDED_AT } from "./occupation";
  * M5). The Picene and Samnite levies Rome called against the Messapians took Brundisium and three Messapian districts for the
  * Picentes and the Samnites, who then refused union and kept them.
  */
-const war = (a: string, b: string): PolityAgreement => ({ id: `war-${a}-${b}`, kind: "war", polityId: a, otherPolityId: b, terms: "War.", sinceStep: 0, untilStep: null, sourceMessageId: null, status: "active", endedAtStep: null, endedReason: null, visibility: "public" } as PolityAgreement);
+const war = (a: string, b: string): PolityAgreement => ({ id: `war-${a}-${b}`, kind: "war", polityId: a, otherPolityId: b, terms: "War.", sinceStep: 0, untilStep: null, sourceMessageId: null, status: "active", endedAtStep: null, endedReason: null, visibility: "public" });
 
 function levyInMessapia(): { world: WorldState; provinceId: string } {
   const opening = ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
