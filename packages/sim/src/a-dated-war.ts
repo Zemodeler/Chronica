@@ -43,12 +43,10 @@ export function decideDatedEvents(input: StatecraftInput, rulerOf: (polityId: st
     // Each thing is done by the man whose it is to do it: the ruler opens a war and raises a garrison, the people's spokesman writes.
     const parts: { by: Character; act: StatecraftDecision["act"]; target: string | null; deltas: WorldDelta[] }[] = [];
     const war = happens.warOpens;
-    let opens = false;
     if (war !== undefined && !atWar(world.polityAgreements, war.polityId, war.otherPolityId)
       && !world.polityAgreements.some((agreement) => agreement.kind === "war" && [agreement.polityId, agreement.otherPolityId].includes(war.polityId) && [agreement.polityId, agreement.otherPolityId].includes(war.otherPolityId) && agreement.sinceStep >= happens.atDay - WAR_ALREADY_WITHIN_DAYS)) {
       const by = speaker(war.polityId);
       if (by !== undefined) {
-        opens = true;
         const deltas: WorldDelta[] = [wd({
           op: "agreement_open", localId: safeLocalId(`war_${war.polityId}_${war.otherPolityId}_${pressure.id}`).slice(0, 60), kind: "war", polityId: war.polityId, otherPolityId: war.otherPolityId,
           terms: war.terms, forDays: null, sourceMessageRef: null, visibility: "public", reason: happens.summary.slice(0, 240),

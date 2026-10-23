@@ -15,7 +15,6 @@ import {
   type SiegeWorkKind,
   DELTA_AUTHORITY_DOMAIN,
   adjustPolityLegitimacy,
-  AGREEMENT_KIND_IN_WORDS,
   boundedId,
   SKILL_BY_BAND,
   faithNamed,
@@ -31,7 +30,6 @@ import {
   redundantDiplomaticOffer,
   sameNegotiation,
   offeredAgreementKinds,
-  peaceOfferMetadata,
   settlePeaceTalks,
   isDelivered,
   newsDaysBetween,
@@ -1561,7 +1559,7 @@ export function layBeforeTheChamber(delta: WorldDelta, world: WorldState, actorI
     enacts: null,
     concerns: [war || delta.op === "agreement_close" ? "war" : "peace"],
     reason: `${actor.name} holds no office that makes ${war ? "war" : "treaties"}, and moved it in the ${chamber.name}.`.slice(0, 240),
-  } as WorldDelta;
+  };
 }
 
 /**
@@ -2026,7 +2024,7 @@ function applyOne(
           label: `Ratify the terms ${sender.name} agreed with ${theirs}: "${message.subject}"`.slice(0, 200),
           resolutionMechanism: "vote", deadlineInDays: 10, visibility: "public", enacts: null, concerns: [kind === "war" ? "war" : "peace"],
           reason: `${theirs} accepted terms written by a man who could not bind ${polityName(replied, message.fromPolityId)}; the ${chamber.name} decides whether they bind it.`.slice(0, 300),
-        } as WorldDelta;
+        };
         try {
           const moved = applyOne(replied, motion, context, assignedIds, resolve, emitFact, emitAccount);
           const procedureId = assignedIds.get(localId);
@@ -2695,7 +2693,7 @@ function applyOne(
         const settled = emptied ? disbandForces(withForce, new Set([source.id]), null) : withForce;
         // Left to hold a place the army is not in: drawn off here and sent there.
         return delta.locationId === source.locationId || !world.map.provinces.some((province) => province.id === delta.locationId) ? settled
-          : applyOne(settled, { op: "force_modify", forceRef: id, locationId: delta.locationId, reason: delta.reason } as WorldDelta, context, assignedIds, resolve, emitFact, emitAccount);
+          : applyOne(settled, { op: "force_modify", forceRef: id, locationId: delta.locationId, reason: delta.reason }, context, assignedIds, resolve, emitFact, emitAccount);
       }
       // An ally's ships called for: raised in its harbours, at its cost (`socii-navales.ts`).
       const leader = actorPolityOf(world, context);
@@ -5623,7 +5621,7 @@ function applyOne(
       // An answer goes back to whoever wrote the letter it answers, when that
       // is one of the power it is sent to: a counter-offer to the player's own
       // letter was handed to the consul instead, and the player never saw it.
-      const repliedTo = delta.inReplyToRef === null ? undefined : world.diplomacy.find((message) => message.id === required(delta.inReplyToRef!, "The letter this answers"));
+      const repliedTo = delta.inReplyToRef === null ? undefined : world.diplomacy.find((message) => message.id === required(delta.inReplyToRef, "The letter this answers"));
       const writerOfRepliedTo = repliedTo?.fromCharacterId == null ? undefined : world.characters.find((character) => character.id === repliedTo.fromCharacterId && character.alive && character.polityId === letterToId);
       const recipientId = delta.toCharacterRef !== null
         ? required(delta.toCharacterRef, "The named recipient")
@@ -5658,7 +5656,7 @@ function applyOne(
         assignedIds.set(delta.localId, redundant.id);
         // Said to its writer: the second letter was a no-op, and an order that "came to nothing" without a word of why (burst 7 of the
         // Hanno run, twice) left a player who had been refused by silence unable to tell that asking in the same words is not allowed.
-        const leftAs = redundant.status === "awaiting_reply" ? "still awaits an answer" : redundant.status === "answered" ? `was answered${redundant.answer === undefined || redundant.answer === null ? "" : ` (${redundant.answer})`}` : `ended as ${redundant.status}`;
+        const leftAs = redundant.status === "awaiting_reply" ? "still awaits an answer" : redundant.status === "answered" ? `was answered${redundant.answer === undefined || redundant.answer === null ? "" : ` (${redundant.answer})`}` : `ended as ${String(redundant.status)}`;
         emitFact({
           localId: safeLocalId(`letter_not_resent_${delta.localId}`).slice(0, 60),
           kind: "letter_not_resent",
@@ -7339,7 +7337,7 @@ function carryOutClauses(
               controlFirmnessBps: 6_000,
               settlements: candidate.settlements.map((settlement) => (settlement.controllerPolityId === province.controllerPolityId || settlement.controllerPolityId === giver ? { ...settlement, controllerPolityId: toId } : settlement)),
               // Its people were not asked, and remember who they belonged to.
-              yearning: { polityId: giver!, bps: 3_000, updatedAtStep: next.elapsedStep },
+              yearning: { polityId: giver, bps: 3_000, updatedAtStep: next.elapsedStep },
               lostBy: null,
             }
             : candidate)),

@@ -205,7 +205,7 @@ export function readProvinceTax(
   officeSkill: number,
   polityId: string,
   /** How much a customs province's hub trades (`tradeIntensity`): its market's flows against its use. */
-  trade?: number | undefined,
+  trade?: number  ,
 ): ProvinceTaxReading {
   // The money a `men` province raises for its holder is a local land levy, and leaks as one; the men it owes the overlord lose nothing to distance.
   const efficiency = collectionEfficiency(steps, policy.regime === "men" ? "land_levy" : policy.regime, officeSkill);

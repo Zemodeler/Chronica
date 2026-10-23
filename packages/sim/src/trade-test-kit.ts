@@ -51,7 +51,7 @@ export function setStock(book: Book, hubId: string, good: GoodId, shareOfTarget:
   const hub = book.get(hubId)!;
   const index = goodIndex(good);
   hub.stock[index] = hub.target[index]! * shareOfTarget;
-  hub.price[index] = priceBpsFrom(GOODS[index]!, hub.stock[index]!, hub.target[index]!);
+  hub.price[index] = priceBpsFrom(GOODS[index]!, hub.stock[index], hub.target[index]!);
 }
 
 /** One month of trade through a book, as the monthly pass runs it. */

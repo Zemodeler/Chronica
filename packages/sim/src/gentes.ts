@@ -2,7 +2,6 @@ import {
   allianceBetween,
   computeOpinion,
   dignitasOfGens,
-  currentAgeYears,
   gensIdOfNomen,
   gensById,
   masculineNomen,

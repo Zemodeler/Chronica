@@ -24,7 +24,7 @@ describe("the friends of a king vie for his ear", () => {
     const quarrel = ill(world, friends[0]!, dioiketes, -80);
     const done = keepTheCourtRivalries(quarrel);
     expect(computeOpinion(quarrel.characters.find((c) => c.id === friends[0])!, dioiketes)).toBeLessThanOrEqual(ENVY_AT);
-    expect(wants(done, friends[0]!)).toMatchObject([{ kind: "office", targetId: dioiketes, label: expect.stringMatching(/king's favour/) }]);
+    expect(wants(done, friends[0]!)).toMatchObject([{ kind: "office", targetId: dioiketes, label: expect.stringMatching(/king's favour/) as unknown }]);
     expect(wants(done, friends[1]!)).toEqual([]);
     // Once, not every month.
     expect(wants(keepTheCourtRivalries(done), friends[0]!)).toHaveLength(1);

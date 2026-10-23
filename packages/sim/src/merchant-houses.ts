@@ -377,7 +377,7 @@ function keepTheCargoes(world: WorldState, toDay: number, ids: IdFactory): { wor
         continue;
       }
     }
-    const purse = accounts.find((account) => account.id === head!.personalAccountId);
+    const purse = accounts.find((account) => account.id === head.personalAccountId);
     if (purse === undefined || purse.status !== "active") continue;
     const polityId = head.polityId;
 
@@ -397,8 +397,8 @@ function keepTheCargoes(world: WorldState, toDay: number, ids: IdFactory): { wor
     // ── 3. The cargoes ─────────────────────────────────────────────────
     // Nothing to buy where no market has been reckoned yet.
     if (memory.markets.length === 0) continue;
-    const mine = world.material.ventures.filter((venture) => venture.ownerCharacterId === head!.id && venture.status === "running");
-    const opened = newVentures.filter((venture) => venture.ownerCharacterId === head!.id);
+    const mine = world.material.ventures.filter((venture) => venture.ownerCharacterId === head.id && venture.status === "running");
+    const opened = newVentures.filter((venture) => venture.ownerCharacterId === head.id);
     let slots = Math.min(MAX_OPENED_PER_MONTH, MAX_VENTURES_PER_HOUSE - mine.length - opened.length);
     if (slots <= 0) continue;
     const skip = new Set([...mine, ...opened].map((venture) => `${venture.fromProvinceId}>${venture.toProvinceId}`));

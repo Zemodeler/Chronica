@@ -314,7 +314,7 @@ describe("an embargo is announced", () => {
   it("is not laid when the demand is met, and is not laid twice", () => {
     // A king whose markets live by Rome's trade, and who is not proud, gives way.
     const frightened = withMind(world(), HIERON, { sociability: 70, honesty: 70 }, { wealth: 30, status: 5, revenge: 5, duty: 5, security: 95 });
-    const laden: WorldState = { ...frightened, economy: { ...frightened.economy!, tradeLanes: [{ fromPolityId: "rome", toPolityId: "syracuse", value: 9_000 }, { fromPolityId: "syracuse", toPolityId: "rome", value: 4_000 }] } as WorldState["economy"] };
+    const laden: WorldState = { ...frightened, economy: { ...frightened.economy!, tradeLanes: [{ fromPolityId: "rome", toPolityId: "syracuse", value: 9_000 }, { fromPolityId: "syracuse", toPolityId: "rome", value: 4_000 }] } };
     const { message, arrived } = put(laden, notice({ trade: { tariffCapBps: null, mostFavoured: false, exempt: [], goods: [] } }));
     const { decision, after } = answered(arrived, message.id);
     expect(decision?.deltas[0]).toMatchObject({ answer: "accepted" });

@@ -29,7 +29,7 @@ function whoseBooks(world: WorldState, delta: WorldDelta): { readonly polityIds:
     else if (owner.kind === "character") ofCharacter(owner.id);
   };
   const d = delta as Record<string, unknown>;
-  const text = (key: string): string | null => (typeof d[key] === "string" ? (d[key] as string) : null);
+  const text = (key: string): string | null => (typeof d[key] === "string" ? (d[key]) : null);
   switch (delta.op) {
     case "tax_policy_set": polities.add(delta.polityId); break;
     case "coinage_debase": { const issuer = coinagesOf(world).find((coinage) => coinage.id === delta.coinageId)?.issuerPolityId; if (issuer != null) polities.add(issuer); break; }

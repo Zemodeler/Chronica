@@ -1142,7 +1142,8 @@ function storySeeds(fact: Fact): string {
     (${parts.join("; ")})`;
 }
 
-const ENGINE_COMPLAINT = /(already exists?|already existed|no such|not found|nothing in this batch|could not be carried out as written|no (?:force|army|character|polity|holding|account) (?:named|called|exists)|local:|localId|refers to)/i;
+// [\b] is a backspace, as the literal character here always was; it was probably meant as \b, a word boundary, which would change what this matches.
+const ENGINE_COMPLAINT = /[\b](already exists?|already existed|no such|not found|nothing in this batch|could not be carried out as written|no (?:force|army|character|polity|holding|account) (?:named|called|exists)|local:|localId|refers to)[\b]/i;
 
 function renderThread(thread: Thread, index: number, said: readonly UtteranceLine[] = []): string {
   const lines = [`THREAD ${index + 1}${thread.reported ? " (news reaching the court; nobody here witnessed it)" : ""}`];

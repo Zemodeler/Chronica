@@ -208,7 +208,6 @@ export interface GentesSeeded {
 export function seatGentes(people: readonly Record<string, unknown>[], links: readonly Record<string, unknown>[]): GentesSeeded {
   const existing = people as unknown as readonly P[];
   const byName = new Map(existing.map((person) => [person.name, person]));
-  const rome = existing.find((person) => person.id === "gnaeus-cornelius")!;
 
   // ── The new people ──────────────────────────────────────────────────────
   const newCharacters: Record<string, unknown>[] = [];
@@ -297,7 +296,7 @@ export function seatGentes(people: readonly Record<string, unknown>[], links: re
     const cutoff = OWN_UNTIL_YEAR_BCE[name];
     const own = owner !== undefined && (cutoff === undefined || year <= cutoff);
     const list = honoursOf.get(gensId) ?? [];
-    list.push({ kind, who: name, characterId: own ? owner!.id : null, stirps: stirpsFor(gensId, name), atStep: yearsToStep(year) });
+    list.push({ kind, who: name, characterId: own ? owner.id : null, stirps: stirpsFor(gensId, name), atStep: yearsToStep(year) });
     honoursOf.set(gensId, list);
   };
   for (const [year, names] of CONSULS_366_TO_270) for (const name of names) addHonour("consul", name, year);

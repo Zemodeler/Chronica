@@ -3,7 +3,6 @@ import {
   adjustPolityLegitimacy,
   allOffices,
   computeOpinion,
-  gensById,
   stableHash,
   type ActKind,
   type FactProposalDraft,

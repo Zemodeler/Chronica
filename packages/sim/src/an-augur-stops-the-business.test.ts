@@ -52,6 +52,6 @@ describe("an augur stops the business", () => {
     let one = base;
     // Every augur but one is gone from the seats; that one is the player.
     one = { ...one, material: { ...one.material, officeSeats: one.material.officeSeats.map((s) => (s.officeId === "roman-augur" && s.holderCharacterId !== augurs[0] ? { ...s, holderCharacterId: null, status: "vacant" as const } : s)) } };
-    expect(stopped(theAuspices(input(one, augurs[0]!)).world)).toEqual([]);
+    expect(stopped(theAuspices(input(one, augurs[0])).world)).toEqual([]);
   });
 });

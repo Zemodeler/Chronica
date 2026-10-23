@@ -20,7 +20,7 @@ const answer = () => JSON.stringify({
 
 describe("a part held for another part that was refused", () => {
   it("is not left waiting for what will never be done", async () => {
-    const port: SimModelPort = { complete: async (operation) => operation === "simulate_orchestrate" ? answer() : JSON.stringify({ actors: [] }) };
+    const port: SimModelPort = { complete: (operation) => Promise.resolve(operation === "simulate_orchestrate" ? answer() : JSON.stringify({ actors: [] })) };
     const result = await runSimulationBurst({ world: WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), clock: definition.clock, offices: definition.government.offices,
       warfare: definition.warfare, burstId: "after-refused", gameId: "after-refused", actorRef: { kind: "character", id: ACTOR },
       actorPolityId: "rome", orderText: ORDER, knownFacts: [], queue: [], port, narratorSeeds: [], spanDays: 1 });

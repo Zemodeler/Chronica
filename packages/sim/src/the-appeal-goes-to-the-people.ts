@@ -41,7 +41,7 @@ export const APPEAL_BPS = 150;
 const markerOf = (procedureId: string): string => `ratified_${procedureId}`.slice(0, 80);
 
 const WAR_MOTION = /\bwar be made on\b/iu;
-const draft = (raw: Record<string, unknown>): FactProposalDraft => FactProposalSchema.parse(raw) as unknown as FactProposalDraft;
+const draft = (raw: Record<string, unknown>): FactProposalDraft => FactProposalSchema.parse(raw);
 const fact = (raw: Record<string, unknown>): FactProposal => FactProposalSchema.parse(raw);
 
 export interface AppealInput {

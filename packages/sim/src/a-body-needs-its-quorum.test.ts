@@ -14,7 +14,7 @@ const sketch = (senate: string, id = "quorum-test"): PoliticalProcedure => ({
   id, type: "council_deliberation", institutionId: senate, sponsorCharacterId: "gaius-genucius", subjectKind: "polity", subjectId: "rome", label: "Motion of Gaius Genucius: that the tribute be laid anew",
   eligibilityRequirementIds: [], eligibleParticipantIds: [], stage: "gathering_support", resolutionMechanism: "vote", openedAtStep: 200, deadlineStep: 220, resolvedAtStep: null, visibility: "public",
   voteRecordId: null, outcome: null, outcomeReason: null, sourceEventIds: [], resultingEventIds: [], concerns: ["taxes"],
-} as PoliticalProcedure);
+});
 
 /** The first `count` named senators put at the head of an army in a province of Rome that is not the city's. */
 function sendOut(world: WorldState, count: number): { world: WorldState; sent: string[] } {

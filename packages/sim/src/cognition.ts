@@ -92,7 +92,7 @@ function shownSchema(): string {
   // terms of a trade pact or the offer of a loan to a state. The parser above still reads them, and the engine sets them aside.
   const defs = (schema.$defs as { WorldDelta?: { oneOf?: Record<string, unknown>[] } } | undefined)?.WorldDelta;
   if (defs?.oneOf !== undefined) {
-    defs.oneOf = defs.oneOf.filter((variant) => !ROUTINE_OPS.has(String(((variant.properties as Record<string, { const?: unknown }> | undefined)?.op)?.const))).map((variant) => shownWarPlanVariant(variant) as Record<string, unknown>);
+    defs.oneOf = defs.oneOf.filter((variant) => !ROUTINE_OPS.has(String(((variant.properties as Record<string, { const?: unknown }> | undefined)?.op)?.const))).map((variant) => shownWarPlanVariant(variant));
     for (const variant of defs.oneOf) {
       const fields = variant.properties as Record<string, { const?: unknown }> | undefined;
       if (fields?.op?.const === "agreement_open") delete fields.trade;

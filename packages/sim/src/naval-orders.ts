@@ -3,7 +3,6 @@ import {
   fitStrengthOf,
   isNavalForce,
   isWinterMonth,
-  kmFrom,
   sailingSeason,
   type Force,
   type NavalPlan,

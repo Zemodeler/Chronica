@@ -405,7 +405,7 @@ function namespaced(value: unknown, prefix: string): unknown {
   return Object.fromEntries(Object.entries(value).map(([key, child]) => [
     key,
     key === "localId" && typeof child === "string" ? `${prefix}${child}`
-      : key === "factLocalIds" && Array.isArray(child) ? child.map((id) => typeof id === "string" ? `${prefix}${id}` : id)
+      : key === "factLocalIds" && Array.isArray(child) ? child.map((id: unknown) => typeof id === "string" ? `${prefix}${id}` : id)
         : namespaced(child, prefix),
   ]));
 }
@@ -489,9 +489,6 @@ async function orchestrateFirst(port: SimModelPort, slice: WorldSlice, kindOf: K
     repairedFrom: results.find((result) => result.repairedFrom !== null)?.repairedFrom ?? null,
   };
 }
-
-/** Reasons a part was given that are not the world's but the answer's own: a war not declared, a custom, a policy. */
-const POLICY_REFUSAL = /((outside|beyond|exceeds?|lacks?|without|not within|no) [^.]{0,40}(authority|power|remit|standing|right)|belongs? to (a |an )?(separate|allied|another)|requires? (breaking|a declaration|declaring|ending)|breaking (rome'?s |the )?peace|not at war|does not exist as a war|not (yet )?(been )?declared|would (start|begin|provoke|cause|trigger) (a )?war|would (break|violate|breach)|against (rome'?s |its |our )?(usual |stated )?(policy|custom|interest)|policy of avoiding|no (cause|reason) for war|contradicts)/i;
 
 /**
  * What the engine can do for the commonest kinds of order, said to the answer that left one undone. Kept out of the standing prompt

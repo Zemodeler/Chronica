@@ -9,7 +9,7 @@ function province(id: string, terrainId: string, settlements: Array<{ kind: "cit
   return {
     id, name: id, formerNames: [], terrainId, controllerPolityId: "rome", controlFirmnessBps: 8_000,
     settlements: settlements.map((settlement, index) => ({ id: `${id}-s${index}`, name: `${id}-s${index}`, kind: settlement.kind, provinceId: id, controllerPolityId: "rome", size: settlement.size, fortificationLevel: 0 })),
-  } as Province;
+  };
 }
 const edge = (from: string, to: string, crossing: ProvinceEdge["crossing"] = "land", distance = 30): ProvinceEdge => ({ from, to, crossing, distance });
 
@@ -25,7 +25,7 @@ function map(): Pick<WorldState, "map"> {
     province("steppe", "desert-steppe"),
   ];
   const edges = [edge("city", "plain"), edge("city", "hill"), edge("plain", "far-plain", "land", 120), edge("far-plain", "far-hill", "land", 120), edge("far-hill", "walled", "pass"), edge("far-plain", "steppe", "land", 200)];
-  return { map: { provinces, edges, polities: [], politicalRelations: [], controlRecords: [], claimRecords: [], occupationRecords: [], administrationRecords: [] } } as unknown as Pick<WorldState, "map">;
+  return { map: { provinces, edges, polities: [], politicalRelations: [], controlRecords: [], claimRecords: [], occupationRecords: [], administrationRecords: [] } };
 }
 
 describe("a province's site", () => {

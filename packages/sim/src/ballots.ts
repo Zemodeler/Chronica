@@ -191,11 +191,6 @@ export function ballotsOfBloc(
   const together = leanAsAGens(seats, own, kin);
   return seats.map((seat, index) => {
     const { temperament } = seat.mind;
-    // A man who thinks for himself is less carried by his faction; a sociable one more.
-    // A faction holds its members closer than a house holds its estates: they go where their leader goes.
-    const followsFaction = 0.7 + (bloc.groupId == null ? 0 : 0.15) + (temperament.sociability - 50) / 220 - (temperament.discipline - 50) / 400;
-    // The day's mood: each seat's own, on each question, larger in the impulsive.
-    const mood = ((stableHash([seat.id, procedure.id, "mood"]) % 2_001) / 1_000 - 1) * (4 + 12 * (1.2 - temperament.discipline / 100));
     let lean = together[index]!;
     // A man who moved the question votes for it, unless he has said otherwise since (a playtest's own motion was voted against by its mover).
     const said = seat.characterId === null ? undefined : ownWords.get(seat.characterId) ?? (seat.characterId === procedure.sponsorCharacterId ? "support" : undefined);

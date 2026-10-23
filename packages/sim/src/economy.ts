@@ -153,7 +153,6 @@ export interface LandResult {
   readonly months: number;
 }
 
-const clampBps = (value: number): number => Math.max(0, Math.min(10_000, Math.round(value)));
 const provinceName = (world: WorldState, id: string): string => world.map.provinces.find((province) => province.id === id)?.name ?? id;
 const polityName = (world: WorldState, id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
 const listed = (names: readonly string[]): string => (names.length <= 1 ? names[0] ?? "" : `${names.slice(0, -1).join(", ")} and ${names.at(-1)!}`);
@@ -167,7 +166,7 @@ const listed = (names: readonly string[]): string => (names.length <= 1 ? names[
  * toward what the hub's grain says it should be, the one thing that does.
  * (`clock` is kept for callers; the stock does not need it to know.)
  */
-export function betweenHarvests(targets: Map<string, ProvinceTargets>, world: WorldState, _clock?: ScenarioClock | undefined): Map<string, ProvinceTargets> {
+export function betweenHarvests(targets: Map<string, ProvinceTargets>, world: WorldState, _clock?: ScenarioClock  ): Map<string, ProvinceTargets> {
   if (!hasMarkets(world)) return targets;
   const next = new Map(targets);
   for (const province of world.map.provinces) {

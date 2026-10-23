@@ -24,7 +24,7 @@ describe("the Rhegium orders require their actual outcomes", () => {
   });
 
   it("does not complete a kill order by putting the Roman army on hold", async () => {
-    const port: SimModelPort = { complete: async (operation) => operation === "simulate_orchestrate" ? JSON.stringify({
+    const port: SimModelPort = { complete: (operation) => Promise.resolve(operation === "simulate_orchestrate" ? JSON.stringify({
       intent: { summary: ORDER, domains: ["military"], parts: [
         { said: "Find and kill the Campanian Legion.", acts: [0], whyNot: "Rome guarantees safe passage, so the army holds instead." },
         { said: "Send 2,000 men to start claiming the territory owned by them.", acts: [], whyNot: "They watch the approaches instead." },
@@ -32,7 +32,7 @@ describe("the Rhegium orders require their actual outcomes", () => {
       narrativeSummary: "The army holds at Rhegium.", frictions: [],
       deltas: [{ op: "force_modify", forceRef: "roman-field-army", hold: true, reason: "Hold rather than attack the Campanian Legion." }],
       facts: [], delegations: [], schedule: [], cognitionCandidates: [], outcome: "continue", playerDecision: null,
-    }) : JSON.stringify({ actors: [] }) };
+    }) : JSON.stringify({ actors: [] })) };
     const result = await runSimulationBurst({ world: opening(), clock: definition.clock, offices: definition.government.offices,
       warfare: definition.warfare, burstId: "rhegium-proof", gameId: "rhegium-proof", actorRef: { kind: "character", id: ACTOR },
       actorPolityId: "rome", orderText: ORDER, knownFacts: [], queue: [], port, narratorSeeds: [], spanDays: 1 });
@@ -95,8 +95,8 @@ describe("the Rhegium orders require their actual outcomes", () => {
     const world = opening();
     const part = OrderPartSchema.parse({ said: "Find and kill the Campanian Legion.", whyNot: "The legion remains alive." });
     world.orders = [{ id: "rhegium-order", actorCharacterId: ACTOR, text: part.said, givenAtStep: 0, parts: [part] }];
-    const port: SimModelPort = { complete: async () => JSON.stringify({ entries: [{ thread: 0,
-      title: "The Campanian Legion was killed", body: "The Campanian Legion was found and killed.", quote: null }] }) };
+    const port: SimModelPort = { complete: () => Promise.resolve(JSON.stringify({ entries: [{ thread: 0,
+      title: "The Campanian Legion was killed", body: "The Campanian Legion was found and killed.", quote: null }] })) };
     const result = await composeChronicle({ port, clock: definition.clock, observer: { kind: "character", id: ACTOR }, observerPolityId: "rome",
       world, facts: [{ id: "hold-fact", time: world.instant, atStep: 0, kind: "order_part_unanswered", summary: "Legio I holds; the Campanian Legion remains alive.",
         affectedEntities: [{ kind: "character", id: ACTOR }], resourceChanges: [], visibility: "public",

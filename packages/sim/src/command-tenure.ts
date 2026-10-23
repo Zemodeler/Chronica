@@ -175,7 +175,7 @@ function procedureOf(input: {
     openedAtStep: input.openedAt, deadlineStep: input.deadline, resolvedAtStep: null, visibility: "public",
     voteRecordId: null, outcome: null, outcomeReason: null, sourceEventIds: [], resultingEventIds: [],
     concerns: [...input.concerns], ...(input.sentence === undefined ? {} : { sentence: input.sentence }),
-  } as PoliticalProcedure;
+  };
 }
 
 export function keepCommandTenure(input: CommandTenureInput): { world: WorldState; facts: FactProposalDraft[] } {
@@ -194,7 +194,7 @@ export function keepCommandTenure(input: CommandTenureInput): { world: WorldStat
   let serial = 0;
   const localId = (kind: string): string => `tenure_${kind}_${(serial += 1)}`;
   const tell = (fact: Omit<FactProposalDraft, "localId"> & { readonly kind: string }): void => {
-    facts.push({ localId: localId(fact.kind), ...fact } as FactProposalDraft);
+    facts.push({ localId: localId(fact.kind), ...fact });
   };
   const addProcedure = (procedure: PoliticalProcedure): void => {
     world = { ...world, material: { ...world.material, politicalProcedures: [...world.material.politicalProcedures, procedure] } };

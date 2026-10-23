@@ -28,19 +28,25 @@ export default tseslint.config(
     files: ["**/*.ts", "**/*.tsx"],
   })),
   {
-    files: ["scripts/**/*.mjs"],
+    files: ["scripts/**/*.mjs", "docs/**/*.mjs"],
     languageOptions: {
       globals: {
         console: "readonly",
         process: "readonly",
+        setTimeout: "readonly",
       },
+    },
+    rules: {
+      "no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
     },
   },
   {
     // packages/sim is pure and deterministic (docs/architecture.md).
     // scripts/check-sim-purity.mjs is the CI gate; this block is the same rule
     // in the editor, where it is cheap to obey and expensive to discover later.
+    // Tests are outside the gate, as they are in the script: they time runs and read fixtures.
     files: ["packages/sim/**/*.ts"],
+    ignores: ["packages/sim/**/*.test.ts"],
     rules: {
       "no-restricted-globals": [
         "error",

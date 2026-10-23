@@ -68,7 +68,7 @@ describe("terms of peace offered to a power nobody plays", () => {
   it("are settled in the tick, and the war and its treaties end with the power", () => {
     const world = surrender(beaten(), 1);
     const ticked = runDeterministicTick({ world: { ...world, elapsedStep: 1, instant: { ...world.instant, day: 1 } }, toDay: 1, ids: createIdFactory("peace-tick"),
-      warfare: definition.warfare, government: { offices: definition.government.offices, successionRules: definition.government.successionRules } as never, playerCharacterId: "gaius-genucius" }).world;
+      warfare: definition.warfare, government: { offices: definition.government.offices, successionRules: definition.government.successionRules }, playerCharacterId: "gaius-genucius" }).world;
     expect(ticked.map.polities.find((polity) => polity.id === "rhegium-campanians")?.endedHow).toBe("absorbed");
     expect(ticked.polityAgreements.find((agreement) => agreement.id === "war-rome-rhegium")?.status).toBe("ended");
   });

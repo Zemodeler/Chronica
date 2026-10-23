@@ -53,7 +53,7 @@ describe("Rome builds a fleet by decree", () => {
     expect(project.completionOutcome.amount).toBeGreaterThan(0);
     expect(project.completionOutcome.amount).toBeLessThanOrEqual(FLEET_HULLS);
     // Moved, it waits: nothing is put twice.
-    const moved = applyDeltas(world, [...rome.deltas], context(world, rome.actorCharacterId) as never);
+    const moved = applyDeltas(world, [...rome.deltas], context(world, rome.actorCharacterId));
     expect(moved.rejected).toEqual([]);
     expect(decideAFleet(romeWith(moved.world), rulerOf(moved.world)).filter((decision) => decision.polityId === "rome")).toEqual([]);
   });
@@ -61,7 +61,7 @@ describe("Rome builds a fleet by decree", () => {
   it("lays the keels the day the Senate carries it, pays by stages from the chest, and launches ships", () => {
     const world = base();
     const rome = decideAFleet(romeWith(world), rulerOf(world)).find((decision) => decision.polityId === "rome")!;
-    const moved = applyDeltas(world, [...rome.deltas], context(world, rome.actorCharacterId) as never).world;
+    const moved = applyDeltas(world, [...rome.deltas], context(world, rome.actorCharacterId)).world;
     const counted = holdVotes({ world: { ...moved, elapsedStep: DAY + 12 }, offices, toDay: DAY + 12, ids: createIdFactory("count") });
     const work = counted.world.projects.find((project) => project.kind === "shipbuilding")!;
     expect(work).toMatchObject({ status: "in_progress" });

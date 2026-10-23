@@ -302,7 +302,7 @@ function routeMonth(_book: Book, input: FlowInput, result: FlowResult, route: Ro
   const lift = Math.max(input.merchantLift?.get(route.aId) ?? 1, input.merchantLift?.get(route.bId) ?? 1);
   const carry = (0.5 + average / 10_000) * CROSSING_CAPACITY_SHARE[link.crossing] * lift;
   const crossPolity = a.polity !== null && b.polity !== null && a.polity !== b.polity;
-  const terms = crossPolity ? route.termsOf(a.polity!, b.polity!) : undefined;
+  const terms = crossPolity ? route.termsOf(a.polity, b.polity) : undefined;
   if (terms !== undefined && terms.closed !== null) return;
   for (let index = 0; index < GOOD_COUNT; index += 1) {
     const spec = GOODS[index]!;

@@ -22,7 +22,7 @@ const answer = () => JSON.stringify({
 
 describe("the answer to a decision card", () => {
   it("is not told as an order that came to nothing", async () => {
-    const port: SimModelPort = { complete: async (operation) => operation === "simulate_orchestrate" ? answer() : JSON.stringify({ actors: [] }) };
+    const port: SimModelPort = { complete: (operation) => Promise.resolve(operation === "simulate_orchestrate" ? answer() : JSON.stringify({ actors: [] })) };
     const result = await runSimulationBurst({ world: WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), clock: definition.clock, offices: definition.government.offices,
       warfare: definition.warfare, burstId: "card-answer", gameId: "card-answer", actorRef: { kind: "character", id: ACTOR }, actorPolityId: "rome",
       orderText: `The ruler has answered: ${ANSWER}.`, answeredDecision: { prompt: "Fight, hold, or fall back?", label: ANSWER, summary: "Form the line.", optionId: "engagement-offer" },

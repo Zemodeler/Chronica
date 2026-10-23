@@ -59,7 +59,7 @@ describe("a long promise", { timeout: 60_000 }, () => {
     const world = opening();
     const target = world.characters[0]!;
     const long = { ...world, characters: [{ ...target, relations: [{ subjectCharacterId: target.id, causes: [{ id: "x", label: LONG, score: -5, occurredAtStep: 0, decayPerYearBps: 0, encounterMemoryId: null, dimensions: {} }] }], ...[] }, ...world.characters.slice(1)] };
-    const mended = clipOverlong(long as WorldState);
+    const mended = clipOverlong(long);
     expect(mended).not.toBeNull();
     expect(WorldStateSchema.safeParse(mended!.world).success).toBe(true);
   });

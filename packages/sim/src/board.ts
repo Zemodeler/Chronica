@@ -190,7 +190,7 @@ function buildBoard(world: WorldState): Board {
   // Every border, by pair, from one pass over the edges.
   const borders = new Map<string, Map<string, { ours: Set<string>; theirs: Set<string> }>>();
   const touch = (a: string, b: string, aProvince: string, bProvince: string): void => {
-    const row = borders.get(a) ?? new Map();
+    const row = borders.get(a) ?? new Map<string, { ours: Set<string>; theirs: Set<string> }>();
     const cell = row.get(b) ?? { ours: new Set<string>(), theirs: new Set<string>() };
     cell.ours.add(aProvince);
     cell.theirs.add(bProvince);
@@ -252,7 +252,7 @@ function buildBoard(world: WorldState): Board {
     if (own.length === 0) continue;
     const wars = warsOf(world.polityAgreements, polity.id);
     const ourStrength = withAllies(polity.id);
-    const bordering = borders.get(polity.id) ?? new Map();
+    const bordering = borders.get(polity.id) ?? new Map<string, { ours: Set<string>; theirs: Set<string> }>();
     const others = new Set<string>([...bordering.keys(), ...rivalsOf(polity.id)]);
 
     // How far off the rivals that do not border us are, from our armies and our capital.

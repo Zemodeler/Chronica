@@ -626,7 +626,7 @@ export function givenItsDestination<T extends { readonly output: OrchestratorOut
       .find((id) => id !== null) ?? null;
     const place = fromGoals ?? named;
     if (place === null || place === force.locationId || !world.map.provinces.some((province) => province.id === place)) continue;
-    deltas[at] = { ...delta, locationId: place } as typeof delta;
+    deltas[at] = { ...delta, locationId: place };
     moved.add(force.id);
     changed = true;
   }
@@ -666,7 +666,7 @@ export function approachFirst<T extends { readonly output: OrchestratorOutput }>
     deltas.push(WorldDeltaSchema.parse({ op: "force_modify", forceRef: entry.forceId, locationId: entry.provinceId, reason: "March to where the order has it act." }));
     const marchPart = parts.length;
     const province = world.map.provinces.find((candidate) => candidate.id === entry.provinceId)?.name ?? "the place";
-    parts.push({ said: `March ${entry.forceName} to ${province}.`, acts: [moveAt], goals: [], spend: null, factLocalIds: [], whyNot: null } as unknown as OrchestratorOutput["intent"]["parts"][number]);
+    parts.push({ said: `March ${entry.forceName} to ${province}.`, acts: [moveAt], goals: [], spend: null, factLocalIds: [], whyNot: null });
     const waiting = parts[entry.part]!;
     parts[entry.part] = { ...waiting, afterParts: [...(waiting.afterParts ?? []), marchPart].slice(0, 4) };
   }
@@ -720,7 +720,8 @@ function releaseUngroundedMarches<T extends { readonly output: OrchestratorOutpu
   for (const [index, part] of output.intent.parts.entries()) {
     const marches = (part.deferredActs ?? []).filter((delta) => delta.op === "project_create" && delta.completionOutcome?.kind === "force_move");
     if (marches.length === 0) continue;
-    if (part.whenForceExists != null || /^(once|after|when|on arrival)/i.test(part.said)) continue;
+    // [\b] is a backspace, as the literal character here always was; it was probably meant as \b, a word boundary, which would change what this matches.
+    if (part.whenForceExists != null || /^(once|after|when|on arrival)[\b]/i.test(part.said)) continue;
     // What an earlier part could be waited on for: a goal it set, a force it moved, a letter it sent.
     const waitedFor = (at: number): boolean => (output.intent.parts[at]?.goals ?? []).length > 0
       || (output.intent.parts[at]?.acts ?? []).some((act) => {
@@ -3293,7 +3294,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       // ...but only where this part's own refusal was for want of one: "march and fight" is not held
       // for the money of "raise a second army" merely because both stand in one order.
       const ownWork = mine.flatMap((act) => act.work ?? []);
-      const forWantOfAVote = ownWork.some((ref) => ref.kind === "procedure") || mine.some((act) => /authori[sz]|senate|vote|funds?|treasur|leave of|permission/i.test(act.refusal ?? ""));
+      // [\b] is a backspace, as the literal character here always was; it was probably meant as \b, a word boundary, which would change what this matches.
+      const forWantOfAVote = ownWork.some((ref) => ref.kind === "procedure") || mine.some((act) => /authori[sz]|senate|[\b]vote[\b]|funds?[\b]|treasur|leave of|permission/i.test(act.refusal ?? ""));
       const votes: StageCondition[] = (forWantOfAVote ? orderWork : []).filter((ref) => ref.kind === "procedure")
         .filter((ref) => world.material.politicalProcedures.find((procedure) => procedure.id === ref.id)?.outcome !== "failed")
         .map((ref) => ({ kind: "procedure_passed" as const, procedureId: ref.id }));

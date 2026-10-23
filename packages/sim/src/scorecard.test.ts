@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
+import { punicWarsScenario } from "@chronica/db";
 import { WorldStateSchema, ensureProvinceMaterial, orderPartStatus, type OrderPart, type WorldState } from "@chronica/shared";
 import type { ChronicleEntry } from "./chronicle";
 import { lineOf } from "./order-outcomes";

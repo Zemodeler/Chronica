@@ -171,7 +171,7 @@ export function stormSiege(
   const stormed = garrison.length === 0 || warfare === undefined ? undefined : resolveEngagement({
     world: { ...world, structures: [...world.structures, walls], elapsedStep: day, instant: { ...world.instant, day } },
     attacker: besieger, defender: garrison[0]!, defenderAllies: garrison.slice(1), posture: "offer_battle",
-    tactic: null, warfare: warfareWith(world, warfare!), battleId: ids.next("battle"), seed: `${siege.id}:storm:${day}`, playerCharacterId: player,
+    tactic: null, warfare: warfareWith(world, warfare), battleId: ids.next("battle"), seed: `${siege.id}:storm:${day}`, playerCharacterId: player,
   }, 950);
   const after: WorldState = stormed === undefined ? world : { ...stormed.world, elapsedStep: world.elapsedStep, instant: world.instant, structures: stormed.world.structures.filter((structure) => structure.id !== walls.id) };
   if (stormed !== undefined) facts.push(...stormed.facts);

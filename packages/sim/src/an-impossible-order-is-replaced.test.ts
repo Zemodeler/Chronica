@@ -27,7 +27,7 @@ describe("an impossible order is replaced", () => {
   it("is replaced by orders that can be carried out, saying why", () => {
     const bare = { ...world, material: { ...world.material, forces: world.material.forces.filter((force) => !(force.polityId === "rome" && force.id !== army.id)) } };
     const ctx = strategyCtx(bare, "rome", ["carthage"]);
-    const issued = issueCampaign(ctx, army, plan as never, undefined, "gaius-genucius", order);
+    const issued = issueCampaign(ctx, army, plan, undefined, "gaius-genucius", order);
     expect(issued).not.toBeNull();
     expect(issued!.campaign.byRule).toBe(true);
     expect(JSON.stringify(issued!.campaign.objective)).not.toBe(JSON.stringify(order.objective));

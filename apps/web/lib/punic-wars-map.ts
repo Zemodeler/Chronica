@@ -19,7 +19,7 @@ export function punicWarsGeoJson(): GeoJsonMap {
     const hasOstia = parsed.features.some((feature) => feature.id === "settlement-ostia");
     punicWarsMap = hasOstia ? parsed : {
       ...parsed,
-      features: [...parsed.features, { type: "Feature", id: "settlement-ostia", geometry: { type: "Point", coordinates: [12.2889, 41.7549] }, properties: { kind: "settlement", name: "Ostia", provinceId: "it-l865w", type: "port" } } as GeoJsonMap["features"][number]],
+      features: [...parsed.features, { type: "Feature", id: "settlement-ostia", geometry: { type: "Point", coordinates: [12.2889, 41.7549] }, properties: { kind: "settlement", name: "Ostia", provinceId: "it-l865w", type: "port" } }],
     };
   }
   return punicWarsMap;

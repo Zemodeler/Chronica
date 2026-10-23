@@ -69,7 +69,7 @@ export function keepTheCourtRivalries(world: WorldState): WorldState {
         : character.ambitions;
       const fresh = want !== undefined && !settled.some((ambition) => ambition.id === wantId(want.targetId));
       if (!fresh && settled === character.ambitions) return character;
-      return { ...character, ambitions: fresh ? [...settled, { id: wantId(want!.targetId), label: want!.label, kind: "office" as const, targetId: want!.targetId, status: "active" as const, steps: [] }] : settled };
+      return { ...character, ambitions: fresh ? [...settled, { id: wantId(want.targetId), label: want.label, kind: "office" as const, targetId: want.targetId, status: "active" as const, steps: [] }] : settled };
     }),
   };
 }

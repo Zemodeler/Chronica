@@ -106,7 +106,7 @@ export function taxPolicyIndex(world: Pick<WorldState, "economy">): (province: P
  * port with a sizeable town is worth more than its land, an inland valley a
  * seventh of it. Men yields the holder its ordinary land levy less the overlord's reserve (`MEN_LEVY_RESERVE_SHARE`), and the overlord no money.
  */
-export function regimeFactor(regime: TaxRegime, row: Pick<ProvinceMaterial, "foodSecurityBps">, _province: Pick<Province, "settlements">, trade?: number | undefined): number {
+export function regimeFactor(regime: TaxRegime, row: Pick<ProvinceMaterial, "foodSecurityBps">, _province: Pick<Province, "settlements">, trade?: number  ): number {
   switch (regime) {
     case "tithe": return Math.max(0.35, Math.min(1.3, row.foodSecurityBps / 8_000));
     case "land_levy": return 1;

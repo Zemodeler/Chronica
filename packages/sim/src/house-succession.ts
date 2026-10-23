@@ -269,7 +269,7 @@ function adopt(world: WorldState, head: Character, adoptee: Character, standing:
   const paid = gift > 0 && adopteePurse !== undefined && adopteePurse.status === "active" && purse !== undefined;
   const transactions: MoneyTransaction[] = paid
     ? [{
-      id: ids.next("txn"), atStep: toDay, kind: "transfer", amount: gift, sourceAccountId: purse!.id, destinationAccountId: adopteePurse!.id,
+      id: ids.next("txn"), atStep: toDay, kind: "transfer", amount: gift, sourceAccountId: purse.id, destinationAccountId: adopteePurse.id,
       cause: { kind: "action", id: boundedId("adoption", head.id, adoptee.id), explanation: `${head.name} gives ${newName} a son's portion on taking him as his heir.`.slice(0, 240) }, visibility: "private",
     }]
     : [];
@@ -304,7 +304,7 @@ function adopt(world: WorldState, head: Character, adoptee: Character, standing:
     }],
     material: {
       ...world.material,
-      accounts: paid ? world.material.accounts.map((account) => (account.id === purse!.id ? { ...account, balance: account.balance - gift } : account.id === adopteePurse!.id ? { ...account, balance: account.balance + gift } : account)) : world.material.accounts,
+      accounts: paid ? world.material.accounts.map((account) => (account.id === purse.id ? { ...account, balance: account.balance - gift } : account.id === adopteePurse.id ? { ...account, balance: account.balance + gift } : account)) : world.material.accounts,
       transactions: [...world.material.transactions, ...transactions],
       contracts: ended.size === 0 ? world.material.contracts : world.material.contracts.map((contract) => (ended.has(contract.id) ? { ...contract, status: "ended" as const, endsAtStep: toDay } : contract)),
       obligations: endedPay.size === 0 ? world.material.obligations : world.material.obligations.map((obligation) => (endedPay.has(obligation.id) ? { ...obligation, active: false } : obligation)),
@@ -407,7 +407,7 @@ export function keepTheLine(start: WorldState, toDay: number, ids: IdFactory, du
       continue;
     }
     const spoken = spokenFor(world);
-    const lost = head.heirCharacterId === null ? null : world.characters.find((character) => character.id === head!.heirCharacterId);
+    const lost = head.heirCharacterId === null ? null : world.characters.find((character) => character.id === head.heirCharacterId);
     const lament = lost === undefined || lost === null ? "" : ` ${lost.name}, whom he had named, ${lost.alive ? "is lost to him" : "is dead"}.`;
 
     // 1. a kinsman
@@ -421,7 +421,7 @@ export function keepTheLine(start: WorldState, toDay: number, ids: IdFactory, du
 
     // 2. adoption: ask in turn, and each answers by his own nature
     const asked = candidatesForAdoption(world, head, toDay, spoken).slice(0, MAX_ASKED);
-    const takers = asked.find(({ person, standing }) => stableHash([house.id, head!.id, person.id, "adopts"]) % 100 < clamp(willingness(person, head!, standing), 0, 100));
+    const takers = asked.find(({ person, standing }) => stableHash([house.id, head.id, person.id, "adopts"]) % 100 < clamp(willingness(person, head, standing), 0, 100));
     if (takers !== undefined) {
       const oldName = takers.person.name;
       world = adopt(world, head, takers.person, takers.standing, toDay, ids);

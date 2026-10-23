@@ -37,8 +37,8 @@ describe("a hired band keeps its own people", () => {
     const named = JSON.stringify([band.name, band.formations, band.personnel]);
     expect(named).not.toMatch(/Legio|hastati|principes|triarii/);
     expect(band.formations).toHaveLength(1);
-    expect(band.formations![0]).toMatchObject({ bodyLabel: expect.stringMatching(/^Gallic band of /), line: "first" });
-    expect(band.personnel[0]).toMatchObject({ categoryId: "infantry", fit: 600, label: expect.stringMatching(/^Gallic foot/) });
+    expect(band.formations![0]).toMatchObject({ bodyLabel: expect.stringMatching(/^Gallic band of /) as unknown, line: "first" });
+    expect(band.personnel[0]).toMatchObject({ categoryId: "infantry", fit: 600, label: expect.stringMatching(/^Gallic foot/) as unknown });
     // Its own pay: the contract's obligation, and an account of its own.
     expect(band.payObligationId).not.toBeNull();
     expect(world.material.accounts.some((account) => account.owner.kind === "force" && account.owner.id === band.id)).toBe(true);

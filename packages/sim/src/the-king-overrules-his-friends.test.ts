@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Character, type WorldState } from "@chronica/shared";
+import { type WorldState } from "@chronica/shared";
 import { consultTheFriends, decideCouncils, stubbornness } from "./bodies";
 import { applyDecision, atDay, opening, question } from "./government-test-kit";
 
@@ -26,15 +26,15 @@ describe("the king overrules his friends", () => {
   });
 
   it("asks nobody where no council advises, and is not against where the friends would agree", () => {
-    expect(consultTheFriends(world0, "rome", hiero as Character, { label: "war be made on Carthage", concerns: ["war"] }, "g")).toBeNull();
+    expect(consultTheFriends(world0, "rome", hiero, { label: "war be made on Carthage", concerns: ["war"] }, "g")).toBeNull();
     const agreeing = { ...world0, material: { ...world0.material, institutions: world0.material.institutions.map((i) => (i.id === "syracusan-council" ? { ...i, votingBlocs: i.votingBlocs.map((b) => ({ ...b, baseSupport: 90 })) } : i)) } };
-    expect(consultTheFriends(agreeing, "syracuse", hiero as Character, { label: "war be made on Carthage", concerns: ["war"] }, "g")).toMatchObject({ against: false, cost: null });
+    expect(consultTheFriends(agreeing, "syracuse", hiero, { label: "war be made on Carthage", concerns: ["war"] }, "g")).toMatchObject({ against: false, cost: null });
   });
 
   it("lets the war wait for a heeding king, and charges a headstrong one in legitimacy", () => {
-    const meek = consultTheFriends(withTemper(friendsAgainst(world0), 5, 95, 5), "syracuse", hiero as Character, { label: "war be made on Carthage", concerns: ["war"] }, "g1");
+    const meek = consultTheFriends(withTemper(friendsAgainst(world0), 5, 95, 5), "syracuse", hiero, { label: "war be made on Carthage", concerns: ["war"] }, "g1");
     expect(meek).toMatchObject({ against: true });
-    const proud = consultTheFriends(withTemper(friendsAgainst(world0), 100, 0, 100), "syracuse", hiero as Character, { label: "war be made on Carthage", concerns: ["war"] }, "g1");
+    const proud = consultTheFriends(withTemper(friendsAgainst(world0), 100, 0, 100), "syracuse", hiero, { label: "war be made on Carthage", concerns: ["war"] }, "g1");
     expect(proud).toMatchObject({ against: true });
     // Over the months, the proud go on more often than the meek.
     const goes = (boldness: number, caution: number, status: number) => [...Array(40).keys()].filter((n) => {
@@ -48,7 +48,7 @@ describe("the king overrules his friends", () => {
   });
 
   it("takes or overrules advice already given on a question: for, he does it; against, by his temper", () => {
-    let world = question(world0, { id: "advised-1", bodyId: "syracusan-council", sponsor: "hieron-ii", label: "Motion of Hieron: that the harbour dues be doubled", concerns: ["taxes"], votesOn: 190, subjectId: "syracuse" });
+    const world = question(world0, { id: "advised-1", bodyId: "syracusan-council", sponsor: "hieron-ii", label: "Motion of Hieron: that the harbour dues be doubled", concerns: ["taxes"], votesOn: 190, subjectId: "syracuse" });
     const advise = (outcome: "passed" | "failed", w: WorldState): WorldState => ({
       ...w, material: {
         ...w.material,
@@ -62,8 +62,8 @@ describe("the king overrules his friends", () => {
     expect(forIt[0]!.deltas[0]).toMatchObject({ op: "political_procedure_resolve", outcome: "passed" });
     const proud = decideCouncils(ctx(withTemper(advise("failed", world), 100, 0, 100)));
     const meek = decideCouncils(ctx(withTemper(advise("failed", world), 5, 95, 5)));
-    expect(proud[0]!.deltas[0]).toMatchObject({ outcome: expect.stringMatching(/passed|withdrawn/) });
-    expect(meek[0]!.deltas[0]).toMatchObject({ outcome: expect.stringMatching(/passed|withdrawn/) });
+    expect(proud[0]!.deltas[0]).toMatchObject({ outcome: expect.stringMatching(/passed|withdrawn/) as unknown });
+    expect(meek[0]!.deltas[0]).toMatchObject({ outcome: expect.stringMatching(/passed|withdrawn/) as unknown });
     // An overruling, applied, costs the power its legitimacy (`overruleCost`).
     const overrule = [...Array(40).keys()].map((n) => decideCouncils({ ...ctx(withTemper(advise("failed", world), 100, 0, 100)), gameId: `g${n}` })[0]!).find((d) => (d.deltas[0] as { outcome: string }).outcome === "passed");
     expect(overrule).toBeDefined();
@@ -74,7 +74,7 @@ describe("the king overrules his friends", () => {
   });
 
   it("leaves the king the player is, and the king the model plays, to himself", () => {
-    const ctx = (played: boolean, player: string | null) => ({ world: world0, gameId: "g", excludedPolityIds: new Set<string>(), playedByModel: new Set(played ? ["hieron-ii"] : []), playerCharacterId: player, rulers: () => [hiero as Character] });
+    const ctx = (played: boolean, player: string | null) => ({ world: world0, gameId: "g", excludedPolityIds: new Set<string>(), playedByModel: new Set(played ? ["hieron-ii"] : []), playerCharacterId: player, rulers: () => [hiero] });
     expect(decideCouncils(ctx(true, null))).toEqual([]);
     expect(decideCouncils(ctx(false, "hieron-ii"))).toEqual([]);
   });

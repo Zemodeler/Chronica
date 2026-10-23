@@ -87,7 +87,7 @@ describe("a price from a stock", () => {
 
 describe("what moves a price", () => {
   const latiumHub = (world: WorldState): string => marketGeography(world).hubOf.get(LATIUM)!;
-  const country = (world: WorldState): ReadonlySet<string> => new Set(marketGeography(world).country.get(latiumHub(world))!);
+  const country = (world: WorldState): ReadonlySet<string> => new Set(marketGeography(world).country.get(latiumHub(world)));
 
   it("makes a good dearer where the country that supplies it has been laid waste", () => {
     const world = ensureMarkets(opening());

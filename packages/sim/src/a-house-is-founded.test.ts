@@ -190,7 +190,7 @@ describe("a house is founded by rule", () => {
 describe("a house is founded by order", () => {
   const order = (world: WorldState, actorId: string, raw: Record<string, unknown>, actorKind: "character" | "polity" = "character") => {
     const deltas = [WorldDeltaSchema.parse({ op: "house_found", reason: "To trade.", ...raw })];
-    return applyDeltas(atDay(world, AT), deltas, { now: { day: AT, minute: 0 }, actorRef: { kind: actorKind, id: actorId } as never, offices: definition.government.offices, warfare: definition.warfare, ids: ids("order"), gameId: "test", orderDeltas: new Set(deltas) });
+    return applyDeltas(atDay(world, AT), deltas, { now: { day: AT, minute: 0 }, actorRef: { kind: actorKind, id: actorId }, offices: definition.government.offices, warfare: definition.warfare, ids: ids("order"), gameId: "test", orderDeltas: new Set(deltas) });
   };
 
   it("founds a house out of the man's own purse, with a freedman at the books, by order", () => {

@@ -145,7 +145,7 @@ export function ageNudge(id: string, ageBefore: number, ageNow: number): Nudge {
       }
     }
   }
-  return total as Nudge;
+  return total;
 }
 
 const clamp = (value: number): number => Math.max(0, Math.min(100, Math.round(value)));

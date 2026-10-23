@@ -294,7 +294,7 @@ async function withLetterBurst(
       const rules = { warfare: view.scenarioWarfare, terrains: view.scenarioMap?.terrains, successionRules: view.scenarioGovernment?.successionRules, wealth: view.scenarioWealth, gameId };
       const answered = await answerNewLetters({
         before: view.world, after: result.world, writerId: characterId, clock: view.scenarioClock, offices,
-        port: await modelPort(db, userId, gameId), knownFacts: await recentFactsOf(db, gameId), rules, ids,
+        port: modelPort(db, userId, gameId), knownFacts: await recentFactsOf(db, gameId), rules, ids,
       });
       const world = answered.world;
       const materialized = materializeFacts({
@@ -344,7 +344,7 @@ async function withLetterBurst(
 }
 
 /** The port the answer is asked through: coin-gated, timed and metered as a turn's is. Null where no model can be reached at all. */
-async function modelPort(db: Parameters<typeof createTimedPort>[0]["db"], userId: string, gameId: string): Promise<SimModelPort | null> {
+function modelPort(db: Parameters<typeof createTimedPort>[0]["db"], userId: string, gameId: string): SimModelPort | null {
   try {
     const timed = createTimedPort({ db, userId, gameId, adapter: createAiAdapter() });
     return meteredPort(timed.port, createRequestLedger(allowanceFromEnv(process.env.CHRONICA_REQUEST_ALLOWANCE)));

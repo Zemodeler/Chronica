@@ -8,7 +8,7 @@ import { EGYPT_MONTHLY_REVENUE, NO_CHEST_BY_DESIGN, STANDING_TAX_CEILING, STANDI
  * kept a treasury in the data. Every power that is a state by its form now keeps one, with a standing tax of its own at the scale of the age; a tribal people, by its
  * form, has no standing tax or loans (docs/plans/government.md) and keeps none.
  */
-const world = (): WorldState => structuredClone(punicWarsScenario.initialWorld) as WorldState;
+const world = (): WorldState => structuredClone(punicWarsScenario.initialWorld);
 const chests = (w: WorldState) => new Map(w.material.accounts.filter((account) => account.owner.kind === "polity").map((account) => [account.owner.id, account]));
 
 describe("every power has a treasury", () => {

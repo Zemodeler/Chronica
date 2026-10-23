@@ -55,7 +55,7 @@ describe("a carried motion becomes an act", () => {
     const army = state.material.forces.filter((force) => force.polityId === "rome" && force.outlaw !== true).sort((a, b) => b.authorizedStrength - a.authorizedStrength)[0]!;
     const there = state.map.provinces.find((province) => province.id !== army.locationId && province.name.length >= 5 && state.map.provinces.filter((other) => other.name === province.name).length === 1)!;
     const sent = readDecree(carried(state, `that the army be sent to ${there.name}`), { label: `that the army be sent to ${there.name}`, institutionId: "roman-senate" }, definition.warfare);
-    expect(sent).toMatchObject({ kind: "march", provinceId: expect.any(String) });
+    expect(sent).toMatchObject({ kind: "march", provinceId: expect.any(String) as unknown });
     const marched = run(carried(state, `that the army be sent to ${there.name}`)).world;
     const after = marched.material.forces.find((force) => force.id === army.id)!;
     expect(after.locationId !== army.locationId || marched.projects.some((project) => project.completionOutcome?.kind === "force_move" && project.completionOutcome.forceId === army.id)).toBe(true);

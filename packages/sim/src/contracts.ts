@@ -63,7 +63,7 @@ export function keepContracts(world: WorldState, toDay: number): { world: WorldS
         facts.push({
           localId: safeLocalId(`mercenary_revolt_${contract.id}`).slice(0, 60),
           kind: "mercenary_revolt",
-          summary: `${company.name} will not go home unpaid: ${name(contract.employeeCharacterId)}'s men have taken the road with their arms and what is owed them (${pay!.arrears} behind), and answer now to nobody in ${next.map.polities.find((polity) => polity.id === contract.forceWas!.polityId)?.name ?? "their old country"}.`.slice(0, 600),
+          summary: `${company.name} will not go home unpaid: ${name(contract.employeeCharacterId)}'s men have taken the road with their arms and what is owed them (${pay.arrears} behind), and answer now to nobody in ${next.map.polities.find((polity) => polity.id === contract.forceWas!.polityId)?.name ?? "their old country"}.`.slice(0, 600),
           affectedRefs: [{ kind: "force", id: company.id }, { kind: "polity", id: contract.forceWas!.polityId }],
           visibility: "public",
           discoveryState: "public",
@@ -87,9 +87,9 @@ export function keepContracts(world: WorldState, toDay: number): { world: WorldS
           ? contract.role === "tax_farmer"
             ? `${who} missed the rent on his tax farm, and the farm was taken back: ${contract.label}.`
             : contract.role === "victualler"
-              ? `${who}'s house went ${pay!.missedPeriods} period(s) without being paid for the bread it sent, and stopped sending it: ${contract.label}. It is out of what it laid out, and the army must be fed some other way.`
+              ? `${who}'s house went ${pay.missedPeriods} period(s) without being paid for the bread it sent, and stopped sending it: ${contract.label}. It is out of what it laid out, and the army must be fed some other way.`
             : contract.role === "mercenary"
-              ? `${who}'s company went ${pay!.missedPeriods} period(s) without its pay${silverDeficitBps(world, employerPolityOf(world, contract)) > 0 ? `, and what pay it had was in coin worth ${Math.round((10_000 - silverDeficitBps(world, employerPolityOf(world, contract))) / 100)} in a hundred of its silver` : ""}, and walked out of the contract: ${contract.label}. It owes nobody anything now.`
+              ? `${who}'s company went ${pay.missedPeriods} period(s) without its pay${silverDeficitBps(world, employerPolityOf(world, contract)) > 0 ? `, and what pay it had was in coin worth ${Math.round((10_000 - silverDeficitBps(world, employerPolityOf(world, contract))) / 100)} in a hundred of its silver` : ""}, and walked out of the contract: ${contract.label}. It owes nobody anything now.`
               : `${who} was not paid, and his contract lapsed: ${contract.label}. He owes nobody anything now.`
           : `${who}'s term ran out: ${contract.label}.`,
       affectedRefs: [{ kind: "character", id: contract.employeeCharacterId }, { kind: "account", id: contract.employerAccountId }],

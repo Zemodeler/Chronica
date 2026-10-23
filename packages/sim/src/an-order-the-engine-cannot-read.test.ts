@@ -42,7 +42,7 @@ describe("an order the engine cannot read", () => {
     // No part written at all: one is made for the order.
     const bare = promise("x");
     const partless = withTheHonestReply({ output: { ...bare.output, intent: { ...bare.output.intent, parts: [] } } }, "Make the Samnites love Rome.", hints());
-    expect(partless.output.intent.parts[0]).toMatchObject({ said: "Make the Samnites love Rome.", whyNot: expect.stringContaining(NO_WAY) });
+    expect(partless.output.intent.parts[0]).toMatchObject({ said: "Make the Samnites love Rome.", whyNot: expect.stringContaining(NO_WAY) as unknown });
   });
 
   it("leaves alone what is no command, what the orchestrator did something for, and what it gave a reason for", () => {

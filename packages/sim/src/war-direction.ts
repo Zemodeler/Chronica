@@ -3,7 +3,6 @@ import {
   campaignOf,
   alliesLedBy,
   isNavalForce,
-  kmFrom,
   warPlanOf,
   leaderOf,
   warsOf,

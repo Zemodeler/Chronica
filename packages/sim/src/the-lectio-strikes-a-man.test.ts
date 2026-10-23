@@ -52,7 +52,7 @@ describe("the lectio strikes a man", () => {
   it("does not enrol him again with the other men who held a magistracy, while the mark stands", () => {
     const done = keepTheRoll(input(world, 200));
     const former = { ...done.world, characters: done.world.characters.map((c) => (c.id === thief ? { ...c, officesHeld: [{ officeId: "roman-quaestor", startedAtStep: 0, endedAtStep: 100 }] } : c)) } as WorldState;
-    const again = enrolFormerMagistrates(former, government.offices as never, 210, [], () => "x");
+    const again = enrolFormerMagistrates(former, government.offices, 210, [], () => "x");
     expect(holdersOfOffice(again, "roman-senator")).not.toContain(thief);
   });
 

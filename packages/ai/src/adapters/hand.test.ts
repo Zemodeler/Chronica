@@ -9,7 +9,7 @@ describe("the hand adapter", () => {
   it("automatically answers and replays, invalidating answers when system or model changes", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "hand-auto-"));
     let calls = 0;
-    const respond = async () => { calls += 1; return '{"actors":[]}'; };
+    const respond = () => { calls += 1; return Promise.resolve('{"actors":[]}'); };
     const adapter = createHandAdapter({ dir, respond, cacheNamespace: "luna" });
     await adapter.call("simulate_cognition", "S", "R");
     await adapter.call("simulate_cognition", "S", "R");

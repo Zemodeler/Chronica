@@ -41,7 +41,7 @@ const MOUSE = { sociability: 60, honesty: 70, boldness: 5, caution: 95, cruelty:
 const MOUSE_DRIVES = { duty: 60, status: 15, revenge: 10, security: 95 };
 
 const asMan = (c0: Character, temperament: object, drives: object): Character =>
-  ({ ...c0, traits: [], mind: { ...c0.mind, temperament: { ...c0.mind.temperament, ...temperament }, drives: { ...c0.mind.drives, ...drives } } }) as Character;
+  ({ ...c0, traits: [], mind: { ...c0.mind, temperament: { ...c0.mind.temperament, ...temperament }, drives: { ...c0.mind.drives, ...drives } } });
 
 describe("a ruler writes in his own voice", () => {
   it("sounds different from another man on the same matter, and always the same as himself", () => {
@@ -86,7 +86,7 @@ describe("a ruler answers a letter as he is", () => {
     id: "ult-1", kind: "ultimatum", fromPolityId: from, fromCharacterId: rulerOf(seeded, from).id, toPolityId: to, toCharacterId: answerer.id,
     subject: "Give back the ground", terms: "Give it back within thirty days, or war.", sentAtStep: 0, replyDueByStep: 400, status: "awaiting_reply", answer: null, answerText: null,
     answeredAtStep: null, inReplyToMessageId: null, visibility: "polity", onRefusal: "war",
-  } as DiplomaticMessage);
+  });
 
   it("gives way to a stronger neighbour's ultimatum if frightened, and defies it if daring or proud", () => {
     const { answerer, sender } = aQuarrel();
@@ -172,7 +172,7 @@ describe("a power writes before it fights", () => {
       id: `n-${kind}`, kind, fromPolityId: candidate.polityId, fromCharacterId: from, toPolityId: candidate.neighbour.polityId, toCharacterId: null,
       subject: "x", terms: "x", sentAtStep, replyDueByStep: sentAtStep + 30, status: answer === null ? "awaiting_reply" : "answered", answer, answerText: null,
       answeredAtStep: answer === null ? null : sentAtStep + 5, inReplyToMessageId: null, visibility: "polity",
-    } as DiplomaticMessage);
+    });
     /** Some ruler who warns: the first sampled man for whom the road is a letter. */
     const next = (earlier: (from: string) => DiplomaticMessage[]) => {
       for (let i = 0; i < 80; i += 1) {

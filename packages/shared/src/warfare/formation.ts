@@ -380,7 +380,7 @@ export function formArmies<W extends { readonly establishments: readonly Militar
     return formOne(force, establishment, atStep, hints);
   });
   if (!changed) return world;
-  return { ...world, establishments, material: { ...world.material, forces } } as W;
+  return { ...world, establishments, material: { ...world.material, forces } };
 
   function formOne(force: Force, establishment: MilitaryEstablishment | undefined, day: number, given: FormingHints): Force {
     let formations = (force.formations ?? []).filter((formation) => force.personnel.some((row) => row.formationId === formation.id));

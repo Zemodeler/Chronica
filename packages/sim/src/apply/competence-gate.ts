@@ -360,8 +360,8 @@ export function noteTheAct(before: WorldState, after: WorldState, delta: WorldDe
     byCharacterId: decreed ? null : actorId,
     byOfficeId: decreed ? null : may?.officeId ?? null,
     atStep: now,
-    sinceStep: spend && !fresh ? prior!.sinceStep : now,
-    total: spend ? (fresh ? 0 : prior!.total) + (gated.amount ?? 0) : 0,
+    sinceStep: spend && !fresh ? prior.sinceStep : now,
+    total: spend ? (fresh ? 0 : prior.total) + (gated.amount ?? 0) : 0,
   };
   return { ...after, actMarks: withActMark(after.actMarks, mark) };
 }
