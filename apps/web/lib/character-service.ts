@@ -1,3 +1,4 @@
+import { purseInTheDraft } from "./purse-in-the-draft";
 import "server-only";
 
 import { createAiAdapter, callWithCoinGate, InsufficientCoinsError, AiParseError } from "@chronica/ai";
@@ -410,7 +411,7 @@ function parseAiKnowledgebase(
   // the player their character for the engine's convenience, and the model's
   // judgment *inside* a band is worth keeping.
   const purse = clampWealth(knowledgebase.startingMoney, knowledgebase.socioEconomicClass, context.wealth);
-  return { ...knowledgebase, startingMoney: purse, becomesCharacterId };
+  return { ...knowledgebase, startingMoney: purse, becomesCharacterId, ...(knowledgebase.confirmationDraft === undefined || knowledgebase.confirmationDraft === null ? {} : { confirmationDraft: purseInTheDraft(knowledgebase.confirmationDraft, knowledgebase.startingMoney, purse) ?? knowledgebase.confirmationDraft }) };
 }
 
 export async function declareCharacter(gameId: string, playerInput: string): Promise<CharacterDeclarationResult> {
