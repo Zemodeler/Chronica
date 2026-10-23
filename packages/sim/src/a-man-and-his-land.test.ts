@@ -3,7 +3,7 @@ import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, estateTerms, improvementTerms, type WorldDelta, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
-import { createIdFactory } from "./ports";
+import { freshIds } from "./fresh-ids-test-kit";
 import { runDeterministicTick } from "./tick";
 import { withMiddlingManagers } from "./middling-managers";
 
@@ -27,13 +27,14 @@ const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 const opening = (): WorldState => withMiddlingManagers(ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0));
 const LATIUM = PUNIC_IDS.rome;
 
-const as = (characterId: string): ApplyContext => ({
+// Ids the world acted on has not used: one seed reused made two money lines with one id, and the books lost the second (`ids.unique`).
+const as = (characterId: string, world: WorldState): ApplyContext => ({
   now: { day: 0, minute: 540 },
   actorRef: { kind: "character", id: characterId },
   offices: definition.government.offices,
   warfare: definition.warfare,
   terrains: definition.map.terrains,
-  ids: createIdFactory(`land-${characterId}`),
+  ids: freshIds(`land-${characterId}`, world),
   gameId: "game-1",
 });
 
@@ -54,7 +55,7 @@ describe("a man and his land", () => {
     const world = opening();
     expect(world.material.holdings.find((holding) => holding.id === "curius-sabine-farm")?.legalHolderCharacterId).toBe("manius-curius");
     const before = balance(world, "curius-purse");
-    const month = runDeterministicTick({ world, toDay: 30, ids: createIdFactory("land-tick"), warfare: definition.warfare }).world;
+    const month = runDeterministicTick({ world, toDay: 30, ids: freshIds("land-tick", world), warfare: definition.warfare }).world;
     // 120 of rent (a tenth of the first drafts, v59, 2026-10-08), and 4 more from how the Treasury's officers are: the men who gather the rents have tempers of their own.
     expect(balance(month, "curius-purse")).toBe(before + 124);
     // An estate authored in the scenario is the same kind of thing as one bought in play.
@@ -68,7 +69,7 @@ describe("a man and his land", () => {
   it("lets a private citizen improve his own estate from his own purse, lawfully", () => {
     const world = opening();
     const terms = improvementTerms(world, LATIUM, 120, "slight")!;
-    const result = applyDeltas(world, [IMPROVE_THE_FARM], as("manius-curius"));
+    const result = applyDeltas(world, [IMPROVE_THE_FARM], as("manius-curius", world));
     expect(result.rejected).toEqual([]);
     expect(result.breaches).toEqual([]);
     expect(balance(result.world, "curius-purse")).toBe(balance(world, "curius-purse") - terms.cost);
@@ -78,7 +79,7 @@ describe("a man and his land", () => {
   it("refuses works nobody can pay for, as the world refusing", () => {
     const world = opening();
     const poor: WorldState = { ...world, material: { ...world.material, accounts: world.material.accounts.map((account) => (account.id === "curius-purse" ? { ...account, balance: 10 } : account)) } };
-    const result = applyDeltas(poor, [IMPROVE_THE_FARM], as("manius-curius"));
+    const result = applyDeltas(poor, [IMPROVE_THE_FARM], as("manius-curius", poor));
     expect(result.rejected).toHaveLength(1);
     expect(result.rejected[0]!.kind).toBe("world");
   });
@@ -88,7 +89,7 @@ describe("a man and his land", () => {
     let refused = false;
     for (let attempt = 0; attempt < 40 && !refused; attempt += 1) {
       const rich: WorldState = { ...world, material: { ...world.material, accounts: world.material.accounts.map((account) => (account.id === "curius-purse" ? { ...account, balance: 1_000_000 } : account)) } };
-      const result = applyDeltas(rich, [{ ...IMPROVE_THE_FARM, band: "great" }], as("manius-curius"));
+      const result = applyDeltas(rich, [{ ...IMPROVE_THE_FARM, band: "great" }], as("manius-curius", rich));
       refused = result.rejected.length > 0;
       world = result.world;
     }
@@ -106,7 +107,7 @@ describe("a man and his land", () => {
       holderCharacterRef: "manius-curius", band: "slight", priceFromAccountRef: "curius-purse",
       reason: "Curius buys the farm beside his own.",
     };
-    const result = applyDeltas(world, [buy], as("manius-curius"));
+    const result = applyDeltas(world, [buy], as("manius-curius", world));
     expect(result.rejected).toEqual([]);
     expect(result.breaches).toEqual([]);
     expect(balance(result.world, "curius-purse")).toBe(balance(world, "curius-purse") - terms.price);
@@ -121,8 +122,9 @@ describe("a man and his land", () => {
       holderCharacterRef: "quintus-ogulnius", band: "marked", priceFromAccountRef: null,
       reason: "A grant for services to the state.",
     };
-    expect(applyDeltas(opening(), [grant], as("gaius-genucius")).breaches).toEqual([]);
-    const unlawful = applyDeltas(opening(), [grant], as("manius-curius"));
+    const world = opening();
+    expect(applyDeltas(world, [grant], as("gaius-genucius", world)).breaches).toEqual([]);
+    const unlawful = applyDeltas(world, [grant], as("manius-curius", world));
     const heard = unlawful.breaches.length > 0 || unlawful.rejected.some((rejection) => rejection.kind === "ignored");
     expect(heard).toBe(true);
   });
@@ -145,7 +147,7 @@ describe("a man and his land", () => {
       reason: "Carthage takes Rome's taxes.",
     };
     for (const delta of [handedAnIncome, rewritten, redirected]) {
-      const result = applyDeltas(world, [delta], as("manius-curius"));
+      const result = applyDeltas(world, [delta], as("manius-curius", world));
       expect(result.rejected).toHaveLength(1);
       // An engine refusal, so the repair pass can put it the right way -- an
       // estate, an office, a payment -- rather than a rule of the world.
@@ -155,14 +157,15 @@ describe("a man and his land", () => {
 
     // A government still levies what it levies; the tick bounds what the land bears.
     const raised: WorldDelta = { ...redirected, beneficiaryAccountRef: "rome-treasury", amount: 150_000, reason: "The Senate raises the tributum." };
-    const levied = applyDeltas(world, [raised], as("gaius-genucius"));
+    const levied = applyDeltas(world, [raised], as("gaius-genucius", world));
     expect(levied.rejected).toEqual([]);
     expect(levied.world.material.incomeSources.find((source) => source.id === "rome-tributum")?.amount).toBe(150_000);
   });
 
   it("does not let a private man improve his farm out of the treasury", () => {
     const fromTheTreasury: WorldDelta = { ...IMPROVE_THE_FARM, paidFromAccountRef: "rome-treasury" };
-    const result = applyDeltas(opening(), [fromTheTreasury], as("manius-curius"));
+    const world = opening();
+    const result = applyDeltas(world, [fromTheTreasury], as("manius-curius", world));
     const lawful = result.breaches.length === 0 && result.rejected.length === 0;
     expect(lawful).toBe(false);
   });

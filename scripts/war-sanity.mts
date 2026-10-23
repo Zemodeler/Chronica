@@ -17,6 +17,9 @@ import { punicWarsScenario } from "@chronica/db";
 import { readDepartments, stableHash, ScenarioDefinitionSchema, WorldStateSchema, WorldDeltaSchema, ensureProvinceMaterial, fitStrengthOf, isNavalForce, formatWorldDate, type WorldState } from "@chronica/shared";
 import { DEFAULT_BUDGET, applyDeltas, auditMoney, combineAudits, emptyAudit, auditInWords, createIdFactory, runSimulationBurst, type SimModelPort } from "@chronica/sim";
 
+// A broken rule of the world stops the run where it was broken (packages/sim/src/invariants.ts); CHRONICA_STRICT=0 runs on and only reports.
+process.env["CHRONICA_STRICT"] ??= "1";
+
 const args = process.argv.slice(2);
 const years = Number(args.find((a) => /^\d+$/.test(a)) ?? "5");
 const actor = (args.find((a) => a.startsWith("--actor=")) ?? "--actor=ptolemaic-egypt-ruler-5mbdla").split("=")[1]!;
@@ -208,4 +211,5 @@ const campaigns = ((world as unknown as { campaigns?: unknown[] }).campaigns ?? 
 if (campaigns.length > 0) console.log(`final campaign plans: ${JSON.stringify(campaigns).slice(0, 1_800)}`);
 if (args.includes("--losses")) for (const [key, count] of [...losses].filter(([k]) => /rome|carthage/.test(k)).sort()) console.log(`  losses ${key}: ${count}`);
 console.log(`unexplained money entries: ${total.unexplained.length}`);
+if (total.unexplained.length > 0) process.exitCode = 1;
 if (args.includes("--audit")) console.log(auditInWords(total));

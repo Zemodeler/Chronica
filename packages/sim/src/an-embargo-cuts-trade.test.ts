@@ -4,7 +4,7 @@ import { ScenarioDefinitionSchema, WorldDeltaSchema, expireDatedAgreements, mayT
 import { applyDeltas } from "./apply/apply-deltas";
 import { SOVEREIGN_AGREEMENTS, nobodyListens } from "./apply/nobody-listens";
 import type { ApplyContext } from "./apply/context";
-import { createIdFactory } from "./ports";
+import { freshIds } from "./fresh-ids-test-kit";
 import { HUBS, POWERS, agreement, bookOf, flow, inflowOf, opening, outflowOf, priceOf, setStock, withAgreements } from "./trade-test-kit";
 
 /**
@@ -20,17 +20,18 @@ import { HUBS, POWERS, agreement, bookOf, flow, inflowOf, opening, outflowOf, pr
 
 const { syracuse, agrigentum } = HUBS;
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
-const context = (): ApplyContext => ({
+// Ids the world acted on has not used: one seed reused made two rows with one id (`ids.unique`).
+const context = (world: WorldState): ApplyContext => ({
   now: { day: 0, minute: 540 },
   actorRef: { kind: "character", id: "gaius-genucius" },
   actsForTheWorld: true,
   offices: definition.government.offices,
   warfare: definition.warfare,
   terrains: definition.map.terrains,
-  ids: createIdFactory("embargo"),
+  ids: freshIds("embargo", world),
   gameId: "game-embargo",
 });
-const apply = (world: WorldState, raw: Record<string, unknown>) => applyDeltas(world, [WorldDeltaSchema.parse(raw)], context());
+const apply = (world: WorldState, raw: Record<string, unknown>) => applyDeltas(world, [WorldDeltaSchema.parse(raw)], context(world));
 
 /** What crossed the border between Carthage and Syracuse in a month, in drachmae, by whichever way. */
 const acrossTheBorder = (lanes: ReadonlyMap<string, number>): number =>

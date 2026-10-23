@@ -58,7 +58,7 @@ export function payCustoms(world: WorldState, atStep: number, ids: IdFactory): W
     material: {
       ...world.material,
       accounts: world.material.accounts.map((account) => (credited.has(account.id) ? { ...account, balance: account.balance + credited.get(account.id)! } : account)),
-      transactions: [...world.material.transactions, ...paid].slice(-512),
+      transactions: [...world.material.transactions, ...paid],
     },
   };
 }

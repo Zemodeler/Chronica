@@ -97,7 +97,7 @@ function credit(world: WorldState, accountId: string, amount: number, transactio
       ...world.material,
       accounts: world.material.accounts.map((account) =>
         account.id === accountId ? { ...account, balance: account.balance + amount } : account),
-      transactions: [...world.material.transactions, transaction].slice(-512),
+      transactions: [...world.material.transactions, transaction],
     },
   };
 }
@@ -268,7 +268,7 @@ export function takeTheChest(world: WorldState, input: ChestCaptureInput): Seizu
         destinationAccountId: destination,
         cause: input.cause,
         visibility: "public" as const,
-      }].slice(-512),
+      }],
     },
   };
   return { world: moved, taken, intoAccountId: destination };

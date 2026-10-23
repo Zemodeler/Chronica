@@ -23,6 +23,9 @@ import { polityMarkets } from "../packages/sim/src/market-summary";
 import { Session } from "node:inspector/promises";
 import { writeFileSync } from "node:fs";
 
+// A broken rule of the world stops the run where it was broken (packages/sim/src/invariants.ts); CHRONICA_STRICT=0 runs on and only reports.
+process.env["CHRONICA_STRICT"] ??= "1";
+
 const args = process.argv.slice(2);
 const years = Number(args.find((a) => /^\d+$/.test(a)) ?? "10");
 const war = args.includes("--war");
@@ -176,3 +179,4 @@ if (profiler !== null) {
 console.log("\nMONEY AUDIT over the run");
 console.log(auditInWords(total));
 console.log(`unexplained entries: ${total.unexplained.length}; elapsed ${((Date.now() - started) / 1000).toFixed(0)}s`);
+if (total.unexplained.length > 0) process.exitCode = 1;

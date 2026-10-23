@@ -23,7 +23,7 @@ import {
 } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import { lineOf } from "./order-outcomes";
-import { createIdFactory } from "./ports";
+import { freshIds } from "./fresh-ids-test-kit";
 import { recordTheFight } from "./ranks";
 import { buildWorldSlice, renderWorldSlice } from "./slice";
 import { BATTLE_WON_BPS, BATTLE_WON_WOUNDED_BPS, CITY_TAKEN_BPS, OFFICE_MONTH_BPS, ROUTED_BPS, creditTheSpeech, honourSieges, honourTheSitting } from "./standing-deeds";
@@ -69,16 +69,17 @@ const me = (world: WorldState) => world.characters.find((character) => character
 const withStanding = (world: WorldState, id: string, prestigeBps: number): WorldState => ({
   ...world, characters: world.characters.map((character) => (character.id === id ? { ...character, prestigeBps } : character)),
 });
+// Ids the world acted on has not used: one seed reused made two money lines with one id, and the books lost the second (`ids.unique`).
 const act = (world: WorldState, actor: string, raw: Record<string, unknown>, day = world.elapsedStep) => {
   const delta = WorldDeltaSchema.parse(raw);
   return applyDeltas(world, [delta], {
     now: { day, minute: 540 }, actorRef: { kind: "character", id: actor }, offices, successionRules: government.successionRules,
-    warfare: definition.warfare, ids: createIdFactory(`name-${actor}-${raw.op as string}-${day}`), gameId: "game-name", playerCharacterId: PLAYER, orderDeltas: new Set([delta]),
+    warfare: definition.warfare, ids: freshIds(`name-${actor}-${raw.op as string}-${day}`, world), gameId: "game-name", playerCharacterId: PLAYER, orderDeltas: new Set([delta]),
   });
 };
 const tick = (world: WorldState, toDay: number) => {
   const advanced = { ...world, elapsedStep: toDay, instant: { day: toDay, minute: 0 } };
-  const result = runDeterministicTick({ world: advanced, toDay, ids: createIdFactory(`name-tick-${toDay}`), warfare: definition.warfare, government, playerCharacterId: PLAYER });
+  const result = runDeterministicTick({ world: advanced, toDay, ids: freshIds(`name-tick-${toDay}`, advanced), warfare: definition.warfare, government, playerCharacterId: PLAYER });
   expect(WorldStateSchema.safeParse(result.world).success).toBe(true);
   return result;
 };

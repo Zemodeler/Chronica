@@ -11,7 +11,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
-import { createIdFactory } from "./ports";
+import { freshIds } from "./fresh-ids-test-kit";
 import { ensureConstitutions } from "./constitutions";
 import { decideStatecraft, type StatecraftDecision, type StatecraftInput } from "./statecraft";
 import type { StrategyContext } from "./grand-strategy";
@@ -30,9 +30,10 @@ export function atWar(day = 90): WorldState {
   return applyDeltas(world, [open], context(world, PLAYER)).world;
 }
 
+// Each context ids its world has not used: two acts of one day under one seed made two agreements with one id (`ids.unique`).
 export const context = (world: WorldState, actor: string, gameId = "war-plan-kit") => ({
   now: world.instant, actorRef: { kind: "character" as const, id: actor }, actsForTheWorld: true, offices: definition.government.offices,
-  warfare: definition.warfare, terrains: definition.map.terrains, ids: createIdFactory(`${gameId}-${world.instant.day}`), gameId,
+  warfare: definition.warfare, terrains: definition.map.terrains, ids: freshIds(`${gameId}-${world.instant.day}`, world), gameId,
 });
 
 export function inputFor(world: WorldState, over: Partial<StatecraftInput> = {}): StatecraftInput {

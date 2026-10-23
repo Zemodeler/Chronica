@@ -13,6 +13,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { createIdFactory } from "../ports";
+import { freshIds } from "../fresh-ids-test-kit";
 import { attachMechanic } from "./attach-mechanic";
 import { newDebitLedger } from "./instantiate";
 import { priceMechanic } from "./price-mechanic";
@@ -54,14 +55,14 @@ function attached(state: WorldState, entityId: string, draft: MechanicDraft, ori
   const refs = readableRefsFor(state, entity.ownerRef!, entity);
   const checked = validateMechanic(draft, state, refs, offices);
   if (!checked.ok) throw new Error(checked.reason);
-  const out = attachMechanic({ world: state, entity, draft: checked.draft, origin, warrants: checked.warrants, refs, ids: createIdFactory("attach"), offices, warfare, gameId: "g" });
+  const out = attachMechanic({ world: state, entity, draft: checked.draft, origin, warrants: checked.warrants, refs, ids: freshIds("attach", state), offices, warfare, gameId: "g" });
   if (!out.ok) throw new Error(out.reason);
   return out.world;
 }
 
 function run(state: WorldState, toDay: number, extra: Partial<Parameters<typeof runMechanics>[0]> = {}) {
   return runMechanics({
-    world: state, toDay, ids: createIdFactory("run"), recentFacts: [], ledger: newDebitLedger(state),
+    world: state, toDay, ids: freshIds("run", state), recentFacts: [], ledger: newDebitLedger(state),
     apply: { offices, warfare, gameId: "g", playerCharacterId: MARCUS.id }, ...extra,
   });
 }

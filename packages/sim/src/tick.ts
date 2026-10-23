@@ -1308,7 +1308,11 @@ export function runDeterministicTick(given: TickInput): TickResult {
           }),
           ...forces,
         ],
-        transactions: transactions.slice(-500),
+        // The last 500 lines, and never fewer than this tick wrote: a ninety-day hop wrote more than 500, kept only the last, and
+        // the money its first lines moved stood in the books with no line to say why (`money.conserved`). Counted from the world
+        // the tick was given, for the crossings and cargoes write first; and the book is cut here only: the levy, the customs, the
+        // siege and the rest each cut it to 500 as they wrote, and a year's hop lost the estates' rents of sixty-nine purses.
+        transactions: transactions.slice(-Math.max(500, transactions.length - given.world.material.transactions.length)),
       },
     },
     input.toDay,

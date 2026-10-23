@@ -515,7 +515,7 @@ function sackCities(world: WorldState, sacked: readonly { provinceId: string; pl
         transactions: chest === undefined || loot <= 0 ? next.material.transactions : [...next.material.transactions, {
           id: boundedId("txn", "sack", sack.provinceId, String(toDay)), atStep: toDay, kind: "spoils" as const, amount: loot, external: "plunder" as const, destinationAccountId: chest.id,
           cause: { kind: "battle_result" as const, id: `sack_${sack.provinceId}`.slice(0, 120), explanation: `${sack.place} sacked`.slice(0, 240) }, visibility: "public" as const,
-        }].slice(-500),
+        }],
       },
     };
     // The market it was the hub of, or belonged to, is stripped, and those who were sold are sold.

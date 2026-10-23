@@ -317,7 +317,7 @@ function grantable(world: WorldState, attempt: OrderAttempt, ask: RequestAsk, in
             transactions: [...now.material.transactions, {
               id: input.ids.next("txn"), atStep, kind: "transfer" as const, amount, sourceAccountId: purse.id, destinationAccountId: into.id,
               cause: { kind: "action" as const, id: attempt.id, explanation: `Given to ${asker.name} at his asking`.slice(0, 240) }, visibility: "private" as const,
-            }].slice(-500),
+            }],
           },
         }),
       };

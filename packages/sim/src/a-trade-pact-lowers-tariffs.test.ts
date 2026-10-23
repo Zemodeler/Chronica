@@ -3,7 +3,7 @@ import { punicWarsScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldDeltaSchema, customsOn, tradeTermsBetween, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
-import { createIdFactory } from "./ports";
+import { freshIds } from "./fresh-ids-test-kit";
 import { PEACE_TRADE_TARIFF_CAP_BPS, treatyOf } from "./peace-table";
 import { trustOf } from "./treaties";
 import { HUBS, POWERS, agreement, bookOf, flow, opening, priceOf, setStock, withAgreements, withCustoms } from "./trade-test-kit";
@@ -21,17 +21,18 @@ import { HUBS, POWERS, agreement, bookOf, flow, opening, priceOf, setStock, with
 
 const { syracuse } = HUBS;
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
-const context = (): ApplyContext => ({
+// Ids the world acted on has not used: one seed reused made two rows with one id (`ids.unique`).
+const context = (world: WorldState): ApplyContext => ({
   now: { day: 0, minute: 540 },
   actorRef: { kind: "character", id: "gaius-genucius" },
   actsForTheWorld: true,
   offices: definition.government.offices,
   warfare: definition.warfare,
   terrains: definition.map.terrains,
-  ids: createIdFactory("pact"),
+  ids: freshIds("pact", world),
   gameId: "game-pact",
 });
-const apply = (world: WorldState, raw: Record<string, unknown>) => applyDeltas(world, [WorldDeltaSchema.parse(raw)], context());
+const apply = (world: WorldState, raw: Record<string, unknown>) => applyDeltas(world, [WorldDeltaSchema.parse(raw)], context(world));
 const pact = (capBps: number | null, more: { mostFavoured?: boolean; exempt?: ("grain" | "textiles")[] } = {}) =>
   agreement("trade_pact", POWERS.carthage, POWERS.syracuse, { trade: { tariffCapBps: capBps, mostFavoured: more.mostFavoured ?? false, exempt: more.exempt ?? [], goods: [] } });
 
@@ -114,7 +115,7 @@ describe("a trade pact lowers tariffs", () => {
     const message = sent.world.diplomacy.at(-1)!;
     expect(message.trade?.tariffCapBps).toBe(500);
     // Ten days later, when the letter has arrived.
-    const answered = applyDeltas({ ...sent.world, elapsedStep: 12 }, [WorldDeltaSchema.parse({ op: "diplomatic_message_answer", messageRef: message.id, answer: "accepted", answerText: "Agreed.", reason: "Agreed." })], { ...context(), now: { day: 12, minute: 0 }, actorRef: { kind: "character", id: receiver.id } });
+    const answered = applyDeltas({ ...sent.world, elapsedStep: 12 }, [WorldDeltaSchema.parse({ op: "diplomatic_message_answer", messageRef: message.id, answer: "accepted", answerText: "Agreed.", reason: "Agreed." })], { ...context(sent.world), now: { day: 12, minute: 0 }, actorRef: { kind: "character", id: receiver.id } });
     expect(answered.rejected).toEqual([]);
     const placed = answered.world.polityAgreements.find((entry) => entry.kind === "trade_pact" && entry.polityId !== "rome" && entry.otherPolityId !== "rome")!;
     expect(placed.trade).toMatchObject({ tariffCapBps: 500, mostFavoured: true });

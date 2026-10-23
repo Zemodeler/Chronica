@@ -261,7 +261,7 @@ export function settleStandingEffects(input: { readonly world: WorldState; reado
           ...(to === null ? {} : { destinationAccountId: to }),
           cause: { kind: kind === "upkeep" ? "obligation" as const : "scheduled_income" as const, id: carrier.id, explanation: carrier.label },
           visibility: "polity" as const,
-        }].slice(-500),
+        }],
       },
     };
   };

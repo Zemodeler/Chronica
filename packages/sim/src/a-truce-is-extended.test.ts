@@ -3,7 +3,7 @@ import { punicWarsScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, ensureProvinceMaterial, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
-import { createIdFactory } from "./ports";
+import { freshIds } from "./fresh-ids-test-kit";
 
 /**
  * A truce accepted over the one that runs is its extension. It was refused as "already stand in truce" while the letter that
@@ -12,11 +12,12 @@ import { createIdFactory } from "./ports";
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 
+// Ids the world acted on has not used: one seed reused made two rows with one id (`ids.unique`).
 function as(written: readonly unknown[], state: WorldState) {
   const deltas = written.map((raw) => WorldDeltaSchema.parse(raw));
   const context: ApplyContext = {
     now: { day: state.elapsedStep, minute: 540 }, actorRef: { kind: "character", id: "gaius-genucius" }, offices: definition.government.offices, warfare: definition.warfare,
-    terrains: definition.map.terrains, ids: createIdFactory(`truce-${state.elapsedStep}`), gameId: "game-truce", orderDeltas: new Set(),
+    terrains: definition.map.terrains, ids: freshIds(`truce-${state.elapsedStep}`, state), gameId: "game-truce", orderDeltas: new Set(),
   };
   return applyDeltas(state, deltas, context);
 }

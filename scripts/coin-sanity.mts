@@ -17,6 +17,9 @@ import { DEFAULT_BUDGET, applyDeltas, auditMoney, combineAudits, emptyAudit, aud
 import { readTheBooks, decideFiscal } from "../packages/sim/src/fiscal-officers";
 import { strainOf } from "../packages/sim/src/fiscal-strain";
 
+// A broken rule of the world stops the run where it was broken (packages/sim/src/invariants.ts); CHRONICA_STRICT=0 runs on and only reports.
+process.env["CHRONICA_STRICT"] ??= "1";
+
 const args = process.argv.slice(2);
 const years = Number(args.find((a) => /^\d+$/.test(a)) ?? "7");
 const peace = args.includes("--peace");
@@ -101,4 +104,5 @@ for (const line of events.slice(0, 40)) console.log(`  ${line}`);
 for (const procedure of world.material.politicalProcedures.filter((q) => /less silver|more silver/.test(q.label))) console.log(`  motion: ${procedure.label.slice(0, 110)} => ${procedure.outcome ?? procedure.stage} (day ${procedure.resolvedAtStep ?? "open"})`);
 for (const power of POWERS) { const coin = coinageOfPolity(world, power); for (const h of coin.history) console.log(`  ${power}: coin struck ${h.fromSilverBps} -> ${h.toSilverBps} on day ${h.atStep}`); }
 console.log(`unexplained money entries: ${total.unexplained.length}`);
+if (total.unexplained.length > 0) process.exitCode = 1;
 if (args.includes("--audit")) console.log(auditInWords(total));

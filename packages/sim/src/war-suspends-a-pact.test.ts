@@ -4,6 +4,7 @@ import { ScenarioDefinitionSchema, WorldDeltaSchema, economyOf, tradeTermsBetwee
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
 import { createIdFactory } from "./ports";
+import { freshIds } from "./fresh-ids-test-kit";
 import { SUSPENDED_PACT_TRUST, keepTreaties, trustOf } from "./treaties";
 import { HUBS, POWERS, agreement, bookOf, flow, opening, setStock, withAgreements, withCustoms } from "./trade-test-kit";
 
@@ -20,17 +21,18 @@ import { HUBS, POWERS, agreement, bookOf, flow, opening, setStock, withAgreement
 
 const { syracuse } = HUBS;
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
-const context = (): ApplyContext => ({
+// Ids the world acted on has not used: one seed reused made two rows with one id (`ids.unique`).
+const context = (world: WorldState): ApplyContext => ({
   now: { day: 0, minute: 540 },
   actorRef: { kind: "character", id: "gaius-genucius" },
   actsForTheWorld: true,
   offices: definition.government.offices,
   warfare: definition.warfare,
   terrains: definition.map.terrains,
-  ids: createIdFactory("held"),
+  ids: freshIds("held", world),
   gameId: "game-held",
 });
-const apply = (world: WorldState, raw: Record<string, unknown>) => applyDeltas(world, [WorldDeltaSchema.parse(raw)], context());
+const apply = (world: WorldState, raw: Record<string, unknown>) => applyDeltas(world, [WorldDeltaSchema.parse(raw)], context(world));
 const PACT = agreement("trade_pact", POWERS.carthage, POWERS.syracuse, { trade: { tariffCapBps: 500, mostFavoured: false, exempt: [], goods: [] } });
 const WAR = { op: "agreement_open", localId: "war-1", kind: "war", polityId: "carthage", otherPolityId: "syracuse", terms: "Over the grain of Agrigentum.", forDays: null, sourceMessageRef: null, visibility: "public", reason: "War." };
 const PEACE = { op: "agreement_open", localId: "peace-1", kind: "peace", polityId: "carthage", otherPolityId: "syracuse", terms: "Peace.", forDays: null, sourceMessageRef: null, visibility: "public", reason: "Peace." };

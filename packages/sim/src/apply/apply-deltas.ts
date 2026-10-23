@@ -160,7 +160,7 @@ import {
   promiseFormOf,
 } from "@chronica/shared";
 import { dutyGoals, impliedUndertakings, offerMetadata } from "../treaty-duties";
-import { findInvariantViolations } from "../invariants";
+import { checkStep, findInvariantViolations } from "../invariants";
 import { resolveEngagement, type BattleAccount } from "../battle";
 import { assaultSiege } from "../siege-decisions";
 import { applyCampaignPlanSet, applyWarPlanSet } from "./war-plan-apply";
@@ -880,7 +880,18 @@ function pledgePay(world: WorldState, polityId: string, forceName: string, men: 
   };
 }
 
+/**
+ * Every act is checked as it is taken, and refused if it breaks a rule of the world (`invariants.ts`); the batch as a whole is
+ * then held to the rules no single act is refused for, and to its money (`checkStep`): strict, a batch that moves money with
+ * no line, or leaves two rows under one id, stops the run.
+ */
 export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], given: ApplyContext): ApplyResult {
+  const result = applyAllDeltas(world, deltas, given);
+  for (const violation of checkStep("applying acts", world, result.world, { acts: true })) console.error(`[chronica] applying acts left ${violation.rule}: ${violation.sentence}`);
+  return result;
+}
+
+function applyAllDeltas(world: WorldState, deltas: readonly WorldDelta[], given: ApplyContext): ApplyResult {
   fillHirePay(world, deltas, given);
   const context: ApplyContext = given.batchStart === undefined ? { ...given, batchStart: world } : given;
   const groups = hiringGroups(deltas, context.atomicGroups);
@@ -2660,23 +2671,31 @@ function applyOne(
         const remaining = source.personnel.map((group, index) => ({ ...group, fit: group.fit - shares[index]! }));
         const emptied = remaining.every((group) => group.fit <= 0);
         const paidByAMan = payObligationId !== null && world.material.accounts.find((account) => account.id === world.material.obligations.find((obligation) => obligation.id === payObligationId)?.payerAccountId)?.owner.kind === "character";
+        // Men detached from an army of their own power are still on its pay, unless the order names who pays them: a detachment
+        // of cohorts left Legio I's pay and was paid by nobody (`force.paid`).
+        const detachedPay = payObligationId ?? (source.polityId === forcePolityId ? source.payObligationId : null);
         const detached: Force = {
           id, name: delta.name, polityId: forcePolityId, ...(delta.outlaw === true ? { outlaw: true } : {}), ...(paidByAMan && delta.outlaw !== true ? { private: true } : {}),
           commanderCharacterId: commanderId, controllerCharacterId: controllerId, locationId: source.locationId, positionId: null,
           authorizedStrength: drawn, personnel: taken,
           moraleBps: source.moraleBps, cohesionBps: source.cohesionBps, fatigueBps: source.fatigueBps,
           provisionStatus: source.provisionStatus, provisionedThroughStep: source.provisionedThroughStep,
-          payObligationId, payArrearsPeriods: 0, ...service, history: [], memberCharacterIds: [],
+          payObligationId: detachedPay, payArrearsPeriods: 0, ...service, history: [], memberCharacterIds: [],
         };
         const garrison = isGarrison(`${delta.name} ${delta.localId} ${delta.reason}`);
-        const force = garrison ? asGarrison(world, detached) : detached;
         const chest = { id: context.ids.next("account"), owner: { kind: "force" as const, id }, currencyId: world.material.currency.id, balance: 0, status: "active" as const, visibility: "polity" as const };
+        // Drawn from an army nobody paid, they are taken on by their power's treasury, as a levy is.
+        const hasTreasury = world.material.accounts.some((account) => account.owner.kind === "polity" && account.owner.id === forcePolityId && account.status === "active");
+        const pledged = detachedPay === null && !paidByAMan && delta.outlaw !== true && hasTreasury ? pledgePay(world, forcePolityId, delta.name, drawn, atStep, context.ids, chest.id) : null;
+        const paid = pledged === null ? detached : { ...detached, payObligationId: pledged.obligation.id };
+        const force = garrison ? asGarrison(world, paid) : paid;
         const withForce: WorldState = {
           ...world,
           material: {
             ...world.material,
             forces: [...world.material.forces.map((candidate) => candidate.id === source.id ? { ...candidate, personnel: remaining, authorizedStrength: Math.max(0, candidate.authorizedStrength - drawn) } : candidate), force],
             accounts: [...world.material.accounts, chest],
+            ...(pledged === null ? {} : { obligations: [...world.material.obligations, pledged.obligation] }),
           },
         };
         emitFact({
@@ -2698,7 +2717,7 @@ function applyOne(
       // An ally's ships called for: raised in its harbours, at its cost (`socii-navales.ts`).
       const leader = actorPolityOf(world, context);
       if (leader !== null && "naval" in category && category.naval === true && owesShipsTo(world, forcePolityId, leader)) {
-        const sent = requisitionAlliedHulls(world, { id, chestId: context.ids.next("account"), allyId: forcePolityId, name: delta.name, wanted: delta.authorizedStrength, commanderId, controllerId, categoryId: category.id, label: category.label, atStep });
+        const sent = requisitionAlliedHulls(world, { id, chestId: context.ids.next("account"), obligationId: context.ids.next("obligation"), allyId: forcePolityId, name: delta.name, wanted: delta.authorizedStrength, commanderId, controllerId, categoryId: category.id, label: category.label, atStep });
         if (typeof sent === "string") reject(sent);
         emitFact({ localId: safeLocalId(`requisitioned_${id}`).slice(0, 60), kind: "hulls_requisitioned", summary: `${sent.hulls} ${category.label.toLowerCase()} were requisitioned from ${world.map.polities.find((polity) => polity.id === forcePolityId)?.name ?? forcePolityId}, as its treaty with ${world.map.polities.find((polity) => polity.id === leader)?.name ?? leader} binds it, and gather at ${world.map.provinces.find((province) => province.id === sent.shore)?.name ?? sent.shore}.`.slice(0, 600), affectedRefs: [{ kind: "force", id }, { kind: "polity", id: forcePolityId }, { kind: "polity", id: leader }], visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 40 });
         return sent.world;
@@ -7912,10 +7931,17 @@ function splitDetachmentsNamedIn(delta: WorldDelta, world: WorldState, assignedI
       assignedIds.set(handle, id);
       const taken = new Map(personnel.map((category) => [category.categoryId, category.fit]));
       const name = handle.split(/[-_]+/).filter(Boolean).map((word) => word[0]!.toUpperCase() + word.slice(1)).join(" ");
+      // Drawn from an army nobody paid, they are taken on by their power's treasury, as a detachment an order makes is: scouts
+      // sent up a pass from an unpaid army were paid by nobody (`force.raised-paid`).
+      const men = personnel.reduce((sum, category) => sum + category.fit, 0);
+      const hasTreasury = next.material.accounts.some((account) => account.owner.kind === "polity" && account.owner.id === parent.polityId && account.status === "active");
+      const pledged = parent.payObligationId === null && parent.outlaw !== true && parent.private !== true && hasTreasury
+        ? pledgePay(next, parent.polityId, name, men, next.elapsedStep, context.ids, parent.id) : null;
       next = {
         ...next,
         material: {
           ...next.material,
+          ...(pledged === null ? {} : { obligations: [...next.material.obligations, pledged.obligation] }),
           forces: [
             ...next.material.forces.map((force) => force.id !== parent.id ? force : {
               ...force,
@@ -7927,8 +7953,8 @@ function splitDetachmentsNamedIn(delta: WorldDelta, world: WorldState, assignedI
               id,
               name: name.slice(0, 120),
               personnel,
-              authorizedStrength: personnel.reduce((sum, category) => sum + category.fit, 0),
-              payObligationId: parent.payObligationId,
+              authorizedStrength: men,
+              payObligationId: pledged?.obligation.id ?? parent.payObligationId,
               payArrearsPeriods: 0,
               history: [],
               memberCharacterIds: [],
