@@ -1,4 +1,4 @@
-import type { WorldState } from "@chronica/shared";
+import { isDelivered, type WorldState } from "@chronica/shared";
 
 /**
  * What the player's power has been given a day to answer, or has a term running out on.
@@ -31,7 +31,8 @@ export function deadlinesFor(world: WorldState, polityId: string | null): readon
   if (polityId === null) return [];
   const found: Deadline[] = [];
   for (const message of world.diplomacy) {
-    if (message.status !== "awaiting_reply" || message.toPolityId !== polityId || !DEMANDS.has(message.kind)) continue;
+    // Told when it arrives, as the Council lists it: a demand still on the road is not on the player's desk, and the burst that stopped for it on the day it was sent showed nothing to answer.
+    if (message.status !== "awaiting_reply" || message.toPolityId !== polityId || !DEMANDS.has(message.kind) || !isDelivered(message, world.elapsedStep)) continue;
     found.push({
       kind: message.kind as "ultimatum" | "tribute_demand" | "protest", id: message.id, otherPolityId: message.fromPolityId, subject: message.subject,
       dueStep: message.replyDueByStep, onRefusal: message.onRefusal ?? null,

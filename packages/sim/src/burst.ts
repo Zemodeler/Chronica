@@ -1562,7 +1562,13 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
               next = { ...next, refusal: why, refusedAtStep: world.elapsedStep };
             } else if (world.elapsedStep >= stageReviewDay(stage, order.givenAtStep)) {
               const actorRef = { kind: "character" as const, id: order.actorCharacterId };
-              const waited = [...new Set(stage.waitsOn.map((condition) => conditionInWords(condition)))].join(" and ");
+              // What it waits for, in the words of waiting: conditionInWords is how a wait failed ("never reached"), and a wait fourteen days old had not failed.
+              const waitingFor = (condition: StageCondition): string => {
+                if (condition.kind !== "force_at") return conditionInWords(condition);
+                const force = world.material.forces.find((candidate) => candidate.id === condition.forceId);
+                return force === undefined ? conditionInWords(condition) : `${force.name} to reach ${world.map.provinces.find((province) => province.id === condition.provinceId)?.name ?? condition.provinceId}`;
+              };
+              const waited = [...new Set(stage.waitsOn.map(waitingFor))].join(" and ");
               const told = materializeFacts({
                 proposals: [{
                   localId: safeLocalId(`order_wait_review_${partIndex}_${stageIndex}`),
@@ -3082,6 +3088,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
    */
   const answerTheOrder = (answer: readonly Fact[], acts: OrderActs): void => {
     if (input.orderText === null || input.orderText.trim().length === 0) return;
+    // The answer to a decision card is the player's choice, taken up by the engine; it is not an order the model failed to carry.
+    if (input.answeredDecision !== undefined) return;
     const seen = factsKnownTo(answer, input.actorRef, input.actorPolityId, world.instant)
       .filter((fact) => !NEVER_PUBLISHED.has(fact.kind));
     const allRefused = acts.carriedOut === 0 && acts.refused > 0;
@@ -3133,7 +3141,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
    * fact for is said, with its reason where it gave one, or the engine's.
    */
   const answerTheParts = (parts: readonly IntentPart[], acts: OrderActs): void => {
-    if (input.orderText === null || orchestrationUnreadable) return;
+    if (input.orderText === null || orchestrationUnreadable || input.answeredDecision !== undefined) return;
     const who = world.characters.find((character) => character.id === input.actorRef.id)?.name ?? "The ruler";
     // Each act of the order to the part it answers: the one that named it,
     // then by its words. A refusal is the answer of the part it belongs to
@@ -3209,6 +3217,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     delegations: Proposal["delegations"],
   ): void => {
     if (input.orderText === null || input.orderText.trim() === "" || orchestrationUnreadable || input.actorRef.kind !== "character") return;
+    // A card answered that the model made nothing of is the choice itself, not an order that stalled in the Council.
+    if (input.answeredDecision !== undefined && acts.carriedOut === 0) return;
     const read: readonly IntentPart[] = parts.length > 0 ? parts : [{ said: summary.slice(0, 200) || input.orderText.trim().slice(0, 200), acts: [], goals: [], spend: null, factLocalIds: [], whyNot: null }];
     const saids = read.map((part) => part.said);
     const ownActs = acts.ownActs ?? [];

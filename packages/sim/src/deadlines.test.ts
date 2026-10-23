@@ -19,6 +19,16 @@ describe("deadlines put to the player's power", () => {
     expect(newDeadlines(after, after, "syracuse")).toHaveLength(0);
   });
 
+  it("is told the day it reaches the player's power, not the day it was sent", () => {
+    const before = world();
+    const travelling = { ...ultimatum("syracuse"), sentAtStep: 10, deliveredOnDay: 16 };
+    const sent: WorldState = { ...before, elapsedStep: 12, diplomacy: [...before.diplomacy, travelling] };
+    const arrived: WorldState = { ...sent, elapsedStep: 16 };
+    expect(deadlinesFor(sent, "syracuse")).toEqual([]);
+    expect(newDeadlines(before, sent, "syracuse")).toHaveLength(0);
+    expect(newDeadlines(sent, arrived, "syracuse").map((deadline) => deadline.id)).toEqual(["message-u1"]);
+  });
+
   it("is not listed once answered", () => {
     const before = world();
     const answered: WorldState = { ...before, diplomacy: [...before.diplomacy, { ...ultimatum("syracuse"), status: "answered" as const }] };

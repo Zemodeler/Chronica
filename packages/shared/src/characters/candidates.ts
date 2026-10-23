@@ -28,7 +28,7 @@ const YOUTH_BPS_PER_YEAR = 50;
 /** What the office's own requirements ask, for eligibility and for standing. */
 export function officeRequirements(world: Pick<WorldState, "material">, office: Office): { readonly requirementIds: readonly string[]; readonly minStanding: number } {
   const seat = world.material.officeSeats.find((candidate) => candidate.officeId === office.id);
-  const requirementIds = seat?.eligibilityRequirementIds ?? office.eligibilityRequirementIds;
+  const requirementIds = seat !== undefined && seat.eligibilityRequirementIds.length > 0 ? seat.eligibilityRequirementIds : office.eligibilityRequirementIds;
   const minStanding = world.material.eligibilityRequirements
     .filter((requirement) => requirement.kind === "min_prestige" && requirementIds.includes(requirement.id))
     .map((requirement) => (requirement.params.minPrestigeBps as number | undefined) ?? 0)[0] ?? ELECTABLE_MIN_PRESTIGE_BPS;

@@ -232,7 +232,9 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
     const cycle = office.cycleDays ?? termDays ?? 0;
     const collegeDueDay = college ? (Number.isFinite(lastCalled) ? lastCalled + cycle : cycle) : null;
     const vacant = (): Place[] => (collegeDueDay !== null && input.toDay < collegeDueDay ? [] : openPlaces());
-    const requirementIds = seats()[0]?.eligibilityRequirementIds ?? office.eligibilityRequirementIds;
+    // A seat that lists no requirements of its own asks the office: an empty list is not "none" (the Campanians' assembly seated a Roman).
+    const seatRequirements = seats()[0]?.eligibilityRequirementIds ?? [];
+    const requirementIds = seatRequirements.length > 0 ? seatRequirements : office.eligibilityRequirementIds;
     // The rules for who may stand and whom the electors think of are shared
     // (`candidates.ts`), so an office's note says the election's own answer.
     const minStanding = officeRequirements(world, office).minStanding;

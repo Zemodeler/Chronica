@@ -217,6 +217,15 @@ describe("a part held for something that does not come", () => {
     expect(result.newFacts.some((fact) => fact.kind === "order_wait_review" && /your word/.test(fact.summary))).toBe(true);
   });
 
+  it("says it is waiting for an army to arrive, not that the army never did", async () => {
+    const waiting: WorldState = { ...at(20), orders: at(20).orders.map((order) => ({ ...order, parts: order.parts.map((part) => ({ ...part,
+      stages: part.stages.map((stage) => ({ ...stage, waitsOn: [{ kind: "force_at" as const, forceId: "roman-field-army", provinceId: MESSANA }] })) })) })) };
+    const result = await runSimulationBurst({ ...input(scripted({})), world: waiting, orderText: null, burstId: "review-force" });
+    const told = result.newFacts.find((fact) => fact.kind === "order_wait_review");
+    expect(told?.summary).toMatch(/Still waiting for .* to reach /);
+    expect(told?.summary).not.toMatch(/never reached/);
+  });
+
   it("lets it lapse, loudly, after a season", async () => {
     const result = await runSimulationBurst({ ...input(scripted({})), world: at(95), orderText: null, burstId: "lapse" });
     const part = result.world.orders[0]!.parts[0]!;
