@@ -40,12 +40,14 @@ function aQuietModel(): SimModelPort & { calls: SimOperation[]; asked: string[] 
   };
 }
 
-async function aTurn(world: WorldState, spanDays: number, orderText: string | null): Promise<{ result: BurstResult; port: ReturnType<typeof aQuietModel> }> {
+async function aTurn(world: WorldState, spanDays: number, orderText: string | null, turn: number): Promise<{ result: BurstResult; port: ReturnType<typeof aQuietModel> }> {
   const port = aQuietModel();
   const result = await runSimulationBurst({
     world, clock: definition.clock, offices: definition.government.offices, successionRules: definition.government.successionRules, warfare: definition.warfare,
     terrains: definition.map.terrains, life: definition.life, wealth: definition.wealth, historicalPressures: definition.historicalPressures,
-    burstId: "a-turn", gameId: "a-turn-spends-few-calls", actorRef: { kind: "character", id: "gaius-genucius" }, actorPolityId: "rome",
+    // Each turn a burst of its own, as in a game: under one name the second turn wrote its money lines under the first one's ids,
+    // and the books took them for old lines (`ids.unique`, `money.conserved`).
+    burstId: `a-turn-${turn}`, gameId: "a-turn-spends-few-calls", actorRef: { kind: "character", id: "gaius-genucius" }, actorPolityId: "rome",
     orderText, spanDays, knownFacts: [], queue: [], port, budget: DEFAULT_BUDGET,
   });
   return { result, port };
@@ -56,7 +58,7 @@ describe("a turn spends few calls", { timeout: 300_000 }, () => {
     let world = opening();
     const perTurn: number[] = [];
     for (let turn = 0; turn < 4; turn += 1) {
-      const { result, port } = await aTurn(world, 90, null);
+      const { result, port } = await aTurn(world, 90, null, turn);
       world = result.world;
       const by = (operation: SimOperation): number => port.calls.filter((call) => call === operation).length;
       perTurn.push(port.calls.length);

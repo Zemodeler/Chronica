@@ -1,4 +1,4 @@
-import { normalizeName, rungOf, type WorldState } from "@chronica/shared";
+import { normalizeName, rungOf, type Character, type WorldState } from "@chronica/shared";
 import { auditMoney } from "./money-audit";
 
 /**
@@ -33,11 +33,11 @@ interface Invariant {
   readonly gate: boolean;
   /**
    * The collections the rule reads. The world is never changed in place, so a
-   * rule whose collections are the very ones it last read gives the same
+   * rule whose collections are the very ones it read before gives the same
    * answer, and is not read again: the applier checks after every act, and
    * most acts touch one or two collections.
    */
-  readonly reads: (world: WorldState) => readonly unknown[];
+  readonly reads: (world: WorldState) => readonly object[];
   readonly check: (world: WorldState) => string[];
 }
 
@@ -93,9 +93,8 @@ const INVARIANTS: readonly Invariant[] = [
       const violations: string[] = [];
       const named = new Map<string, string>();
       for (const character of world.characters) {
-        // A single name is shared by many: Hanno is a dozen men of Carthage.
-        if (!character.alive || character.name.trim().split(/\s+/).length < 2) continue;
-        const key = `${character.polityId}:${normalizeName(character.name)}`;
+        const key = personKey(character);
+        if (key === null) continue;
         const other = named.get(key);
         if (other !== undefined) violations.push(`${other} and ${character.id} are the same person of ${character.polityId}, "${character.name}", made twice`);
         else named.set(key, character.id);
@@ -178,34 +177,64 @@ const INVARIANTS: readonly Invariant[] = [
     id: "ids.unique", gate: false,
     reads: (world) => [world.characters, world.material.forces, world.material.accounts, world.material.obligations, world.material.officeSeats, world.polityAgreements, world.genericEntities, world.projects, world.orders, world.material.transactions],
     check: (world) => {
-      const violations: string[] = [];
       const collections: readonly [string, readonly { readonly id: string }[]][] = [
         ["character", world.characters], ["force", world.material.forces], ["account", world.material.accounts],
         ["obligation", world.material.obligations], ["office seat", world.material.officeSeats], ["agreement", world.polityAgreements],
         ["arrangement", world.genericEntities], ["project", world.projects], ["order", world.orders], ["money line", world.material.transactions],
       ];
-      for (const [what, rows] of collections) {
-        const seen = new Set<string>();
-        for (const row of rows) {
-          if (seen.has(row.id)) violations.push(`two ${what} rows share the id ${row.id}`);
-          seen.add(row.id);
-        }
-      }
-      return violations;
+      return collections.flatMap(([what, rows]) => duplicateIds(rows).map((id) => `two ${what} rows share the id ${id}`));
     },
   },
 ];
 
-/** Each rule's last two readings: what it read, and what it found. */
-const lastRead = new Map<string, { reads: readonly unknown[]; found: string[] }[]>();
+/**
+ * The key a living person of two names or more is known by in his power, or null (`person.made-once`): kept per row, for the
+ * characters change with nearly every act and their names almost never.
+ */
+const personKeys = new WeakMap<Character, string | null>();
+function personKey(character: Character): string | null {
+  const kept = personKeys.get(character);
+  if (kept !== undefined) return kept;
+  // A single name is shared by many: Hanno is a dozen men of Carthage.
+  const key = !character.alive || character.name.trim().split(/\s+/).length < 2 ? null : `${character.polityId}:${normalizeName(character.name)}`;
+  personKeys.set(character, key);
+  return key;
+}
 
-function readRule(invariant: Invariant, world: WorldState): string[] {
-  const reads = invariant.reads(world);
-  const kept = lastRead.get(invariant.id) ?? [];
-  const same = kept.find((entry) => entry.reads.length === reads.length && entry.reads.every((read, index) => read === reads[index]));
-  if (same !== undefined) return same.found;
+/** The ids a collection holds twice, kept per collection (`ids.unique`): an act changes one or two, and the rest are not read again. */
+const duplicatesIn = new WeakMap<readonly { readonly id: string }[], string[]>();
+function duplicateIds(rows: readonly { readonly id: string }[]): string[] {
+  const kept = duplicatesIn.get(rows);
+  if (kept !== undefined) return kept;
+  const seen = new Set<string>();
+  const twice: string[] = [];
+  for (const row of rows) {
+    if (seen.has(row.id)) twice.push(row.id);
+    seen.add(row.id);
+  }
+  duplicatesIn.set(rows, twice);
+  return twice;
+}
+
+/**
+ * What each rule found, by the collections it read: a tree of weak maps, one level a collection. Two readings were kept, and the
+ * applier's check after each act, the batch's, the tick's and the stage's took turns pushing out the one the next would ask for.
+ */
+const readings = new Map<string, WeakMap<object, unknown>>();
+
+function readRule(invariant: Invariant, world: WorldState, reads: readonly object[] = invariant.reads(world)): string[] {
+  let level = readings.get(invariant.id);
+  if (level === undefined) readings.set(invariant.id, (level = new WeakMap()));
+  for (const read of reads.slice(0, -1)) {
+    let deeper = level.get(read) as WeakMap<object, unknown> | undefined;
+    if (deeper === undefined) level.set(read, (deeper = new WeakMap()));
+    level = deeper;
+  }
+  const last = reads[reads.length - 1]!;
+  const kept = level.get(last) as string[] | undefined;
+  if (kept !== undefined) return kept;
   const found = invariant.check(world);
-  lastRead.set(invariant.id, [{ reads, found }, ...kept].slice(0, 2));
+  level.set(last, found);
   return found;
 }
 
@@ -224,10 +253,17 @@ export function findInvariantViolations(world: WorldState): string[] {
   return findViolations(world, "gate").map((violation) => violation.sentence);
 }
 
-/** What `after` breaks that `before` did not. */
+/** What `after` breaks that `before` did not. A rule whose collections the step left as they were is not read at all. */
 export function newViolations(before: WorldState, after: WorldState): Violation[] {
-  const already = new Set(findViolations(before).map((violation) => `${violation.rule}|${violation.sentence}`));
-  return findViolations(after).filter((violation) => !already.has(`${violation.rule}|${violation.sentence}`));
+  const violations: Violation[] = [];
+  for (const invariant of INVARIANTS) {
+    const was = invariant.reads(before);
+    const now = invariant.reads(after);
+    if (now.every((read, index) => read === was[index])) continue;
+    const already = new Set(readRule(invariant, before, was));
+    for (const sentence of readRule(invariant, after, now)) if (!already.has(sentence)) violations.push({ rule: invariant.id, sentence });
+  }
+  return violations;
 }
 
 /**

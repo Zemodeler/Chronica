@@ -68,7 +68,7 @@ function doorOf(transaction: MoneyTransaction): ExternalMoneyKind | null {
 /**
  * Audits the money that moved between two states of a world.
  *
- * The lines written since `before` (those whose ids it did not hold) are
+ * The lines written since `before` (`linesSince`) are
  * sorted into what passed between two accounts and what passed through a door;
  * each account's change in balance is then checked against its own lines, and
  * whatever the lines do not account for is unexplained. An account opened in
@@ -77,11 +77,9 @@ function doorOf(transaction: MoneyTransaction): ExternalMoneyKind | null {
 export function auditMoney(before: WorldState, after: WorldState): MoneyAudit {
   const doors = emptyDoors();
   const unexplained: Unexplained[] = [];
-  const known = new Set(before.material.transactions.map((transaction) => transaction.id));
   const expected = new Map<string, number>();
   let internal = 0;
-  for (const transaction of after.material.transactions) {
-    if (known.has(transaction.id)) continue;
+  for (const transaction of linesSince(before.material.transactions, after.material.transactions)) {
     if (transaction.sourceAccountId !== undefined) expected.set(transaction.sourceAccountId, (expected.get(transaction.sourceAccountId) ?? 0) - transaction.amount);
     if (transaction.destinationAccountId !== undefined) expected.set(transaction.destinationAccountId, (expected.get(transaction.destinationAccountId) ?? 0) + transaction.amount);
     if (transaction.sourceAccountId !== undefined && transaction.destinationAccountId !== undefined) {
@@ -102,13 +100,17 @@ export function auditMoney(before: WorldState, after: WorldState): MoneyAudit {
     else doors[door] = { ...doors[door], out: doors[door].out + transaction.amount };
   }
 
-  const earlier = new Map(before.material.accounts.map((account) => [account.id, account.balance]));
-  const seen = new Set<string>();
-  for (const account of after.material.accounts) {
-    seen.add(account.id);
-    const was = earlier.get(account.id);
+  const was = before.material.accounts;
+  const now = after.material.accounts;
+  // Accounts are opened at the end of the list and struck off rarely: when every account `before` held stands where it stood,
+  // an account that is the very same row and has no line of its own has not moved, and none was struck off.
+  const aligned = now.length >= was.length && was.every((account, index) => now[index] === account || now[index]!.id === account.id);
+  const earlier = aligned ? null : new Map(was.map((account) => [account.id, account.balance]));
+  for (const [index, account] of now.entries()) {
+    if (account === was[index] && !expected.has(account.id)) continue;
     const lines = expected.get(account.id) ?? 0;
-    if (was === undefined) {
+    const balance = earlier === null ? was[index]?.balance : earlier.get(account.id);
+    if (balance === undefined) {
       // Opened in the span: whatever it was opened with, less the lines that
       // paid into it, came with its owner.
       const brought = account.balance - lines;
@@ -116,15 +118,29 @@ export function auditMoney(before: WorldState, after: WorldState): MoneyAudit {
       else if (brought < 0) unexplained.push({ kind: "unrecorded", accountId: account.id, amount: brought, note: "a new account holds less than was paid into it" });
       continue;
     }
-    const gap = account.balance - was - lines;
+    const gap = account.balance - balance - lines;
     if (gap !== 0) unexplained.push({ kind: "unrecorded", accountId: account.id, amount: gap, note: gap > 0 ? "balance rose with no line to say why" : "balance fell with no line to say why" });
   }
-  for (const [id, was] of earlier) {
+  if (earlier === null) return { internal, doors, unexplained };
+  const seen = new Set(now.map((account) => account.id));
+  for (const [id, balance] of earlier) {
     // An account struck off must have been emptied by lines (a disbanded chest handed to a treasury): what its lines do not account for is unexplained.
-    const left = was + (expected.get(id) ?? 0);
+    const left = balance + (expected.get(id) ?? 0);
     if (!seen.has(id) && left !== 0) unexplained.push({ kind: "unrecorded", accountId: id, amount: -left, note: "an account holding money was removed" });
   }
   return { internal, doors, unexplained };
+}
+
+/**
+ * The lines written since `before`. The books are written at their end, so when `after` begins with the lines `before` held, the
+ * rest are the new ones and nothing need be looked up: checked after every batch of acts, a set of every line's id built twice
+ * over cost more than the acts did. A book that was cut (`tick.ts` keeps the last lines) is read by id.
+ */
+function linesSince(was: readonly MoneyTransaction[], now: readonly MoneyTransaction[]): readonly MoneyTransaction[] {
+  if (was === now) return [];
+  if (now.length >= was.length && (was.length === 0 || (now[0] === was[0] && now[was.length - 1] === was[was.length - 1]))) return now.slice(was.length);
+  const known = new Set(was.map((transaction) => transaction.id));
+  return now.filter((transaction) => !known.has(transaction.id));
 }
 
 /** Two audits as one, for adding up a run of ticks. */

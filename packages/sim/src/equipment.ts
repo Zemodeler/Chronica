@@ -218,7 +218,7 @@ export function keepTheKit(input: KitInput): { world: WorldState; facts: FactPro
     material: {
       ...world.material,
       forces: world.material.forces.map((force) => changed.get(force.id) ?? force),
-      transactions: transactions.length === 0 ? world.material.transactions : [...world.material.transactions, ...transactions].slice(-500),
+      transactions: transactions.length === 0 ? world.material.transactions : [...world.material.transactions, ...transactions],
     },
   };
   return { world, facts: kitFacts(world, reckonings, day) };

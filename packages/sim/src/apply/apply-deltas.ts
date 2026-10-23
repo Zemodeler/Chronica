@@ -2719,7 +2719,7 @@ function applyOne(
       // An ally's ships called for: raised in its harbours, at its cost (`socii-navales.ts`).
       const leader = actorPolityOf(world, context);
       if (leader !== null && "naval" in category && category.naval === true && owesShipsTo(world, forcePolityId, leader)) {
-        const sent = requisitionAlliedHulls(world, { id, chestId: context.ids.next("account"), allyId: forcePolityId, name: delta.name, wanted: delta.authorizedStrength, commanderId, controllerId, categoryId: category.id, label: category.label, atStep });
+        const sent = requisitionAlliedHulls(world, { id, chestId: context.ids.next("account"), obligationId: context.ids.next("obligation"), allyId: forcePolityId, name: delta.name, wanted: delta.authorizedStrength, commanderId, controllerId, categoryId: category.id, label: category.label, atStep });
         if (typeof sent === "string") reject(sent);
         emitFact({ localId: safeLocalId(`requisitioned_${id}`).slice(0, 60), kind: "hulls_requisitioned", summary: `${sent.hulls} ${category.label.toLowerCase()} were requisitioned from ${world.map.polities.find((polity) => polity.id === forcePolityId)?.name ?? forcePolityId}, as its treaty with ${world.map.polities.find((polity) => polity.id === leader)?.name ?? leader} binds it, and gather at ${world.map.provinces.find((province) => province.id === sent.shore)?.name ?? sent.shore}.`.slice(0, 600), affectedRefs: [{ kind: "force", id }, { kind: "polity", id: forcePolityId }, { kind: "polity", id: leader }], visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 40 });
         return sent.world;
@@ -7933,10 +7933,17 @@ function splitDetachmentsNamedIn(delta: WorldDelta, world: WorldState, assignedI
       assignedIds.set(handle, id);
       const taken = new Map(personnel.map((category) => [category.categoryId, category.fit]));
       const name = handle.split(/[-_]+/).filter(Boolean).map((word) => word[0]!.toUpperCase() + word.slice(1)).join(" ");
+      // Drawn from an army nobody paid, they are taken on by their power's treasury, as a detachment an order makes is: scouts
+      // sent up a pass from an unpaid army were paid by nobody (`force.raised-paid`).
+      const men = personnel.reduce((sum, category) => sum + category.fit, 0);
+      const hasTreasury = next.material.accounts.some((account) => account.owner.kind === "polity" && account.owner.id === parent.polityId && account.status === "active");
+      const pledged = parent.payObligationId === null && parent.outlaw !== true && parent.private !== true && hasTreasury
+        ? pledgePay(next, parent.polityId, name, men, next.elapsedStep, context.ids, parent.id) : null;
       next = {
         ...next,
         material: {
           ...next.material,
+          ...(pledged === null ? {} : { obligations: [...next.material.obligations, pledged.obligation] }),
           forces: [
             ...next.material.forces.map((force) => force.id !== parent.id ? force : {
               ...force,
@@ -7948,8 +7955,8 @@ function splitDetachmentsNamedIn(delta: WorldDelta, world: WorldState, assignedI
               id,
               name: name.slice(0, 120),
               personnel,
-              authorizedStrength: personnel.reduce((sum, category) => sum + category.fit, 0),
-              payObligationId: parent.payObligationId,
+              authorizedStrength: men,
+              payObligationId: pledged?.obligation.id ?? parent.payObligationId,
               payArrearsPeriods: 0,
               history: [],
               memberCharacterIds: [],

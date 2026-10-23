@@ -208,17 +208,21 @@ export function sentenceByOutcome(world: WorldState, procedure: PoliticalProcedu
   const convicted = world.characters.find((character) => character.id === procedure.subjectId && character.alive);
   if (convicted === undefined) return world;
   let next = condemnedBy(world, procedure, convicted, atStep);
+  // Each line its own number: what he took from the treasury and the fine he paid it were two lines under one id, and the
+  // books kept one of them (`ids.unique`).
+  let lines = 0;
   const move = (from: string, to: string | null, amount: number): number => {
     const purse = next.material.accounts.find((account) => account.id === from);
     const paid = Math.min(amount, Math.max(0, purse?.balance ?? 0));
     if (paid <= 0 || to === null || to === from) return 0;
+    lines += 1;
     next = {
       ...next,
       material: {
         ...next.material,
         accounts: next.material.accounts.map((account) => (account.id === from ? { ...account, balance: account.balance - paid } : account.id === to ? { ...account, balance: account.balance + paid } : account)),
         transactions: [...next.material.transactions, {
-          id: boundedId("txn", "judgment", procedure.id, to), atStep, kind: "confiscation" as const, amount: paid, sourceAccountId: from, destinationAccountId: to,
+          id: boundedId("txn", "judgment", procedure.id, to, lines), atStep, kind: "confiscation" as const, amount: paid, sourceAccountId: from, destinationAccountId: to,
           cause: { kind: "action" as const, id: procedure.id, explanation: procedure.label.slice(0, 200) }, visibility: "public" as const,
         }],
       },

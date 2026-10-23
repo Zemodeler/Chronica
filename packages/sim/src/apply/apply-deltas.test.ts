@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario, FIRST_PUNIC_IDS, punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, advanceWorldTo, allOffices, buildAuthorityIndex, localRef, vacateOfficesOf, type Office, type WorldDelta, type WorldState } from "@chronica/shared";
-import { createIdFactory } from "../ports";
-import { applyDeltas } from "./apply-deltas";
+import { createIdFactory, type IdFactory } from "../ports";
+import { freshIds } from "../fresh-ids-test-kit";
+import { applyDeltas as applyAll } from "./apply-deltas";
 import type { ApplyContext } from "./context";
 
-// A fresh seed for each context: one seed reused made two rows with one id (`ids.unique`).
-let contexts = 0;
+/** Ids the world acted on has not used (`freshIds`): one seed reused made two rows with one id (`ids.unique`). */
+const TEST_IDS: IdFactory = createIdFactory("test");
+const applyDeltas = (state: WorldState, deltas: readonly WorldDelta[], given: ApplyContext) =>
+  applyAll(state, deltas, given.ids === TEST_IDS ? { ...given, ids: freshIds("test", state) } : given);
 
 const world = (): WorldState => WorldStateSchema.parse(structuredClone(firstPunicWarScenario.initialWorld));
 const definition = ScenarioDefinitionSchema.parse(firstPunicWarScenario.definition);
@@ -20,7 +23,7 @@ function context(overrides: Partial<ApplyContext> = {}): ApplyContext {
     actorRef: { kind: "character", id: "marcus-atilius" },
     offices,
     warfare,
-    ids: createIdFactory(`test-${(contexts += 1)}`),
+    ids: TEST_IDS,
     gameId: "game-1",
     ...overrides,
   };

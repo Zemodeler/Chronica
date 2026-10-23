@@ -226,7 +226,7 @@ function settleDoctrines(world: WorldState, toDay: number, ids: IdFactory, facts
           transactions: [...next.material.transactions, {
             id: ids.next("txn"), atStep: toDay, kind: "upkeep" as const, amount: due, sourceAccountId: payer.id,
             cause: { kind: "obligation" as const, id: doctrine.id, explanation: `The keep of ${doctrine.label}` }, visibility: "polity" as const,
-          }].slice(-500),
+          }],
         },
       };
     }

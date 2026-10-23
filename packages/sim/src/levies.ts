@@ -212,7 +212,7 @@ export function raiseLevy(given: WorldState, request: LevyRequest): Levy {
           sourceAccountId: payer.id,
           cause: { kind: "action" as const, id: request.cause, explanation: `${naval ? `Bounty and pay in advance for the crews of ${men} ships` : `Bounty and kit for ${men} men levied`} in ${name(request.provinceId)}.`.slice(0, 240) },
           visibility: "polity" as const,
-        }].slice(-500),
+        }],
       },
     };
   }

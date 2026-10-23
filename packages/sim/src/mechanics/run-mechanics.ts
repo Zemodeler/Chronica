@@ -216,7 +216,7 @@ export function runMechanics(input: RunMechanicsInput): RunMechanicsResult {
               ...(to === undefined ? {} : { destinationAccountId: to.id }),
               cause: { kind: "mechanic" as const, id: entity.id, explanation: entity.label.slice(0, 200) },
               visibility: "polity" as const,
-            }].slice(-500),
+            }],
           },
         };
       }

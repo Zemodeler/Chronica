@@ -11,13 +11,11 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { createIdFactory } from "./ports";
+import { freshIds } from "./fresh-ids-test-kit";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
 import { holdElections } from "./elections";
 import { holdVotes, voteDayOf } from "./senate";
-
-// A fresh seed for each context: one seed reused made two money lines with one id, and the books lost the second (`ids.unique`).
-let contexts = 0;
 
 /**
  * The places the engine held a person back that it had no business holding.
@@ -48,20 +46,21 @@ const SICILY_NE = PUNIC_IDS.messana;
 
 const world = (): WorldState => WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
 
-const context = (actor: string, extra: Partial<ApplyContext> = {}): ApplyContext => ({
+// Ids the world acted on has not used: one seed reused made two money lines with one id, and the books lost the second (`ids.unique`).
+const context = (actor: string, state: WorldState, extra: Partial<ApplyContext> = {}): ApplyContext => ({
   now: { day: 0, minute: 540 },
   actorRef: { kind: "character", id: actor },
   offices: definition.government.offices,
   warfare: definition.warfare,
   terrains: definition.map.terrains,
-  ids: createIdFactory(`unbound-${(contexts += 1)}`),
+  ids: freshIds("unbound", state),
   gameId: "game-unbound",
   ...extra,
 });
 
 function act(actor: string, written: readonly unknown[], state: WorldState = world(), extra: Partial<ApplyContext> = {}) {
   const deltas = written.map((raw) => WorldDeltaSchema.parse(raw));
-  const result = applyDeltas(state, deltas, context(actor, extra));
+  const result = applyDeltas(state, deltas, context(actor, state, extra));
   expect(WorldStateSchema.safeParse(result.world).success).toBe(true);
   return result;
 }
@@ -411,7 +410,8 @@ describe("the order cannot move another power's men", () => {
 
   it("is not obeyed when it is the ruler's order", () => {
     const delta = WorldDeltaSchema.parse(TURN_BACK);
-    const result = applyDeltas(world(), [delta], context("gaius-genucius", { actsForTheWorld: true, orderDeltas: new Set([delta]) }));
+    const state = world();
+    const result = applyDeltas(state, [delta], context("gaius-genucius", state, { actsForTheWorld: true, orderDeltas: new Set([delta]) }));
     expect(result.rejected[0]?.kind).toBe("ignored");
   });
 
@@ -419,13 +419,15 @@ describe("the order cannot move another power's men", () => {
     const delta = WorldDeltaSchema.parse({
       op: "agreement_open", localId: "their_pact", kind: "alliance", polityId: "carthage", otherPolityId: "syracuse", terms: "Against Rome.", reason: "Rome decides it.",
     });
-    const result = applyDeltas(world(), [delta], context("gaius-genucius", { actsForTheWorld: true, orderDeltas: new Set([delta]) }));
+    const state = world();
+    const result = applyDeltas(state, [delta], context("gaius-genucius", state, { actsForTheWorld: true, orderDeltas: new Set([delta]) }));
     expect(result.rejected[0]?.kind).toBe("ignored");
   });
 
   it("is carried out when it is the world moving on its own", () => {
     const delta = WorldDeltaSchema.parse({ ...TURN_BACK, locationId: undefined, name: "The Punic fleet" });
-    const result = applyDeltas(world(), [delta], context("gaius-genucius", { actsForTheWorld: true, orderDeltas: new Set() }));
+    const state = world();
+    const result = applyDeltas(state, [delta], context("gaius-genucius", state, { actsForTheWorld: true, orderDeltas: new Set() }));
     expect(result.rejected).toEqual([]);
     expect(result.breaches).toEqual([]);
   });

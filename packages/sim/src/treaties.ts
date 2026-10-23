@@ -24,7 +24,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
-import { ALLIED_HULL_CATEGORY, alliedHullsAvailable, requisitionAlliedHulls } from "./socii-navales";
+import { ALLIED_HULL_CATEGORY, alliedHullsAvailable, alliedPay, requisitionAlliedHulls } from "./socii-navales";
 import { safeLocalId } from "./safe-local-id";
 
 /**
@@ -450,7 +450,7 @@ function levyContingents(world: WorldState, war: PolityAgreement, ids: IdFactory
       const captain = next.characters.filter((character) => character.alive && character.polityId === ally).sort((a, b) => b.prestigeBps - a.prestigeBps || a.id.localeCompare(b.id))[0];
       if (captain !== undefined && alliedHullsAvailable(next, ally).hulls > 0) {
         const forceId = ids.next("force");
-        const afloat = requisitionAlliedHulls(next, { id: forceId, chestId: ids.next("account"), allyId: ally, name: `The ${polity.name} hulls`.slice(0, 120), wanted: Number.MAX_SAFE_INTEGER, commanderId: captain.id, controllerId: captain.id, categoryId: ALLIED_HULL_CATEGORY, label: "Allied transports", atStep: war.sinceStep });
+        const afloat = requisitionAlliedHulls(next, { id: forceId, chestId: ids.next("account"), obligationId: ids.next("obligation"), allyId: ally, name: `The ${polity.name} hulls`.slice(0, 120), wanted: Number.MAX_SAFE_INTEGER, commanderId: captain.id, controllerId: captain.id, categoryId: ALLIED_HULL_CATEGORY, label: "Allied transports", atStep: war.sinceStep });
         if (typeof afloat !== "string") {
           next = afloat.world;
           shipsSent.push({ polityId: ally, hulls: afloat.hulls });
@@ -488,20 +488,24 @@ function levyContingents(world: WorldState, war: PolityAgreement, ids: IdFactory
         next = made.world;
         commander = made.character.id;
       }
-      // Drawn from each of its provinces in proportion to the men it has.
+      // Drawn from each of its provinces in proportion to the men it has, and paid by its own treasury (`socii-navales.ts`).
       const share = men / Math.max(1, available);
+      const contingentId = ids.next("force");
+      const name = `The ${polity.name} contingent`.slice(0, 120);
+      const pay = alliedPay(next, { allyId: ally, obligationId: ids.next("obligation"), name, categoryId: "infantry", fit: men, atStep: war.sinceStep });
       next = {
         ...next,
         material: {
           ...next.material,
+          ...(pay === null ? {} : { obligations: [...next.material.obligations, pay] }),
           provinceMaterial: next.material.provinceMaterial.map((row) => (lands.some((land) => land.provinceId === row.provinceId)
             ? applyRecruitmentToMaterial(row, Math.floor(row.availableManpower * share), war.sinceStep) : row)),
           forces: [...next.material.forces, {
-            id: ids.next("force"), name: `The ${polity.name} contingent`.slice(0, 120), polityId: ally,
+            id: contingentId, name, polityId: ally,
             commanderCharacterId: commander, controllerCharacterId: commander, locationId: muster, positionId: null, authorizedStrength: men,
             personnel: [{ categoryId: "infantry", label: "Allied infantry", fit: men, unavailable: [] }],
             moraleBps: 6_000, cohesionBps: 5_500, fatigueBps: 0, provisionStatus: "provisioned", provisionedThroughStep: war.sinceStep + 30,
-            payObligationId: null, payArrearsPeriods: 0, history: [], memberCharacterIds: [],
+            payObligationId: pay?.id ?? null, payArrearsPeriods: 0, history: [], memberCharacterIds: [],
           }],
         },
         characters: next.characters.map((character) => (character.id === commander ? { ...character, locationProvinceId: muster } : character)),
