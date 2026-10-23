@@ -7,6 +7,9 @@ import { createIdFactory } from "./ports";
 import { SUSPENDED_PACT_TRUST, keepTreaties, trustOf } from "./treaties";
 import { HUBS, POWERS, agreement, bookOf, flow, opening, setStock, withAgreements, withCustoms } from "./trade-test-kit";
 
+// A fresh seed for each context: one seed reused made two rows with one id (`ids.unique`).
+let contexts = 0;
+
 /**
  * War suspends a pact (phase D of the economy rework).
  *
@@ -27,7 +30,7 @@ const context = (): ApplyContext => ({
   offices: definition.government.offices,
   warfare: definition.warfare,
   terrains: definition.map.terrains,
-  ids: createIdFactory("held"),
+  ids: createIdFactory(`held-${(contexts += 1)}`),
   gameId: "game-held",
 });
 const apply = (world: WorldState, raw: Record<string, unknown>) => applyDeltas(world, [WorldDeltaSchema.parse(raw)], context());

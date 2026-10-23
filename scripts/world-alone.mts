@@ -15,6 +15,9 @@ import { punicWarsScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, formatWorldDate } from "@chronica/shared";
 import { DEFAULT_BUDGET, runSimulationBurst, type SimModelPort } from "@chronica/sim";
 
+// A broken rule of the world stops the run where it was broken (packages/sim/src/invariants.ts); CHRONICA_STRICT=0 runs on and only reports.
+process.env["CHRONICA_STRICT"] ??= "1";
+
 const months = Number(process.argv[2] ?? "12");
 const quiet = process.argv.includes("--quiet");
 const saveAt = process.argv.indexOf("--save") === -1 ? null : process.argv[process.argv.indexOf("--save") + 1] ?? null;

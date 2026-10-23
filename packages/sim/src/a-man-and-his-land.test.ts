@@ -7,6 +7,9 @@ import { createIdFactory } from "./ports";
 import { runDeterministicTick } from "./tick";
 import { withMiddlingManagers } from "./middling-managers";
 
+// A fresh seed for each context: one seed reused made two money lines with one id, and the books lost the second (`ids.unique`).
+let contexts = 0;
+
 /**
  * "I don't hold office. I own an estate, and I mean to improve it."
  *
@@ -33,7 +36,7 @@ const as = (characterId: string): ApplyContext => ({
   offices: definition.government.offices,
   warfare: definition.warfare,
   terrains: definition.map.terrains,
-  ids: createIdFactory(`land-${characterId}`),
+  ids: createIdFactory(`land-${characterId}-${(contexts += 1)}`),
   gameId: "game-1",
 });
 
@@ -54,7 +57,7 @@ describe("a man and his land", () => {
     const world = opening();
     expect(world.material.holdings.find((holding) => holding.id === "curius-sabine-farm")?.legalHolderCharacterId).toBe("manius-curius");
     const before = balance(world, "curius-purse");
-    const month = runDeterministicTick({ world, toDay: 30, ids: createIdFactory("land-tick"), warfare: definition.warfare }).world;
+    const month = runDeterministicTick({ world, toDay: 30, ids: createIdFactory(`land-tick-${(contexts += 1)}`), warfare: definition.warfare }).world;
     // 120 of rent (a tenth of the first drafts, v59, 2026-10-08), and 4 more from how the Treasury's officers are: the men who gather the rents have tempers of their own.
     expect(balance(month, "curius-purse")).toBe(before + 124);
     // An estate authored in the scenario is the same kind of thing as one bought in play.

@@ -15,6 +15,9 @@ import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, ensurePro
 import { applyDeltas, createIdFactory } from "@chronica/sim";
 import { runDeterministicTick } from "../packages/sim/src/tick";
 
+// A broken rule of the world stops the run where it was broken (packages/sim/src/invariants.ts); CHRONICA_STRICT=0 runs on and only reports.
+process.env["CHRONICA_STRICT"] ??= "1";
+
 const years = Number(process.argv.slice(2).find((arg) => /^\d+$/.test(arg)) ?? "5");
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 const MAN = "manius-curius";

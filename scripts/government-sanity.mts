@@ -24,6 +24,9 @@ import {
 } from "@chronica/shared";
 import { DEFAULT_BUDGET, auditInWords, auditMoney, combineAudits, emptyAudit, runSimulationBurst, type SimModelPort, type MoneyAudit } from "@chronica/sim";
 
+// A broken rule of the world stops the run where it was broken (packages/sim/src/invariants.ts); CHRONICA_STRICT=0 runs on and only reports.
+process.env["CHRONICA_STRICT"] ??= "1";
+
 const args = process.argv.slice(2);
 const years = Number(args.find((arg) => /^\d+$/.test(arg)) ?? "5");
 const quiet = args.includes("--quiet");
@@ -200,3 +203,4 @@ console.log(flags.length === 0 ? "none" : flags.join("\n"));
 console.log("\nMONEY AUDIT over the run");
 console.log(auditInWords(total));
 console.log(`unexplained entries: ${total.unexplained.length}; elapsed ${((Date.now() - started) / 1000).toFixed(0)}s`);
+if (total.unexplained.length > 0) process.exitCode = 1;

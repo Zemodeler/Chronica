@@ -5,6 +5,9 @@ import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
 import { createIdFactory } from "./ports";
 
+// A fresh seed for each context: one seed reused made two rows with one id (`ids.unique`).
+let contexts = 0;
+
 /**
  * A truce accepted over the one that runs is its extension. It was refused as "already stand in truce" while the letter that
  * asked for it was told as agreed, and the old truce lapsed on its day (a playtest as the Mamertine leader, twice).
@@ -16,7 +19,7 @@ function as(written: readonly unknown[], state: WorldState) {
   const deltas = written.map((raw) => WorldDeltaSchema.parse(raw));
   const context: ApplyContext = {
     now: { day: state.elapsedStep, minute: 540 }, actorRef: { kind: "character", id: "gaius-genucius" }, offices: definition.government.offices, warfare: definition.warfare,
-    terrains: definition.map.terrains, ids: createIdFactory(`truce-${state.elapsedStep}`), gameId: "game-truce", orderDeltas: new Set(),
+    terrains: definition.map.terrains, ids: createIdFactory(`truce-${state.elapsedStep}-${(contexts += 1)}`), gameId: "game-truce", orderDeltas: new Set(),
   };
   return applyDeltas(state, deltas, context);
 }

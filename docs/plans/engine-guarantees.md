@@ -148,8 +148,9 @@ The three rules already there (one voyage per fleet, one army per man, no person
 Once after each tick in `tickTo`, after each bookkeeping stage in `checkpoint`, and after each applied batch in `applyDeltas`
 (which already rolls back a delta that adds a violation). Each check is indexed by id so a run of a month stays well under a second.
 
-Two modes, chosen by `CHRONICA_STRICT=1` (set in the vitest setup file, every `*-sanity.mts`, `world-alone`, the hand-run
-harnesses and CI):
+Two modes, chosen by `CHRONICA_STRICT=1` (set in the sim vitest config, so in CI, and by default in every `*-sanity.mts` and
+`world-alone`; the hand-run harnesses take it when asked, since a fault thrown twenty minutes into a hand-played burst loses the
+burst, and they print every fault anyway):
 
 - **strict:** a new violation throws `InvariantBroken` with the rule, the things, the stage and the burst id. Sanity scripts exit
   non-zero when the money audit is not clean.

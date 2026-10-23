@@ -30,6 +30,9 @@ import { BATTLE_WON_BPS, BATTLE_WON_WOUNDED_BPS, CITY_TAKEN_BPS, OFFICE_MONTH_BP
 import { runDeterministicTick } from "./tick";
 import { sentenceByOutcome } from "./trials";
 
+// A fresh seed for each context: one seed reused made two money lines with one id, and the books lost the second (`ids.unique`).
+let contexts = 0;
+
 /**
  * A name is made (L1, L2, L3, L7, E16, E17 of the 2026-10-02 play-test).
  *
@@ -73,12 +76,12 @@ const act = (world: WorldState, actor: string, raw: Record<string, unknown>, day
   const delta = WorldDeltaSchema.parse(raw);
   return applyDeltas(world, [delta], {
     now: { day, minute: 540 }, actorRef: { kind: "character", id: actor }, offices, successionRules: government.successionRules,
-    warfare: definition.warfare, ids: createIdFactory(`name-${actor}-${raw.op as string}-${day}`), gameId: "game-name", playerCharacterId: PLAYER, orderDeltas: new Set([delta]),
+    warfare: definition.warfare, ids: createIdFactory(`name-${actor}-${raw.op as string}-${day}-${(contexts += 1)}`), gameId: "game-name", playerCharacterId: PLAYER, orderDeltas: new Set([delta]),
   });
 };
 const tick = (world: WorldState, toDay: number) => {
   const advanced = { ...world, elapsedStep: toDay, instant: { day: toDay, minute: 0 } };
-  const result = runDeterministicTick({ world: advanced, toDay, ids: createIdFactory(`name-tick-${toDay}`), warfare: definition.warfare, government, playerCharacterId: PLAYER });
+  const result = runDeterministicTick({ world: advanced, toDay, ids: createIdFactory(`name-tick-${toDay}-${(contexts += 1)}`), warfare: definition.warfare, government, playerCharacterId: PLAYER });
   expect(WorldStateSchema.safeParse(result.world).success).toBe(true);
   return result;
 };

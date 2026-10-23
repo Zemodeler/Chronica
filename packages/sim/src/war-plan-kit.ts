@@ -30,9 +30,11 @@ export function atWar(day = 90): WorldState {
   return applyDeltas(world, [open], context(world, PLAYER) as never).world;
 }
 
+// Each context its own ids: two acts of one day under one seed made two agreements with one id (`ids.unique`).
+let contexts = 0;
 export const context = (world: WorldState, actor: string, gameId = "war-plan-kit") => ({
   now: world.instant, actorRef: { kind: "character" as const, id: actor }, actsForTheWorld: true, offices: definition.government.offices,
-  warfare: definition.warfare, terrains: definition.map.terrains, ids: createIdFactory(`${gameId}-${world.instant.day}`), gameId,
+  warfare: definition.warfare, terrains: definition.map.terrains, ids: createIdFactory(`${gameId}-${world.instant.day}-${(contexts += 1)}`), gameId,
 });
 
 export function inputFor(world: WorldState, over: Partial<StatecraftInput> = {}): StatecraftInput {

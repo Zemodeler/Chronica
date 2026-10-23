@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { punicWarsScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, type Commitment, type WorldState } from "@chronica/shared";
 
@@ -46,6 +46,8 @@ const burst = (world: WorldState) => runSimulationBurst({
 });
 
 describe("a long promise", { timeout: 60_000 }, () => {
+  // What a player's game does with a step that breaks the world: sets it aside and goes on. Strict, it would stop.
+  beforeEach(() => { vi.stubEnv("CHRONICA_STRICT", "0"); });
   it("breaks into a world that still loads", () => {
     const start = promised(opening());
     const early = keepPromises({ world: start, toDay: start.elapsedStep + 10, playerCharacterId: "gaius-genucius" });

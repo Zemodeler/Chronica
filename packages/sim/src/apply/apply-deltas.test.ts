@@ -5,6 +5,9 @@ import { createIdFactory } from "../ports";
 import { applyDeltas } from "./apply-deltas";
 import type { ApplyContext } from "./context";
 
+// A fresh seed for each context: one seed reused made two rows with one id (`ids.unique`).
+let contexts = 0;
+
 const world = (): WorldState => WorldStateSchema.parse(structuredClone(firstPunicWarScenario.initialWorld));
 const definition = ScenarioDefinitionSchema.parse(firstPunicWarScenario.definition);
 const offices: readonly Office[] = definition.government.offices;
@@ -17,7 +20,7 @@ function context(overrides: Partial<ApplyContext> = {}): ApplyContext {
     actorRef: { kind: "character", id: "marcus-atilius" },
     offices,
     warfare,
-    ids: createIdFactory("test"),
+    ids: createIdFactory(`test-${(contexts += 1)}`),
     gameId: "game-1",
     ...overrides,
   };

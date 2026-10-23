@@ -8,6 +8,9 @@ import { PEACE_TRADE_TARIFF_CAP_BPS, treatyOf } from "./peace-table";
 import { trustOf } from "./treaties";
 import { HUBS, POWERS, agreement, bookOf, flow, opening, priceOf, setStock, withAgreements, withCustoms } from "./trade-test-kit";
 
+// A fresh seed for each context: one seed reused made two rows with one id (`ids.unique`).
+let contexts = 0;
+
 /**
  * A trade pact lowers tariffs (phase D of the economy rework).
  *
@@ -28,7 +31,7 @@ const context = (): ApplyContext => ({
   offices: definition.government.offices,
   warfare: definition.warfare,
   terrains: definition.map.terrains,
-  ids: createIdFactory("pact"),
+  ids: createIdFactory(`pact-${(contexts += 1)}`),
   gameId: "game-pact",
 });
 const apply = (world: WorldState, raw: Record<string, unknown>) => applyDeltas(world, [WorldDeltaSchema.parse(raw)], context());

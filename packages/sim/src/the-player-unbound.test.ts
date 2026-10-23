@@ -16,6 +16,9 @@ import type { ApplyContext } from "./apply/context";
 import { holdElections } from "./elections";
 import { holdVotes, voteDayOf } from "./senate";
 
+// A fresh seed for each context: one seed reused made two money lines with one id, and the books lost the second (`ids.unique`).
+let contexts = 0;
+
 /**
  * The places the engine held a person back that it had no business holding.
  *
@@ -51,7 +54,7 @@ const context = (actor: string, extra: Partial<ApplyContext> = {}): ApplyContext
   offices: definition.government.offices,
   warfare: definition.warfare,
   terrains: definition.map.terrains,
-  ids: createIdFactory("unbound"),
+  ids: createIdFactory(`unbound-${(contexts += 1)}`),
   gameId: "game-unbound",
   ...extra,
 });

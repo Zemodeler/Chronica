@@ -7,6 +7,9 @@ import type { ApplyContext } from "./apply/context";
 import { createIdFactory } from "./ports";
 import { HUBS, POWERS, agreement, bookOf, flow, inflowOf, opening, outflowOf, priceOf, setStock, withAgreements } from "./trade-test-kit";
 
+// A fresh seed for each context: one seed reused made two rows with one id (`ids.unique`).
+let contexts = 0;
+
 /**
  * An embargo cuts trade (phase D of the economy rework).
  *
@@ -27,7 +30,7 @@ const context = (): ApplyContext => ({
   offices: definition.government.offices,
   warfare: definition.warfare,
   terrains: definition.map.terrains,
-  ids: createIdFactory("embargo"),
+  ids: createIdFactory(`embargo-${(contexts += 1)}`),
   gameId: "game-embargo",
 });
 const apply = (world: WorldState, raw: Record<string, unknown>) => applyDeltas(world, [WorldDeltaSchema.parse(raw)], context());

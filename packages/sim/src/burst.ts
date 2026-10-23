@@ -143,7 +143,7 @@ import { kindAskedFor, verifyPart } from "./order-verifier";
 import { answerBreach, breachDecision, isGrandBreach } from "./breach-decisions";
 import { factContradictsState } from "./fact-parity";
 import type { RequestLedger } from "./request-ledger";
-import { findInvariantViolations } from "./invariants";
+import { InvariantBroken, checkStep, isStrict } from "./invariants";
 import { debatersOf, electiveOfficesOf, voteCalendarDays } from "./senate";
 import { ensureConstitutions } from "./constitutions";
 import { skimTheHand } from "./departments";
@@ -1222,7 +1222,14 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     step();
     if (world === before) return true;
     let broken = brokenBy(before, world);
-    if (broken === null) return true;
+    if (broken === null) {
+      for (const violation of checkStep(stage, before, world)) {
+        skipped.push({ stage: "invariant", reason: `${stage} left ${violation.rule}: ${violation.sentence}` });
+        console.error(`[chronica] ${stage} left ${violation.rule}: ${violation.sentence}`);
+      }
+      return true;
+    }
+    if (isStrict()) throw new InvariantBroken(stage, [{ rule: "world.loads", sentence: broken }]);
     const mended = clipOverlong(world);
     if (mended !== null) {
       skipped.push({ stage: "invariant", reason: `${stage} wrote words too long for their place, and they were cut: ${mended.clipped.slice(0, 3).join(", ")}` });
@@ -2675,14 +2682,17 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       // Which account, and what it held before the tick: a fractional balance is one sum somewhere that was never rounded.
       const fractional = ticked.world.material.accounts.filter((account) => !Number.isInteger(account.balance)).slice(0, 3)
         .map((account) => `${account.id} ${account.balance} (was ${world.material.accounts.find((before) => before.id === account.id)?.balance ?? "new"})`);
-      console.error(`[chronica] ${failure}${fractional.length === 0 ? "" : `; fractional: ${fractional.join(", ")}`}`);
+      const said = `${failure}${fractional.length === 0 ? "" : `; fractional: ${fractional.join(", ")}`}`;
+      if (isStrict()) throw new InvariantBroken(`the tick to day ${toDay}`, [{ rule: "world.loads", sentence: said }]);
+      console.error(`[chronica] ${said}`);
       return;
     }
     // The tick writes without the applier's per-act checks, so what it left
-    // at odds with itself is written down (`invariants.ts`).
-    const oddBefore = new Set(findInvariantViolations(world));
-    for (const violation of findInvariantViolations(holds.data).filter((entry) => !oddBefore.has(entry))) {
-      skipped.push({ stage: "invariant", reason: `the tick to day ${toDay} left ${violation}` });
+    // at odds with itself, and the money it moved with no line, is written
+    // down (`invariants.ts`); strict, it stops the run.
+    for (const violation of checkStep(`the tick to day ${toDay}`, world, holds.data)) {
+      skipped.push({ stage: "invariant", reason: `the tick to day ${toDay} left ${violation.rule}: ${violation.sentence}` });
+      console.error(`[chronica] the tick to day ${toDay} left ${violation.rule}: ${violation.sentence}`);
     }
     const beforeTick = world;
     lastSound = holds.data;
@@ -4568,6 +4578,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   // caught here, and the last world that held is what is kept.
   const unsound = whyItWillNotLoad(world);
   if (unsound !== null) {
+    if (isStrict()) throw new InvariantBroken("the end of the burst", [{ rule: "world.loads", sentence: unsound }]);
     skipped.push({ stage: "invariant", reason: `the burst ended on a world that would not load (${unsound}); the last world that held, of day ${lastSound.instant.day}, was kept` });
     parseFailures.push(`the world this report ended on would not load (${unsound}), and the last one that held was kept`);
     world = lastSound;
