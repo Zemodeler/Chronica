@@ -61,12 +61,16 @@ export interface PoliticalOverlayInput { readonly polities: DynamicMapOverlay["p
 
 /** Returns only shared country boundaries belonging to an active war pair. */
 export function deriveWarBorderPaths(state: PoliticalMapState, wars: DynamicMapOverlay["conflicts"]["wars"]): string {
-  const activeWars = new Set(wars.map((war) => `${war.polityAId}:${war.polityBId}`));
+  // Allies fight their leader's wars: a Bruttian border with the Campanian
+  // Legion is a war border even though Rome is the named party to the war.
+  const sideOf = (polityId: string): string => state.leaderByPolity.get(polityId) ?? polityId;
+  const pairOf = (a: string, b: string): string => a < b ? `${a}:${b}` : `${b}:${a}`;
+  const activeWars = new Set(wars.map((war) => pairOf(sideOf(war.polityAId), sideOf(war.polityBId))));
   return state.borderSegments.filter((border) => {
     if (border.classification !== "country_border" || border.provinceB === null) return false;
     const a = state.ownerByProvince.get(border.provinceA);
     const b = state.ownerByProvince.get(border.provinceB);
-    return a !== null && a !== undefined && b !== null && b !== undefined && activeWars.has(a < b ? `${a}:${b}` : `${b}:${a}`);
+    return a !== null && a !== undefined && b !== null && b !== undefined && activeWars.has(pairOf(sideOf(a), sideOf(b)));
   }).map((border) => border.svgPath).join("");
 }
 

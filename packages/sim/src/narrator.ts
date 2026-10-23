@@ -1,8 +1,10 @@
-import { difficultyRules, readService, type ServiceReading } from "@chronica/shared";
+import { difficultyRules, isOrderPartOpen, readService, type ServiceReading } from "@chronica/shared";
 import {
   LOOSE_COHESION_BPS,
   adjacentTo,
   agreementsBetween,
+  alliesLedBy,
+  leaderOf,
   deriveRelationDimension,
   familyLinksOf,
   isNavalForce,
@@ -17,6 +19,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { findPolityGaps } from "./population";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * The narrator: the world making trouble where nobody is looking (VISION §5,
@@ -372,7 +375,8 @@ function standingIn(world: WorldState, polityIds: readonly string[], provinceId:
  */
 export function livePressures(world: WorldState, pressures: readonly ScenarioHistoricalPressure[]): ScenarioHistoricalPressure[] {
   const spent = new Set(world.narrator.spentPressureIds);
-  return pressures.filter((pressure) => !spent.has(pressure.id) && pressureHolds(world, pressure, spent));
+  // What the age dates and the rules bring about themselves (`happens`) is not the narrator's to offer.
+  return pressures.filter((pressure) => pressure.happens === undefined && !spent.has(pressure.id) && pressureHolds(world, pressure, spent));
 }
 
 /**
@@ -473,10 +477,38 @@ function recentlyNamed(facts: readonly Fact[], today: number): Set<string> {
   return named;
 }
 
+/**
+ * The ground the player's open orders are about: where the army he sent is
+ * and is going, the province he means to take, where the man he sent is bound.
+ * Trouble that finds him there is trouble he is watching for (plan
+ * chronicle-and-order-truth, 5.1); the model is still never told why.
+ */
+export function groundOfOpenOrders(world: WorldState, playerCharacterId: string | null): Set<string> {
+  const ground = new Set<string>();
+  if (playerCharacterId === null) return ground;
+  for (const order of world.orders) {
+    if (order.actorCharacterId !== playerCharacterId) continue;
+    for (const part of order.parts) {
+      if (!isOrderPartOpen(world, part)) continue;
+      for (const goal of part.goals) {
+        if (goal.kind === "force_at") {
+          ground.add(goal.provinceId);
+          const force = world.material.forces.find((candidate) => candidate.id === goal.forceId);
+          if (force !== undefined) ground.add(force.locationId);
+        } else if (goal.kind === "control" || goal.kind === "character_at") ground.add(goal.provinceId);
+      }
+    }
+  }
+  return ground;
+}
+
 function chooseProvince(input: NarratorInput, tension: TensionReading, seedCount: number, requireController: boolean, requireCoast = false): WorldState["map"]["provinces"][number] | null {
   const { world } = input;
   const coastal = requireCoast ? coastalProvinceIds(world) : null;
   const home = landsAtHome(tension.comfort, input.gameId, seedCount);
+  // One seed in three is aimed at what the player is attempting (5.1).
+  const focus = groundOfOpenOrders(world, input.playerCharacterId);
+  const aimed = focus.size > 0 && stableChoice([input.gameId, "narrator", "aim", seedCount], 3) === 0;
   const busy = recentlyNamed(input.facts, world.instant.day);
   const garrisoned = new Set(world.material.forces.map((force) => force.locationId));
   const atWar = new Set(world.conflicts.wars.flatMap((war) => [war.polityAId, war.polityBId]));
@@ -494,10 +526,11 @@ function chooseProvince(input: NarratorInput, tension: TensionReading, seedCount
   if (possible.length === 0) return null;
   const candidates = possible
     .filter((province) => (!requireController || province.controllerPolityId !== null) && !(province.controllerPolityId !== null && filling.has(province.controllerPolityId)))
-    .filter((province) => (province.controllerPolityId === input.ownPolityId) === home);
+    .filter((province) => (aimed && focus.has(province.id)) || (province.controllerPolityId === input.ownPolityId) === home);
   const scored = (candidates.length === 0 ? possible : candidates)
     .map((province) => {
       let score = 0;
+      if (aimed && focus.has(province.id)) score += 6;
       if (!busy.has(province.id) && (province.controllerPolityId === null || !busy.has(province.controllerPolityId))) score += 3;
       if (!garrisoned.has(province.id)) score += 1;
       if (province.controllerPolityId !== null && atWar.has(province.controllerPolityId)) score -= 3;
@@ -537,10 +570,22 @@ function chooseAdversary(
       .map((war) => (war.polityAId === polityId ? war.polityBId : war.polityAId)),
   );
 
+  // Nobody is sent to war with a follower by foedus: a power's own followers and the followers of another leader make their
+  // wars and peaces through that leader (a seed set Rome against the Apulian cities, put the war in a censor's name and called
+  // every other ally of Rome to arms against its own sister; another set Carthage against the Etruscan cities, Rome's followers).
+  const kin = new Set<string>(alliesLedBy(world.polityAgreements, polityId));
+  const leader = leaderOf(world.polityAgreements, polityId);
+  // A follower by foedus makes no war of its own, and nobody else can pick one with it: send no seed that needs it either way.
+  if (leader !== null) return null;
+  for (const polity of world.map.polities) {
+    const itsLeader = leaderOf(world.polityAgreements, polity.id);
+    if (itsLeader !== null && itsLeader !== polityId) kin.add(polity.id);
+  }
+  alreadyFighting.forEach((id) => kin.add(id));
   const neighbours = new Set<string>();
   for (const { provinceId: side } of adjacentTo(world, provinceId)) {
     const controller = controllerOf.get(side) ?? null;
-    if (controller === null || controller === polityId || alreadyFighting.has(controller)) continue;
+    if (controller === null || controller === polityId || kin.has(controller)) continue;
     neighbours.add(controller);
   }
   // Nothing across this particular border: take any power that borders the
@@ -551,7 +596,7 @@ function chooseAdversary(
       const outward = ownProvinceIds.has(edge.from) ? edge.to : ownProvinceIds.has(edge.to) ? edge.from : null;
       if (outward === null) continue;
       const controller = controllerOf.get(outward) ?? null;
-      if (controller === null || controller === polityId || alreadyFighting.has(controller)) continue;
+      if (controller === null || controller === polityId || kin.has(controller)) continue;
       neighbours.add(controller);
     }
   }
@@ -652,6 +697,50 @@ export function decideNarratorSeed(input: NarratorInput): NarratorSeed | null {
   return seedAt(input, tension, ledger.seedCount, !ledger.consumed && ledger.lastSeedKey !== null, new Set());
 }
 
+/** A thread the world opened is given its next beat after this long quiet, so an arc runs omen, escalation, break. */
+const ARC_BEAT_AFTER_DAYS = 14;
+
+/**
+ * The next beat of a thread the world is already following (plan
+ * chronicle-and-order-truth, 5.3): omen to escalation to crisis to resolution,
+ * one beat at a time, each after the thread has been quiet a fortnight, and at
+ * most one per call. The model is told to advance the thread; it is never told
+ * why now.
+ */
+export function arcBeat(input: NarratorInput): NarratorSeed | null {
+  const { world } = input;
+  const beats = { brewing: "escalating", escalating: "crisis", crisis: "resolving" } as const;
+  const due = openStorylines(world.storylines)
+    .filter((storyline) => storyline.origin === "world" && storyline.phase in beats && world.elapsedStep - storyline.updatedAtStep >= ARC_BEAT_AFTER_DAYS)
+    .sort((a, b) => a.updatedAtStep - b.updatedAtStep || a.id.localeCompare(b.id));
+  const thread = due[0];
+  if (thread === undefined) return null;
+  const next = beats[thread.phase as keyof typeof beats];
+  const province = thread.provinceId === null ? null : world.map.provinces.find((candidate) => candidate.id === thread.provinceId) ?? null;
+  const polityId = province?.controllerPolityId ?? null;
+  const polity = polityId === null ? null : world.map.polities.find((candidate) => candidate.id === polityId) ?? null;
+  const person = thread.participantIds.map((id) => world.characters.find((character) => character.id === id)).find((character) => character !== undefined);
+  const severity: SeedSeverity = next === "crisis" ? "grave" : next === "escalating" ? "serious" : "minor";
+  return {
+    key: `seed-arc-${thread.id}-${next}`,
+    kind: "world_event",
+    archetype: "arc_beat",
+    severity,
+    secret: thread.visibility === "private",
+    oneShot: false,
+    target: {
+      provinceId: province?.id ?? null, provinceName: province?.name ?? null, polityId, polityName: polity?.name ?? null,
+      characterId: person?.id ?? null, characterName: person?.name ?? null, otherPolityId: null, otherPolityName: null,
+      forceId: null, forceName: null, forceIsNaval: false,
+    },
+    inPlayerRealm: polityId !== null && polityId === input.ownPolityId,
+    repeated: false,
+    pressureId: null,
+    why: `the thread "${thread.title}" has been quiet ${world.elapsedStep - thread.updatedAtStep} days`,
+    brief: `The thread "${thread.title}" [${thread.id}] has moved on: it is now ${next === "resolving" ? "coming to its end" : next}. Advance it with "storyline_advance" (phase "${next}"): say what just happened in it, in a line, and what comes next. Where it changes the province or the people in it, do that too, and record what happened as a fact. Its stakes were: ${thread.stakes}`,
+  };
+}
+
 /**
  * Everything that stirs this burst, not merely the one thing.
  *
@@ -691,7 +780,10 @@ export function decideNarratorSeeds(input: NarratorInput): NarratorSeed[] {
   const share = wanted * difficultyRules(input.world.difficulty).personalSeedShare;
   const personalCount = Math.floor(share) + (stableChoice([input.gameId, "narrator", "personal-count", ledger.seedCount], 12) < Math.round((share % 1) * 12) ? 1 : 0);
   const personal = input.playerCharacterId === null || personalCount === 0 ? [] : personalSeeds(input, ledger.seedCount + wanted, personalCount);
-  for (let index = 0; index < wanted - personal.length; index += 1) {
+  // One beat of an arc already running, before anything new is started (5.3).
+  const beat = arcBeat(input);
+  if (beat !== null) { keys.add(beat.key); seeds.push(beat); }
+  for (let index = 0; index < wanted - personal.length - (beat === null ? 0 : 1); index += 1) {
     // Only the first carries the repeat: a batch of six re-offered whole
     // because one of them went unread would be the same month twice.
     const repeated = index === 0 && !ledger.consumed && ledger.lastSeedKey !== null;
@@ -726,7 +818,8 @@ export function readPersonalTension(world: WorldState, playerCharacterId: string
   const obligations = world.material.obligations.filter((obligation) => obligation.active && obligation.payerAccountId === purse?.id);
   const monthly = obligations.reduce((sum, obligation) => sum + (obligation.cadenceSteps <= 0 ? 0 : obligation.amount / obligation.cadenceSteps) * 30, 0);
   const balance = purse?.balance ?? 0;
-  const runwayMonths = monthly <= 0 ? (balance > 0 ? 6 : 0) : balance / monthly;
+  // With nothing owed, a purse is as full as it is: seven hundred drachmae of a condemned man was "full" for want of a bill to measure it by.
+  const runwayMonths = monthly <= 0 ? (balance >= 3_000 ? 6 : balance >= 500 ? 3 : 0) : balance / monthly;
   const treasury = clamp01(runwayMonths / 6);
   const missed = obligations.filter((obligation) => obligation.missedPeriods > 0).length
     + world.material.loans.filter((loan) => loan.borrowerAccountId === purse?.id && loan.status === "defaulted").length;
@@ -1209,7 +1302,7 @@ export function engineWork(seed: NarratorSeed, winter = false): { readonly delta
       reason: news,
     }],
     fact: {
-      localId: `stirring_${seed.key.replace(/[^a-z0-9_-]/g, "_")}`,
+      localId: safeLocalId(`stirring_${seed.key.replace(/[^a-z0-9_-]/g, "_")}`),
       kind: seed.archetype,
       summary: news,
       affectedRefs: [

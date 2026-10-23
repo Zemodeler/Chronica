@@ -29,7 +29,7 @@ import { runDeterministicTick } from "./tick";
 
 /**
  * Workstream 4 of the Codex hand-mode play-test (docs/reports/
- * 2026-10-03-codex-hand-playtest-triage.md): a consul who could not cross to
+ * hand-run-reports.md): a consul who could not cross to
  * Sicily, spend what the Senate voted, act as proconsul, leave a garrison, or
  * take an ally into the state.
  */
@@ -60,7 +60,13 @@ const armyAt = (world: WorldState, provinceId: string): WorldState => ({
     ...world.material,
     forces: world.material.forces.map((force) => (force.id !== "roman-field-army" ? force : {
       ...force, locationId: provinceId, positionId: null,
-      personnel: force.personnel.map((group, at) => (at === 0 ? { ...group, fit: group.fit - (8_860 - 8_772) } : group)),
+      // The opening's army is two legions and two alae now (17,720: `punic-wars-sicily.ts`); the play-test's figure is what these cases were struck on, so the rows are scaled to it.
+      personnel: (() => {
+        const total = force.personnel.reduce((sum, group) => sum + group.fit, 0);
+        const scaled = force.personnel.map((group) => ({ ...group, fit: Math.floor((group.fit * 8_772) / total) }));
+        const short = 8_772 - scaled.reduce((sum, group) => sum + group.fit, 0);
+        return scaled.map((group, at) => (at === 0 ? { ...group, fit: group.fit + short } : group));
+      })(),
     })),
   },
 });
@@ -206,7 +212,7 @@ describe("a proconsul (L14)", () => {
     expect(grants.every((grant) => grant.source === "law" && grant.expiresAtStep === hold.untilStep)).toBe(true);
     const treasury = grants.find((grant) => grant.scope.id === "rome-treasury")!;
     // A year of what his armies cost: the legion's pay and the hulls' victualling.
-    expect(treasury.cap!.amount).toBe((229 + 40) * 12);
+    expect(treasury.cap!.amount).toBe((130_000 + 3_500) * 12);
   });
 
   it("leaves a garrison and spends from the treasury out of office, and the slice says what he may do", () => {

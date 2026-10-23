@@ -1,4 +1,6 @@
 import type { FactProposalDraft, Loan, MoneyObligation, WorldState } from "@chronica/shared";
+import { safeLocalId } from "./safe-local-id";
+import { priceOfDefault } from "./lending";
 
 /**
  * Debts that end (VISION §7, §20).
@@ -70,7 +72,7 @@ export function settleDebts(input: DebtsInput): { world: WorldState; facts: Fact
     const outstanding = now.remainingPeriods === 0 ? 0 : Math.max(0, loan.outstanding - paid * principalShare(loan.outstanding, was.remainingPeriods));
     if (outstanding > 0) return { ...loan, outstanding };
     facts.push({
-      localId: `repaid_${loan.id}`.slice(0, 60),
+      localId: safeLocalId(`repaid_${loan.id}`).slice(0, 60),
       kind: "loan_repaid",
       summary: `The last instalment on ${loan.terms} has been paid: the debt of ${loan.principal} is discharged.`.slice(0, 600),
       affectedRefs: [{ kind: "account", id: loan.borrowerAccountId }, ...(loan.lenderKind === "character" && loan.lenderId !== null ? [{ kind: "character" as const, id: loan.lenderId }] : [])],
@@ -94,6 +96,10 @@ export function settleDebts(input: DebtsInput): { world: WorldState; facts: Fact
     world = seized.world;
     facts.push(seized.fact);
   }
+  // ── The price of it: the lender's loss, the debtor's name and credit (`lending.ts`) ──
+  const priced = priceOfDefault(world, input.world.elapsedStep);
+  world = priced.world;
+  facts.push(...priced.facts);
   return { world, facts };
 }
 
@@ -132,7 +138,7 @@ function seizeThePledge(world: WorldState, loan: Loan): { world: WorldState; fac
   return {
     world: { ...world, material: { ...world.material, holdings, incomeSources } },
     fact: {
-      localId: `pledge_${loan.id}`.slice(0, 60),
+      localId: safeLocalId(`pledge_${loan.id}`).slice(0, 60),
       kind: "collateral_seized",
       summary: loan.lenderKind === "character"
         ? `${holding.title}, pledged by ${holderName} for ${loan.terms}, is forfeit: the debt went unpaid, and it is ${lenderName}'s now, rents and all.`.slice(0, 600)

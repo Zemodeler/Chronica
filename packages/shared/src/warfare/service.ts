@@ -163,18 +163,20 @@ export function serveInArmy(world: WorldState, input: ServeInput): WorldState {
       .find((index) => !posts.some((post) => post.formationId === formationId && post.unitIndex === index && post.rankId === rank?.id));
     unitIndex = free ?? unitIndex;
   }
+  // Taken on again, he is not a recruit: what he served, fought and was marked for before goes with him.
+  const earlier = already === undefined ? person.service : undefined;
   const service: ServiceRecord = already ?? {
     forceId: force.id,
     formationId,
     unitIndex: rank?.level === "body" || rank?.level === "formation" || rank?.level === "army" ? null : unitIndex,
     rankId: rank?.id ?? "ranks",
     enlistedAtStep: input.atStep,
-    campaigns: 0,
-    priorCampaigns: input.priorCampaigns ?? 0,
-    battles: 0,
-    wounds: 0,
-    decorations: [],
-    punishments: [],
+    campaigns: earlier?.campaigns ?? 0,
+    priorCampaigns: earlier === undefined ? input.priorCampaigns ?? 0 : earlier.priorCampaigns,
+    battles: earlier?.battles ?? 0,
+    wounds: earlier?.wounds ?? 0,
+    decorations: earlier?.decorations ?? [],
+    punishments: earlier?.punishments ?? [],
     conduct: "steady",
   };
   next = setService(next, person.id, service);

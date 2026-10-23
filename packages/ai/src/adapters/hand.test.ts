@@ -9,7 +9,7 @@ describe("the hand adapter", () => {
   it("automatically answers and replays, invalidating answers when system or model changes", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "hand-auto-"));
     let calls = 0;
-    const respond = async () => { calls += 1; return '{"actors":[]}'; };
+    const respond = () => { calls += 1; return Promise.resolve('{"actors":[]}'); };
     const adapter = createHandAdapter({ dir, respond, cacheNamespace: "luna" });
     await adapter.call("simulate_cognition", "S", "R");
     await adapter.call("simulate_cognition", "S", "R");
@@ -52,6 +52,15 @@ describe("the hand adapter", () => {
     await new Promise((resolve) => setTimeout(resolve, 40));
     writeFileSync(path.join(dir, `${stem}.json`), '{"facts": []}');
     await expect(reply).resolves.toMatchObject({ content: '{"facts": []}' });
+  });
+
+  it("reads an answer saved with a byte-order mark, as Windows editors and PowerShell save UTF-8", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "hand-"));
+    const adapter = createHandAdapter({ dir, pollMs: 10, timeoutMs: 500 });
+    const stem = handStem("reconcile_facts", "with a mark");
+    const reply = adapter.call("reconcile_facts", "S", "with a mark");
+    writeFileSync(path.join(dir, `${stem}.json`), '﻿{"withdraw": [], "rewrite": []}');
+    await expect(reply).resolves.toMatchObject({ content: '{"withdraw": [], "rewrite": []}' });
   });
 
   it("returns a tool step's calls with their arguments", async () => {

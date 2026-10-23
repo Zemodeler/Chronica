@@ -91,6 +91,8 @@ export const StopReasonSchema = z.enum([
   "max_span",
   // Run too long in wall-clock time; stopped between hops, with what was done kept.
   "deadline",
+  // The world could not be carried forward: a hop wrote what would not load. Stopped at the last sound day, loudly.
+  "tick_failed",
 ]);
 export type StopReason = z.infer<typeof StopReasonSchema>;
 

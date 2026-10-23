@@ -7,6 +7,7 @@ import {
   isMagistracy,
   labelNamesOffice,
   leverAptitude,
+  officeTemper,
   seatCharacterInOffice,
   type Character,
   type LeverId,
@@ -16,6 +17,7 @@ import {
 } from "@chronica/shared";
 import { rulerOf, rulerOfficeOf, type GovernmentRules } from "./constitutions";
 import { assessExecution, domainOfWork } from "./delegation";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Posts a government made and nobody filled.
@@ -108,8 +110,8 @@ export function fillAppointments(input: FillAppointmentsInput): { readonly world
     // it is -- an admiral by a soldier's gifts, not by his standing.
     const domain = domainOfWork("office", office.label);
     const fitness = (character: Character): number => levers === undefined || levers.length === 0
-      ? assessExecution(world, character.id, domain)?.competence ?? 0
-      : levers.reduce((sum, lever) => sum + leverAptitude(character, lever), 0) / levers.length;
+      ? (assessExecution(world, character.id, domain)?.competence ?? 0) + officeTemper(character)
+      : levers.reduce((sum, lever) => sum + leverAptitude(character, lever), 0) / levers.length + officeTemper(character);
     const candidates = world.characters.filter((character) => character.alive
       && character.polityId === office.polityId
       && character.id !== player
@@ -123,7 +125,7 @@ export function fillAppointments(input: FillAppointmentsInput): { readonly world
     world = seatCharacterInOffice(world, chosen.id, { office, vacantSeatId: seat.seatId }, input.toDay, office.termDays ?? null);
     const namer = ruler === null ? "The government" : ruler.name;
     facts.push({
-      localId: `appointed_${seat.seatId ?? office.id}_${input.toDay}`.slice(0, 60),
+      localId: safeLocalId(`appointed_${seat.seatId ?? office.id}_${input.toDay}`).slice(0, 60),
       kind: "office_filled",
       summary: `${namer} named ${chosen.name} ${office.label}, a post that had stood empty.`,
       affectedRefs: [

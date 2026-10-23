@@ -11,6 +11,7 @@ import {
 } from "@chronica/shared";
 import { endPolity } from "./polity-end";
 import { addGrievance, hasGrievance, menUnderArms, trustOf } from "./treaties";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * An ally taken into the state (L15).
@@ -74,7 +75,9 @@ export function unionScore(world: WorldState, follower: string, leader: string, 
   score += trust;
   if (trust !== 0) reasons.push(trust > 0 ? "it trusts its leader" : "it does not trust its leader");
   const foedus = world.polityAgreements.find((agreement) => agreement.status === "active" && agreement.kind === "foedus" && agreement.polityId === follower && agreement.otherPolityId === leader);
-  const years = foedus === undefined ? 0 : Math.max(0, world.elapsedStep - foedus.sinceStep) / 365;
+  // Its whole age, the years it had stood before the world began included: the Marsi, allies since 304, were told they had
+  // "followed for 0 years" (consul-run-issues M6).
+  const years = foedus === undefined ? 0 : Math.max(0, world.elapsedStep - foedus.sinceStep) / 365 + (foedus.heldYearsAtStart ?? 0);
   const habit = Math.min(15, Math.floor(years * 2));
   if (habit > 0) { score += habit; reasons.push(`it has followed for ${Math.floor(years)} years`); }
   const offered = offer === "citizenship" ? 25 : offer === "sine_suffragio" ? 15 : 0;
@@ -154,7 +157,7 @@ export function settleUnionOffers(world: WorldState, toDay: number, facts: FactP
         : candidate)),
     };
     facts.push({
-      localId: `union_${message.id}`.slice(0, 60),
+      localId: safeLocalId(`union_${message.id}`).slice(0, 60),
       kind: "letter_answered",
       summary: verdict.why.slice(0, 600),
       affectedRefs: [{ kind: "polity", id: verdict.follower }, { kind: "polity", id: verdict.leader }],
@@ -197,7 +200,7 @@ export function deditio(world: WorldState, toDay: number, playerPolityId: string
     if (victor === undefined) continue;
     const ended = endPolity(next, polity.id, "absorbed", victor, toDay, false);
     next = ended.world;
-    facts.push(...ended.facts.map((fact) => ({ ...fact, localId: `deditio_${polity.id}`.slice(0, 60), kind: "deditio" })));
+    facts.push(...ended.facts.map((fact) => ({ ...fact, localId: safeLocalId(`deditio_${polity.id}`).slice(0, 60), kind: "deditio" })));
   }
   return { world: next, facts };
 }

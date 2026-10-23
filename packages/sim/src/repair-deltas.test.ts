@@ -229,6 +229,26 @@ describe("refusals no correction can cure", () => {
     expect(worthRepairing({ reason })).toBe(false);
   });
 
+  it("spends no call on a force no force in the world could be", () => {
+    const world = WorldStateSchema.parse(structuredClone(firstPunicWarScenario.initialWorld));
+    expect(world.material.forces.some((force) => force.id.startsWith("wholly-invented-host"))).toBe(false);
+    expect(worthRepairing({ reason: 'No force "wholly-invented-host" exists.' }, world)).toBe(false);
+    const real = world.material.forces[0]?.id;
+    if (real !== undefined) expect(worthRepairing({ reason: `No force "${real.slice(0, 8)}" exists.` }, world)).toBe(true);
+  });
+
+  it("shows the repair the forces a wrong force handle could have meant", async () => {
+    const full = world();
+    const real = full.material.forces[0]!;
+    const word = real.name.split(/\s+/).find((part) => part.length >= 4)!.toLowerCase();
+    const { port, seen } = recordingPort({ repair_deltas: [JSON.stringify({ deltas: [] })] });
+    await repairDeltas({
+      port, worldText: "", world: full,
+      rejected: [{ delta: { op: "force_modify", forceRef: `${word}-host`, reason: "x" } as never, reason: `No force "${word}-host" exists.`, kind: "reference" }],
+    });
+    expect(seen[0]!.message).toContain(`${real.id} (${real.name})`);
+  });
+
   it("still repairs a cut-off id, which the world can show the candidates for", () => {
     expect(worthRepairing({ reason: `No province "${FIRST_PUNIC_IDS.rome.slice(0, 5)}" exists to move this force to.` })).toBe(true);
     expect(worthRepairing({ reason: 'No letter "message-12148423" exists to answer.' })).toBe(true);

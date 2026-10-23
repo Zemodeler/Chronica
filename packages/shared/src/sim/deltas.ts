@@ -29,7 +29,8 @@ import {
   SupportReasonKindSchema,
   VisibilitySchema,
 } from "../material-state";
-import { PolityAgreementKindSchema } from "../world/agreements";
+import { PolityAgreementKindSchema, TradeTermsSchema } from "../world/agreements";
+import { TreatyCompletionGoalSchema } from "../world/goals";
 import { ContingencyEffectSchema } from "../world/contingency";
 import { CovertPlotKindSchema } from "../world/covert-plot";
 import { WatchPredicateSchema } from "../world/watch";
@@ -43,6 +44,7 @@ import { DiplomaticAnswerSchema, DiplomaticMessageKindSchema, NegotiationProposa
 import { OrderPartyRefSchema } from "../world/party-ref";
 import { StorylinePhaseSchema } from "../world/storylines";
 import { LocalIdSchema, MaybeRefSchema, RefSchema } from "./refs";
+import { CampaignPlanSetSchema, WarPlanSetSchema } from "./war-plan-deltas";
 import { ChamberPowerSchema, CommandTenureSchema, FranchiseSchema, GovernmentFormSchema, QuestionConcernSchema } from "../political-parts";
 
 /**
@@ -926,7 +928,7 @@ const EnactmentProposalSchema = z
             /** Absent founds a new chamber. */
             institutionRef: MaybeRefSchema.optional(),
             name: NameSchema.optional(),
-            powers: z.array(ChamberPowerSchema).max(6).optional(),
+            powers: z.array(ChamberPowerSchema).max(10).optional(),
             advisory: z.boolean().optional(),
             franchise: FranchiseSchema.optional(),
             abolish: z.boolean().default(false),
@@ -1097,6 +1099,23 @@ const TradeVentureOpenSchema = z.object({
   /** How much is put into it: a single cargo, a regular trade, a great house's business. */
   band: EffectBandSchema.default("slight"),
   paidFromAccountRef: RefSchema,
+  reason: ReasonSchema,
+}).strict();
+
+/**
+ * A man founds a merchant house (`sim/house-founding.ts`, docs/economy.md "Houses are founded"): capital out of his own purse, a head (himself, or a
+ * freedman, client or factor of his who keeps the books), a home market, and from then on the house is run by the rules like any other. A private
+ * man's act only: a power has no purse to found one with.
+ */
+const HouseFoundSchema = z.object({
+  op: z.literal("house_found"),
+  name: NameSchema,
+  kind: z.enum(["maritime", "grain", "silver", "banking", "publicani"]).default("maritime"),
+  founderRef: MaybeRefSchema.default(null).describe("null: the man giving the order; it is always his own purse"),
+  headRef: MaybeRefSchema.default(null).describe("null: the founder; or the freedman or client who keeps the books"),
+  heirRef: MaybeRefSchema.default(null).describe("null: the house looks for one by its rules"),
+  homeProvinceId: MaybeIdSchema.default(null).describe("null: where the founder lives; a province with a market near a port"),
+  capital: MoneySchema,
   reason: ReasonSchema,
 }).strict();
 
@@ -1524,6 +1543,19 @@ const FamilyTieSetSchema = z.object({
 }).strict();
 
 /**
+ * A man adopts an heir out of another gens (adoptio; adrogatio where the son is his own master): he takes the adopter's praenomen,
+ * nomen and cognomen with his old nomen as an -ianus cognomen, his order, his gens, its rites and images, and the estate as a son.
+ * The engine judges the Roman rules: the adopter old enough and without a son, the adoptee a free man and willing, the father's
+ * leave, a patrician adopter's curiate law before the pontifices. A plebeian may become a patrician only so; nobody goes over to the plebs.
+ */
+const AdoptSchema = z.object({
+  op: z.literal("adopt"),
+  adopterRef: RefSchema,
+  adopteeRef: RefSchema,
+  reason: ReasonSchema,
+}).strict();
+
+/**
  * A man hired for work (roles plan phase 5; `material-state.ts`
  * `ServiceContractSchema`).
  *
@@ -1658,6 +1690,47 @@ const PublicBenefactionSchema = z.object({
 }).strict();
 
 /**
+ * How a power taxes its provinces (`material/tax-policy.ts`): the regime --
+ * tithe, land levy, customs or a tribute of men -- and the share it takes, for
+ * the power as a whole or for one province of it. The power's own provinces
+ * only, and the rate never past `MAX_TAX_RATE_BPS`; a rate set higher is
+ * brought down to it.
+ *
+ * The third scope, `customs`, sets what the power lays on goods that enter its
+ * markets from other powers (a share of their value, never past
+ * `MAX_CUSTOMS_RATE_BPS`): the tariff the trade flows pay and a trade pact may
+ * cap. It names no regime.
+ */
+const TaxPolicySetSchema = z.object({
+  op: z.literal("tax_policy_set"),
+  scope: z.enum(["polity", "province", "customs"]).describe("polity: default for provinces without their own; province: this one only; customs: tariff on foreign goods (regime ignored)"),
+  polityId: EntityIdSchema.describe("the power whose policy it is; for a province it must hold it"),
+  provinceId: MaybeIdSchema.default(null),
+  regime: z.enum(["tithe", "land_levy", "customs", "men"]).default("land_levy").describe("tithe: share of the harvest, swings with the year; land_levy: steady, resented; customs: dues on trade; men: manpower tribute from allies and subjects, no money"),
+  rateBps: z.number().int().min(0).max(10_000).describe("share of what the land can bear; 1,000 is the ordinary levy; above about 1,200 costs order, and stays costly. Customs scope: share of the goods' value, 5,000 at most"),
+  reason: ReasonSchema,
+}).strict();
+
+/**
+ * A mint strikes its coin with less silver in it, or more (`world/coinage.ts`).
+ * Only the issuer's own government may. Lowering the silver content earns the
+ * treasury a one-off seigniorage and, over the months after, raises prices in
+ * the countries that use the coin and lowers what it fetches abroad; raising it
+ * back (a reform) costs the silver to re-strike what is called in. Name either
+ * the silver content to strike at (`targetSilverBps`, 10,000 being an Attic
+ * drachma's) or the change to make to it (`stepBps`, negative to debase); no
+ * single act moves it by more than a quarter, and no coin is struck below four
+ * in ten of the silver it began with.
+ */
+const CoinageDebaseSchema = z.object({
+  op: z.literal("coinage_debase"),
+  coinageId: EntityIdSchema,
+  targetSilverBps: z.number().int().min(1_000).max(30_000).nullable().default(null).describe("silver to strike at (10,000 = an Attic drachma); or null"),
+  stepBps: z.number().int().min(-2_500).max(2_500).nullable().default(null).describe("change to the silver, negative debases, positive re-coins; or null"),
+  reason: ReasonSchema,
+}).strict();
+
+/**
  * A man put in a post in an army: made optio, centurion, legate. No act could
  * set one, so a man in the ranks could rise only when the man over him died
  * (E15). Judged by who gives the post (`appointedBy`): the centurion his
@@ -1717,6 +1790,7 @@ const TreatyClauseSchema = z.discriminatedUnion("kind", [
         duty: z.enum(["payment", "military_support", "protection", "other"]),
         what: LabelSchema,
         withinDays: DaysSchema,
+        completionGoals: z.array(TreatyCompletionGoalSchema).min(1).max(4).optional(),
       }).strict(),
     ]).meta({ id: "TreatyClause" });
 
@@ -1766,12 +1840,16 @@ const DiplomaticMessageSendSchema = z.object({
    */
   // Twenty-four: a war's end cedes a country, not six of its provinces.
   clauses: z.array(TreatyClauseSchema).max(24).optional(),
+  /** For a trade offer: the pact's terms if it is accepted: a cap on customs, most-favoured status, goods let in free. */
+  trade: TradeTermsSchema.optional(),
+  /** How long what it offers lasts, when it is for a time (a pact for five years): carried to the agreement its acceptance opens. */
+  forDays: z.number().int().positive().max(36_600).nullable().optional(),
   /**
    * What the sender does if it is refused, or no answer comes by
    * "replyWithinDays": "war"; "war_if_attacked" when the threat is war only
    * if they go on attacking. The engine carries it out.
    */
-  onRefusal: z.enum(["war", "war_if_attacked"]).nullable().optional(),
+  onRefusal: z.enum(["war", "war_if_attacked", "embargo"]).nullable().optional(),
   reason: ReasonSchema,
 }).strict();
 
@@ -1800,6 +1878,15 @@ const AgreementOpenSchema = z.object({
   polityId: RefSchema,
   otherPolityId: RefSchema,
   terms: z.string().trim().min(1).max(600),
+  /**
+   * For a trade pact or an embargo, what the markets read of it: a cap on the
+   * customs either may lay on the other's goods (basis points of their value),
+   * most-favoured status, goods let in free; for an embargo, the goods it
+   * forbids (none named: all of them). A pact or embargo with only words is
+   * one with no special terms: a pact that caps nothing, an embargo of everything.
+   * An embargo is ordered: `polityId` is the power that lays it.
+   */
+  trade: TradeTermsSchema.optional(),
   /**
    * What the treaty actually makes happen, beyond what it is called.
    *
@@ -1937,11 +2024,11 @@ const SiegeLaySchema = z.object({
 const ForceProvisionSchema = z.object({
   op: z.literal("force_provision"),
   forceRef: RefSchema,
-  how: z.enum(["buy", "requisition", "convoy"]),
-  days: z.number().int().min(1).max(120),
+  how: z.enum(["buy", "requisition", "convoy", "contract"]),
+  days: z.number().int().min(1).max(360),
   /** Convoy: where it is sent from. */
   fromProvinceId: MaybeIdSchema.default(null),
-  /** Buy or convoy: who pays. */
+  /** Buy or convoy: who pays. Contract: a house of the power feeds the army for "days" (a term of months) at the market price and a margin, the treasury paying for what reaches it. */
   payAccountRef: MaybeRefSchema.default(null),
   reason: ReasonSchema,
 }).strict();
@@ -1999,6 +2086,8 @@ const DiplomaticMessageAnswerSchema = z.object({
   addedTerms: z.string().trim().min(1).max(600).nullable().optional(),
   /** Accepting all but some of its clauses, by their place: the rest go back as a counter-offer. */
   refusedClauses: z.array(z.number().int().min(0).max(5)).max(6).optional(),
+  /** Answering "countered" to an offer of trade: the pact's terms it would make instead, sent back as a trade offer of its own. */
+  counterTrade: TradeTermsSchema.optional(),
   reason: ReasonSchema,
 }).strict();
 
@@ -2032,6 +2121,7 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   ForcePostSetSchema,
   TradeVentureOpenSchema,
   TradeVentureCloseSchema,
+  HouseFoundSchema,
   GenericEntityUpdateSchema,
   LoanOpenSchema,
   LoanSettleSchema,
@@ -2057,14 +2147,19 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   AuditOpenSchema,
   SiegeLaySchema,
   SiegeLiftSchema,
+  WarPlanSetSchema,
+  CampaignPlanSetSchema,
   ForceProvisionSchema,
   FamilyTieSetSchema,
+  AdoptSchema,
   CharacterDeathSchema,
   LegalStatusSetSchema,
   ServiceContractOpenSchema,
   ServiceContractCloseSchema,
   RegimeChangeSchema,
   PublicBenefactionSchema,
+  TaxPolicySetSchema,
+  CoinageDebaseSchema,
 ]).meta({ id: "WorldDelta" });
 export type WorldDelta = z.infer<typeof WorldDeltaSchema>;
 export type WorldDeltaOp = WorldDelta["op"];
@@ -2100,6 +2195,7 @@ export const WORLD_DELTA_OPS = [
   "force_post_set",
   "trade_venture_open",
   "trade_venture_close",
+  "house_found",
   "generic_entity_update",
   "loan_open",
   "loan_settle",
@@ -2124,15 +2220,20 @@ export const WORLD_DELTA_OPS = [
   "audit_open",
   "siege_lay",
   "siege_lift",
+  "war_plan_set",
+  "campaign_plan_set",
   "force_provision",
   "force_raid",
   "family_tie_set",
+  "adopt",
   "character_death",
   "legal_status_set",
   "service_contract_open",
   "service_contract_close",
   "regime_change",
   "public_benefaction",
+  "tax_policy_set",
+  "coinage_debase",
 ] as const satisfies readonly WorldDeltaOp[];
 
 /**
@@ -2171,6 +2272,7 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   force_post_set: "military",
   trade_venture_open: "fiscal",
   trade_venture_close: "fiscal",
+  house_found: "fiscal",
   generic_entity_update: "civil",
   loan_open: "fiscal",
   loan_settle: "fiscal",
@@ -2204,10 +2306,13 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   // A siege is an army's work, judged as ordering the army would be.
   siege_lay: "military",
   siege_lift: "military",
+  war_plan_set: "military",
+  campaign_plan_set: "military",
   // Feeding an army is its commander's business, and whoever pays for the bread.
   force_provision: "military",
   // Marrying and adopting are a family's business, and its head's.
   family_tie_set: "social",
+  adopt: "social",
   // Putting a man to death is the judicial power at its plainest; a duel or a
   // suicide is nobody's office, and is judged as the act of whoever gave it.
   character_death: "judicial",
@@ -2220,4 +2325,8 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   regime_change: "military",
   // Spending on the people: his own purse is his own business, the treasury is not.
   public_benefaction: "fiscal",
+  // How a power's provinces are taxed is the fiscal power at its plainest.
+  tax_policy_set: "fiscal",
+  // What the mint strikes is the treasury's own: the fiscal power, and only the issuer's.
+  coinage_debase: "fiscal",
 };

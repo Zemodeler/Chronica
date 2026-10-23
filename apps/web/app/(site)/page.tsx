@@ -4,6 +4,7 @@ import { StatusMessage } from "../components/status-message";
 import { DeleteSaveForm } from "../components/delete-save-form";
 import { Era } from "../components/ui/era";
 import { gameRepository, type GameSummaryRow, type SaveFacts } from "../../lib/game-repository";
+import { savesByLastPlayed } from "../../lib/saves-by-last-played";
 import { roomStyleFor } from "../games/[gameId]/components/office-objects";
 import { Landing } from "./landing";
 
@@ -59,9 +60,10 @@ export default async function HomePage({
 /** The saves, once their facts are read: the one to go back to, then the rest. */
 async function Shelf({ hosted }: { readonly hosted: readonly GameSummaryRow[] }) {
   const facts = await gameRepository.describeSaves(hosted.map((game) => game.gameId));
-  const open = hosted.filter((game) => game.status === "lobby" || game.status === "active");
+  // The one to go back to is the one last played, not the one last made.
+  const open = savesByLastPlayed(hosted.filter((game) => game.status === "lobby" || game.status === "active"));
   const featured = open[0] ?? null;
-  const shelf = hosted.filter((game) => game !== featured);
+  const shelf = savesByLastPlayed(hosted.filter((game) => game !== featured));
   return (
     <>
       {featured !== null && <FeaturedSave game={featured} facts={facts.get(featured.gameId)} />}

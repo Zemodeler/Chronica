@@ -1,4 +1,5 @@
-import { atWar, fitStrengthOf, kmFromAny, takenBy, type FactProposalDraft, type WorldState } from "@chronica/shared";
+import { atWar, fitStrengthOf, kmFromAny, takenBy, takerFor, type FactProposalDraft, type WorldState } from "@chronica/shared";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Open country is occupied by the army standing in it (docs/plans/a-living-world.md §3).
@@ -66,14 +67,16 @@ export function occupyOpenCountry(world: WorldState, toDay: number): { world: Wo
     const taker = takenBy_.get(province.id);
     if (taker === undefined) return province;
     const holder = province.controllerPolityId!;
+    // An ally fighting its leader's war holds the ground for its leader (consul-run-issues M5).
+    const owner = takerFor(world.polityAgreements, taker.polityId, holder);
     const entry = held.get(taker.id) ?? { force: taker, names: [], from: new Set<string>() };
     entry.names.push(province.name);
     entry.from.add(holder);
     held.set(taker.id, entry);
     return {
       ...province,
-      ...takenBy(province, taker.polityId, world.polityAgreements),
-      settlements: province.settlements.map((settlement) => (settlement.controllerPolityId === holder || settlement.controllerPolityId === null ? { ...settlement, controllerPolityId: taker.polityId } : settlement)),
+      ...takenBy(province, owner, world.polityAgreements),
+      settlements: province.settlements.map((settlement) => (settlement.controllerPolityId === holder || settlement.controllerPolityId === null ? { ...settlement, controllerPolityId: owner } : settlement)),
       controlFirmnessBps: Math.min(province.controlFirmnessBps, 2_000),
       lostBy: { polityId: holder, atStep: toDay },
     };
@@ -82,7 +85,7 @@ export function occupyOpenCountry(world: WorldState, toDay: number): { world: Wo
   for (const { force, names, from } of held.values()) {
     const where = names.length === 1 ? names[0]! : `${names.length} districts, ${names.slice(0, 2).join(" and ")} among them`;
     facts.push({
-      localId: `occupied_${force.id}_${toDay}`.slice(0, 60),
+      localId: safeLocalId(`occupied_${force.id}_${toDay}`).slice(0, 60),
       kind: "province_occupied",
       summary: `${force.name}${force.name.includes(name(force.polityId)) ? "" : ` of ${name(force.polityId)}`} occupied ${where}, ground of ${[...from].map(name).join(" and ")}.`.slice(0, 400),
       affectedRefs: [{ kind: "polity" as const, id: force.polityId }, ...[...from].map((id) => ({ kind: "polity" as const, id })), { kind: "force" as const, id: force.id }].slice(0, 16),

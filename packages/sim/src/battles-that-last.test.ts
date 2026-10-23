@@ -27,7 +27,8 @@ function facing(options: { readonly hieronCaution?: number; readonly syracusans?
       : character)),
     material: {
       ...opening.material,
-      forces: opening.material.forces.map((force) => (force.id !== "syracusan-army" ? force : {
+      // The cases below were struck on the consul's army of 8,860 (one legion, one ala); the opening has two of each now (`punic-wars-sicily.ts`), so the rows are halved.
+      forces: opening.material.forces.map((force) => (force.id === "roman-field-army" ? { ...force, authorizedStrength: force.authorizedStrength / 2, personnel: force.personnel.map((group) => ({ ...group, fit: group.fit / 2 })) } : force)).map((force) => (force.id !== "syracusan-army" ? force : {
         ...force,
         locationId: LATIUM,
         ...(options.syracusans === undefined ? {} : { personnel: [{ ...force.personnel[0]!, fit: options.syracusans }], authorizedStrength: options.syracusans }),
@@ -197,12 +198,37 @@ describe("turning points", () => {
     expect(waited.engagements.find((candidate) => candidate.id === engagement.id)!.rounds).toBe(0);
   });
 
+  it("does not stop the turn for a skirmish: the commander settles it by the engine's rule (item 5)", () => {
+    const small = facing({ hieronCaution: 70, syracusans: 400 });
+    const skirmish: WorldState = { ...small, material: { ...small.material, forces: small.material.forces.map((force) => (force.id === "roman-field-army" ? { ...force, personnel: [{ ...force.personnel[0]!, fit: 800 }] } : force)) } };
+    const offered = offer(skirmish).world;
+    const engagement = offered.engagements.find((candidate) => candidate.status === "open")!;
+    expect(engagement.awaiting).toBeNull();
+    expect(engagementDecision(offered, "hieron-ii", definition.warfare)).toBeUndefined();
+  });
+
+  it("still stops it for a fight of the main armies", () => {
+    const offered = offer(facing({ hieronCaution: 70 })).world;
+    expect(offered.engagements.find((candidate) => candidate.status === "open")!.awaiting?.kind).toBe("battle_offered");
+  });
+
   it("fights the battle the day after he says to come out", () => {
     const offered = offer(facing({ hieronCaution: 70 })).world;
     const answered = answerEngagement(offered, "hieron-ii", "fight-fight", offered.elapsedStep + 1).world;
     const next = tickAs(answered, "hieron-ii").world;
     const engagement = next.engagements.find((candidate) => candidate.openedByForceId === "roman-field-army")!;
     expect(engagement.pitchedRounds).toBe(1);
+  });
+
+  it("storms the camp when the attacker, already refused for days, answers 'offer battle'", () => {
+    const sieged = days(attack(facing({ hieronCaution: 90 })).world, 3).world;
+    const open = sieged.engagements.find((candidate) => candidate.status === "open")!;
+    expect(open.seeking).toBe("battle");
+    const waiting = { ...sieged, engagements: sieged.engagements.map((candidate) => (candidate.id === open.id ? { ...candidate, awaiting: { kind: "hungry" as const, side: "attacker" as const, askedAtStep: sieged.elapsedStep } } : candidate)) };
+    const answered = answerEngagement(waiting, "gaius-genucius", "fight-fight", waiting.elapsedStep + 1).world;
+    const released = answered.engagements.find((candidate) => candidate.id === open.id)!;
+    expect(released.awaiting).toBeNull();
+    expect(released.manoeuvre).toMatchObject({ kind: "storm_camp", side: "attacker" });
   });
 
   it("keeps to the camp when he answers with an order instead", () => {

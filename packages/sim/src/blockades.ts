@@ -9,6 +9,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Enemy fleets off a port (docs/plans/battles-that-last.md).
@@ -47,7 +48,7 @@ export function keepBlockades(world: WorldState, toDay: number, warfare: Scenari
     const known = world.blockades.find((blockade) => blockade.status === "active" && blockade.provinceId === province.id && blockade.blockaderPolityId === blockader);
     if (known === undefined) {
       facts.push({
-        localId: `blockade_${province.id}_${toDay}`.slice(0, 60),
+        localId: safeLocalId(`blockade_${province.id}_${toDay}`).slice(0, 60),
         kind: "blockade_begun",
         summary: `${fleets.map((force) => force.name).join(" and ")} of ${name(blockader)} closed in on the harbour of ${province.name}, and ${name(holder)}'s shipping there is shut in${tightnessBps < 5_000 ? ", though too few ships watch it to stop every night's traffic" : ""}.`.slice(0, 600),
         affectedRefs: [{ kind: "province", id: province.id }, { kind: "polity", id: holder }, { kind: "polity", id: blockader }, ...fleets.slice(0, 4).map((force) => ({ kind: "force" as const, id: force.id }))],
@@ -67,7 +68,7 @@ export function keepBlockades(world: WorldState, toDay: number, warfare: Scenari
   for (const blockade of ended) {
     const where = world.map.provinces.find((province) => province.id === blockade.provinceId)?.name ?? blockade.provinceId;
     facts.push({
-      localId: `blockade_end_${blockade.id}_${toDay}`.slice(0, 60),
+      localId: safeLocalId(`blockade_end_${blockade.id}_${toDay}`).slice(0, 60),
       kind: "blockade_ended",
       summary: `The blockade of ${where} by ${name(blockade.blockaderPolityId)} is over after ${toDay - blockade.sinceStep} days, and its shipping moves again.`,
       affectedRefs: [{ kind: "province", id: blockade.provinceId }, { kind: "polity", id: blockade.blockadedPolityId }, { kind: "polity", id: blockade.blockaderPolityId }],

@@ -13,6 +13,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Powers that sue for peace by themselves (docs/plans/departments.md §13).
@@ -34,7 +35,7 @@ const TRUCE_DAYS = 180;
 
 const nameOf = (world: WorldState, polityId: string): string => world.map.polities.find((polity) => polity.id === polityId)?.name ?? polityId;
 
-export function sueForPeace(world: WorldState, toDay: number, ids: IdFactory): { world: WorldState; facts: FactProposalDraft[] } {
+export function sueForPeace(world: WorldState, toDay: number, ids: IdFactory, playerPolityId: string | null = null): { world: WorldState; facts: FactProposalDraft[] } {
   const reader = readDepartments(world);
   const facts: FactProposalDraft[] = [];
   const letters: DiplomaticMessage[] = [];
@@ -58,6 +59,24 @@ export function sueForPeace(world: WorldState, toDay: number, ids: IdFactory): {
       if (ours.some((message) => message.status === "awaiting_reply" || toDay - message.sentAtStep < ASKS_EVERY_DAYS)) continue;
       const writer = reader.holding({ kind: "polity", id: polity.id }, "peace_talks").people[0];
       if (writer === undefined) continue;
+      // The player's own power never writes in his name unasked (a hand run found two truce letters he never ordered):
+      // his officers say the war has gone on long enough, about once in a season, and the choice to write is his.
+      if (polity.id === playerPolityId) {
+        if (Math.floor(toDay / ASKS_EVERY_DAYS) === Math.floor((toDay - 30) / ASKS_EVERY_DAYS)) continue;
+        const us = nameOf(world, polity.id);
+        const them = nameOf(world, enemyId);
+        facts.push({
+          localId: safeLocalId(`urge_${polity.id}_${enemyId}_${toDay}`).slice(0, 60),
+          kind: "war_weariness",
+          summary: `The officers of ${us} told their leader that the war with ${them} has gone on long enough, and urged him to ask for ${weariness.score >= PEACE_AT ? "peace" : "a truce"}: ${weariness.parts.slice(0, 3).join(", ") || "the men are tired"}.`.slice(0, 400),
+          affectedRefs: [{ kind: "polity", id: polity.id }, { kind: "polity", id: enemyId }, { kind: "character", id: writer.id }],
+          visibility: "polity",
+          discoveryState: "polity",
+          knowableInDays: 0,
+          significance: 40,
+        });
+        continue;
+      }
       const reader_ = reader.holding({ kind: "polity", id: enemyId }, "peace_talks").people[0] ?? null;
       const refused = ours.filter((message) => message.answer === "refused" || message.answer === "ignored").length;
       const us = nameOf(world, polity.id);
@@ -101,7 +120,7 @@ export function sueForPeace(world: WorldState, toDay: number, ids: IdFactory): {
       };
       letters.push(letter);
       facts.push({
-        localId: `sues_${polity.id}_${enemyId}`.slice(0, 60),
+        localId: safeLocalId(`sues_${polity.id}_${enemyId}`).slice(0, 60),
         kind: "diplomacy",
         summary: `${writer.name} wrote to ${them} for ${us}, asking for ${peace ? "peace" : "a truce"}: ${weariness.parts.slice(0, 3).join(", ") || "the war has gone on long enough"}.`.slice(0, 400),
         affectedRefs: [{ kind: "polity", id: polity.id }, { kind: "polity", id: enemyId }, { kind: "character", id: writer.id }],

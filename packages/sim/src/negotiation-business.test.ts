@@ -1,3 +1,4 @@
+import { seatedInTheCast } from "./askable-test-kit";
 import { describe, expect, it } from "vitest";
 import { punicWarsScenario } from "@chronica/db";
 import { DiplomaticMessageSchema, PoliticalProcedureSchema, ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, advanceWorldTo, diplomaticAnswerChangesTrust, diplomaticSituationKey, emitFacts, negotiationBusinesses, redundantDiplomaticOffer, sameDiplomaticTerms, type DiplomaticMessage, type WorldState } from "@chronica/shared";
@@ -5,7 +6,7 @@ import { applyDeltas } from "./apply/apply-deltas";
 import { routeAttention, routeAmbientActors } from "./attention";
 import { runSimulationBurst, DEFAULT_BUDGET } from "./burst";
 import { renderCharacterPortrait } from "./cognition";
-import { diplomaticMemory } from "./negotiation-business";
+import { describeDiplomaticBusiness, diplomaticMemory } from "./negotiation-business";
 import { dueSteps, layPlan, markWoken, nextPlanDay, settleOverdueSteps } from "./plans";
 import { createIdFactory, type SimModelPort } from "./ports";
 import { isWatchSatisfied } from "./watch";
@@ -38,7 +39,8 @@ describe("negotiations progress instead of restarting", () => {
     const repeated = apply(sent.world, [proposal({ subject: "Prompt consultation", terms: "Please provide five days advance notice before moving." })]);
     expect(repeated.rejected).toEqual([]);
     expect(repeated.world.diplomacy).toHaveLength(sent.world.diplomacy.length);
-    expect(repeated.factProposals).toEqual([]);
+    // The offer is suppressed all the same, and its writer is told so (loop 2: an order that "came to nothing" without a word of why).
+    expect(repeated.factProposals.map((fact) => fact.kind)).toEqual(["letter_not_resent"]);
     expect(repeated.applied[0]?.changed).toBe(false);
     expect(repeated.assignedIds.get("consultation")).toBe(sent.world.diplomacy.at(-1)!.id);
   });
@@ -93,6 +95,24 @@ describe("negotiations progress instead of restarting", () => {
 });
 
 describe("diplomatic memory and responsibility", () => {
+  it("shortens settled correspondence but keeps agreed terms and active bargaining history", () => {
+    const world = day(initial(), 60);
+    const first = letter({ id: "early-terms", sentAtStep: 0, deliveredOnDay: 0, status: "answered", answer: "countered", answeredAtStep: 1, answerText: "Three days instead." });
+    const second = letter({ id: "middle-terms", sentAtStep: 2, deliveredOnDay: 2, status: "answered", answer: "countered", answeredAtStep: 3, answerText: "Four days instead." });
+    const latest = letter({ id: "final-terms", sentAtStep: 4, deliveredOnDay: 4, status: "answered", answer: "accepted", answeredAtStep: 5, answerText: "Five days is agreed", agreementId: "notice-agreement" });
+    world.diplomacy = [first, second, latest];
+    const settled = describeDiplomaticBusiness(world, actor).join("\n");
+    expect(settled).toContain("Five days notice");
+    expect(settled).toContain("Five days is agreed");
+    expect(settled).toContain("notice-agreement");
+    expect(settled).toContain("Letter [final-terms]");
+    expect(settled).not.toContain("Letter [early-terms]");
+    const active = describeDiplomaticBusiness({ ...world, diplomacy: [first, second, { ...latest, status: "awaiting_reply", answer: null }] }, actor).join("\n");
+    expect(active).toContain("Letter [early-terms]");
+    expect(active).toContain("Letter [middle-terms]");
+    expect(active).toContain("Letter [final-terms]");
+    expect(world.diplomacy).toHaveLength(3);
+  });
   it("shows pending outgoing business and agreement history, with no incoming leak", () => {
     const world = initial();
     const m = letter();
@@ -214,7 +234,7 @@ describe("a duplicate cannot manufacture progress inside a burst", () => {
       asked = true;
       return Promise.resolve(JSON.stringify({ actors: [{ actorRef: { kind: "character", id: actor }, proposal: { deltas: [proposal()], facts: [{ localId: "manufactured", kind: "diplomatic_message_sent", summary: "Hanno sent a fresh notice proposal again.", affectedRefs: [{ kind: "character", id: actor }], visibility: "public", discoveryState: "public", significance: 40 }] }, serves: [{ ref: step, acts: [0] }] }] }));
     } };
-    const result = await runSimulationBurst({ world, clock: definition.clock, offices: definition.government.offices, warfare: definition.warfare, burstId: "duplicate-burst", gameId: "business", actorRef: { kind: "character", id: "gaius-genucius" }, actorPolityId: "rome", orderText: "Let three days pass.", spanDays: 3, knownFacts: [], queue: [], port, narratorSeeds: [], budget: { ...DEFAULT_BUDGET, maxFocusedActors: 3, maxAmbientActors: 3 } });
+    const result = await runSimulationBurst({ world: seatedInTheCast(world, actor), clock: definition.clock, offices: definition.government.offices, warfare: definition.warfare, burstId: "duplicate-burst", gameId: "business", actorRef: { kind: "character", id: "gaius-genucius" }, actorPolityId: "rome", orderText: "Let three days pass.", spanDays: 3, knownFacts: [], queue: [], port, narratorSeeds: [], budget: { ...DEFAULT_BUDGET, maxFocusedActors: 3, maxAmbientActors: 3 } });
     expect(asked, JSON.stringify({ skipped: result.skipped, plans: result.plans, stop: result.stopReason })).toBe(true);
     expect(result.world.diplomacy.filter((message) => message.fromCharacterId === actor && message.negotiation?.issueKey === negotiation.issueKey)).toHaveLength(1);
     expect(result.newFacts.some((fact) => fact.summary.includes("fresh notice proposal"))).toBe(false);

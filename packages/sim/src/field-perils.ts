@@ -19,6 +19,7 @@ import {
 import { RELIEF_KM, kmFrom } from "@chronica/shared";
 import type { MemberFate } from "./battle";
 import { handOverForcesOf, killCharacter, mattersEnough } from "./mortality";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * A death or a capture that matters, told in two reports instead of one.
@@ -198,7 +199,7 @@ export function openFieldPerils(
         : character)),
     };
     facts.push({
-      localId: `field_${id}`.slice(0, 60),
+      localId: safeLocalId(`field_${id}`).slice(0, 60),
       kind: draft.plight === "encircled" ? "commander_encircled" : "commander_cut_off",
       summary: summary.slice(0, 600),
       affectedRefs: [

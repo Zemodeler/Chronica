@@ -1,6 +1,7 @@
 import type { FactProposalDraft, WorldState } from "@chronica/shared";
 import { acceptedAgreementDelta, applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Terms accepted abroad and waiting on the chamber at home, settled once it
@@ -34,7 +35,7 @@ export function settleRatifications(world: WorldState, context: ApplyContext): {
           ? { ...candidate, agreementId, ratification: { ...ratification, status: "ratified" as const } }
           : candidate)) };
         facts.push(...opened.factProposals, {
-          localId: `ratified_${message.id}`.slice(0, 60),
+          localId: safeLocalId(`ratified_${message.id}`).slice(0, 60),
           kind: "treaty_ratified",
           summary: `${home} ratified the terms agreed with ${theirs}, "${message.subject}", and they bind it now.`.slice(0, 600),
           affectedRefs: [{ kind: "polity", id: message.fromPolityId }, { kind: "polity", id: message.toPolityId }, { kind: "character", id: message.fromCharacterId }],
@@ -50,7 +51,7 @@ export function settleRatifications(world: WorldState, context: ApplyContext): {
       const why = opened.rejected[0]?.reason ?? "the world had moved on";
       next = { ...next, diplomacy: next.diplomacy.map((candidate) => (candidate.id === message.id ? { ...candidate, ratification: { ...ratification, status: "refused" as const } } : candidate)) };
       facts.push({
-        localId: `unratifiable_${message.id}`.slice(0, 60),
+        localId: safeLocalId(`unratifiable_${message.id}`).slice(0, 60),
         kind: "acceptance_unbound",
         summary: `${home} voted the terms agreed with ${theirs}, but they could no longer be carried out: ${why}`.slice(0, 600),
         affectedRefs: [{ kind: "polity", id: message.fromPolityId }, { kind: "polity", id: message.toPolityId }],
@@ -63,7 +64,7 @@ export function settleRatifications(world: WorldState, context: ApplyContext): {
     }
     next = { ...next, diplomacy: next.diplomacy.map((candidate) => (candidate.id === message.id ? { ...candidate, ratification: { ...ratification, status: "refused" as const } } : candidate)) };
     facts.push({
-      localId: `not_ratified_${message.id}`.slice(0, 60),
+      localId: safeLocalId(`not_ratified_${message.id}`).slice(0, 60),
       kind: "treaty_not_ratified",
       summary: `${home} would not ratify the terms its man had agreed with ${theirs}, "${message.subject}": they bind nobody.`.slice(0, 600),
       affectedRefs: [{ kind: "polity", id: message.fromPolityId }, { kind: "polity", id: message.toPolityId }, { kind: "character", id: message.fromCharacterId }],

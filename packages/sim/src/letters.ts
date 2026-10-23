@@ -1,4 +1,5 @@
-import { allOffices, buildAuthorityIndex, formatWorldDate, isDelivered, peaceOfferMetadata, readDepartments, type DiplomaticMessage, type Office, type ScenarioClock, type WorldState } from "@chronica/shared";
+import { offerMetadata } from "./treaty-duties";
+import { WorldDeltaSchema, formatWorldDate, isDelivered, settlePeaceTalks, tradeAddresseeFinder, type DiplomaticMessage, type Office, type ScenarioClock, type WorldDelta, type WorldState } from "@chronica/shared";
 
 /**
  * Who answers a letter sent to a power.
@@ -16,35 +17,9 @@ import { allOffices, buildAuthorityIndex, formatWorldDate, isDelivered, peaceOff
  * that, nobody, and the letter stays addressed to the power as it always was.
  */
 export function diplomaticAnswererOf(world: WorldState, polityId: string, offices: readonly Office[], notFrom: string | null = null): string | null {
-  const members = new Set(world.characters.filter((character) => character.alive && character.polityId === polityId && character.id !== notFrom).map((character) => character.id));
-  if (members.size === 0) return null;
-  const index = buildAuthorityIndex(
-    { officeSeats: world.material.officeSeats, forces: world.material.forces, accounts: world.material.accounts },
-    world.authorityGrants,
-    allOffices(world, offices),
-    world.elapsedStep,
-  );
-  // The department that writes the state's letters, where it has one; then
-  // whoever may treat for it, the ruler before a cavalry commander with the
-  // same powers -- the Bruttians' letter once went to their hipparch by the
-  // alphabet, and their ruler never saw it.
-  const reader = readDepartments(world);
-  const office = reader.holding({ kind: "polity", id: polityId }, "foreign_letters");
-  const clerk = office.department === null ? undefined : office.people.find((person) => members.has(person.id));
-  if (clerk !== undefined) return clerk.id;
-  const rulers = new Set(reader.rulers(polityId).map((person) => person.id));
-  const diplomats = index.grants
-    .filter((grant) => grant.domain === "diplomatic" && grant.scope.kind === "polity" && grant.scope.id === polityId
-      && grant.holder.kind === "character" && members.has(grant.holder.id))
-    .sort((a, b) => b.powers.length - a.powers.length || Number(rulers.has(b.holder.id)) - Number(rulers.has(a.holder.id)) || a.holder.id.localeCompare(b.holder.id));
-  if (diplomats.length > 0) return diplomats[0]!.holder.id;
-  const ruler = [...rulers].find((id) => members.has(id));
-  if (ruler !== undefined) return ruler;
-  const officeHolders = world.characters
-    .filter((character) => members.has(character.id) && character.officeId !== null)
-    .map((character) => character.id)
-    .sort();
-  return officeHolders[0] ?? null;
+  // One reading for the engine and the page (`trade-desk.ts`): the sheet that says who decides a trade and the rule that
+  // addresses the letter are the same function, so what the player is told is who in fact answers.
+  return tradeAddresseeFinder(world, offices)(polityId, notFrom)?.characterId ?? null;
 }
 
 /**
@@ -53,7 +28,8 @@ export function diplomaticAnswererOf(world: WorldState, polityId: string, office
  * sent. Run once at the top of a burst, before anybody is asked anything.
  */
 export function addressWaitingLetters(world: WorldState, offices: readonly Office[]): WorldState {
-  world = { ...world, diplomacy: world.diplomacy.map((message) => ({ ...message, ...peaceOfferMetadata(message) })) };
+  world = settlePeaceTalks(world);
+  world = { ...world, diplomacy: world.diplomacy.map((message) => ({ ...message, ...offerMetadata(world, message) })) };
   if (!world.diplomacy.some((message) => message.status === "awaiting_reply" && message.toCharacterId === null)) return world;
   return {
     ...world,
@@ -111,7 +87,7 @@ export function lettersOwed(world: WorldState, clock: ScenarioClock, excludeIds:
   const polityName = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
   const owed = new Map<string, string>();
   for (const message of world.diplomacy) {
-    if (message.status !== "awaiting_reply" || message.putToRecipientOnDay != null || message.toCharacterId === null) continue;
+    if (message.status !== "awaiting_reply" || message.putToRecipientOnDay != null || message.toCharacterId === null || message.heldAnswer !== undefined) continue;
     if (!isDelivered(message, world.instant.day) || isBackgroundLetter(message, ownPolityId)) continue;
     const reader = world.characters.find((character) => character.id === message.toCharacterId);
     if (reader === undefined || !reader.alive || excluded.has(reader.id) || owed.has(reader.id)) continue;
@@ -119,6 +95,23 @@ export function lettersOwed(world: WorldState, clock: ScenarioClock, excludeIds:
     owed.set(reader.id, `a letter from ${polityName(message.fromPolityId)} awaits their answer ("${message.subject}"${due})`);
   }
   return owed;
+}
+
+/**
+ * A letter that has reached a man the model is never asked about (he is far from the player, of no cast, with no plot of his own) is read by the rules on the day it
+ * comes: `answerByRule` answers it where there is a verdict to give, and past its term his silence is his own (`tick.ts`). Left unread it waited for ever for a turn
+ * that would not come, or woke a far man round after round (the user's rule: far people are never asked). Marked as put to him, once.
+ */
+export function readByTheRules(world: WorldState, detailOf: (characterId: string) => "personal" | "regional" | "background"): WorldState {
+  const today = world.instant.day;
+  let changed = false;
+  const diplomacy = world.diplomacy.map((message) => {
+    if (message.status !== "awaiting_reply" || message.putToRecipientOnDay != null || message.heldAnswer !== undefined || message.toCharacterId === null) return message;
+    if (!isDelivered(message, today) || detailOf(message.toCharacterId) !== "background") return message;
+    changed = true;
+    return { ...message, putToRecipientOnDay: today };
+  });
+  return changed ? { ...world, diplomacy } : world;
 }
 
 /** Every unanswered letter in front of someone in this round's cast, marked as read today. */
@@ -149,6 +142,8 @@ export function nextReplyDueKey(world: WorldState, afterKey: number): number | u
     .flatMap((message) => [
       ...(message.replyDueByStep === null ? [] : [message.replyDueByStep * 1440]),
       ...(message.deliveredOnDay == null ? [] : [message.deliveredOnDay * 1440]),
+      // The day an answer decided at send time comes back: the walk stops there, and it is given (`heldAnswersDue`).
+      ...(message.heldAnswer === undefined ? [] : [message.heldAnswer.comesOnDay * 1440]),
     ])
     .filter((key) => key > afterKey)
     .sort((a, b) => a - b)[0];
@@ -166,11 +161,53 @@ export function aLetterWaitsOnItsReader(world: WorldState, excludeIds: readonly 
   const excluded = new Set(excludeIds);
   const today = world.instant.day;
   return world.diplomacy.some((message) => {
-    if (message.status !== "awaiting_reply" || message.toCharacterId === null || excluded.has(message.toCharacterId)) return false;
+    if (message.status !== "awaiting_reply" || message.toCharacterId === null || excluded.has(message.toCharacterId) || message.heldAnswer !== undefined) return false;
     if (isBackgroundLetter(message, ownPolityId) && message.putToRecipientOnDay == null) return false;
     // Still on the road: its arrival is on the calendar (`nextReplyDueKey`).
     if (!isDelivered(message, today)) return false;
     if (message.putToRecipientOnDay != null) return message.replyDueByStep !== null && message.replyDueByStep <= today;
     return world.characters.some((character) => character.id === message.toCharacterId && character.alive);
   });
+}
+
+/** An answer decided when the letter was sent, now come back to the writer: whose it is, and the acts it is made of. */
+export interface HeldAnswerDue {
+  readonly messageId: string;
+  readonly readerId: string;
+  readonly deltas: readonly WorldDelta[];
+}
+
+/**
+ * Letters whose answer was decided at send time (`letter-reply.ts`) and whose day has come.
+ *
+ * The model was called when the player wrote, and what it had the reader say was
+ * kept on the letter until the road there and back had been walked. Now the
+ * story is at that day, and the answer is given as the reader's own act, judged
+ * by the engine as any other act of his would be.
+ */
+export function heldAnswersDue(world: WorldState, day: number = world.instant.day): readonly HeldAnswerDue[] {
+  return world.diplomacy.flatMap((message): HeldAnswerDue[] => {
+    if (message.status !== "awaiting_reply" || message.heldAnswer === undefined || message.heldAnswer.comesOnDay > day || message.toCharacterId === null) return [];
+    // A reader who has died on the road gives no answer: the letter is as any unanswered one, and his successor is asked.
+    const reader = world.characters.find((character) => character.id === message.toCharacterId);
+    if (reader === undefined || !reader.alive) return [{ messageId: message.id, readerId: message.toCharacterId, deltas: [] }];
+    const deltas = message.heldAnswer.deltas.flatMap((raw) => {
+      const read = WorldDeltaSchema.safeParse(raw);
+      return read.success ? [read.data] : [];
+    });
+    return [{ messageId: message.id, readerId: message.toCharacterId, deltas }];
+  });
+}
+
+/** The letter put back as it was before it was answered ahead of time: awaiting its reader, who is asked as anybody is. */
+export function withoutHeldAnswer(world: WorldState, messageId: string): WorldState {
+  if (!world.diplomacy.some((message) => message.id === messageId && message.heldAnswer !== undefined)) return world;
+  return {
+    ...world,
+    diplomacy: world.diplomacy.map((message) => {
+      if (message.id !== messageId) return message;
+      const { heldAnswer: _given, ...rest } = message;
+      return rest;
+    }),
+  };
 }

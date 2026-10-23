@@ -145,6 +145,9 @@ export const DOMAIN_POWER_BY_ACTION: Readonly<Record<string, AuthorityPower>> = 
   // Nobody's office grants taking the state; the attempt is judged as the override it is.
   regime_change: "override",
   public_benefaction: "spend",
+  house_found: "spend",
+  tax_policy_set: "spend",
+  coinage_debase: "spend",
   office_seat_set: "appoint",
   agreement_open: "negotiate",
   agreement_close: "negotiate",
@@ -158,9 +161,12 @@ export const DOMAIN_POWER_BY_ACTION: Readonly<Record<string, AuthorityPower>> = 
   siege_lay: "command",
   force_provision: "command",
   siege_lift: "command",
+  war_plan_set: "command",
+  campaign_plan_set: "command",
   contingency_disarm: "command",
   audit_open: "propose",
   family_tie_set: "propose",
+  adopt: "propose",
   // A government that really does give its magistrates the power of life and
   // death says so by listing this; everybody else breaches when they use it.
   character_death: "punish",
@@ -280,6 +286,23 @@ export function deriveCommandGrants(forces: MaterialWorldState["forces"], atStep
         grantedAtStep: atStep,
       }),
     );
+    // And the man it answers to, where he is not its commander: the proconsul whose legate and tribunes lead the
+    // detachments of his army was "beyond his authority" in giving them orders (consul-run-issues M9).
+    if (force.controllerCharacterId != null && force.controllerCharacterId !== force.commanderCharacterId) {
+      grants.push(
+        AuthorityGrantSchema.parse({
+          id: `control:${force.id}`,
+          holder: { kind: "character", id: force.controllerCharacterId },
+          source: "command",
+          sourceRef: force.id,
+          domain: "military",
+          scope: { kind: "force", id: force.id },
+          powers: ["command"],
+          standing: "lawful",
+          grantedAtStep: atStep,
+        }),
+      );
+    }
   }
   return grants;
 }

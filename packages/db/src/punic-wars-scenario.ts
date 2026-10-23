@@ -1,13 +1,22 @@
 import { GovernmentFormSchema, ScenarioDefinitionSchema, WorldStateSchema, formArmies, ordoOfRomanName, type GovernmentForm, type ScenarioDefinition, type WorldState } from "@chronica/shared";
 import { PUNIC_IDS } from "./punic-ids";
 import { PUNIC_DOCTRINES, PUNIC_ESTABLISHMENTS, SEASONED_ARMIES } from "./punic-wars-establishments";
+import { MAMERTINE_DATES } from "./punic-wars-mamertines";
+import { OSTIA_SETTLEMENTS } from "./punic-wars-ostia";
+import { seatChamberField } from "./punic-wars-seats";
+import { EQUESTRIAN_FLOOR, SENATORIAL_FLOOR } from "./punic-wars-merchant-start";
 import { POLITY_META, PUNIC_WARS_GRAPH_EDGES, PUNIC_WARS_GRAPH_POLITIES, PUNIC_WARS_GRAPH_PROVINCES, PUNIC_WARS_GRAPH_SETTLEMENTS } from "./punic-wars-map-graph";
 import { foundingPeople, knownRulerId, romanSenators, withFinerSkills } from "./punic-wars-rulers";
 import { WORLD_PRESSURES, withWorldPolitics } from "./punic-wars-politics";
 import { houseFamilies, rosterPeople } from "./punic-wars-rosters";
+import { seatGentes } from "./punic-wars-gentes";
+import { withRegionalTaxes } from "./punic-wars-taxes";
+import { withHiredHosts } from "./punic-wars-hired-hosts";
+import { withCarthageInSicily } from "./punic-wars-sicily";
+import { PUNIC_CHARGES } from "./punic-wars-charges";
 
 /**
- * The Mediterranean and the Near East of 270 BCE, on the generated map: 6,384 provinces, 164 powers
+ * The Mediterranean and the Near East of 270 BCE, on the generated map: provinces and powers
  * and every drawn town come from the map's graph (`punic-wars-map-graph.ts`,
  * built by `scripts/map-gen`), and this file adds what the graph cannot know --
  * how each power governs, who its people are, what armies and money they hold.
@@ -23,6 +32,64 @@ const italianPolities = [
   ["lucanians", "Lucanians"], ["bruttians", "Bruttians"], ["apulian-cities", "Apulian cities"], ["messapians", "Messapians"],
 ] as const;
 
+/** Rome's allies by foedus, who owe it men and not money (v51), and keep a treasury and a land levy of their own (v53). */
+const ALLIES_IN_MEN: readonly string[] = ["etruscan-cities", "umbrians", "picentes", "marsi-paeligni", "samnites", "lucanians", "bruttians", "apulian-cities"];
+/**
+ * What each ally of the foedus takes in a month from its own land (v53), in drachmae at the scale of v52: about three
+ * tenths of what its provinces can bear after the contingent has had its share (`MEN_LEVY_RESERVE_SHARE`), so that
+ * every ally asks less of its land than the customary half, as Rome does (`taxBurdens`). The Etruscan cities and the
+ * Apulian ones, the largest, take in about a fifth of Rome's; the Samnites, beaten twice and robbed of land, a twenty-fifth.
+ * The chest it opens with is four months of it, and the city's magistracies, garrisons and works spend four fifths.
+ */
+const ALLY_NAMES: Readonly<Record<string, string>> = Object.fromEntries(italianPolities.map(([id, name]) => [id, name]));
+const ALLY_REVENUE: Readonly<Record<string, number>> = {
+  "etruscan-cities": 100_000, umbrians: 40_000, picentes: 40_000, "marsi-paeligni": 40_000,
+  samnites: 21_000, lucanians: 48_000, bruttians: 48_000, "apulian-cities": 116_000,
+};
+
+/**
+ * The coinages of 270 BCE (v50), with the silver in one unit of each against
+ * the Attic drachma (about 4.3 g, 10,000). Approximations from the standard
+ * numismatic weights; the engine only uses them to price a debasement and a
+ * crossing from one coin to another, and to show a sum as local coin.
+ *
+ *  - Rome and the allies of its foedus (Italy used the Romano-Campanian silver
+ *    didrachm of about 6.8 g, at roughly nine parts in ten fine, beside the
+ *    heavy bronze aes grave): about 6.3 g of silver to the didrachm, or 3.2 g to
+ *    the unit, 7,300. The Roman as is a bronze coin whose worth is its token
+ *    value, not its metal, so the allowance is made for silver alone.
+ *  - Carthage: the silver shekel and the Sicilo-Punic tetradrachm struck on the
+ *    Attic weight, but most of its currency was electrum and billon issues
+ *    well below it; 9,000 is the average of the two, and the least certain.
+ *  - Syracuse, with the Mamertines and the Campanians of Rhegium, who
+ *    struck on the Sicilian standard: Hieron's silver, a little under Attic
+ *    weight, 9,500.
+ *  - Egypt and Cyrene: the Ptolemaic tetradrachm of 14.3 g, a lighter standard
+ *    than the Attic, 3.6 g to the unit, 8,300.
+ *  - The Greek cities, leagues and the Macedonian and Seleucid kings strike on
+ *    the Attic standard, 10,000: nobody in particular controls it.
+ *  - Everything else (Gauls, Iberians, Thracians, Massalia, the Arabian
+ *    peoples) is foreign silver by weight, 10,000.
+ */
+const PUNIC_COINAGES: readonly { id: string; name: string; issuerPolityId: string | null; silverBps: number; polityIds: string[] }[] = [
+  {
+    id: "roman_aes_and_silver", name: "Roman aes and silver", issuerPolityId: "rome", silverBps: 7_300,
+    polityIds: ["rome", "etruscan-cities", "umbrians", "picentes", "marsi-paeligni", "samnites", "lucanians", "bruttians", "apulian-cities"],
+  },
+  { id: "carthaginian_shekel", name: "Carthaginian shekel", issuerPolityId: "carthage", silverBps: 9_000, polityIds: ["carthage"] },
+  { id: "syracusan_silver", name: "Syracusan litra and drachma", issuerPolityId: "syracuse", silverBps: 9_500, polityIds: ["syracuse", "mamertines", "rhegium-campanians"] },
+  { id: "ptolemaic_silver", name: "Ptolemaic silver", issuerPolityId: "ptolemaic-egypt", silverBps: 8_300, polityIds: ["ptolemaic-egypt", "cyrene"] },
+  {
+    id: "attic_drachma", name: "Attic drachma", issuerPolityId: null, silverBps: 10_000,
+    polityIds: [
+      "athens", "macedon", "seleucid-empire", "rhodes", "pergamon", "sparta", "argos", "elis", "megalopolis", "messenia", "epirus", "acarnania",
+      "achaean-league", "aetolian-league", "arcadian-league", "boeotian-league", "phocian-league", "ionian-islands", "ionia-communities", "aeolis-communities",
+      "cycladic-islanders", "cretan-cities-east", "cretan-cities-west", "euxine-greek-cities", "hellespont-propontic-cities", "heraclea-pontica",
+    ],
+  },
+  { id: "foreign_silver", name: "Foreign silver", issuerPolityId: null, silverBps: 10_000, polityIds: [] },
+];
+
 /** The powers this scenario writes out itself, apart from the map's list of who holds what. */
 const AUTHORED_POLITY_IDS: ReadonlySet<string> = new Set(["rome", "carthage", "syracuse", "mamertines", "rhegium-campanians", ...italianPolities.map(([id]) => id)]);
 
@@ -33,14 +100,15 @@ const AUTHORED_POLITY_IDS: ReadonlySet<string> = new Set(["rome", "carthage", "s
  * but Rome's. That is the whole bargain, and it is what the engine enforces.
  */
 const alliedItaly: readonly (readonly [string, number, string, number, string])[] = [
-  ["etruscan-cities", 0, "Each Etruscan city made its own peace with Rome after 280, and sends men to Rome's wars.", 0, "Allied since the peaces of the 280s; Volsinii's nobles fear their own people more than Rome."],
-  ["umbrians", 0, "Allied since Camerinum's treaty of 310: men for Rome's wars, no war or peace of their own.", 25, "Old allies, with a Latin colony at Narnia to watch the road."],
-  ["picentes", 0, "Allied since 299: men for Rome's wars, no war or peace of their own.", -30, "Hemmed in by Roman colonies at Hadria and on the Gallic coast, and close to rising."],
-  ["marsi-paeligni", 0, "Allied since 304: the Marsi, Paeligni, Marrucini and Vestini send men to Rome's wars.", 40, "Rome's steadiest allies in the mountains."],
-  ["samnites", 0, "Bound to Rome after defeat in 290 and again in 272: men for Rome's wars, no war or peace of their own.", -40, "Beaten twice in twenty years and robbed of land for Roman colonies; some still fight on."],
-  ["lucanians", 0, "Bound to Rome after defeat in 272: men for Rome's wars, no war or peace of their own.", -25, "Pyrrhus's allies until two years ago; Paestum and Venusia now watch them."],
-  ["bruttians", 0, "Bound to Rome after defeat in 272, when they gave up half the Sila forest.", -40, "Stripped of half their forest, and neighbours to the Campanians of Rhegium."],
-  ["apulian-cities", 0, "Tarentum surrendered in 272 and keeps its own laws under a Roman garrison; Arpi and the Daunians have been allies since 326. All send men and ships to Rome's wars.", -15, "Tarentum has a Roman garrison in its citadel and remembers Pyrrhus."],
+  // The second figure is the year BC the foedus dates from, so its age at the start is read as the age it was (`heldYearsAtStart`).
+  ["etruscan-cities", 280, "Each Etruscan city made its own peace with Rome after 280, and sends men to Rome's wars.", 0, "Allied since the peaces of the 280s; Volsinii's nobles fear their own people more than Rome."],
+  ["umbrians", 310, "Allied since Camerinum's treaty of 310: men for Rome's wars, no war or peace of their own.", 25, "Old allies, with a Latin colony at Narnia to watch the road."],
+  ["picentes", 299, "Allied since 299: men for Rome's wars, no war or peace of their own.", -30, "Hemmed in by Roman colonies at Hadria and on the Gallic coast, and close to rising."],
+  ["marsi-paeligni", 304, "Allied since 304: the Marsi, Paeligni, Marrucini and Vestini send men to Rome's wars.", 40, "Rome's steadiest allies in the mountains."],
+  ["samnites", 272, "Bound to Rome after defeat in 290 and again in 272: men for Rome's wars, no war or peace of their own.", -40, "Beaten twice in twenty years and robbed of land for Roman colonies; some still fight on."],
+  ["lucanians", 272, "Bound to Rome after defeat in 272: men for Rome's wars, no war or peace of their own.", -25, "Pyrrhus's allies until two years ago; Paestum and Venusia now watch them."],
+  ["bruttians", 272, "Bound to Rome after defeat in 272, when they gave up half the Sila forest.", -40, "Stripped of half their forest, and neighbours to the Campanians of Rhegium."],
+  ["apulian-cities", 326, "Tarentum surrendered in 272 and keeps its own laws under a Roman garrison; Arpi and the Daunians have been allies since 326. All send men and ships to Rome's wars.", -15, "Tarentum has a Roman garrison in its citadel and remembers Pyrrhus."],
 ];
 
 /**
@@ -71,7 +139,7 @@ const RULER = [...IMPERIUM, "capital_set"];
 // Free-born and male, the Vestals apart: what the law asks of anybody who holds anything.
 const romanReqs = ["req-alive", "req-roman-polity", "req-not-disqualified", "req-free-born", "req-male"];
 const office = (fields: Record<string, unknown>) => ({
-  sponsorableCategories: [], treasuryAccountId: null, treasuryPermissions: [], incomeSourceId: null, expectedBlocId: null, ...fields,
+  sponsorableCategories: [], treasuryAccountId: null, treasuryPermissions: [], incomeSourceId: null, expectedBlocId: null, ...seatChamberField(fields["id"]), ...fields,
 });
 
 const ladderRequirements = [
@@ -90,6 +158,7 @@ const ladderRequirements = [
   { id: "req-gap-aedile-10", kind: "not_held_within_years", label: "Not curule aedile within ten years (lex Genucia)", params: { officeId: "roman-aedile", years: 10 } },
   { id: "req-gap-plebeian-aedile-10", kind: "not_held_within_years", label: "Not plebeian aedile within ten years (lex Genucia)", params: { officeId: "roman-plebeian-aedile", years: 10 } },
   { id: "req-plebeian", kind: "ordo", label: "A plebeian", params: { ordo: "plebeian" } },
+  { id: "req-patrician", kind: "ordo", label: "A patrician by birth", params: { ordo: "patrician" } },
   // "No citizen may hold office before he has served ten campaigns" (Polybius
   // 6.19.4) -- the rule of Polybius' own day. In 270 the ladder was custom,
   // not law (see a-career.test.ts), so no office asks it yet; a law may.
@@ -100,6 +169,8 @@ const ladderRequirements = [
   { id: "req-campanian-polity", kind: "polity_membership", label: "Must belong to the Campanians of Rhegium", params: { polityId: "rhegium-campanians" } },
 ];
 
+/** What a priest of the old rites may do in the world: his own words and beliefs, nothing of the state's (the rites are his charge by the department, not by his powers). */
+const RITES = ["social_events", "belief_set", "character_intent_set"];
 const romanOffices = [
   office({ id: "roman-quaestor", label: "Roman quaestor", polityId: "rome", kind: "magistracy", rank: 1, seatCount: 4, termDays: 365, authorisedActionIds: MAGISTRATE, treasuryAccountId: "rome-treasury", treasuryPermissions: ["view", "propose_spending"], successionRuleId: "roman-election-tribal", eligibilityRequirementIds: [...romanReqs, "req-standing-3000"] }),
   // Elected by the plebs alone, sacrosanct, and able to forbid any magistrate's
@@ -127,6 +198,13 @@ const romanOffices = [
   // An augur who saw bad omens could stop an assembly meeting that day. Five of
   // the nine places were the plebeians' since the lex Ogulnia.
   office({ id: "roman-augur", label: "Roman augur", polityId: "rome", kind: "priesthood", seatCount: 9, ordoSeats: { plebeian: 5 }, vetoes: true, authorisedActionIds: CIVIL, successionRuleId: "roman-cooptation", eligibilityRequirementIds: romanReqs }),
+  // The old rites (scenario v58): the king of the rites and the three great flamines, each held for life by a patrician by birth, chosen by the
+  // pontifex maximus (Livy 27.8, Gellius 10.15). Their taboos are eligibility, in code (`priestlyTaboo`, `commandBar`): the flamen Dialis may hold no other
+  // office and no command, and the rex sacrorum no magistracy (Livy 40.42). Their charge is the public rites and nothing else (the department of the pontiffs).
+  office({ id: "roman-rex-sacrorum", label: "Rex sacrorum", polityId: "rome", kind: "priesthood", seatCount: 1, authorisedActionIds: RITES, successionRuleId: "roman-vestal-choice", eligibilityRequirementIds: [...romanReqs, "req-patrician"] }),
+  office({ id: "roman-flamen-dialis", label: "Flamen Dialis", polityId: "rome", kind: "priesthood", seatCount: 1, authorisedActionIds: RITES, successionRuleId: "roman-vestal-choice", eligibilityRequirementIds: [...romanReqs, "req-patrician"] }),
+  office({ id: "roman-flamen-martialis", label: "Flamen Martialis", polityId: "rome", kind: "priesthood", seatCount: 1, authorisedActionIds: RITES, successionRuleId: "roman-vestal-choice", eligibilityRequirementIds: [...romanReqs, "req-patrician"] }),
+  office({ id: "roman-flamen-quirinalis", label: "Flamen Quirinalis", polityId: "rome", kind: "priesthood", seatCount: 1, authorisedActionIds: RITES, successionRuleId: "roman-vestal-choice", eligibilityRequirementIds: [...romanReqs, "req-patrician"] }),
   office({ id: "roman-vestal", label: "Vestal", polityId: "rome", kind: "priesthood", seatCount: 6, authorisedActionIds: ["social_events", "belief_set", "character_intent_set"], successionRuleId: "roman-vestal-choice", eligibilityRequirementIds: ["req-alive", "req-roman-polity", "req-not-disqualified", "req-free-born", "req-female"] }),
 ];
 
@@ -142,20 +220,28 @@ const seeded = (id: string, polityId: string, name: string, levers: string[], of
 const SEEDED_DEPARTMENTS = [
   // The quaestors kept the treasury in the temple of Saturn, and paid out
   // nothing the Senate had not voted.
-  seeded("rome-aerarium", "rome", "The Treasury of Saturn", ["tax_roll"], ["roman-quaestor"], { gates: [{ institutionId: "roman-senate", act: "spend" }] }),
+  // And what the state borrowed or owed was in their books (credit; H0's lever): Rome had no public debt to speak of in 270, so it is the books' terms and no more.
+  seeded("rome-aerarium", "rome", "The Treasury of Saturn", ["tax_roll", "credit"], ["roman-quaestor"], { gates: [{ institutionId: "roman-senate", act: "spend" }] }),
   // The census, the rolls of the tribes, and the public contracts let every
   // five years -- the roads, the sewers, the collection of the rents.
-  seeded("rome-censorship", "rome", "The Censorship", ["audit", "public_works_cost"], ["roman-censor"], { gates: [{ institutionId: "roman-senate", act: "spend" }] }),
-  // The markets and the corn of the city.
-  seeded("rome-aediles", "rome", "The Aediles", ["grain"], ["roman-aedile", "roman-plebeian-aedile"]),
+  // The census is theirs (H), and so are the harbour dues, which they let to the companies of publicani with the rents (M-L for the date: kept as a simplification of the
+  // five-yearly contracts, Polybius 6.17).
+  seeded("rome-censorship", "rome", "The Censorship", ["audit", "public_works_cost", "census", "customs"], ["roman-censor"], { gates: [{ institutionId: "roman-senate", act: "spend" }] }),
+  // The markets, the weights and the corn of the city (M). No department keeps the mint: in 270 a consul or the Senate ordered a striking at the temple of Juno Moneta,
+  // and the tresviri monetales are probably later than their traditional 289, so none is invented (docs/plans/government.md, "Disputed and thin evidence").
+  seeded("rome-aediles", "rome", "The Aediles", ["grain", "markets"], ["roman-aedile", "roman-plebeian-aedile"]),
   seeded("rome-praetor", "rome", "The Urban Praetor's Court", ["courts"], ["roman-praetor"], { headOfficeId: "roman-praetor" }),
-  seeded("rome-pontiffs", "rome", "The College of Pontiffs", ["public_rites"], ["roman-pontiff"], { headOfficeId: "roman-pontifex-maximus" }),
+  seeded("rome-pontiffs", "rome", "The College of Pontiffs", ["public_rites"], ["roman-pontiff", "roman-rex-sacrorum", "roman-flamen-dialis", "roman-flamen-martialis", "roman-flamen-quirinalis"], { headOfficeId: "roman-pontifex-maximus" }),
   // Carthage's revenues were counted by its own officers of the accounts, and
   // spent as the elders allowed.
-  seeded("carthage-accounts", "carthage", "The Office of the Accounts", ["tax_roll", "public_works_cost"], ["carthaginian-accountant"], { gates: [{ institutionId: "carthaginian-council", act: "spend" }] }),
+  // The same officers counted the harbour dues and the tribute rolls of the Libyans (L-M), and struck the coin the elders ordered, in the city's name (L-M): customs, credit,
+  // census and the mint are written to them as the simplest reading of a board whose duties the sources only sketch.
+  seeded("carthage-accounts", "carthage", "The Office of the Accounts", ["tax_roll", "public_works_cost", "customs", "credit", "census", "mint"], ["carthaginian-accountant"], { gates: [{ institutionId: "carthaginian-council", act: "spend" }] }),
   // The court of the council that judged the generals when they came home.
   seeded("carthage-hundred-and-four", "carthage", "The Hundred and Four", ["courts"], ["carthaginian-judge"], { gates: [{ institutionId: "carthaginian-hundred-and-four", act: "judge_commander" }] }),
   seeded("carthage-priests", "carthage", "The Priests of Baal Hammon", ["public_rites"], ["carthaginian-priest"]),
+  // Hiero's strategoi (M) carry out the king's levy and command his garrisons; the king's own chest and mint are the king's, and so are the tithe's collectors (private bidders) -- no department.
+  seeded("syracuse-strategoi", "syracuse", "The Strategoi of Syracuse", ["levy", "supply"], ["syracusan-strategos"]),
 ];
 const otherPowersOffices = [
   // Two suffetes a year, elected by the citizens: Carthage's consuls.
@@ -217,19 +303,22 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
    * above the assidui who could afford their own arms, which sat above the
    * capite censi who could not. The numbers here are those ratios in the
    * scenario's own money rather than in asses, because what a sum means is a
-   * property of this economy and nothing the engine could work out.
+   * property of this economy and nothing the engine could work out. Since v47
+   * they are counted against a legionary's pay of 120 drachmae a year: a
+   * senator's fortune is some hundred thousand, an equestrian's a tenth of
+   * that and more, a smallholder's a few years of a soldier's pay.
    */
   wealth: {
     bands: [
-      { id: "capite-censi", label: "counted by his head and nothing else", min: 0, max: 40,
+      { id: "capite-censi", label: "counted by his head and nothing else", min: 0, max: 600,
         words: ["poor", "capite", "censi", "proletarian", "labourer", "laborer", "peasant", "slave", "freedman", "servant", "shepherd", "rower", "sailor"] },
-      { id: "assidui", label: "a man who can arm himself", min: 10, max: 150,
+      { id: "assidui", label: "a man who can arm himself", min: 150, max: 2_500,
         words: ["soldier", "legionary", "ranker", "assidui", "smallholder", "farmer", "artisan", "craftsman", "smith", "veteran"] },
-      { id: "citizen", label: "a household of some standing", min: 60, max: 600,
+      { id: "citizen", label: "a household of some standing", min: 1_200, max: 12_000,
         words: ["citizen", "plebeian", "plebian", "commoner", "centurion", "shopkeeper", "trader", "scribe", "clerk", "priest", "physician", "teacher"] },
-      { id: "equestrian", label: "money enough to be courted for it", min: 400, max: 5_000,
+      { id: "equestrian", label: "money enough to be courted for it", min: EQUESTRIAN_FLOOR, max: 150_000,
         words: ["merchant", "shipowner", "equestrian", "equites", "eques", "knight", "landowner", "banker", "financier", "publican", "officer", "tribune", "decurion", "magistrate"] },
-      { id: "senatorial", label: "a fortune that is itself a kind of office", min: 2_500, max: 60_000,
+      { id: "senatorial", label: "a fortune that is itself a kind of office", min: SENATORIAL_FLOOR, max: 500_000,
         words: ["patrician", "senatorial", "senator", "aristocracy", "aristocrat", "noble", "nobility", "consul", "praetor", "king", "queen", "prince", "royal", "dynast", "tyrant", "suffete"] },
     ],
     defaultBandId: "citizen",
@@ -256,7 +345,7 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
       { id: "childhood", label: "childhood", minAgeYears: 0, maxAgeYears: 14, mortalityRatePerYearBps: 200, incapacityRatePerYearBps: 20, recoveryRatePerYearBps: 5_000 },
       { id: "young", label: "youth", minAgeYears: 15, maxAgeYears: 29, mortalityRatePerYearBps: 120, incapacityRatePerYearBps: 60, recoveryRatePerYearBps: 5_000 },
       { id: "prime", label: "prime", minAgeYears: 30, maxAgeYears: 44, mortalityRatePerYearBps: 180, incapacityRatePerYearBps: 90, recoveryRatePerYearBps: 4_000 },
-      { id: "late", label: "later years", minAgeYears: 45, maxAgeYears: 54, mortalityRatePerYearBps: 330, incapacityRatePerYearBps: 160, recoveryRatePerYearBps: 3_000 },
+      { id: "late", label: "middle years", minAgeYears: 45, maxAgeYears: 54, mortalityRatePerYearBps: 330, incapacityRatePerYearBps: 160, recoveryRatePerYearBps: 3_000 },
       { id: "elder", label: "old age", minAgeYears: 55, maxAgeYears: 64, mortalityRatePerYearBps: 700, incapacityRatePerYearBps: 320, recoveryRatePerYearBps: 2_000 },
       { id: "great-age", label: "great age", minAgeYears: 65, maxAgeYears: null, mortalityRatePerYearBps: 1_400, incapacityRatePerYearBps: 600, recoveryRatePerYearBps: 1_200 },
     ],
@@ -348,8 +437,90 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
       target: { polityId: null, provinceId: null },
       brief: "Someone who has held an army in the field for years has begun to treat it as his own: paying it from his own takings, settling his own quarrels with it, answering his government later and later. Choose the commander from PEOPLE -- it must be someone who actually commands. Put it on them with \"character_intent_set\" (private) and a \"character_pressure_set\", and record what they have already done as a private fact known to them alone.",
     },
+    {
+      id: "volsinii-the-slaves-rule",
+      label: "Rome is asked to put a city's old order back",
+      kind: "world_event",
+      severity: "serious",
+      weight: 9,
+      when: { politiesExist: ["rome"], notBeforeDay: 1500, notAfterDay: 3000 },
+      target: { polityId: null, provinceId: null },
+      brief: "Volsinii, the richest city of Etruria, is held by the slaves its masters freed to fight for them, and the old families are begging Rome to put them back. Decide whether the Senate sends a consul, who profits and who pays, and what the Etruscan cities make of Rome's answer. Record it as a public fact naming Volsinii and Rome.",
+    },
+    {
+      id: "carthage-squeezes-libya",
+      label: "Carthage takes half the Libyans' harvest to pay for the sea",
+      kind: "world_event",
+      severity: "serious",
+      weight: 12,
+      when: { politiesExist: ["carthage"], notBeforeDay: 1460 },
+      target: { polityId: null, provinceId: null },
+      brief: "Carthage's war is paid for by the villages of Libya, who give up half the crop and an unnamed number of men. Decide which district is bled hardest, who among the Libyans speaks for it and what they will do when the tax collectors come again. Put it on that man with \"character_create\" and \"character_intent_set\", shift the district with \"province_material_shift\" and record the grievance as a public fact naming Carthage.",
+    },
+    {
+      id: "the-peace-party-at-carthage",
+      label: "A long war leaves Carthage's council divided",
+      kind: "person_problem",
+      severity: "serious",
+      weight: 12,
+      when: { politiesExist: ["carthage"], atWar: [{ polityId: "rome", otherPolityId: "carthage" }], notBeforeDay: 3000 },
+      target: { polityId: null, provinceId: null },
+      brief: "The war has outlived the men who began it. One faction on the Council of Carthage wants it won at any price and the ships paid for; another wants it ended before the treasury is. Choose the two men who lead them from PEOPLE or create them, give each a \"character_intent_set\", and record the division as a public fact. Neither is yours to settle: the faction that wins is the one with the argument and the money.",
+    },
+    {
+      id: "an-omen-ignored",
+      label: "A magistrate with more nerve than judgment overrides the auspices",
+      kind: "person_problem",
+      severity: "grave",
+      weight: 11,
+      when: { politiesExist: ["rome", "carthage"], atWar: [{ polityId: "rome", otherPolityId: "carthage" }], notBeforeDay: 1800 },
+      target: { polityId: null, provinceId: null },
+      brief: "A magistrate of Rome who has never lost anything and has never been seriously tested has a fleet or an army, a rival who has been given credit he wanted, and an omen that says wait. Choose him from PEOPLE -- someone ambitious, with rank and little proven skill. Decide what he does about the omen and what it costs the men under him. Put it on him with \"character_intent_set\" and \"character_pressure_set\", and record what he has done as a public fact.",
+    },
+    {
+      id: "a-favourite-above-his-skill",
+      label: "A famous name is given a command he is not yet fit for",
+      kind: "person_problem",
+      severity: "serious",
+      weight: 11,
+      when: { politiesExist: ["rome"], notBeforeDay: 300 },
+      target: { polityId: null, provinceId: null },
+      brief: "A young man of a great family, ambitious and well-connected and short of experience, is pushed forward for a command by relatives who sit on the right benches. Choose him from PEOPLE -- young, ambitious, not yet skilled. Decide who is backing him and what the old soldiers under him make of it. Put it on him with \"character_intent_set\" and record the backing as a fact naming his sponsors.",
+    },
+    {
+      id: "the-old-soldier-is-passed-over",
+      label: "A loyal veteran is passed over once too often",
+      kind: "person_problem",
+      severity: "serious",
+      weight: 9,
+      secret: true,
+      when: { politiesExist: ["rome"], notBeforeDay: 500 },
+      target: { polityId: null, provinceId: null },
+      brief: "A man of fifty who has served in every campaign and never schemed is passed over for a command in favour of someone younger and better connected. Choose him from PEOPLE -- competent, loyal, long-serving. Decide whether he says anything, whether his men are loyal to him or to the state, and who notices. Put it on him with \"character_intent_set\" (private) and record the slight as a private fact known to him.",
+    },
+    {
+      id: "hunger-in-the-cities",
+      label: "A bad harvest bites the cities that feed the war",
+      kind: "world_event",
+      severity: "serious",
+      weight: 10,
+      when: { notBeforeDay: 200 },
+      target: { polityId: null, provinceId: null },
+      brief: "The harvest has failed in the country that feeds one of the powers at war, and the army has been eating what the cities would. Decide which power and which province, how bad it is, and who among the magistrates is blamed. Shift the province with \"province_material_shift\" and record it as a public fact; a power at war pays for it twice, in bread and in the men who go hungry.",
+    },
+    {
+      id: "the-plebs-want-land",
+      label: "The plebs ask what the war has done for them",
+      kind: "person_problem",
+      severity: "serious",
+      weight: 9,
+      when: { politiesExist: ["rome"], notBeforeDay: 400 },
+      target: { polityId: null, provinceId: null },
+      brief: "The men who have fought for Rome are coming home to debts, and the land the war has taken has gone to the great families. Choose a tribune from PEOPLE, or create one, who takes up their case and has something to gain by it. Decide what he proposes and which senators stand to lose. Put it on him with \"character_intent_set\" and record the proposal as a public fact.",
+    },
     // The age away from Italy (v43).
     ...WORLD_PRESSURES,
+    ...MAMERTINE_DATES,
   ],
   warfare: {
     troopCategories: [
@@ -398,7 +569,8 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
       ...romanOffices,
       ...otherPowersOffices,
       ...templateOffices,
-    ],
+      // What the form does differently from the common run, written down for the offices of the powers we know (v55; punic-wars-charges.ts).
+    ].map((entry) => { const charge = PUNIC_CHARGES[(entry as { id: string }).id]; return charge === undefined ? entry : { ...entry, charge }; }),
     successionRules: [
       // The Senate elected nobody. Consuls, praetors and censors were chosen
       // by the people voting in their centuries; quaestors, aediles and the
@@ -508,7 +680,7 @@ const governmentFormFor = (polityId: string): GovernmentForm | null => {
 };
 
 const settlementsByProvince = new Map<string, (typeof PUNIC_WARS_GRAPH_SETTLEMENTS)[number][]>();
-for (const settlement of PUNIC_WARS_GRAPH_SETTLEMENTS) {
+for (const settlement of [...PUNIC_WARS_GRAPH_SETTLEMENTS, ...OSTIA_SETTLEMENTS]) {
   const at = settlementsByProvince.get(settlement.provinceId);
   if (at === undefined) settlementsByProvince.set(settlement.provinceId, [{ ...settlement }]);
   else at.push({ ...settlement });
@@ -543,18 +715,23 @@ function withFoundingPeople<T extends {
   const rosters = rosterPeople(definition.government.offices, seatedSoFar);
   // And the great houses' wives, daughters and sons (play-test L10).
   const families = houseFamilies([...raw.characters, ...founding.characters, ...senate.characters, ...rosters.characters] as Record<string, unknown>[]);
-  return {
-    ...raw,
-    familyLinks: [...((raw as { familyLinks?: readonly unknown[] }).familyLinks ?? []), ...families.familyLinks],
-    characters: [...raw.characters, ...founding.characters, ...senate.characters, ...rosters.characters, ...families.characters]
+  const everybody = [...raw.characters, ...founding.characters, ...senate.characters, ...rosters.characters, ...families.characters]
       .map((character) => withFinerSkills(character as { id: string; name: string; skills: Record<string, unknown> }))
       // Every Roman is a patrician or a plebeian, by his gens.
       .map((character) => ((character as { polityId?: string }).polityId === "rome" && (character as { ordo?: string }).ordo === undefined
         ? { ...character, ordo: ordoOfRomanName((character as { name: string }).name) }
-        : character)),
+        : character));
+  const familyLinks = [...((raw as { familyLinks?: readonly unknown[] }).familyLinks ?? []), ...families.familyLinks];
+  // And the noble families (v56): every Roman is of a gens, the missing living members are added, the fasti are written into the gentes' honours.
+  const kin = seatGentes(everybody, familyLinks as Record<string, unknown>[]);
+  return {
+    ...raw,
+    gentes: kin.gentes,
+    familyLinks: [...familyLinks, ...kin.familyLinks],
+    characters: kin.characters,
     material: {
       ...raw.material,
-      accounts: [...raw.material.accounts, ...founding.accounts, ...senate.accounts, ...rosters.accounts, ...families.accounts],
+      accounts: [...raw.material.accounts, ...founding.accounts, ...senate.accounts, ...rosters.accounts, ...families.accounts, ...kin.accounts],
       officeSeats: [...raw.material.officeSeats, ...founding.officeSeats, ...senate.officeSeats, ...rosters.officeSeats],
     },
   };
@@ -563,9 +740,52 @@ const WRITTEN_OUT: ReadonlySet<string> = new Set(["rome", "carthage", "syracuse"
 
 const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
   schemaVersion: 3,
-  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 44, libraryVersion: 1 },
+  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 59, libraryVersion: 1 },
   elapsedStep: 0,
   instant: { day: 0, minute: 0 },
+  // How the powers tax their ground, where the age said so (v48). Every other
+  // power is taxed as it always was, by one steady levy at the ordinary rate:
+  // Rome's tributum and the rents of its public land, Carthage's tribute on
+  // its Libyan subjects, the allies' own taxes. Syracuse alone is written
+  // down: under the lex Hieronica the grain-lands of Sicily paid a tithe of
+  // the harvest, the decuma, which Rome inherited from Hiero and kept -- so
+  // the king's revenue swings with the year, and a drought is a thin year for
+  // his treasury as well as for his people.
+  //
+  // And the customs of the age (v49): what each power lays on goods that enter
+  // its markets from another's, where the sources say. Carthage lived by its
+  // harbour dues, which the treaty texts show it guarding, and Syracuse, the
+  // other great emporium of the west, levied them heavily too; Rome's portoria
+  // were light; Rhodes and Athens took the two in a hundred (the pentekoste)
+  // that the Aegean world took everywhere (Polybius 30.31 has Rhodes drawing a
+  // million drachmae a year from its harbour); the Ptolemies' import duties on
+  // oil and wine ran to a quarter of the price. Every other power lays none:
+  // nothing is known of what its harbours charged.
+  //
+  // And the moneys of the age (v50), at the silver they held, against the Attic
+  // drachma of 4.3 g (10,000). The engine counts every sum in silver by weight
+  // and these only say what a power's mint strikes it into, what a debasement
+  // would move, and what the money-changers take for crossing from one coin to
+  // another (`world/coinage.ts`). The weights are the coinage's principal
+  // small denomination, as numismatists give them, and are approximations.
+  economy: {
+    coinages: PUNIC_COINAGES,
+    taxPolicies: [
+      // v51. Rome's tributum fell on its citizens by the land they held, with the rents of the public land beside it.
+      { polityId: "rome", regime: "land_levy", rateBps: 1_000 },
+      { polityId: "syracuse", regime: "tithe", rateBps: 1_000 },
+      // The allies of the foedus paid in soldiers and not in coin: a tribute of men, light, since the contingents they send are paid by them.
+      ...ALLIES_IN_MEN.map((polityId) => ({ polityId, regime: "men" as const, rateBps: 500 })),
+    ],
+    customsRates: [
+      { polityId: "athens", rateBps: 200 },
+      { polityId: "carthage", rateBps: 1_000 },
+      { polityId: "ptolemaic-egypt", rateBps: 2_500 },
+      { polityId: "rhodes", rateBps: 200 },
+      { polityId: "rome", rateBps: 250 },
+      { polityId: "syracuse", rateBps: 1_000 },
+    ],
+  },
   map: {
     settlementCatalogueVersion: 40,
     polities: [
@@ -573,8 +793,8 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
       // twenty thousand under arms -- two consular armies, as it did -- for
       // 700 of its ~1 300 a month rather than nearly all of it. The other half
       // of every consular army is allies, who come armed and paid by their own.
-      { id: "rome", name: "Roman Republic", headOfficeId: "roman-consul", capitalSettlementId: "settlement-rome", cohesionBps: cohesionFor("rome"), soldierPayPerThousand: 35, governmentForm: governmentFormFor("rome") },
-      { id: "carthage", name: "Carthage", headOfficeId: "carthaginian-strategos", capitalSettlementId: "settlement-carthage", cohesionBps: cohesionFor("carthage"), governmentForm: governmentFormFor("carthage"), commandTenure: "indefinite_answerable" },
+      { id: "rome", name: "Roman Republic", headOfficeId: "roman-consul", capitalSettlementId: "settlement-rome", cohesionBps: cohesionFor("rome"), soldierPayPerThousand: 10_000, governmentForm: governmentFormFor("rome") },
+      { id: "carthage", name: "Carthage", headOfficeId: "carthaginian-suffete", capitalSettlementId: "settlement-carthage", cohesionBps: cohesionFor("carthage"), governmentForm: governmentFormFor("carthage"), commandTenure: "indefinite_answerable" },
       { id: "syracuse", name: "Kingdom of Syracuse", capitalSettlementId: "settlement-syracuse", cohesionBps: cohesionFor("syracuse"), governmentForm: governmentFormFor("syracuse") },
       { id: "mamertines", name: "Mamertines of Messana", capitalSettlementId: "settlement-messana", cohesionBps: cohesionFor("mamertines"), governmentForm: governmentFormFor("mamertines") },
       // The Campanian legion sent to garrison Rhegium killed the citizens and
@@ -583,7 +803,7 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
       // them at all: two forces of one power will not fight each other, so the
       // assault on Rhegium was refused by the engine and the siege could never
       // end. They are what they actually were: a power holding a city.
-      { id: "rhegium-campanians", name: "Campanian legion of Rhegium", capitalSettlementId: "settlement-rhegium", cohesionBps: cohesionFor("rhegium-campanians"), governmentForm: governmentFormFor("rhegium-campanians") },
+      { id: "rhegium-campanians", name: "Campanian Legion", capitalSettlementId: "settlement-rhegium", cohesionBps: cohesionFor("rhegium-campanians"), governmentForm: governmentFormFor("rhegium-campanians") },
       ...italianPolities.map(([id, name]) => ({ id, name, capitalSettlementId: PUNIC_WARS_GRAPH_POLITIES.find((polity) => polity.polityId === id)?.capitalSettlementId ?? null, cohesionBps: cohesionFor(id), governmentForm: governmentFormFor(id) })),
       // Everyone else who holds ground on this map: the Gaulish and Iberian
       // peoples, the Britons, the Germanic and Illyrian and Thracian
@@ -668,7 +888,7 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
   // Carthage is named as a participant, not merely adjacent to the crisis: it
   // has its own stake in whether Messana falls to Syracuse or holds.
   storylines: [{ id: "rhegium-recovery", title: "Rhegium and the Campanian Legion", participantIds: ["gaius-genucius", "decius-vibellius", "manius-curius"], provinceId: PUNIC_IDS.rhegium, phase: "escalating", stakes: "Rome must retake a city its own garrison murdered and kept, in front of every ally watching how the Republic treats a broken oath.", history: ["The Campanian legion sent to hold Rhegium killed its citizens and took the city for itself.", "The Senate has resolved that the matter be ended."], nextDevelopment: "The consular army turns south, or the Senate finds someone else to send.", visibility: "public", updatedAtStep: 0 }, { id: "mamertine-syracusan-crisis", title: "The Messana Crisis", participantIds: ["hieron-ii", "mamertine-spokesman", "hanno-carthage"], provinceId: PUNIC_IDS.messana, phase: "escalating", stakes: "Syracuse seeks to contain the Mamertines without drawing Rome and Carthage into a wider war.", history: ["Hieron II's forces pressure the Mamertines around the Strait of Messana.", "Carthage watches the strait for any opening or threat to its own position in Sicily."], nextDevelopment: "Envoys may seek outside support if the local balance collapses.", visibility: "public", updatedAtStep: 0 }],
-  conflicts: { battles: [], sieges: [], wars: [] },
+  conflicts: { battles: [], sieges: [], wars: [{ polityAId: "rhegium-campanians", polityBId: "rome" }] },
   // Who is in charge of what beneath the consuls and the suffetes (v35,
   // docs/plans/departments.md). Named once, as the sources have them; every
   // other power opens with its ruler holding all of it. What Rome's consuls
@@ -679,13 +899,14 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
   // Rome is already at war with the men holding Rhegium: the Senate has
   // resolved the matter be ended, and the army is marching. Saying so in state
   // is what lets the assault happen at all.
-  polityAgreements: [...alliedItaly.map(([polityId, since, terms]) => ({
+  polityAgreements: [...alliedItaly.map(([polityId, foundedBc, terms]) => ({
     id: `foedus-${polityId}`,
     kind: "foedus",
     polityId,
     otherPolityId: "rome",
     terms,
-    sinceStep: since,
+    sinceStep: 0,
+    heldYearsAtStart: Math.max(0, foundedBc - 270),
     untilStep: null,
     sourceMessageId: null,
     status: "active",
@@ -698,6 +919,41 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
     polityId: "rome",
     otherPolityId: "rhegium-campanians",
     terms: "Rome means to retake Rhegium from the garrison that seized it and killed its citizens.",
+    sinceStep: 0,
+    untilStep: null,
+    sourceMessageId: null,
+    status: "active",
+    endedAtStep: null,
+    endedReason: null,
+    visibility: "public",
+  },
+  // The treaties of trade Rome stands in (v49). With Carthage: the compact of 509
+  // as Polybius gives it (3.22), renewed in 348 and again in 306 and, on the eve
+  // of Pyrrhus's war, in 279; Romans and Carthaginians may trade in each other's
+  // harbours on the dues written, which neither may raise past what the treaty
+  // allows. With Massalia: the old friendship of the two cities (Justin 43.3, the
+  // Phocaeans' gift to Rome after the Gauls), on terms no worse than any other's.
+  {
+    id: "trade-rome-carthage",
+    kind: "trade_pact",
+    polityId: "rome",
+    otherPolityId: "carthage",
+    terms: "The treaties of 509, 348 and 306 BC, renewed in 279: Romans and Carthaginians trade in each other's harbours on the dues written, and neither raises them.",
+    trade: { tariffCapBps: 500, mostFavoured: false, exempt: [], goods: [] },
+    sinceStep: 0,
+    untilStep: null,
+    sourceMessageId: null,
+    status: "active",
+    endedAtStep: null,
+    endedReason: null,
+    visibility: "public",
+  }, {
+    id: "trade-rome-massalia",
+    kind: "trade_pact",
+    polityId: "rome",
+    otherPolityId: "massalia",
+    terms: "The old friendship of Rome and Massalia: their merchants trade in each other's harbours on the best terms either gives anyone.",
+    trade: { tariffCapBps: 250, mostFavoured: true, exempt: [], goods: [] },
     sinceStep: 0,
     untilStep: null,
     sourceMessageId: null,
@@ -746,26 +1002,28 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
     // didrachms Rome is about to strike. Rome itself still counts in bronze.
     currency: { id: "drachma", name: "Drachmae", unitName: "drachma", unitNamePlural: "drachmae", symbol: "Dr" },
     accounts: [
-      { id: "gaius-purse", owner: { kind: "character", id: "gaius-genucius" }, currencyId: "drachma", balance: 1_200, status: "active", visibility: "private" },
-      { id: "blasio-purse", owner: { kind: "character", id: "gnaeus-cornelius" }, currencyId: "drachma", balance: 1_300, status: "active", visibility: "private" },
-      { id: "hanno-purse", owner: { kind: "character", id: "hanno-carthage" }, currencyId: "drachma", balance: 1_100, status: "active", visibility: "private" },
-      { id: "hieron-purse", owner: { kind: "character", id: "hieron-ii" }, currencyId: "drachma", balance: 1_000, status: "active", visibility: "private" },
-      { id: "mamertine-purse", owner: { kind: "character", id: "mamertine-spokesman" }, currencyId: "drachma", balance: 700, status: "active", visibility: "private" },
-      { id: "curius-purse", owner: { kind: "character", id: "manius-curius" }, currencyId: "drachma", balance: 900, status: "active", visibility: "private" },
-      { id: "ogulnius-purse", owner: { kind: "character", id: "quintus-ogulnius" }, currencyId: "drachma", balance: 1_300, status: "active", visibility: "private" },
-      { id: "vibellius-purse", owner: { kind: "character", id: "decius-vibellius" }, currencyId: "drachma", balance: 600, status: "active", visibility: "private" },
-      { id: "leptines-purse", owner: { kind: "character", id: "leptines-syracuse" }, currencyId: "drachma", balance: 1_400, status: "active", visibility: "private" },
-      { id: "gisco-purse", owner: { kind: "character", id: "hannibal-gisco" }, currencyId: "drachma", balance: 950, status: "active", visibility: "private" },
+      { id: "gaius-purse", owner: { kind: "character", id: "gaius-genucius" }, currencyId: "drachma", balance: 36_000, status: "active", visibility: "private" },
+      { id: "blasio-purse", owner: { kind: "character", id: "gnaeus-cornelius" }, currencyId: "drachma", balance: 39_000, status: "active", visibility: "private" },
+      { id: "hanno-purse", owner: { kind: "character", id: "hanno-carthage" }, currencyId: "drachma", balance: 33_000, status: "active", visibility: "private" },
+      { id: "hieron-purse", owner: { kind: "character", id: "hieron-ii" }, currencyId: "drachma", balance: 30_000, status: "active", visibility: "private" },
+      { id: "mamertine-purse", owner: { kind: "character", id: "mamertine-spokesman" }, currencyId: "drachma", balance: 21_000, status: "active", visibility: "private" },
+      { id: "curius-purse", owner: { kind: "character", id: "manius-curius" }, currencyId: "drachma", balance: 27_000, status: "active", visibility: "private" },
+      { id: "ogulnius-purse", owner: { kind: "character", id: "quintus-ogulnius" }, currencyId: "drachma", balance: 39_000, status: "active", visibility: "private" },
+      { id: "vibellius-purse", owner: { kind: "character", id: "decius-vibellius" }, currencyId: "drachma", balance: 18_000, status: "active", visibility: "private" },
+      { id: "leptines-purse", owner: { kind: "character", id: "leptines-syracuse" }, currencyId: "drachma", balance: 42_000, status: "active", visibility: "private" },
+      { id: "gisco-purse", owner: { kind: "character", id: "hannibal-gisco" }, currencyId: "drachma", balance: 28_500, status: "active", visibility: "private" },
       // The powers' own chests. There were none at all: nine personal purses
       // and no treasury anywhere, so a war cost nobody anything, no office
       // could confer fiscal reach because there was nothing to reach, and
       // VISION §7's whole economy -- income, expenditure, surplus -- had no
       // subject. A republic that cannot run out of money is not a republic
       // anybody has to govern.
-      { id: "rome-treasury", owner: { kind: "polity", id: "rome" }, currencyId: "drachma", balance: 9_000, status: "active", visibility: "polity" },
-      { id: "carthage-treasury", owner: { kind: "polity", id: "carthage" }, currencyId: "drachma", balance: 16_000, status: "active", visibility: "polity" },
-      { id: "syracuse-treasury", owner: { kind: "polity", id: "syracuse" }, currencyId: "drachma", balance: 5_200, status: "active", visibility: "polity" },
-      { id: "mamertine-treasury", owner: { kind: "polity", id: "mamertines" }, currencyId: "drachma", balance: 2_500, status: "active", visibility: "polity" },
+      { id: "rome-treasury", owner: { kind: "polity", id: "rome" }, currencyId: "drachma", balance: 2_790_000, status: "active", visibility: "polity" },
+      { id: "carthage-treasury", owner: { kind: "polity", id: "carthage" }, currencyId: "drachma", balance: 18_600_000, status: "active", visibility: "polity" },
+      { id: "syracuse-treasury", owner: { kind: "polity", id: "syracuse" }, currencyId: "drachma", balance: 1_612_000, status: "active", visibility: "polity" },
+      { id: "mamertine-treasury", owner: { kind: "polity", id: "mamertines" }, currencyId: "drachma", balance: 775_000, status: "active", visibility: "polity" },
+      // The allies of the foedus kept their own chests (v53): their own laws, their own magistrates and a land levy of their own, with a tribute of men to Rome on top.
+      ...ALLIES_IN_MEN.map((polityId) => ({ id: `${polityId}-treasury`, owner: { kind: "polity" as const, id: polityId }, currencyId: "drachma", balance: 4 * ALLY_REVENUE[polityId]!, status: "active" as const, visibility: "polity" as const })),
       // The chest each army carries. Empty at the opening -- nobody has taken
       // anything yet -- but real, because it is where plunder lands and what
       // an army paid out of what it takes is paid from. Without one, an order
@@ -773,9 +1031,9 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
       // private purse, which is a different arrangement wearing the same coat:
       // a man's own money does not march away when he loses a battle.
       ...[
-        ["roman-field-army", 400], ["campanian-legion", 260], ["carthaginian-fleet", 350],
-        ["syracusan-squadron", 150], ["allied-greek-hulls", 40], ["carthaginian-garrison", 300],
-        ["syracusan-army", 200], ["mamertine-garrison", 90]
+        ["roman-field-army", 40_000], ["campanian-legion", 26_000], ["carthaginian-fleet", 35_000],
+        ["syracusan-squadron", 15_000], ["allied-greek-hulls", 4_000], ["carthaginian-garrison", 30_000],
+        ["syracusan-army", 20_000], ["mamertine-garrison", 9_000]
       ].map(([forceId, balance]) => ({
         id: `${forceId as string}-chest`,
         owner: { kind: "force" as const, id: forceId as string },
@@ -824,6 +1082,9 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
         franchise: "council",
         // Laid before it only by a magistrate who could convene it.
         convenedByOfficeIds: ["roman-consul", "roman-praetor", "roman-dictator", "roman-tribune"],
+        // The Senate holds the state's purse, its coin, its treaties, the levy and the war (Polybius 6.13: the treasury, foreign affairs, the provinces),
+        // and the laws it carries to the people; it names nobody, for the assemblies elect (v55: said outright, so that a competence reads it by name).
+        powers: ["laws", "war", "taxes", "constitution", "judgment", "coinage", "finance", "treaties", "levy"],
         totalVotingWeight: 100,
         quorumBps: 5_000,
         passageThresholdBps: 5_001,
@@ -835,6 +1096,8 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
       {
         id: "roman-comitia-centuriata",
         polityId: "rome",
+        // The people elect the consuls, praetors and censors, pass the laws, decide war on the Senate's motion (M) and ratify treaties (H), and judge capital cases.
+        powers: ["elections", "laws", "war", "treaties", "judgment"],
         name: "Centuriate Assembly",
         votingBlocs: [
           { id: "centuriate-first-class", name: "First class", representedInterest: "the propertied", weight: 98, baseSupport: 10, yesThreshold: 15, noThreshold: -15, causes: [], interests: ["landed", "merchants"] },
@@ -853,6 +1116,7 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
       {
         id: "roman-comitia-tributa",
         polityId: "rome",
+        powers: ["elections", "laws", "judgment"],
         name: "Tribal Assembly",
         votingBlocs: [
           { id: "tribal-rural", name: "Rural tribes", representedInterest: "farmers", weight: 29, baseSupport: 5, yesThreshold: 15, noThreshold: -15, causes: [], interests: ["commons", "landed"] },
@@ -901,7 +1165,8 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
         quorumBps: 5_000,
         passageThresholdBps: 5_001,
         denominator: "cast",
-        powers: ["laws", "war", "taxes", "constitution"],
+        // The elders decide finance, foreign affairs and war (Aristotle 2.11); where they and the suffetes split, the people (refersFailuresTo).
+        powers: ["laws", "war", "taxes", "constitution", "coinage", "finance", "treaties", "levy"],
         advisory: false,
         franchise: "council",
         refersFailuresTo: "carthaginian-assembly",
@@ -1055,32 +1320,48 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
      * place. The counterparty is named where the money comes from abroad, so a
      * war can actually cut it -- which is what `counterpartyPolityId` is for
      * and what nothing in this scenario previously gave it to do.
+     *
+     * Every figure is in drachmae at the scale of the ancient accounts (v47;
+     * a talent is 6 000): the revenues here were a hundredth of what a power
+     * of the age took in. Since v52 every one is 3.1 times what v47 wrote
+     * (`REVENUE_SCALE`), to meet the rule that 10 000 men cost Rome a fifth
+     * of its income and 20 000 two fifths: Rome's own citizens and public land
+     * bring in about 400 000 a month, and with the rents of the land taken
+     * from the Bruttians and Samnites 500 000, a thousand talents a year;
+     * Carthage, whose harbour dues and African tribute come to about
+     * 1 457 000 a month, takes in some 2 900 talents; Syracuse's tithe is
+     * 192 000 a month and the Mamertines' tolls on the strait 54 250 (77 500
+     * at 70% collected). What a province can bear (`TAX_CAPACITY_PER_POPULATION`)
+     * is scaled with them, so each of these asks the same share of its land
+     * as before. The pay below was not raised: a man still draws ten.
      */
     incomeSources: [
-      { id: "rome-tributum", kind: "tax", label: "The tributum on Roman citizens", beneficiaryAccountId: "rome-treasury", originKind: "polity", originId: "rome", amount: 1_100, cadenceSteps: 30, nextDueStep: 30, collectionRateBps: 9_000, active: true },
-      { id: "rome-ager-publicus", kind: "land", label: "Rents of the public land", beneficiaryAccountId: "rome-treasury", originKind: "polity", originId: "rome", amount: 330, cadenceSteps: 30, nextDueStep: 30, active: true },
+      { id: "rome-tributum", kind: "tax", label: "The tributum on Roman citizens", beneficiaryAccountId: "rome-treasury", originKind: "polity", originId: "rome", amount: 340_000, cadenceSteps: 30, nextDueStep: 30, collectionRateBps: 9_000, active: true },
+      { id: "rome-ager-publicus", kind: "land", label: "Rents of the public land", beneficiaryAccountId: "rome-treasury", originKind: "polity", originId: "rome", amount: 102_000, cadenceSteps: 30, nextDueStep: 30, active: true },
       // The allies pay Rome no tribute, but the land Rome took from them when
       // it beat them is Rome's, rented out or cut for timber. Each rent runs
       // through its ally's country, so a revolt cuts it off.
-      { id: "rome-sila-forest", kind: "land", label: "Timber and pitch of the Sila forest, taken from the Bruttians in 272", beneficiaryAccountId: "rome-treasury", originKind: "polity", originId: "rome", counterpartyPolityId: "bruttians", amount: 150, cadenceSteps: 30, nextDueStep: 30, active: true },
-      { id: "rome-samnite-land", kind: "land", label: "Rents of the land taken from the Samnites", beneficiaryAccountId: "rome-treasury", originKind: "polity", originId: "rome", counterpartyPolityId: "samnites", amount: 150, cadenceSteps: 30, nextDueStep: 30, active: true },
-      { id: "carthage-harbour-dues", kind: "trade", label: "Harbour dues at Carthage", beneficiaryAccountId: "carthage-treasury", originKind: "polity", originId: "carthage", amount: 1_400, cadenceSteps: 30, nextDueStep: 30, active: true },
-      { id: "carthage-african-tribute", kind: "tribute", label: "Tribute of the African subjects", beneficiaryAccountId: "carthage-treasury", originKind: "polity", originId: "carthage", amount: 960, cadenceSteps: 30, nextDueStep: 30, collectionRateBps: 8_500, active: true },
-      { id: "syracuse-tax", kind: "tax", label: "The Syracusan tithe", beneficiaryAccountId: "syracuse-treasury", originKind: "polity", originId: "syracuse", amount: 620, cadenceSteps: 30, nextDueStep: 30, active: true },
-      // What the estates above pay their owners, month by month.
+      { id: "rome-sila-forest", kind: "land", label: "Timber and pitch of the Sila forest, taken from the Bruttians in 272", beneficiaryAccountId: "rome-treasury", originKind: "polity", originId: "rome", counterpartyPolityId: "bruttians", amount: 46_000, cadenceSteps: 30, nextDueStep: 30, active: true },
+      { id: "rome-samnite-land", kind: "land", label: "Rents of the land taken from the Samnites", beneficiaryAccountId: "rome-treasury", originKind: "polity", originId: "rome", counterpartyPolityId: "samnites", amount: 46_000, cadenceSteps: 30, nextDueStep: 30, active: true },
+      { id: "carthage-harbour-dues", kind: "trade", label: "Harbour dues at Carthage", beneficiaryAccountId: "carthage-treasury", originKind: "polity", originId: "carthage", amount: 930_000, cadenceSteps: 30, nextDueStep: 30, active: true },
+      { id: "carthage-african-tribute", kind: "tribute", label: "Tribute of the African subjects", beneficiaryAccountId: "carthage-treasury", originKind: "polity", originId: "carthage", amount: 620_000, cadenceSteps: 30, nextDueStep: 30, collectionRateBps: 8_500, active: true },
+      { id: "syracuse-tax", kind: "tax", label: "The Syracusan tithe", beneficiaryAccountId: "syracuse-treasury", originKind: "polity", originId: "syracuse", amount: 192_000, cadenceSteps: 30, nextDueStep: 30, active: true },
+      // What the estates above pay their owners, month by month: six in the hundred a year of what each would cost to buy (a tenth of the first drafts, 2026-10-08, when land was priced at 200 months of its yield: shared/material/estates.ts).
       ...([
-        ["curius-sabine-farm", "The Sabine farm", "curius-purse", 40],
-        ["genucian-estates", "The Genucian estates", "gaius-purse", 100],
-        ["cornelian-estates", "The Cornelian estates", "blasio-purse", 110],
-        ["ogulnian-estates", "The Ogulnian lands in Campania", "ogulnius-purse", 125],
-        ["hanno-estates", "Hanno's estates in the African hinterland", "hanno-purse", 240],
-        ["gisco-estates", "The Gisconid farms", "gisco-purse", 100],
-        ["leptines-estates", "The house of Leptines' estates", "leptines-purse", 90],
+        ["curius-sabine-farm", "The Sabine farm", "curius-purse", 120],
+        ["genucian-estates", "The Genucian estates", "gaius-purse", 300],
+        ["cornelian-estates", "The Cornelian estates", "blasio-purse", 330],
+        ["ogulnian-estates", "The Ogulnian lands in Campania", "ogulnius-purse", 375],
+        ["hanno-estates", "Hanno's estates in the African hinterland", "hanno-purse", 720],
+        ["gisco-estates", "The Gisconid farms", "gisco-purse", 300],
+        ["leptines-estates", "The house of Leptines' estates", "leptines-purse", 270],
       ] as const).map(([holdingId, title, purse, amount]) => ({
         id: `${holdingId}-yield`, kind: "land" as const, label: `Yield of ${title}`, beneficiaryAccountId: purse,
         originKind: "holding" as const, originId: holdingId, amount, cadenceSteps: 30, nextDueStep: 30, active: true,
       })),
-      { id: "mamertine-tolls", kind: "trade", label: "Tolls on the strait", beneficiaryAccountId: "mamertine-treasury", originKind: "polity", originId: "mamertines", amount: 250, cadenceSteps: 30, nextDueStep: 30, collectionRateBps: 7_000, active: true },
+      // And the allies' own land levy (v53), which the `men` regime leaves them (`tax-policy.ts`): raised in their own provinces, paid into their own chests.
+      ...ALLIES_IN_MEN.map((polityId) => ({ id: `${polityId}-land-levy`, kind: "tax" as const, label: `The land levy of the ${ALLY_NAMES[polityId] ?? polityId}`, beneficiaryAccountId: `${polityId}-treasury`, originKind: "polity" as const, originId: polityId, amount: ALLY_REVENUE[polityId]!, cadenceSteps: 30, nextDueStep: 30, active: true })),
+      { id: "mamertine-tolls", kind: "trade", label: "Tolls on the strait", beneficiaryAccountId: "mamertine-treasury", originKind: "polity", originId: "mamertines", amount: 77_500, cadenceSteps: 30, nextDueStep: 30, collectionRateBps: 7_000, active: true },
     ],
     /**
      * And what it costs them to stand still.
@@ -1091,34 +1372,45 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
      * had no unpaid army to describe, because nothing was ever owed.
      */
     obligations: [
-      // 147 for the 4 200 foot of a full legion at 35 a thousand, 32 for its
-      // 300 horse at three times the foot's rate (Polybius 6.39: two obols a
-      // day for a foot soldier, a drachma for a horseman), and 50 for the
-      // allies' grain: Polybius says the allied infantry drew its ration free,
-      // where a Roman had the price stopped from his pay. Their wages are their
-      // own cities'. (190 until v42, for 4 000 places and no horse.)
-      { id: "rome-legion-pay", kind: "army_pay", label: "Pay of the legions, and grain for their allies", payerAccountId: "rome-treasury", amount: 229, cadenceSteps: 30, nextDueStep: 30, priority: 900, arrears: 0, missedPeriods: 0, active: true },
-      { id: "rome-magistracies", kind: "salary", label: "The magistracies and the public works", payerAccountId: "rome-treasury", amount: 190, cadenceSteps: 30, nextDueStep: 30, priority: 500, arrears: 0, missedPeriods: 0, active: true },
-      { id: "carthage-fleet-pay", kind: "army_pay", label: "Pay of the fleet and its crews", payerAccountId: "carthage-treasury", amount: 430, cadenceSteps: 30, nextDueStep: 30, priority: 900, arrears: 0, missedPeriods: 0, active: true },
-      { id: "carthage-mercenaries", kind: "army_upkeep", label: "The hired men of Libya and Iberia", payerAccountId: "carthage-treasury", amount: 520, cadenceSteps: 30, nextDueStep: 30, priority: 850, arrears: 0, missedPeriods: 0, active: true },
-      { id: "syracuse-squadron-pay", kind: "army_pay", label: "Pay of the Syracusan squadron", payerAccountId: "syracuse-treasury", amount: 210, cadenceSteps: 30, nextDueStep: 30, priority: 900, arrears: 0, missedPeriods: 0, active: true },
-      { id: "mamertine-soldiery", kind: "army_pay", label: "The soldiery that holds Messana", payerAccountId: "mamertine-treasury", amount: 120, cadenceSteps: 30, nextDueStep: 30, priority: 950, arrears: 0, missedPeriods: 0, active: true },
+      // Every army's pay here is counted from the one rate (v47): ten a man a
+      // month gross, a thousand men at ten thousand (Polybius 6.39: two obols
+      // a day for a foot soldier, a drachma for a horseman). 42 000 for the
+      // 4 200 foot of a full legion, 9 000 for its 300 horse at three times
+      // the foot's rate, and 14 000 for the allies' grain: Polybius says the
+      // allied infantry drew its ration free, where a Roman had the price
+      // stopped from his pay. Their wages are their own cities'. (229 until
+      // v47, when it was paid at 35 a thousand and the named men of the army
+      // at ten a man, so that the pool their shares came out of could not
+      // have paid them.)
+      { id: "rome-legion-pay", kind: "army_pay", label: "Pay of the legions, and grain for their allies", payerAccountId: "rome-treasury", amount: 65_000, cadenceSteps: 30, nextDueStep: 30, priority: 900, arrears: 0, missedPeriods: 0, active: true },
+      ...ALLIES_IN_MEN.map((polityId) => ({ id: `${polityId}-upkeep`, kind: "salary" as const, label: `The magistracies, garrisons and works of the ${ALLY_NAMES[polityId] ?? polityId}`, payerAccountId: `${polityId}-treasury`, amount: Math.round(ALLY_REVENUE[polityId]! * 0.8), cadenceSteps: 30, nextDueStep: 30, priority: 500, arrears: 0, missedPeriods: 0, active: true })),
+      { id: "rome-magistracies", kind: "salary", label: "The magistracies and the public works", payerAccountId: "rome-treasury", amount: 19_000, cadenceSteps: 30, nextDueStep: 30, priority: 500, arrears: 0, missedPeriods: 0, active: true },
+      { id: "carthage-fleet-pay", kind: "army_pay", label: "Pay of the fleet and its crews", payerAccountId: "carthage-treasury", amount: 55_000, cadenceSteps: 30, nextDueStep: 30, priority: 900, arrears: 0, missedPeriods: 0, active: true },
+      { id: "carthage-mercenaries", kind: "army_upkeep", label: "The hired men of Libya and Iberia", payerAccountId: "carthage-treasury", amount: 38_000, cadenceSteps: 30, nextDueStep: 30, priority: 850, arrears: 0, missedPeriods: 0, active: true },
+      { id: "syracuse-squadron-pay", kind: "army_pay", label: "Pay of the Syracusan squadron", payerAccountId: "syracuse-treasury", amount: 17_500, cadenceSteps: 30, nextDueStep: 30, priority: 900, arrears: 0, missedPeriods: 0, active: true },
+      { id: "mamertine-soldiery", kind: "army_pay", label: "The soldiery that holds Messana", payerAccountId: "mamertine-treasury", amount: 14_000, cadenceSteps: 30, nextDueStep: 30, priority: 950, arrears: 0, missedPeriods: 0, active: true },
       // Hieron's hoplites and the allied hulls Rome sails on had no wages at
       // all: `syracuse-squadron-pay` covers the forty triremes and nothing
       // else, and `rome-legion-pay` the field army and nothing else. Priced
-      // off this scenario's own rates -- 0.075 a man a month, as the legions
-      // were paid until v30 (now Rome's 35 a thousand, on its 4 000 places)
-      // and the Mamertine mercenaries still are, and a fraction of a
-      // warship's pay for transports the allied cities crew and maintain
-      // themselves, Rome bearing only their victualling in the field.
-      { id: "syracuse-army-pay", kind: "army_pay", label: "Pay of the Syracusan army", payerAccountId: "syracuse-treasury", amount: 225, cadenceSteps: 30, nextDueStep: 30, priority: 900, arrears: 0, missedPeriods: 0, active: true },
-      { id: "rome-allied-hulls", kind: "army_upkeep", label: "Victualling of the allied hulls", payerAccountId: "rome-treasury", amount: 40, cadenceSteps: 30, nextDueStep: 30, priority: 800, arrears: 0, missedPeriods: 0, active: true },
+      // off the same rate (v47): the Syracusan hoplites, citizens serving
+      // their city's turn, at half of it (10 000 for 2 000), the hired men at
+      // the whole (7 000 for 700) and the horse at three times (9 000 for
+      // 300); the Mamertine mercenaries at the whole (14 000 for 1 400); the
+      // fleets at 500 a hull, which is the keep of the oarsmen who were not
+      // citizens (55 000 for Carthage's 110 quinqueremes, 17 500 for the 35
+      // triremes of Syracuse); the Carthaginian field force by its nations
+      // (38 000: 2 300 foot and 300 slingers at ten, 400 Numidian horse at
+      // thirty); and a fraction of a warship's pay for transports the allied
+      // cities crew and maintain themselves, Rome bearing only their
+      // victualling in the field.
+      { id: "syracuse-army-pay", kind: "army_pay", label: "Pay of the Syracusan army", payerAccountId: "syracuse-treasury", amount: 26_000, cadenceSteps: 30, nextDueStep: 30, priority: 900, arrears: 0, missedPeriods: 0, active: true },
+      { id: "rome-allied-hulls", kind: "army_upkeep", label: "Victualling of the allied hulls", payerAccountId: "rome-treasury", amount: 3_500, cadenceSteps: 30, nextDueStep: 30, priority: 800, arrears: 0, missedPeriods: 0, active: true },
     ],
     forces: [
       // A consular army was half allies: Latin and Italian cohorts raised,
       // armed and paid by their own cities under the foedus and led by Roman
       // prefects. Rome owes the legionaries their pay and the allies only their
-      // grain, which is why the pay below is more than 4 000 men at 35 a thousand.
+      // grain, which is why the pay below is more than 4 000 men at ten thousand a thousand.
       //
       // One legion and one ala, as Polybius 6.21 and 6.26 count them (v42):
       // 3 000 hastati, principes and triarii, 1 200 velites and 300 horse, the
@@ -1184,12 +1476,12 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
  * with the drill and experience the armies standing on the first morning
  * already have (`SEASONED_ARMIES`). Everyone else's armies stay flat.
  */
-const initialWorld: WorldState = WorldStateSchema.parse(formArmies(
+const initialWorld: WorldState = WorldStateSchema.parse(withHiredHosts(withRegionalTaxes(formArmies(
   // v43: the wider world's grudges, peaces, claims and aims (punic-wars-politics.ts).
-  withWorldPolitics({ ...unformedWorld, establishments: [...PUNIC_ESTABLISHMENTS], doctrines: [...PUNIC_DOCTRINES] }),
+  withCarthageInSicily(withWorldPolitics({ ...unformedWorld, establishments: [...PUNIC_ESTABLISHMENTS], doctrines: [...PUNIC_DOCTRINES] })),
   0,
   { seasoned: (force) => SEASONED_ARMIES[force.id] },
-));
+))));
 
 export const punicWarsScenario = { definition, initialWorld } as const;
 

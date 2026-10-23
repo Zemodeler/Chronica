@@ -20,9 +20,10 @@ import { TroopCategoryDefinitionSchema } from "../warfare/battle";
 import { DoctrineSchema, EstablishmentSchema } from "../warfare/establishment";
 import { ContingencySchema } from "./contingency";
 import { SiegeSchema } from "./siege";
+import { CampaignPlanSchema, WarPlanSchema } from "./war-plan";
 import { EnactmentSchema } from "./enactment";
 import { CovertPlotSchema } from "./covert-plot";
-import { OrderRecordSchema, OwedTurnSchema } from "./orders";
+import { CognitionReviewSchema, OrderRecordSchema, OwedTurnSchema } from "./orders";
 import { MapConflictsOverlaySchema } from "./map-presentation";
 import { NemesisSchema } from "./nemesis";
 import { WorldStorylineSchema } from "./storylines";
@@ -43,6 +44,8 @@ import { SuccessionRuleSchema } from "../characters/character";
 import { AuditSchema, DepartmentSchema, DiversionSchema } from "./departments";
 import { BlockadeSchema, ConvoySchema, EngagementSchema } from "./engagement";
 import { EconomyMemorySchema } from "./economy";
+import { GensSchema, MAX_GENTES } from "./gentes";
+import { ActMarkSchema, MAX_ACT_MARKS } from "./act-marks";
 
 /**
  * Bumped when an old snapshot needs upgrading on load.
@@ -178,12 +181,16 @@ export const WorldStateSchema = z
      * reviews the world.
      */
     constitutions: z.array(ConstitutionSchema).default([]),
+    /** The noble families -- Rome's gentes, Carthage's great houses, the kings' houses (`world/gentes.ts`, `sim/gentes.ts`). */
+    gentes: z.array(GensSchema).max(MAX_GENTES).default([]),
     /**
      * Who is in charge of what, beneath the ruler: a power's departments and
      * a household's stewards (`world/departments.ts`). A lever no department
      * holds is the ruler's own, and an estate nobody stewards is its owner's.
      */
     departments: z.array(DepartmentSchema).default([]),
+    /** Who last decided each act of a power, and what each office has spent this year (`world/act-marks.ts`). */
+    actMarks: z.array(ActMarkSchema).max(MAX_ACT_MARKS).default([]),
     /** What officers and stewards have taken, and whether anybody has found it (`world/departments.ts`). */
     diversions: z.array(DiversionSchema).max(600).default([]),
     audits: z.array(AuditSchema).max(200).default([]),
@@ -317,6 +324,8 @@ export const WorldStateSchema = z
      * held up waiting for anybody.
      */
     owed: z.array(OwedTurnSchema).max(40).default([]),
+    /** What each person was last asked about and decided on, so a new burst does not review everybody afresh (S4, `CognitionReviewSchema`). */
+    cognitionReviews: z.array(CognitionReviewSchema).max(200).default([]),
     /**
      * Plans laid against days that have not come -- see `world/contingency.ts`.
      *
@@ -329,6 +338,9 @@ export const WorldStateSchema = z
     contingencies: z.array(ContingencySchema).default([]),
     /** Cities held under siege (`siege.ts`), kept until they fall or the siege is lifted. */
     sieges: z.array(SiegeSchema).default([]),
+    /** What each power at war means to do by it, and what each army is sent to do (`war-plan.ts`). */
+    warPlans: z.array(WarPlanSchema).max(60).default([]),
+    campaigns: z.array(CampaignPlanSchema).max(120).default([]),
     /** Fights begun by an order and not yet decided, fought a round a day (`world/engagement.ts`). */
     engagements: z.array(EngagementSchema).default([]),
     /** Bread on the road to armies (`world/engagement.ts`). */

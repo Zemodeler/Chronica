@@ -4,7 +4,7 @@ import type { Office } from "../characters/character";
 import type { WorldState } from "../world/world-state";
 import type { Project } from "../world/project";
 import { formatWorldDate, type ScenarioClock } from "../world/clock";
-import { isOrderPartStale, letterTally, letterTallyInWords, orderPartLabel, orderPartStatus, waitingUntil } from "../world/orders";
+import { isOrderPartStale, letterTally, letterTallyInWords, orderPartLabel, orderPartStatus, procedureReasonOf, waitingUntil } from "../world/orders";
 
 /**
  * What the player's orders are doing, as they could know it.
@@ -126,6 +126,8 @@ export function ordersUnderWay(
   // with the reason. The latest order's parts that came to nothing are here
   // too, so an order is never answered only in prose.
   const shown = new Set(items.map((item) => item.key.replace(/^(project|march):/, "")));
+  // A pursuit an order recorded is that order's own line, and is not listed a second time beneath it.
+  const orderTexts = new Set<string>();
   const latest = [...world.orders].reverse().find((order) => order.actorCharacterId === characterId);
   for (const order of world.orders) {
     if (order.actorCharacterId !== characterId) continue;
@@ -134,7 +136,7 @@ export function ordersUnderWay(
       // a season's dead orders stood beside the live ones (E6).
       if (part.closedAtStep !== null || isOrderPartStale(world, order, part)) continue;
       const status = orderPartStatus(world, part);
-      const finished = status === "achieved" || status === "partly_done" || status === "failed" || status === "refused" || status === "unanswered";
+      const finished = status === "achieved" || status === "partly_done" || status === "failed" || status === "refused" || status === "unanswered" || status === "carried_unverified" || status === "already_so";
       if (finished && order !== latest) continue;
       if (status === "achieved" && part.note === null) continue;
       // Shown already, as its own work: a project above, or an audit, a plot or
@@ -147,9 +149,10 @@ export function ordersUnderWay(
         || (ref.kind === "procedure" && world.material.politicalProcedures.some((procedure) => procedure.id === ref.id && procedure.outcome === "passed"));
       if (status !== "blocked" && status !== "failed" && status !== "authorized" && status !== "acknowledged" && part.note === null && part.workRefs.length > 0
         && part.workRefs.every((ref) => (ref.kind === "project" && shown.has(ref.id)) || listedBelow(ref) || ref.kind === "force" || ref.kind === "entity")) continue;
-      const why = part.refusal ?? part.whyNot;
+      const why = (status === "refused" ? procedureReasonOf(world, part) : null) ?? part.refusal ?? part.whyNot ?? procedureReasonOf(world, part);
       // What a held act waits on, said as the ledger says it (`waitingUntil`).
       const until = waitingUntil(world, part);
+      orderTexts.add(order.text);
       const stateLabel = until !== null ? `Waiting until ${until}` : upperFirst(orderPartLabel(status, part, world));
       const tally = letterTally(world, part);
       items.push({
@@ -157,7 +160,7 @@ export function ordersUnderWay(
         kind: "order",
         label: part.said,
         detail: `${stateLabel}.${tally === null ? "" : ` ${letterTallyInWords(tally)}.`}${why === null || status === "achieved" ? "" : ` ${lastSentenceWithin(why, 320)}`}${part.note === null ? "" : ` ${upperFirst(part.note)}.`}`,
-        stalled: status === "blocked" || status === "failed" || status === "refused" || status === "unanswered" || status === "authorized" || status === "acknowledged",
+        stalled: status === "blocked" || status === "failed" || status === "refused" || status === "unanswered" || status === "authorized" || status === "acknowledged" || status === "stalled",
       });
     }
   }
@@ -240,7 +243,7 @@ export function ordersUnderWay(
 
   // What an order set the player (or the power they speak for) to doing.
   for (const entity of world.genericEntities) {
-    if (entity.kind !== "pursuit" || "retiredAtStep" in entity.attributes) continue;
+    if (entity.kind !== "pursuit" || "retiredAtStep" in entity.attributes || (typeof entity.attributes.order === "string" && orderTexts.has(entity.attributes.order))) continue;
     const owner = entity.ownerRef;
     const yours = owner !== null && ((owner.kind === "character" && owner.id === characterId)
       || (governs && owner.kind === "polity" && owner.id === station.polityId));

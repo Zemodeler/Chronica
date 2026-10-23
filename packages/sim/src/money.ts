@@ -1,13 +1,16 @@
 import {
   boundedId,
   computeOpinion,
-  ESTATE_PRICE_MONTHS,
+  ESTATE_LAND_PRICE_MONTHS,
+  LEGIONARY_PAY_GROSS,
+  PAY_STOPPAGES_SHARE,
   stableHash,
   type FactProposalDraft,
   type MoneyObligation,
   type WorldState,
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Money a private man can come by (play-test E18, L8).
@@ -21,17 +24,9 @@ import type { IdFactory } from "./ports";
 
 // ── A soldier's pay ──────────────────────────────────────────────────────────
 
-/**
- * What a legionary is owed a month, in drachmae, before stoppages: two obols a
- * day, as Polybius gives it (6.39), thirty days to the month.
- */
-export const LEGIONARY_PAY_GROSS = 10;
-/**
- * And what is stopped out of it for his grain, his clothes and the arms he is
- * issued, which Polybius says the quaestor deducted: about a third. A legionary
- * keeps seven a month, a centurion twice that, a horseman three times.
- */
-export const PAY_STOPPAGES_SHARE = 1 / 3;
+// The rates are the world's (`shared/world/economy.ts`), so the treasury's
+// outlay for an army and the pay of the named men in it are counted from one.
+export { LEGIONARY_PAY_GROSS, PAY_STOPPAGES_SHARE };
 const CENTURION_PAY_MULTIPLE = 2;
 const HORSEMAN_PAY_MULTIPLE = 3;
 
@@ -113,16 +108,16 @@ export function monthlyOutgoingsOf(world: WorldState, purseId: string): number {
 }
 
 // ── Loans offered ────────────────────────────────────────────────────────────
-
-/** Below this a purse is low whatever it owes: a man cannot keep a household on less. */
-const LOW_PURSE_FLOOR = 150;
+/** Below this a purse is low whatever it owes: a senator's household runs to a few thousand a month. */
+/** Below this a purse is low whatever it owes: a senator cannot keep a household on less than a few months of what it spends, a legionary's pay for forty years. */
+const LOW_PURSE_FLOOR = 4_500;
 /** Or below this many months of what it is bound to pay out. */
 const LOW_PURSE_MONTHS = 2;
 /** How many men offer at once. */
 const MAX_LENDERS = 3;
 /** A lender is a man who cares for money -- and has it. */
 const LENDER_WEALTH_DRIVE = 60;
-const LENDER_MIN_BALANCE = 500;
+const LENDER_MIN_BALANCE = 15_000;
 /** Of his own money, the most a lender puts in one man's hands. */
 const LENDER_SHARE = 0.25;
 /** Of what a man has coming in each month, and of what he could pledge. */
@@ -182,7 +177,7 @@ export function loanOffersFor(world: WorldState, characterId: string): readonly 
   // What he could pledge: his estates at what an estate sells for, and what he has in his ventures.
   const estates = world.material.holdings
     .filter((holding) => holding.legalHolderCharacterId === characterId)
-    .map((holding) => ({ holding, value: (world.material.incomeSources.find((source) => source.id === holding.incomeSourceId)?.amount ?? 0) * ESTATE_PRICE_MONTHS }))
+    .map((holding) => ({ holding, value: (world.material.incomeSources.find((source) => source.id === holding.incomeSourceId)?.amount ?? 0) * ESTATE_LAND_PRICE_MONTHS }))
     .sort((a, b) => b.value - a.value || a.holding.id.localeCompare(b.holding.id));
   const ventures = world.material.ventures
     .filter((venture) => venture.ownerCharacterId === characterId && venture.status === "running")
@@ -249,7 +244,7 @@ export function loanOffersFact(world: WorldState, characterId: string, known: re
   if (toldLately) return null;
   const who = offers.map((offer) => `${offer.lenderName} up to ${offer.amount} at ${(offer.interestBps / 100).toFixed(1)}% a month over ${offer.periods} months`).join("; ");
   return {
-    localId: `loan_offered_${characterId}`.slice(0, 60),
+    localId: safeLocalId(`loan_offered_${characterId}`).slice(0, 60),
     kind: "loan_offered",
     summary: `Word reaches him that his purse is known to be low, and that men would lend to him: ${who}.`.slice(0, 600),
     affectedRefs: [{ kind: "character", id: characterId }, ...offers.map((offer) => ({ kind: "character" as const, id: offer.lenderId }))],
@@ -377,7 +372,7 @@ export function keepPatronage(world: WorldState, ids: IdFactory, atStep: number)
         struck.add(pair.linkId);
         if (turned) {
           facts.push({
-            localId: `client_turned_${pair.clientId}`.slice(0, 60), kind: "clientage_ended",
+            localId: safeLocalId(`client_turned_${pair.clientId}`).slice(0, 60), kind: "clientage_ended",
             summary: `${name(pair.clientId)} voted against his patron ${name(pair.patronId)}, who will keep him no longer: the stipend is stopped.`,
             affectedRefs: [{ kind: "character", id: pair.clientId }, { kind: "character", id: pair.patronId }],
             visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 30,
@@ -390,7 +385,7 @@ export function keepPatronage(world: WorldState, ids: IdFactory, atStep: number)
     if (!answer.willing) {
       struck.add(pair.linkId);
       facts.push({
-        localId: `client_refused_${pair.clientId}`.slice(0, 60), kind: "clientage_refused",
+        localId: safeLocalId(`client_refused_${pair.clientId}`).slice(0, 60), kind: "clientage_refused",
         summary: `${name(pair.patronId)} will not have ${name(pair.clientId)} as his client: ${answer.reason}.`,
         affectedRefs: [{ kind: "character", id: pair.clientId }, { kind: "character", id: pair.patronId }],
         visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 20,
@@ -404,7 +399,7 @@ export function keepPatronage(world: WorldState, ids: IdFactory, atStep: number)
       priority: 300, arrears: 0, missedPeriods: 0, active: true,
     });
     facts.push({
-      localId: `client_taken_${pair.clientId}`.slice(0, 60), kind: "clientage_begun",
+      localId: safeLocalId(`client_taken_${pair.clientId}`).slice(0, 60), kind: "clientage_begun",
       summary: `${answer.reason}: ${amount} a month from his purse, and his voice when it is wanted.`,
       affectedRefs: [{ kind: "character", id: pair.clientId }, { kind: "character", id: pair.patronId }],
       visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 25,

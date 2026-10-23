@@ -10,6 +10,7 @@ import { spreadSubSkills } from "./aptitude";
 import { faithNamed } from "../world/faith";
 import { declaredOrdo } from "./ordo";
 import { difficultyRules } from "../world/pushback";
+import { ageWhereNoneWasSaid, nameNotTaken, withDeclaredKin } from "./declared-kin";
 
 // Placing a declared player character into the world.
 //
@@ -26,8 +27,10 @@ import { difficultyRules } from "../world/pushback";
 // was the only caller.
 
 /** Normalised words of a role or office label, for matching one against the other. */
-function labelTokens(value: string): Set<string> {
-  return new Set(
+function labelTokens(value: string): ReadonlySet<string> {
+  const known = TOKENS_OF.get(value);
+  if (known !== undefined) return known;
+  const tokens: ReadonlySet<string> = new Set(
     value
       .toLowerCase()
       .replace(/[^a-z0-9\s]/g, " ")
@@ -35,7 +38,14 @@ function labelTokens(value: string): Set<string> {
       .map((token) => OFFICE_STEMS[token] ?? token)
       .filter((token) => token.length > 2 && !GENERIC_ROLE_WORDS.has(token)),
   );
+  // The elections read every procedure's label against every office's, month after month: a few hundred
+  // distinct labels, read hundreds of thousands of times. Kept, but never without limit.
+  if (TOKENS_OF.size >= MAX_REMEMBERED_LABELS) TOKENS_OF.clear();
+  TOKENS_OF.set(value, tokens);
+  return tokens;
 }
+const TOKENS_OF = new Map<string, ReadonlySet<string>>();
+const MAX_REMEMBERED_LABELS = 4_096;
 
 /**
  * The office a word is the holding of. "Vettius stands for the military
@@ -197,6 +207,18 @@ export function labelNamesOffice(text: string, officeLabel: string): boolean {
  * on "aedile" alone, and is the plebs' own. Null where it names none.
  */
 export function officeNamedIn<T extends Pick<Office, "label">>(text: string, offices: readonly T[]): T | null {
+  // The same few hundred labels are put to the same list of offices again and again within a pass: kept per list, which goes with it.
+  let memo = NAMED_IN.get(offices);
+  if (memo === undefined) { memo = new Map(); NAMED_IN.set(offices, memo); }
+  if (memo.has(text)) return memo.get(text) as T | null;
+  const found = officeNamedInUncached(text, offices);
+  memo.set(text, found);
+  return found;
+}
+
+const NAMED_IN = new WeakMap<readonly unknown[], Map<string, unknown>>();
+
+function officeNamedInUncached<T extends Pick<Office, "label">>(text: string, offices: readonly T[]): T | null {
   let best: T | null = null;
   let bestSize = 0;
   for (const office of offices) {
@@ -501,7 +523,8 @@ function materializeAsDeclared(
   // What he believes and how old he is, as he declared them. Both used to be
   // thrown away -- every player was thirty-five and believed in nothing.
   const believes = knowledgebase.faith === null ? null : faithNamed(world, knowledgebase.faith, world.elapsedStep);
-  const ageYears = Math.max(14, Math.min(80, knowledgebase.ageYearsAtOpening ?? 35));
+  // (Where he did not say, a soldier of the line is a young man, not thirty-five: `ageWhereNoneWasSaid`.)
+  const ageYears = Math.max(14, Math.min(80, knowledgebase.ageYearsAtOpening ?? ageWhereNoneWasSaid(knowledgebase.role, actorCharacterId)));
   const officeId = matched?.office.id ?? null;
   // Who he is, from what was said of him. He was a blank: no traits, a mind
   // derived from his skills alone, the standing of nobody in particular, and
@@ -511,7 +534,8 @@ function materializeAsDeclared(
   const mind = mindShapedBy(deriveDefaultMind({ id: actorCharacterId, officeId, skills, ageYears, cultureId }), traits);
   const playerCharacter: WorldState["characters"][number] = {
     id: actorCharacterId,
-    name: knowledgebase.canonicalName,
+    // A second man of the same name is told from the first (a namesake in the roster once made a stray party round him).
+    name: nameNotTaken(world, knowledgebase.canonicalName, actorCharacterId),
     cultureId,
     faithId: believes?.faithId ?? null,
     dynastyId: null,
@@ -641,12 +665,14 @@ function materializeAsDeclared(
         }],
     },
   };
-  if (enlistedIn === undefined) return made;
+  // The wife, the son, the patron and the friend he declared, made where he is made.
+  const kinned = withDeclaredKin(made, actorCharacterId, knowledgebase);
+  if (enlistedIn === undefined) return kinned;
   // A man in the ranks stands somewhere in them (`warfare/service.ts`): a
   // formation, a unit, a rank, a named officer over him and named men beside
   // him -- where his power keeps an establishment to say what those are. A
   // man of thirty at Rome had campaigns behind him before the world began.
-  return serveInArmy(made, {
+  return serveInArmy(kinned, {
     characterId: actorCharacterId,
     forceId: enlistedIn,
     role: knowledgebase.role,

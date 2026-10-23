@@ -10,7 +10,7 @@ import { musterTheForces, type Muster } from "../material/forces";
 import type { ScenarioWarfareRules } from "../warfare/battle";
 import { authorityInWords, buildStation, CLAIMED_OFFICE_SOURCE_REF, factsKnownToStation } from "./station";
 import { buildAuthorityIndex, isActive } from "./authority-grant";
-import { ALL_CHAMBER_POWERS } from "../political-parts";
+import { ALL_CHAMBER_POWERS, POWER_IMPLIED_BY } from "../political-parts";
 
 export interface InsightLine { readonly key: string; readonly text: string; readonly detail: string | null }
 export interface PermissionReading extends InsightLine { readonly direct: boolean }
@@ -80,9 +80,12 @@ export function readOfficeInsights(input: {
       detail: direct ? "You may spend without a vote." : office.treasuryPermissions.includes("propose_spending")
         ? "You may propose spending; a vote is required before you spend." : "You may inspect the books; this office grants no spending permission." });
   }
-  const chamberSubjects = { laws: "laws and continuing measures", war: "war, peace, treaties and levies", taxes: "taxation and public spending", elections: "appointments by election", constitution: "changes to the constitution", judgment: "trials and removals" };
+  const chamberSubjects = { laws: "laws and continuing measures", war: "war, peace, treaties and levies", taxes: "taxation and public spending", elections: "appointments by election", constitution: "changes to the constitution", judgment: "trials and removals",
+    coinage: "the silver in the coin", treaties: "pacts and embargoes", finance: "what is borrowed and what is spent beyond a magistrate's allowance", levy: "the number of men raised" };
   for (const body of world.material.institutions.filter((body) => body.polityId === station.polityId)) {
-    const powers = body.powers ?? ALL_CHAMBER_POWERS;
+    // A chamber that holds every power holds the four newer ones with the older, and says no more than it always did.
+    const all = body.powers === undefined || ALL_CHAMBER_POWERS.every((power) => body.powers!.includes(power));
+    const powers = all ? ALL_CHAMBER_POWERS.filter((power) => POWER_IMPLIED_BY[power] === undefined) : body.powers!;
     if (powers.length === 0) continue;
     permissions.push({ key: `chamber:${body.id}`, text: `${body.name}: ${powers.map((power) => chamberSubjects[power]).join("; ")}`, direct: false,
       detail: body.advisory === true ? "This body's vote is advice; the ruler still decides." : "Questions within these powers can be decided by this body. Holding an office does not replace its decision on a question put before it." });

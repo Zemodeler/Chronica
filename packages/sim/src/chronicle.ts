@@ -1,5 +1,6 @@
-import { z } from "zod";
 import {
+  CHRONICLE_MAX_ENTRIES,
+  ChronicleOutputSchema,
   type OrderPartStatus,
   factsKnownTo,
   newsArrivesAt,
@@ -24,6 +25,7 @@ import {
 } from "@chronica/shared";
 import { extractJson } from "./json";
 import { claimsItDone } from "./order-outcomes";
+import { clerkPhraseCount, clerkRetryMessage, clerkSentences } from "./chronicle-lint";
 import type { SimModelPort } from "./ports";
 
 /**
@@ -96,7 +98,7 @@ import type { SimModelPort } from "./ports";
  * window as the burst walks forward (`WINDOW_MAX_ENTRIES`), and a burst of
  * four hops that told three things a hop would run to twelve.
  */
-const MAX_ENTRIES = 10;
+const MAX_ENTRIES = CHRONICLE_MAX_ENTRIES;
 
 /**
  * How many entries one window of a burst may carry, beyond the answer to the
@@ -247,11 +249,46 @@ Leave to Cross into Samnium", "Etruscan Envoys Sue for Peace After Sutrium",
 "Agathocles of Syracuse Assassinated". A person or a body, and the deed.
 Capitalised as a title; never a date, never a bare noun phrase.
 
-THE PASSAGE tells the matter in the order it happened, in the past tense.
-Its length is the matter's: a single decision is told in two or three
-sentences, a battle or an embassy that went back and forth in a paragraph or
-two. Say each thing once, and stop when the last thing that happened has been
-told -- no summing up, no moral, no word on what it means or what may come.
+THE PASSAGE is one paragraph of narrative, in the past tense, like an entry in
+a campaign journal. A matter of any weight takes five to eight sentences, some
+ninety to a hundred and seventy words; only a trivial one is told in three. It
+moves in this order, without announcing it:
+- who stood where, what they wanted, and what pressed on them;
+- what they did or asked for, and the argument they made for it;
+- how the other side answered, and the reasons it gave;
+- and how matters stood when it ended -- who was angry or afraid, what was
+  being gathered or fortified, what was still undecided -- said as a plain
+  fact of that moment, in the manner of "The frontier remained tense but
+  static." or "The Samnites, enraged by the raid, began mobilizing warriors
+  toward the border."
+Be concrete: the pass, the river, the garrison, the round number of men, the
+grievance, the thing carried off or burned. Say each thing once. The facts are the
+skeleton and the "Accounts given at the time" are the people's own reasons:
+build the passage on them, and where they are thin you may fill the room a
+historian fills -- the mood in the camp or the chamber, the ground and the
+season, what each side feared or wanted, the shape of an argument that must
+have been made -- so long as it follows from those facts and from who the
+people are. No moral and
+no forecast: end on how things stood, never on what will come of it.
+
+Two passages to hear the register by (invented; never borrow their facts):
+"Praetor Withholds Grain from Tarentum Until the Hostages Come" -- Praetor
+Lucius Valerius held back the grain ships at Brundisium. Tarentum had promised
+twelve hostages by midsummer and sent four, and the harvest in Apulia had
+failed for the second year. Its magistrates pleaded that the rest were
+children and would follow once the roads were dry, and offered silver in their
+place. Valerius refused the silver: he would feed no city that bargained with
+him, and he sent centurions to the harbour gate to count the hostages as they
+came. The granaries of Tarentum stood half empty, and the grain ships rode at
+anchor in plain sight of its walls.
+"Hasdrubal Burns the Camp at Lilybaeum" -- Hasdrubal fired his stores on the
+night the wind turned. For three weeks the Roman lines had crept closer to the
+wall, and his officers had told him the men would not hold another month on
+half rations. Some six thousand marched out by the south road with what they
+could carry, leaving the wounded and the horses behind. The Roman pickets saw
+the glow before they heard the column, and the consul called out the cavalry
+but would not follow into the dark. By morning the camp was ash and the road
+south lay open.
 
 Tell what people did and why they did it: what they wanted, what they argued,
 what it cost them, what they found. Name them in full at first mention, with
@@ -273,11 +310,13 @@ historian would -- "some seven and a half thousand men", "about six hundred
 fell" -- and keep the small ones exact. Give each figure once; never total up
 what you have already given.
 
-Write only from what the thread gives you. You may give it the colour of its
-time and place -- the season, the ground, the kind of men involved -- but not a
-single event, number or motive it does not contain. A thread marked as news
-reaching the court is second-hand: tell it as the court heard it ("word came
-from Syracuse that"). Keep the threads apart; a passage names nothing that is
+A label that is not a name -- "C2 Greek Captain", an id, a code -- is called by what the
+person is: "a Greek ship's captain". Embroider, never invent events. You may give a thread the colour of its time
+and place and the likely texture of its moment, but not an event, a result, a
+number, a decision, a named person or a document it does not contain; and
+nothing that contradicts it. A thread marked as news reaching the court is
+second-hand: tell it as the court heard it ("word came from Syracuse that"),
+and embroider it no further than rumour would. Keep the threads apart; a passage names nothing that is
 not in its own thread.
 
 Write as a historian, never as a clerk: none of "project", "milestone",
@@ -303,30 +342,6 @@ closed on the ford".
 Answer with JSON and nothing else:
 {"entries":[{"thread":1,"title":"...","body":"...","quote":{"speaker":"...","line":"...","occasion":"..."}}]}
 "quote" may be left out.`;
-
-const ChronicleOutputSchema = z
-  .object({
-    entries: z
-      .array(
-        z.object({
-          thread: z.number().int().positive(),
-          title: z.string().trim().min(1).max(120),
-          body: z.string().trim().min(1),
-          quote: z
-            .object({
-              speaker: z.string().trim().min(1).max(120),
-              line: z.string().trim().min(1).max(220),
-              occasion: z.string().trim().min(1).max(160),
-            })
-            .nullable()
-            .optional()
-            // A quotation that does not read is dropped, never the passage with it.
-            .catch(null),
-        }),
-      )
-      .max(MAX_ENTRIES),
-  })
-  .strict();
 
 /**
  * One actor's account of what they were doing, tied to the facts it describes.
@@ -490,6 +505,8 @@ export interface ChronicleInput {
    * burst takes `WINDOW_MAX_ENTRIES`.
    */
   readonly maxEntries?: number;
+  /** True when the turn has spent its time: a passage is written once and not again for its register or its claims. */
+  readonly skipRetries?: (() => boolean) | undefined;
   /**
    * Whether to write the weightiest thread anyway when nothing clears the bar,
    * so a report is not blank when something happened. On for a whole span;
@@ -547,6 +564,12 @@ export interface ChronicleResult {
    * beside its own, so a matter that builds slowly is told once it has built.
    */
   readonly carried: readonly Fact[];
+  /**
+   * For the dev inspector (plan chronicle-and-order-truth, 6.1): per entry, the
+   * facts it was written from with the weight each carried, and whether the
+   * thread was news from afar. And how many facts were carried, not told.
+   */
+  readonly inspection?: { readonly entries: readonly { readonly title: string; readonly facts: readonly { readonly id: string; readonly kind: string; readonly weight: number }[]; readonly reported: boolean }[]; readonly carriedCount: number; /** Passages that overstated an order part and were replaced. */ readonly overstated: number; readonly passages: number };
 }
 
 interface Thread {
@@ -1101,6 +1124,27 @@ function renderBattle(battle: BattleAccountLine): string[] {
   return lines;
 }
 
+/** How the court knows a fact, said before it: the fact's own source where it has one, else what the thread shows. */
+function sourceNote(fact: Fact, thread: Thread): string {
+  const source = fact.story?.source ?? null;
+  if (source === "reported" || fact.kind === "spy_report") return "(an agent's report: say that it came by an agent, once and briefly; do not go on to say it may be wrong) ";
+  if (source === "rumoured") return "(rumour only: tell it as rumour) ";
+  if (source === "observed") return "";
+  return !thread.reported && thread.hearsayIds.has(fact.id) ? "(word only, not witnessed) " : "";
+}
+
+/** The fact's seeds, on the line after it: who, what, why, at what cost. Nothing the fact did not give. */
+function storySeeds(fact: Fact): string {
+  const story = fact.story;
+  if (story === undefined) return "";
+  const parts = [story.subject === null ? null : `who: ${story.subject}`, story.deed === null ? null : `did: ${story.deed}`, story.motive === null ? null : `why: ${story.motive}`, story.cost === null ? null : `cost: ${story.cost}`].filter((part): part is string => part !== null);
+  return parts.length === 0 ? "" : `
+    (${parts.join("; ")})`;
+}
+
+// [\b] is a backspace, as the literal character here always was; it was probably meant as \b, a word boundary, which would change what this matches.
+const ENGINE_COMPLAINT = /[\b](already exists?|already existed|no such|not found|nothing in this batch|could not be carried out as written|no (?:force|army|character|polity|holding|account) (?:named|called|exists)|local:|localId|refers to)[\b]/i;
+
 function renderThread(thread: Thread, index: number, said: readonly UtteranceLine[] = []): string {
   const lines = [`THREAD ${index + 1}${thread.reported ? " (news reaching the court; nobody here witnessed it)" : ""}`];
   if (thread.matter !== null) lines.push(`Part of a longer matter: ${thread.matter}.`);
@@ -1113,10 +1157,12 @@ function renderThread(thread: Thread, index: number, said: readonly UtteranceLin
     // Where it is known from, fact by fact: one witnessed fact used to make a
     // whole thread firsthand, and a spy's report read as the court's own
     // knowledge (C05, R43).
-    ...thread.facts.map((fact) => `- ${fact.kind === "spy_report" ? "(an agent's report: say so, and that it may be wrong) " : !thread.reported && thread.hearsayIds.has(fact.id) ? "(word only, not witnessed) " : ""}${readable(fact.summary)}`),
+    ...thread.facts.map((fact) => `- ${sourceNote(fact, thread)}${readable(fact.summary)}${storySeeds(fact)}`),
   );
   if (thread.narrative.length > 0) lines.push("Accounts given at the time:", ...thread.narrative.map((line) => `- ${readable(line)}`));
-  if (thread.frictions.length > 0) lines.push("Difficulties reported:", ...thread.frictions.map((line) => `- ${readable(line)}`));
+  // The engine's own complaints ("both already existed", "could not be carried out as written") are not what happened.
+  const difficulties = thread.frictions.filter((line) => !ENGINE_COMPLAINT.test(line));
+  if (difficulties.length > 0) lines.push("Difficulties reported:", ...difficulties.map((line) => `- ${readable(line)}`));
   if (thread.battle !== null) lines.push(...renderBattle(thread.battle));
   // The part of the order this tells, as the world has it: the passage says
   // it, and says nothing that contradicts it.
@@ -1587,8 +1633,22 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
    */
   const faithful = (thread: Thread, body: string): string => {
     if (thread.outcome === null || !claimsItDone(body, thread.outcome.status)) return body;
-    return [thread.outcome.line, ...thread.facts.map((fact) => readable(fact.summary))].join("\n\n");
+    // Only the sentences that claim too much come out; the rest of the passage is still the historian's.
+    const kept = body.split(/(?<=[.!?])\s+/).filter((sentence) => !claimsItDone(sentence, thread.outcome!.status)).join(" ").trim();
+    return kept.length >= 60 ? kept : plainAccount(thread);
   };
+
+  /** Where the part stands and the first two distinct things said of it: never the same fact four times, nor the engine's own refusals. */
+  function plainAccount(thread: Thread): string {
+    const seen = new Set<string>();
+    const facts = thread.facts.map((fact) => readable(fact.summary)).filter((text) => {
+      const key = text.toLowerCase().replace(/[^a-z]+/g, " ").slice(0, 48);
+      if (seen.has(key) || /^what the ruler intends is his own to say/i.test(text)) return false;
+      seen.add(key);
+      return true;
+    }).slice(0, 2);
+    return [thread.outcome!.line, ...facts].join("\n\n");
+  }
 
   // A failed narration must not cost the player the record itself: fall back to
   // the plain facts, under the period as a title, rather than losing the span.
@@ -1674,6 +1734,9 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
       }
     }
   };
+  let retries = 0;
+  /** Passages whose prose said more than the world shows, replaced by the engine's line: how often the historian still overstates (alarm, plan 2). */
+  let overstated = 0;
   await mapWithLimit(threads, CHRONICLE_CONCURRENCY, async (thread, index): Promise<void> => {
     // The answer to the order is news by definition: the player gave it this
     // turn. Shown the last report's titles, the historian judged "Clepsina
@@ -1685,7 +1748,35 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
     let entry: ChronicleEntry | null;
     try {
       const raw = await input.port.complete("compose_chronicle", CHRONICLE_SYSTEM_PROMPT, userMessage);
-      const parsed = ChronicleOutputSchema.safeParse(extractJson(raw));
+      let parsed = ChronicleOutputSchema.safeParse(extractJson(raw));
+      // The clerk's register is caught here, for nothing, and the passage written once more with the sentences quoted; the better of the two stands (3.2).
+      const clerkly = parsed.success ? clerkSentences(parsed.data.entries.find((candidate) => candidate.thread === 1)?.body ?? "") : [];
+      if (parsed.success && clerkly.length > 0 && input.skipRetries?.() !== true) {
+        try {
+          retries += 1;
+          const again = ChronicleOutputSchema.safeParse(extractJson(await input.port.complete("compose_chronicle", CHRONICLE_SYSTEM_PROMPT, clerkRetryMessage(userMessage, clerkly))));
+          const better = again.success ? again.data.entries.find((candidate) => candidate.thread === 1) : undefined;
+          if (again.success && better !== undefined && clerkPhraseCount(better.body) < clerkPhraseCount(parsed.data.entries.find((candidate) => candidate.thread === 1)?.body ?? "")) parsed = again;
+        } catch { /* the first passage stands */ }
+      }
+      // A passage that says more was done than the world shows is written once more, told where the part
+      // stands, before the engine's own line is put in its place: the line reads as a ledger.
+      if (parsed.success && thread.outcome !== null) {
+        const overclaims = (candidate: { readonly title: string; readonly body: string }): boolean => claimsItDone(candidate.body.trim(), thread.outcome!.status) || claimsItDone(candidate.title, thread.outcome!.status);
+        const first = parsed.data.entries.find((candidate) => candidate.thread === 1);
+        if (first !== undefined && overclaims(first) && input.skipRetries?.() !== true) {
+          try {
+            retries += 1;
+            const again = ChronicleOutputSchema.safeParse(extractJson(await input.port.complete("compose_chronicle", CHRONICLE_SYSTEM_PROMPT,
+              `${userMessage}
+
+Your passage said more was done than the world shows. This part of the order stands exactly so: ${thread.outcome.line}
+Write the passage again: say plainly where it stands, and tell the rest of the matter in full.`)));
+            const redone = again.success ? again.data.entries.find((candidate) => candidate.thread === 1) : undefined;
+            if (again.success && redone !== undefined && !overclaims(redone)) parsed = again;
+          } catch { /* the first passage stands, and is judged below */ }
+        }
+      }
       if (!parsed.success) entry = plainly(thread);
       else {
         const passage = parsed.data.entries.find((candidate) => candidate.thread === 1);
@@ -1693,9 +1784,13 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
         // -- told what the last report said, she judged this the same thing.
         // That is a decision, not a failure, and the record honours it: the
         // thread is dropped, not printed as bare facts under a period title.
+        const body = passage === undefined ? null : faithful(thread, passage.body.trim());
+        const contradicted = passage !== undefined && thread.outcome !== null
+          && (body !== passage.body.trim() || claimsItDone(passage.title, thread.outcome.status));
+        if (contradicted) overstated += 1;
         entry = passage === undefined
           ? (answering ? plainly(thread) : null)
-          : entryOf(thread, passage.title, faithful(thread, passage.body.trim()));
+          : entryOf(thread, thread.outcome !== null && claimsItDone(passage.title, thread.outcome.status) ? headlineOf(thread.facts) ?? period : passage.title, body!);
         const own = passage?.quote ?? null;
         // A quotation is somebody's recorded words, or it is not printed. The
         // historian's own line is kept only where it is, near enough, what that
@@ -1721,7 +1816,18 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   });
   await handing;
 
-  return { entries: results.flatMap((entry) => (entry === null || entry === undefined ? [] : [entry])), calls: threads.length, carried };
+  const told = results.flatMap((entry) => (entry === null || entry === undefined ? [] : [entry]));
+  const inspection = {
+    entries: told.map((entry) => ({
+      title: entry.title,
+      facts: entry.factIds.flatMap((id) => { const found = visible.find((fact) => fact.id === id); return found === undefined ? [] : [{ id, kind: found.kind, weight: weightOf(found) }]; }),
+      reported: entry.factIds.length > 0 && entry.factIds.every((id) => reportedIds.has(id)),
+    })),
+    carriedCount: carried.length,
+    overstated,
+    passages: threads.length,
+  };
+  return { entries: told, calls: threads.length + retries, carried, inspection };
 }
 
 /**

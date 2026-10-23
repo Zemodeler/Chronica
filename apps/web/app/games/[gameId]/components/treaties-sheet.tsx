@@ -1,8 +1,11 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { spanInWords, type Abroad, type PolityAgreementKind, type TreatyLine, type TreatyMoment, type TreatyPosture, type TreatyPower } from "@chronica/shared";
+import { spanInWords, type TradeProposalKind, type Abroad, type PolityAgreementKind, type TreatyLine, type TreatyMoment, type TreatyPosture, type TreatyPower, type TreatyTradeTerms } from "@chronica/shared";
+import type { PeaceTablesView } from "@chronica/sim";
 import { Era } from "../../../components/ui/era";
+import { Tabs, type TabSection } from "../../../components/ui/tabs";
+import { WarTab } from "./peace-table-sheet";
 import { Tip, TipCard } from "../../../components/ui/tip";
 
 /**
@@ -43,10 +46,16 @@ function postureLine(power: TreatyPower, polityLabel: string): string {
   }
 }
 
-export function TreatiesSheet({ abroad, onWriteTo, onOpenLetters }: {
+export function TreatiesSheet({ abroad, onWriteTo, onProposeTrade, onOpenLetters, peace, gameId, onChanged }: {
   readonly abroad: Abroad;
+  /** The peace tables his power sits at; with `gameId`, they give a war its tab. */
+  readonly peace?: PeaceTablesView | null | undefined;
+  readonly gameId?: string | undefined;
+  readonly onChanged?: (() => void) | undefined;
   /** Start a letter to them at the desk; absent for those who cannot give orders. */
   readonly onWriteTo?: ((polityLabel: string) => void) | undefined;
+  /** Put trade to them in a letter: a pact, new terms, the lifting of an embargo, or a notice of one. Absent for those who cannot give orders. */
+  readonly onProposeTrade?: ((polityLabel: string, kind?: TradeProposalKind) => void) | undefined;
   readonly onOpenLetters?: (() => void) | undefined;
 }) {
   const polityLabel = abroad.polityLabel ?? "Your power";
@@ -106,7 +115,15 @@ export function TreatiesSheet({ abroad, onWriteTo, onOpenLetters }: {
       </nav>
 
       {chosen !== null && (
-        <Dossier key={chosen.polityId} power={chosen} ask={ask} onWriteTo={onWriteTo} onOpenLetters={onOpenLetters} />
+        <Dossier
+          key={chosen.polityId}
+          power={chosen}
+          ask={ask}
+          war={peace != null && gameId !== undefined ? <WarTab gameId={gameId} peace={peace} enemyId={chosen.polityId} onChanged={onChanged ?? (() => undefined)} /> : undefined}
+          onWriteTo={onWriteTo}
+          onProposeTrade={onProposeTrade}
+          onOpenLetters={onOpenLetters}
+        />
       )}
     </div>
   );
@@ -156,12 +173,19 @@ function PowerCard({ power, chosen, onChoose, ask }: {
   );
 }
 
-function Dossier({ power, ask, onWriteTo, onOpenLetters }: {
+function Dossier({ power, ask, war, onWriteTo, onProposeTrade, onOpenLetters }: {
   readonly power: TreatyPower;
   readonly ask: Ask;
+  /** Where the player is at war with this power: its war tab. */
+  readonly war?: ReactNode;
   readonly onWriteTo?: ((polityLabel: string) => void) | undefined;
+  readonly onProposeTrade?: ((polityLabel: string, kind?: TradeProposalKind) => void) | undefined;
   readonly onOpenLetters?: (() => void) | undefined;
 }) {
+  const sections: TabSection[] = [
+    { id: "treaties", title: "Treaties", content: <DossierBody power={power} ask={ask} onWriteTo={onWriteTo} onProposeTrade={onProposeTrade} onOpenLetters={onOpenLetters} /> },
+    ...(war !== undefined && power.posture === "war" ? [{ id: "war", title: "War", marked: true, content: war }] : []),
+  ];
   return (
     <article className="treaties__dossier" aria-label={`${power.label}: where you stand`}>
       <header className="dossier__header">
@@ -169,6 +193,20 @@ function Dossier({ power, ask, onWriteTo, onOpenLetters }: {
         <h3 className="dossier__title"><PowerTip power={power} ask={ask} /></h3>
         {power.regard !== null && <p className="dossier__regard"><RegardTip power={power} ask={ask} /></p>}
       </header>
+      <Tabs label={`${power.label}: where you stand`} sections={sections} />
+    </article>
+  );
+}
+
+function DossierBody({ power, ask, onWriteTo, onProposeTrade, onOpenLetters }: {
+  readonly power: TreatyPower;
+  readonly ask: Ask;
+  readonly onWriteTo?: ((polityLabel: string) => void) | undefined;
+  readonly onProposeTrade?: ((polityLabel: string, kind?: TradeProposalKind) => void) | undefined;
+  readonly onOpenLetters?: (() => void) | undefined;
+}) {
+  return (
+    <>
 
       {power.letters.length > 0 && (
         <section className="dossier__section dossier__letters">
@@ -217,9 +255,14 @@ function Dossier({ power, ask, onWriteTo, onOpenLetters }: {
       {onWriteTo !== undefined && (
         <footer className="dossier__actions">
           <button type="button" className="btn" onClick={() => onWriteTo(power.label)}>Write to {power.label}</button>
+          {onProposeTrade !== undefined && (
+            <button type="button" className="btn" onClick={() => onProposeTrade(power.label, power.lines.some((line) => line.kind === "trade_pact") ? "revise" : undefined)}>
+              {power.lines.some((line) => line.kind === "trade_pact") ? "Propose new terms of trade" : "Propose trade"}
+            </button>
+          )}
         </footer>
       )}
-    </article>
+    </>
   );
 }
 
@@ -233,8 +276,23 @@ function LineEntry({ line, power, ask }: { readonly line: TreatyLine; readonly p
         {line.secret && <span> · <SecretTip ask={ask} power={power} /></span>}
       </p>
       <p className="treaty-line__summary">{line.summary}.</p>
+      {line.trade !== null && line.trade !== undefined && <TradeTerms trade={line.trade} kind={line.kind} />}
     </div>
   );
+}
+
+/** What a trade pact or an embargo says about customs and goods, a term to a line. */
+function TradeTerms({ trade, kind }: { readonly trade: TreatyTradeTerms; readonly kind: PolityAgreementKind }) {
+  const percent = (bps: number): string => `${(bps / 100).toFixed(bps % 100 === 0 ? 0 : 1)} in a hundred`;
+  const terms = kind === "embargo"
+    ? [trade.forbidden.length === 0 ? "Every good is forbidden." : `Forbidden: ${trade.forbidden.join(", ")}.`]
+    : [
+      trade.tariffCapBps === null ? "No cap on customs: each power lays its own." : `Customs on either's goods may not pass ${percent(trade.tariffCapBps)}.`,
+      trade.mostFavoured ? "Each gives the other the best terms it gives anyone." : null,
+      trade.exempt.length > 0 ? `Free of customs: ${trade.exempt.join(", ")}.` : null,
+      trade.heldByWar ? "Held by the war; it comes back with the peace." : null,
+    ].filter((term): term is string => term !== null);
+  return <ul className="treaty-line__trade" aria-label="Terms of trade">{terms.map((term) => <li key={term}>{term}</li>)}</ul>;
 }
 
 /* ─── The notes ─────────────────────────────────────────────────────── */

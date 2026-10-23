@@ -1,4 +1,4 @@
-import { leaderOf, nearestShore, type Force, type WorldState } from "@chronica/shared";
+import { LEGIONARY_PAY_GROSS, WARSHIP_PAY_PER_HULL, crewPerHull, leaderOf, nearestShore, type Force, type MoneyObligation, type WorldState } from "@chronica/shared";
 
 /**
  * The allies' ships (socii navales).
@@ -12,6 +12,10 @@ import { leaderOf, nearestShore, type Force, type WorldState } from "@chronica/s
  * magistrate may call for them whenever he needs them: "requisition the socii
  * navales" is a `force_create` of transports under the ally's name, raised in
  * its harbours at its own cost (`apply-deltas.ts`, "force_create").
+ *
+ * At its own cost, and so on its own pay: the hulls and the men an ally sent
+ * were paid by nobody, and its treasury never felt a war it served in
+ * (`force.raised-paid`). The socii kept their own contingents; Rome fed them.
  */
 
 /** Transports each of an ally's harbours can send, and the fewest a harbour-less coast still finds. */
@@ -45,11 +49,27 @@ export function alliedHullsAvailable(world: WorldState, allyId: string): { reado
 }
 
 /**
+ * What an ally pays each month for a contingent it sends: its men at a legionary's wage, its hulls at a crew's, out of its own
+ * treasury. Null for an ally with no treasury, whose men serve unpaid as they always did.
+ */
+export function alliedPay(world: WorldState, input: {
+  readonly allyId: string; readonly obligationId: string; readonly name: string; readonly categoryId: string; readonly fit: number; readonly atStep: number;
+}): MoneyObligation | null {
+  const treasury = world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === input.allyId && account.status === "active");
+  if (treasury === undefined) return null;
+  const wage = crewPerHull(input.categoryId) > 0 ? WARSHIP_PAY_PER_HULL : LEGIONARY_PAY_GROSS;
+  return {
+    id: input.obligationId, kind: "army_pay", label: `The pay of ${input.name}`.slice(0, 120), payerAccountId: treasury.id, amount: Math.max(1, Math.ceil(input.fit * wage)),
+    cadenceSteps: 30, nextDueStep: input.atStep + 30, priority: 900, arrears: 0, missedPeriods: 0, active: true,
+  };
+}
+
+/**
  * The hulls an ally sends: a force of its own, in its own harbour, at its own
  * cost, under the man the order names -- or the reason none come.
  */
 export function requisitionAlliedHulls(world: WorldState, input: {
-  readonly id: string; readonly chestId: string; readonly allyId: string; readonly name: string; readonly wanted: number;
+  readonly id: string; readonly chestId: string; readonly obligationId: string; readonly allyId: string; readonly name: string; readonly wanted: number;
   readonly commanderId: string; readonly controllerId: string; readonly categoryId: string; readonly label: string; readonly atStep: number;
 }): { readonly world: WorldState; readonly hulls: number; readonly shore: string } | string {
   const ally = world.map.polities.find((polity) => polity.id === input.allyId)?.name ?? input.allyId;
@@ -57,11 +77,12 @@ export function requisitionAlliedHulls(world: WorldState, input: {
   if (shore === null) return `${ally} holds no coast, and has no ships to send.`;
   if (hulls <= 0) return `${ally} has sent every hull its harbours owe already.`;
   const sent = Math.min(hulls, input.wanted);
+  const pay = alliedPay(world, { allyId: input.allyId, obligationId: input.obligationId, name: input.name, categoryId: input.categoryId, fit: sent, atStep: input.atStep });
   const force: Force = {
     id: input.id, name: input.name, polityId: input.allyId, commanderCharacterId: input.commanderId, controllerCharacterId: input.controllerId,
     locationId: shore, positionId: null, authorizedStrength: sent, personnel: [{ categoryId: input.categoryId, label: input.label, fit: sent, unavailable: [] }],
     moraleBps: 6_000, cohesionBps: 5_500, fatigueBps: 0, provisionStatus: "provisioned", provisionedThroughStep: input.atStep + 60,
-    payObligationId: null, payArrearsPeriods: 0, history: [], memberCharacterIds: [],
+    payObligationId: pay?.id ?? null, payArrearsPeriods: 0, history: [], memberCharacterIds: [],
   };
   return {
     world: {
@@ -69,6 +90,7 @@ export function requisitionAlliedHulls(world: WorldState, input: {
       material: {
         ...world.material,
         forces: [...world.material.forces, force],
+        ...(pay === null ? {} : { obligations: [...world.material.obligations, pay] }),
         accounts: [...world.material.accounts, { id: input.chestId, owner: { kind: "force", id: input.id }, currencyId: world.material.currency.id, balance: 0, status: "active", visibility: "polity" }],
       },
     },

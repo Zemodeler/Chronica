@@ -7,6 +7,7 @@ import {
   allOffices,
   boundedId,
   createPressure,
+  currentAgeYears,
   isNavalForce,
   type BlocInterest,
   type Character,
@@ -21,13 +22,16 @@ import {
 } from "@chronica/shared";
 import { circleName, clientsName, CLASS_NAMES } from "./group-names";
 import { forceLever, polityLever, type WarfareContext } from "@chronica/shared";
+import { safeLocalId } from "./safe-local-id";
 
 /** The doctrines a world's powers and armies practise, for the levers society reads. */
 const contextOf = (world: WorldState): WarfareContext => ({ establishments: world.establishments, doctrines: world.doctrines, today: world.elapsedStep });
 import { chambersOf, polityPhrase, rulerOf, rulerOfficeOf, templateFor, type GovernmentRules } from "./constitutions";
 import { grumbleAtOfficers } from "./grumbling";
+import { keepTheCourtRivalries } from "./court-rivalry";
 import { aimsFromState } from "./outlooks";
 import { sueForPeace } from "./sue-for-peace";
+import { ungarrisonedTowns } from "./ungarrisoned";
 import type { IdFactory } from "./ports";
 
 /**
@@ -541,7 +545,7 @@ function groupFact(world: WorldState, group: PoliticalGroup, what: "appeared" | 
   const where = group.polityId === null ? "" : ` in ${polityName(world, group.polityId)}`;
   const leader = group.leaderCharacterId === null ? undefined : world.characters.find((character) => character.id === group.leaderCharacterId);
   return {
-    localId: `group_${what}_${group.id}`.slice(0, 60),
+    localId: safeLocalId(`group_${what}_${group.id}`).slice(0, 60),
     kind: what === "appeared" ? "group_formed" : "group_dissolved",
     summary: what === "appeared"
       ? `${group.name}: ${GROUP_TYPE_IN_WORDS[group.type] ?? "a new party"} has formed${where}${leader === undefined ? "" : `, around ${leader.name}`}.`
@@ -727,7 +731,7 @@ function officesByNeed(world: WorldState, government: GovernmentRules, warfare: 
         successionRules: next.successionRules.some((rule) => rule.id === ruleId) ? next.successionRules : [...next.successionRules, { id: ruleId, label: "Named by the government", kind: "appointment", institutionId: null }],
       };
       facts.push({
-        localId: `office_need_${id}`.slice(0, 60), kind: "office_created",
+        localId: safeLocalId(`office_need_${id}`).slice(0, 60), kind: "office_created",
         summary: `${polityPhrase(polity.name).replace(/^the/u, "The")} has made the office of ${office.label}: ${why}.`,
         affectedRefs: [{ kind: "polity", id: polity.id }], visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 35,
       });
@@ -735,7 +739,10 @@ function officesByNeed(world: WorldState, government: GovernmentRules, warfare: 
     const ships = next.material.forces.filter((force) => force.polityId === polity.id && isNavalForce(force, warfare)).reduce((sum, force) => sum + menIn(force), 0);
     if (ships >= 20 && !has(/\b(fleet|fleets|navy|naval|admiral|nauarch)\b/iu)) make("admiral", `Admiral of the fleet of ${polityPhrase(polity.name)}`, 1, "it has ships and nobody to command them");
     const taken = next.map.provinces.filter((province) => province.controllerPolityId === polity.id && native.has(province.id) && native.get(province.id) !== polity.id).length;
-    if (taken >= 2 && !has(/\b(governor|governors|satrap|prefect|praefectus|praefect|proconsul)\b/iu)) make("governor", `Governor of the conquered lands of ${polityPhrase(polity.name)}`, Math.min(12, taken), "it holds conquered provinces and nobody to govern them");
+    // One post, named by the ruler to the ablest man he has (`fillAppointments`): a college with a seat count is never filled by rule, and a post made with no man to hold it would only stand empty till it lapsed.
+    const ruler = rulerOf(next, polity.id, government);
+    const hasAMan = next.characters.some((character) => character.alive && character.polityId === polity.id && character.id !== ruler?.id && currentAgeYears(character, toDay) >= 25);
+    if (taken >= 2 && hasAMan && !has(/\b(governor|governors|satrap|prefect|praefectus|praefect|proconsul)\b/iu)) make("governor", `Governor of the conquered lands of ${polityPhrase(polity.name)}`, 1, "it holds conquered provinces and nobody to govern them");
   }
 
   // Idle offices: remembered from the month they fell idle, and lapsing after three years.
@@ -763,7 +770,7 @@ function officesByNeed(world: WorldState, government: GovernmentRules, warfare: 
       society: { ...next.society, precedents: [...next.society.precedents, { polityId: office.polityId, kind: "emergency_office" as const, key: office.label.toLowerCase().slice(0, 160), atStep: toDay }].slice(-200) },
     };
     facts.push({
-      localId: `office_lapsed_${office.id}`.slice(0, 60), kind: "office_lapsed",
+      localId: safeLocalId(`office_lapsed_${office.id}`).slice(0, 60), kind: "office_lapsed",
       summary: `Nobody has held the office of ${office.label} in three years, and it has lapsed.`,
       affectedRefs: [{ kind: "polity", id: office.polityId }], visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 25,
     });
@@ -819,7 +826,7 @@ function customs(world: WorldState, toDay: number, ids: IdFactory, facts: FactPr
       }],
     };
     facts.push({
-      localId: `custom_${entry.polityId}_${entry.kind}`.slice(0, 60), kind: "custom_formed",
+      localId: safeLocalId(`custom_${entry.polityId}_${entry.kind}`).slice(0, 60), kind: "custom_formed",
       summary: `It has become the custom: ${label.charAt(0).toLowerCase()}${label.slice(1)}.`,
       affectedRefs: [{ kind: "polity", id: entry.polityId }], visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 45,
     });
@@ -835,6 +842,8 @@ export interface ReviewSocietyInput {
   readonly warfare?: ScenarioWarfareRules | undefined;
   readonly toDay: number;
   readonly ids: IdFactory;
+  /** The player's character, whose power must not write letters in his name unasked. */
+  readonly playerCharacterId?: string | null | undefined;
 }
 
 /** Once a month: remember, read every group, seat them, let the strong ones press, and write down what has become custom. */
@@ -886,13 +895,17 @@ export function reviewSociety(input: ReviewSocietyInput): { world: WorldState; f
   if (!opening) world = wantDepartments(world);
   // And an officer who runs his work badly is a mark for those who dislike him.
   if (!opening) world = grumbleAtOfficers(world, input.toDay);
+  // And at a king's court the friends who envy the favourite come to want him put out of the king's favour (`court-rivalry.ts`).
+  if (!opening) world = keepTheCourtRivalries(world);
   // What each power is trying to do, read again off the state it is in.
   if (!opening) world = { ...world, polityOutlooks: aimsFromState(world, input.toDay) };
   // And a power tired of its war asks for an end to it.
   if (!opening) {
-    const sued = sueForPeace(world, input.toDay, input.ids);
+    const player = input.playerCharacterId == null ? undefined : world.characters.find((character) => character.id === input.playerCharacterId);
+    const sued = sueForPeace(world, input.toDay, input.ids, player?.polityId ?? null);
     world = sued.world;
     facts.push(...sued.facts);
+    facts.push(...ungarrisonedTowns(world, player?.polityId ?? null, input.toDay));
   }
   world = { ...world, society: { ...world.society, lastReviewStep: input.toDay } };
   return { world, facts: opening ? [] : facts };

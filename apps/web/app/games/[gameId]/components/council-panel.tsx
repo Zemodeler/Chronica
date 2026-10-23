@@ -154,10 +154,10 @@ export function CouncilPanel({
               </select>
               <span>pass.</span>
             </div>
-            {order.length > 0 && <p className="quiet desk__draft" role="status">Draft saved. You can put this down and consult another document.</p>}
+            {order.length > 0 && <p className="quiet desk__draft" role="status">Not sent yet: Send gives the order. Letting time pass keeps this draft and sends nothing.</p>}
             <div className="tablet__actions">
               <button type="button" className="btn btn--quiet" disabled={busy || spentOut} onClick={() => void wait()}>
-                Let {TIME_SPANS.find((choice) => choice.days === (spanDays ?? 30))?.label ?? "a month"} pass
+                Let {TIME_SPANS.find((choice) => choice.days === (spanDays ?? 30))?.label ?? "a month"} pass{order.trim().length > 0 && ", without sending"}
               </button>
               <button type="submit" className="btn btn--primary" disabled={busy || spentOut || order.trim().length === 0}>
                 {busy ? "The world is moving…" : "Send"}
@@ -170,7 +170,8 @@ export function CouncilPanel({
         {!busy && (
           <section className="desk__report">
             {latest.length === 0 ? (
-              <p className="quiet">Nothing has been recorded yet. Give an order and the world will answer.</p>
+              // Until the record has been read, an empty list means "not yet", not "nothing": a reload showed the empty-state words for a quarter of a minute.
+              <p className="quiet">{view.dateLabel === undefined ? "Reading the record…" : "Nothing has been recorded yet. Give an order and the world will answer."}</p>
             ) : (
               <p className="desk__latest">
                 <span className="desk__kicker">Since your last order</span>{" "}

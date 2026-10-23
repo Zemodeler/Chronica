@@ -5,6 +5,7 @@ import {
 import { vetoingOffice } from "../tribunes";
 import { sovereignChamberOf } from "../constitutions";
 import { askAConvener, convenersByLikelihood } from "./asking";
+import { safeLocalId } from "../safe-local-id";
 
 /**
  * What a power-wide grant does not reach, however wide it is, and what the
@@ -172,7 +173,7 @@ export function whoseToGive(
         authority: { authorized: true, grant: null, standing: "lawful", reason: "Made, holding nothing." },
         instead: { ...delta, officeLabel: null, officeAuthorises: [] },
         fact: {
-          localId: `unseated_${delta.localId}`.slice(0, 60),
+          localId: safeLocalId(`unseated_${delta.localId}`).slice(0, 60),
           kind: "office_not_given",
           summary: `${delta.name} is no ${delta.officeLabel}: ${why}.`.slice(0, 600),
           affectedRefs: [{ kind: "character", id: actorId }],
@@ -265,7 +266,7 @@ function askOfQuestion(delta: Extract<WorldDelta, { op: "political_procedure_ope
 }
 
 /** What an intercession may name: the levy, the treasury, the chambers, the seats -- or all of his acts in the city. */
-type Interceded = "levy" | "spending" | "motion" | "appointment" | "all";
+type Interceded = "levy" | "spending" | "motion" | "appointment" | "tax" | "all";
 
 /**
  * A tribune's word standing against this act, or null.
@@ -305,6 +306,11 @@ function interceded(
       case "service_contract_open": return publicMoney(delta.employerAccountRef) ? "spending" : null;
       case "political_procedure_open": return delta.type === "nomination" ? null : "motion";
       case "office_seat_set": return "appointment";
+      // The tribute and the coin are acts of the magistrate's that his colleague (par potestas) or a tribune may stop.
+      case "tax_policy_set":
+      case "coinage_debase": return "tax";
+      case "loan_open": return publicMoney(delta.borrowerAccountRef) ? "spending" : null;
+      case "public_benefaction": return publicMoney(delta.payerAccountRef) ? "spending" : null;
       case "force_modify": {
         const force = world.material.forces.find((candidate) => candidate.id === id(delta.forceRef));
         return force?.locationId === city && COMMANDING.some((field) => delta[field] !== undefined) ? "all" : null;
@@ -321,9 +327,15 @@ function interceded(
     const tribuneId = entity.ownerRef.id;
     const tribune = world.characters.find((character) => character.id === tribuneId && character.alive);
     const office = seatsOf(tribuneId).find((held) => held.tribunician === true && held.polityId === polityId);
-    if (tribune === undefined || office === undefined) continue;
+    // Or a colleague of equal power: either consul may stop what the other does (par potestas, intercessio).
+    const colleagueOffice = tribuneId === actorId ? undefined : seatsOf(tribuneId).find((held) => magistracies.some((own) => own.id === held.id));
+    if (tribune === undefined || (office === undefined && colleagueOffice === undefined)) continue;
     const actor = world.characters.find((character) => character.id === actorId)?.name ?? "The magistrate";
-    return `${tribune.name}, as ${office.label}, has interceded against ${actor}${act === "all" ? "" : `'s ${act === "levy" ? "levy" : act === "spending" ? "spending of the public money" : act === "motion" ? "motions" : "appointments"}`}, and nobody in the city would act against a tribune's word while it stands.`;
+    const what = act === "all" ? "" : `'s ${act === "levy" ? "levy" : act === "spending" ? "spending of the public money" : act === "motion" ? "motions" : act === "tax" ? "tribute and coin" : "appointments"}`;
+    if (office === undefined) {
+      return `${tribune.name}, his colleague as ${colleagueOffice!.label}, has interceded against ${actor}${what}: what one of two of equal power does, the other may stop while his word stands.`;
+    }
+    return `${tribune.name}, as ${office.label}, has interceded against ${actor}${what}, and nobody in the city would act against a tribune's word while it stands.`;
   }
   return null;
 }
@@ -364,7 +376,7 @@ export function sacrilegeOf(
   return {
     world,
     fact: {
-      localId: `sacrilege_${victimId}`.slice(0, 60),
+      localId: safeLocalId(`sacrilege_${victimId}`).slice(0, 60),
       kind: "sacrilege",
       summary: `${victim.name} was killed while ${office.label}, whose person is sacrosanct. ${killer?.name ?? "His killer"} is accursed before the people.`,
       affectedRefs: [{ kind: "character", id: victimId }, { kind: "character", id: actorId }, { kind: "polity", id: office.polityId }],

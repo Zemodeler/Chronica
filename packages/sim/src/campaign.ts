@@ -18,7 +18,11 @@ import {
   type WarfareRules,
   type WorldState,
   forceLever,
+  applyForagingScar,
+  drawStock,
 } from "@chronica/shared";
+import { safeLocalId } from "./safe-local-id";
+import { shadowedForceIds } from "./a-shadowed-army-goes-hungry";
 
 /**
  * An army in the field, fed, sickening and resting, day by day.
@@ -57,6 +61,21 @@ import {
 export const CARRIED_DAYS = 30;
 /** Days on short rations before men begin to die of it. */
 export const STARVING_AFTER_DAYS = 10;
+/**
+ * What an army with no bread at all loses, of its men, for every day past the short rations: dead of hunger and the sickness that comes with it, or gone.
+ * A quarter of a per cent a day, seven and a half in the hundred a month. It was four in a thousand, twelve in the hundred a month, which is what Hannibal's
+ * army lost in the Alps and the marches to Italy in all (about 38,000 foot and 8,000 horse become 20,000 and 6,000 in some five months, battles, cold and
+ * hunger together: Polybius 3.35, 3.56), taken for hunger alone and for an army that was ordinarily fed until the day its bread ran out: a consular army of 17,500
+ * was found to lose 7,000 men to hunger in one campaigning year (docs/plans/war-plans.md, "War gaps closed"), nine in ten of what it lost.
+ */
+const STARVING_LOSS_PER_DAY = 0.0025;
+/**
+ * Of the men a starving army loses, the share that slips away rather than dies. Six in ten for men whose pay is owed them (the hired hosts of the Carthaginians, whose desertions
+ * and mutiny are Polybius 1.66-67); a quarter for an army that is paid, whose men are sworn (the Roman sacramentum, the allies' oath by the treaty) and whose desertion was a
+ * capital offence (Polybius 6.37): no Roman army of this age is said to have dissolved of it, though several went hungry (Agrigentum, 262; Polybius 1.17-18).
+ */
+const UNPAID_WALK_SHARE = 0.6;
+const SWORN_WALK_SHARE = 0.25;
 /**
  * Of the people of a province, how many soldiers' mouths its fields can feed
  * besides their own: one for every forty, now that a province counts its
@@ -121,6 +140,8 @@ export function takeMen(force: Force, lost: number, kind: "attrition_death" | "d
     return { ...group, fit: group.fit - share };
   });
   const gone = taken - left;
+  // The rounding may leave the last group too small to take its share: no men gone is no loss written (a count of 0 is a world that would not load, 2026-10-08).
+  if (gone <= 0) return force;
   return {
     ...force,
     personnel,
@@ -154,21 +175,30 @@ export function keepTheField(input: KeepTheFieldInput): { world: WorldState; fac
   // fight not yet decided (`engagements.ts`). His foragers are cut up, so the
   // country does not feed him; the enemy, who holds it, forages as he likes.
   const penned = new Set(world.engagements.filter((engagement) => engagement.status === "open").flatMap((engagement) => engagement.defenderForceIds));
+  // An army shadowed by another keeps its camp but not the country about it, nor the convoys from afar (a-shadowed-army-goes-hungry.ts).
+  const shadowed = shadowedForceIds(world, toDay);
   const provinceName = (id: string): string => world.map.provinces.find((province) => province.id === id)?.name ?? id;
   let provinceMaterial = world.material.provinceMaterial;
   const materialOf = (id: string): ProvinceMaterial | undefined => provinceMaterial.find((row) => row.provinceId === id);
+  // What an army living off a country takes of its grain is taken from the granary of its market too, a month's
+  // bread for the share of the people it ate: the price answers, and the next reckoning reads the food off what is left.
+  const foraged = new Map<string, number>();
   const strip = (id: string, food: number, productive: number, stability: number, damage: number): void => {
-    provinceMaterial = provinceMaterial.map((row) => (row.provinceId !== id ? row : {
+    const people = materialOf(id)?.population ?? 0;
+    if (food > 0 && people > 0) foraged.set(id, (foraged.get(id) ?? 0) + (food / 10_000) * people * 4);
+    // An army living off a country wears it down a little for every day it stays: a development hit and a scar
+    // in proportion to the burning (`applyForagingScar`), well below a battle's.
+    provinceMaterial = provinceMaterial.map((row) => (row.provinceId !== id ? row : applyForagingScar({
       ...row,
       foodSecurityBps: clampBps(row.foodSecurityBps - food),
       productiveCapacityBps: clampBps(row.productiveCapacityBps - productive),
       stabilityBps: clampBps(row.stabilityBps - stability),
       warDamageBps: clampBps(row.warDamageBps + damage),
-    }));
+    }, damage)));
   };
   const say = (kind: string, force: Force, summary: string, significance: number): void => {
     facts.push({
-      localId: `${kind}_${force.id}_${toDay}`.slice(0, 60),
+      localId: safeLocalId(`${kind}_${force.id}_${toDay}`).slice(0, 60),
       kind,
       summary: summary.slice(0, 600),
       affectedRefs: [{ kind: "force", id: force.id }, { kind: "province", id: force.locationId }],
@@ -192,16 +222,17 @@ export function keepTheField(input: KeepTheFieldInput): { world: WorldState; fac
     if (province === undefined || material === undefined) return undefined;
     const holder = province.controllerPolityId;
     const keptIn = penned.has(force.id);
+    const cutOff = keptIn || shadowed.has(force.id);
     // Penned, only what is inside his lines feeds him: a walled town of his
     // own side here, whose granaries he can reach, or a depot on the spot.
     const granary = province.settlements.some((settlement) => settlement.fortificationLevel >= 2 && friendly(force, settlement.controllerPolityId));
     if (friendly(force, holder) && material.foodSecurityBps >= FAMINE_BPS && (!keptIn || granary)) return "home";
     const depot = world.structures.some((structure) => structure.ownerPolityId === force.polityId && structure.supplyRadius > 0
-      && (structure.provinceId === force.locationId || (!keptIn && (kmBetween(world, structure.provinceId, force.locationId, structure.supplyRadius * REFERENCE_PROVINCE_KM) ?? Infinity) <= structure.supplyRadius * REFERENCE_PROVINCE_KM)));
+      && (structure.provinceId === force.locationId || (!cutOff && (kmBetween(world, structure.provinceId, force.locationId, structure.supplyRadius * REFERENCE_PROVINCE_KM) ?? Infinity) <= structure.supplyRadius * REFERENCE_PROVINCE_KM)));
     if (depot) return "depot";
     const ships = world.material.forces.filter((other) => other.locationId === force.locationId && other.id !== force.id && isNavalForce(other, input.warfare));
     if (ships.some((fleet) => fleet.polityId === force.polityId) && !ships.some((fleet) => hostile(force, fleet.polityId))) return "sea";
-    if (keptIn) return null;
+    if (cutOff) return null;
     if (material.population <= 0) return undefined;
     const feeds = material.population * FORAGE_MEN_PER_HEAD * (material.foodSecurityBps / 10_000) * (winter ? 0.5 : 1);
     return men <= feeds ? "forage" : null;
@@ -262,8 +293,8 @@ export function keepTheField(input: KeepTheFieldInput): { world: WorldState; fac
         cohesionBps: clampBps(force.cohesionBps - starvingDays * 60),
       };
       if (starvingDays > 0) {
-        const lost = Math.min(Math.floor(men * 0.3), Math.floor(men * starvingDays * 0.004));
-        const walked = Math.floor(lost * 0.6);
+        const lost = Math.min(Math.floor(men * 0.3), Math.floor(men * starvingDays * STARVING_LOSS_PER_DAY));
+        const walked = Math.floor(lost * (force.payArrearsPeriods > 0 ? UNPAID_WALK_SHARE : SWORN_WALK_SHARE));
         force = takeMen(takeMen(force, lost - walked, "attrition_death", toDay, "hunger"), walked, "desertion", toDay, "hunger");
         // Said when the hunger begins and once a month after: every tick of it
         // once filled a turn's record with the same army starving.
@@ -348,5 +379,7 @@ export function keepTheField(input: KeepTheFieldInput): { world: WorldState; fac
     return force;
   });
 
-  return { world: { ...world, material: { ...world.material, forces, provinceMaterial } }, facts };
+  let marketed: WorldState = { ...world, material: { ...world.material, forces, provinceMaterial } };
+  for (const [provinceId, units] of foraged) marketed = drawStock(marketed, provinceId, "grain", units).world;
+  return { world: marketed, facts };
 }

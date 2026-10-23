@@ -62,11 +62,13 @@ describe("the peace table", () => {
     const { world, tableId, held } = atTheTable();
     let state = world;
     let last = "";
-    for (let session = 0; session < 3; session += 1) {
+    for (let session = 0; session < 4; session += 1) {
       state = { ...state, instant: { ...state.instant, day: 200 + 60 * session }, elapsedStep: 200 + 60 * session };
-      const turn = putTerms(state, tableId, "syracuse", [{ kind: "submission" }, ...held.map((provinceId) => ({ kind: "cede" as const, provinceId }))], { ...context, now: state.instant }, offices, "hieron-ii");
+      // Carthage holds an army and two garrisons in Sicily now (`punic-wars-sicily.ts`) and can bear more than it could; the demand is what no war has cost it.
+      const turn = putTerms(state, tableId, "syracuse", [{ kind: "submission" }, { kind: "indemnity", amount: 50_000_000, periods: 12 }, ...held.map((provinceId) => ({ kind: "cede" as const, provinceId }))], { ...context, now: state.instant }, offices, "hieron-ii");
       state = turn.world;
       last = turn.answer;
+      if (last === "walked_out") break;
     }
     expect(last).toBe("walked_out");
     expect(state.peaceTables[0]!.status).toBe("walked_out");

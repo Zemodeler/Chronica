@@ -59,7 +59,8 @@ describe("the books, as the person holding them can read them", () => {
     const state = world();
     const ids = new Set([...state.material.accounts.map((account) => account.owner.id), ...state.material.accounts.map((account) => account.id)]);
     for (const account of readTheBooks(state, null).accounts) {
-      for (const id of ids) expect(account.label, `${account.label} contains ${id}`).not.toMatch(new RegExp(`(^|[^A-Za-z])${id}([^A-Za-z]|$)`));
+      // (A plain substring test first: the full pattern for every label and every id took the five seconds a test is given, once the houses and gentes had their accounts.)
+      for (const id of ids) if (account.label.includes(id)) expect(account.label, `${account.label} contains ${id}`).not.toMatch(new RegExp(`(^|[^A-Za-z])${id}([^A-Za-z]|$)`));
     }
   });
 

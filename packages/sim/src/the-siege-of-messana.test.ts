@@ -55,10 +55,11 @@ function run(state: WorldState, days: number): { world: WorldState; facts: FactP
 }
 
 describe("the siege of Messana", () => {
-  it("is refused to a power not at war with the city", () => {
-    const refused = applyDeltas(before(), [LAY], context);
-    expect(refused.rejected[0]?.reason).toMatch(/not at war/);
-    expect(refused.world.sieges).toHaveLength(0);
+  it("is laid by a power not yet at war with the city, and the siege is the war's beginning", () => {
+    const laid = applyDeltas(before(), [LAY], context);
+    expect(laid.rejected.map((rejection) => rejection.reason)).toEqual([]);
+    expect(laid.world.sieges).toHaveLength(1);
+    expect(laid.factProposals.some((fact) => fact.kind === "war_declared")).toBe(true);
   });
 
   it("is laid by an army standing before it, and said", () => {

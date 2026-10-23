@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { withTheConsularArmyOnceDrawn } from "./the-opening-as-it-was";
 import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import {
   ScenarioDefinitionSchema,
@@ -10,6 +11,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { createIdFactory } from "./ports";
+import { freshIds } from "./fresh-ids-test-kit";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
 import { holdElections } from "./elections";
@@ -44,20 +46,21 @@ const SICILY_NE = PUNIC_IDS.messana;
 
 const world = (): WorldState => WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
 
-const context = (actor: string, extra: Partial<ApplyContext> = {}): ApplyContext => ({
+// Ids the world acted on has not used: one seed reused made two money lines with one id, and the books lost the second (`ids.unique`).
+const context = (actor: string, state: WorldState, extra: Partial<ApplyContext> = {}): ApplyContext => ({
   now: { day: 0, minute: 540 },
   actorRef: { kind: "character", id: actor },
   offices: definition.government.offices,
   warfare: definition.warfare,
   terrains: definition.map.terrains,
-  ids: createIdFactory("unbound"),
+  ids: freshIds("unbound", state),
   gameId: "game-unbound",
   ...extra,
 });
 
 function act(actor: string, written: readonly unknown[], state: WorldState = world(), extra: Partial<ApplyContext> = {}) {
   const deltas = written.map((raw) => WorldDeltaSchema.parse(raw));
-  const result = applyDeltas(state, deltas, context(actor, extra));
+  const result = applyDeltas(state, deltas, context(actor, state, extra));
   expect(WorldStateSchema.safeParse(result.world).success).toBe(true);
   return result;
 }
@@ -187,13 +190,13 @@ describe("paying with what there is", () => {
   it("repays what the debtor has, when he has less than he offers", () => {
     const opened = act("gaius-genucius", [{
       op: "loan_open", localId: "debt", lenderKind: "foreign", lenderRef: null, borrowerAccountRef: "gaius-purse",
-      principal: 5_000, interestBps: 100, cadenceDays: 30, terms: "A banker's loan", collateralHoldingRef: null, reason: "He borrows.",
+      principal: 50_000, interestBps: 100, cadenceDays: 30, terms: "A banker's loan", collateralHoldingRef: null, reason: "He borrows.",
     }]);
-    const spent = act("gaius-genucius", [{ op: "money_transfer", fromAccountRef: "gaius-purse", toAccountRef: null, amount: 5_000, reason: "Spent." }], opened.world);
+    const spent = act("gaius-genucius", [{ op: "money_transfer", fromAccountRef: "gaius-purse", toAccountRef: null, amount: 50_000, reason: "Spent." }], opened.world);
     const loanId = spent.world.material.loans[0]!.id;
-    const repaid = act("gaius-genucius", [{ op: "loan_settle", loanRef: loanId, action: "repay", amount: 5_000, reason: "All of it." }], spent.world);
+    const repaid = act("gaius-genucius", [{ op: "loan_settle", loanRef: loanId, action: "repay", amount: 50_000, reason: "All of it." }], spent.world);
     expect(repaid.rejected).toEqual([]);
-    expect(repaid.world.material.loans[0]!.outstanding).toBe(5_000 - 1_200);
+    expect(repaid.world.material.loans[0]!.outstanding).toBe(50_000 - 36_000);
     expect(balance(repaid.world, "gaius-purse")).toBe(0);
   });
 });
@@ -215,7 +218,8 @@ describe("the side attacked has a plan too", () => {
       op: "force_modify", forceRef: "roman-field-army",
       battlePlan: { factor: "cohesion", magnitude: "meaningful", rationale: "Hold the line behind the stakes.", restsOn: ["numbers", "second_force"] },
       reason: "The consul sets the order of battle.",
-    }], facing());
+    // The case was struck on the consul's army of one legion and one ala (`the-opening-as-it-was.ts`).
+    }], withTheConsularArmyOnceDrawn(facing()));
     expect(planned.world.material.forces.find((force) => force.id === "roman-field-army")!.battlePlan?.factor).toBe("cohesion");
 
     const attacked = act("hanno-carthage", [{
@@ -252,13 +256,13 @@ describe("civil war", () => {
 describe("rising while in office", () => {
   it("lets a man who holds another office stand, and he lays it down when he wins", () => {
     let state = world();
-    // Quintus is made a quaestor, has made a name, and the consulship falls vacant.
-    state = act("gaius-genucius", [{ op: "office_seat_set", officeId: "roman-quaestor", officeLabel: "Quaestor", holderCharacterRef: "quintus-ogulnius", reason: "Named quaestor." }], state).world;
+    // Quintus is made a praetor (a quaestor does not leap to the consulship: the cursus keeps its order), has made a name, and the consulship falls vacant.
+    state = act("gaius-genucius", [{ op: "office_seat_set", officeId: "roman-praetor", officeLabel: "Praetor", holderCharacterRef: "quintus-ogulnius", reason: "Named praetor." }], state).world;
     // His seat in the Senate is not the office he rises from.
-    const quaestorship = state.material.officeSeats.find((seat) => seat.holderCharacterId === "quintus-ogulnius" && seat.officeId.includes("quaestor"))!.officeId;
+    const quaestorship = state.material.officeSeats.find((seat) => seat.holderCharacterId === "quintus-ogulnius" && seat.officeId.includes("praetor"))!.officeId;
     state = {
       ...state,
-      characters: state.characters.map((character) => (character.id === "quintus-ogulnius" ? { ...character, prestigeBps: 9_000 } : character.id === "manius-curius" ? { ...character, prestigeBps: 6_000 } : character)),
+      characters: state.characters.map((character) => (character.id === "quintus-ogulnius" ? { ...character, prestigeBps: 9_000, ageYearsAtStart: 45 } : character.id === "manius-curius" ? { ...character, prestigeBps: 6_000 } : character)),
       material: {
         ...state.material,
         officeSeats: state.material.officeSeats.map((seat) => (seat.id === "roman-consul:seat:1" ? { ...seat, holderCharacterId: null, status: "vacant" as const, vacancyCause: "term_expired" as const, termExpiresAtStep: 0 } : seat)),
@@ -406,7 +410,8 @@ describe("the order cannot move another power's men", () => {
 
   it("is not obeyed when it is the ruler's order", () => {
     const delta = WorldDeltaSchema.parse(TURN_BACK);
-    const result = applyDeltas(world(), [delta], context("gaius-genucius", { actsForTheWorld: true, orderDeltas: new Set([delta]) }));
+    const state = world();
+    const result = applyDeltas(state, [delta], context("gaius-genucius", state, { actsForTheWorld: true, orderDeltas: new Set([delta]) }));
     expect(result.rejected[0]?.kind).toBe("ignored");
   });
 
@@ -414,13 +419,15 @@ describe("the order cannot move another power's men", () => {
     const delta = WorldDeltaSchema.parse({
       op: "agreement_open", localId: "their_pact", kind: "alliance", polityId: "carthage", otherPolityId: "syracuse", terms: "Against Rome.", reason: "Rome decides it.",
     });
-    const result = applyDeltas(world(), [delta], context("gaius-genucius", { actsForTheWorld: true, orderDeltas: new Set([delta]) }));
+    const state = world();
+    const result = applyDeltas(state, [delta], context("gaius-genucius", state, { actsForTheWorld: true, orderDeltas: new Set([delta]) }));
     expect(result.rejected[0]?.kind).toBe("ignored");
   });
 
   it("is carried out when it is the world moving on its own", () => {
     const delta = WorldDeltaSchema.parse({ ...TURN_BACK, locationId: undefined, name: "The Punic fleet" });
-    const result = applyDeltas(world(), [delta], context("gaius-genucius", { actsForTheWorld: true, orderDeltas: new Set() }));
+    const state = world();
+    const result = applyDeltas(state, [delta], context("gaius-genucius", state, { actsForTheWorld: true, orderDeltas: new Set() }));
     expect(result.rejected).toEqual([]);
     expect(result.breaches).toEqual([]);
   });

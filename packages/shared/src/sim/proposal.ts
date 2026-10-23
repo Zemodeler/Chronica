@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { EntityIdSchema, MaybeIdSchema } from "../material-state";
-import { FactDiscoveryStateSchema, FactVisibilitySchema } from "../world/facts";
+import { FactDiscoveryStateSchema, FactStorySchema, FactVisibilitySchema } from "../world/facts";
 import { OrderPartyRefSchema } from "../world/party-ref";
 import { WatchPredicateSchema } from "../world/watch";
 import { AmbitionKindSchema } from "../characters/character";
@@ -50,6 +50,8 @@ export const FactProposalSchema = z.object({
   knownToRefs: z.array(OrderPartyRefSchema).max(16).default([]),
   /** The thread this belongs to, when it belongs to one: an existing storyline id or a "local:" handle opened in this answer. */
   storylineRef: MaybeRefSchema.default(null),
+  /** Who did what, why, at what cost, and how the court knows -- seeds the historian tells it from. Null when the summary says it all. */
+  story: FactStorySchema.nullable().default(null),
 });
 export type FactProposal = z.infer<typeof FactProposalSchema>;
 /** The same, before defaults: what the engine itself writes when it records a consequence the model did not author. */
@@ -273,6 +275,8 @@ export const OrchestratorOutputSchema = ProposalSchema.extend({
         spend: z.object({ payerAccountRef: RefSchema, cap: z.number().positive() }).strict().nullable().default(null),
         factLocalIds: z.array(z.string().trim().min(1).max(80)).max(6).default([]),
         whyNot: z.string().trim().min(1).max(300).nullable().default(null),
+        /** "declare" where the player said he does it ("I declare war"); "propose" where he moves it ("propose war", "ask the Senate"). Absent where the words are neither. */
+        stance: z.enum(["propose", "declare"]).optional(),
       }).strict()).max(10).default([]),
     })
     .strict(),
@@ -337,6 +341,8 @@ export const PlanProposalSchema = z
         /** What it has to wait for, if anything. */
         when: WatchPredicateSchema.nullable().default(null),
         afterConditionDays: z.number().int().positive().max(730).optional(),
+        /** Already-approved project whose completion fulfils this step; never an instruction to create work. */
+        routineProjectRef: RefSchema.nullable().optional(),
       }).strict())
       .min(1)
       .max(4),

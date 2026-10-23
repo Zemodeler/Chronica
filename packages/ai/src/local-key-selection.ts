@@ -4,13 +4,14 @@ import { join } from "node:path";
 export type LocalAiProvider = "openai" | "anthropic" | "codex";
 
 /**
- * How hard the Codex responder thinks. Medium is the default: on the
- * 2026-10-02 play-test low wrote unreadable JSON five or six times a run, and
- * high took twenty-three minutes a turn.
+ * How hard the Codex responder thinks. Low matches the API's simulation
+ * calls. The old low-effort JSON failures came through the string envelope
+ * after rejected schemas; the corrected provider grammar avoids that path.
+ * Explicit account selections and environment overrides still take precedence.
  */
 export type LocalAiEffort = "low" | "medium" | "high";
 export const LOCAL_AI_EFFORTS: readonly LocalAiEffort[] = ["low", "medium", "high"];
-export const DEFAULT_LOCAL_AI_EFFORT: LocalAiEffort = "medium";
+export const DEFAULT_LOCAL_AI_EFFORT: LocalAiEffort = "low";
 
 export function isLocalAiEffort(value: unknown): value is LocalAiEffort {
   return value === "low" || value === "medium" || value === "high";
@@ -117,7 +118,7 @@ export function getSelectedLocalAiModel(provider: LocalAiProvider): string | nul
   return configuration.activeModel;
 }
 
-/** The Codex responder's effort: the account screen's choice, else `CHRONICA_HAND_EFFORT`, else medium. */
+/** The Codex responder's effort: the account screen's choice, else `CHRONICA_HAND_EFFORT`, else low. */
 export function getSelectedLocalAiEffort(): LocalAiEffort {
   const configuration = getLocalAiProviderConfiguration();
   return configuration.available ? configuration.activeEffort : environmentEffort() ?? DEFAULT_LOCAL_AI_EFFORT;

@@ -35,7 +35,10 @@ export function describeDiplomaticBusiness(world: WorldState, characterId: strin
     lines.push(`  - business [${entry.id}], issueKey "${entry.issueKey}"; our negotiator [${owner}]. Objective: ${entry.objective}. Stage: ${entry.stage}. Question: ${entry.question}.`);
     const agreed = entry.messages.filter((message) => message.answer === "accepted").at(-1);
     if (agreed !== undefined) lines.push(`    Already agreed in correspondence: ${agreed.terms} ${agreed.answerText ?? ""}${agreed.agreementId == null ? " (correspondence only; no binding treaty recorded)" : ` (agreement [${agreed.agreementId}])`}`);
-    for (const message of entry.messages.slice(-3)) {
+    // Settled business is context, not another live negotiation. Its accepted
+    // terms above and latest answer suffice; active bargaining keeps history.
+    const history = entry.stage === "agreed" ? entry.messages.slice(-1) : entry.messages.slice(-3);
+    for (const message of history) {
       const position = message.negotiation?.positions.map((row) => `${row.issue}: ${row.value}`).join("; ") ?? message.terms;
       lines.push(`    Letter [${message.id}] on day ${message.sentAtStep}, ${message.fromCharacterId === characterId ? "sent by them" : "received"}: ${position}. ${message.status === "awaiting_reply" ? `Awaiting reply${message.deliveredOnDay !== undefined && message.deliveredOnDay !== null && message.deliveredOnDay > world.instant.day ? `; on the road until day ${message.deliveredOnDay}` : ""}${message.replyDueByStep === null ? "" : `; due day ${message.replyDueByStep}${message.deliveredOnDay === undefined || message.deliveredOnDay === null || message.deliveredOnDay === message.sentAtStep ? "" : ` (the days allowed run from its arrival on day ${message.deliveredOnDay})`}`}.` : `${message.answer}: ${message.answerText ?? ""}`}`);
     }

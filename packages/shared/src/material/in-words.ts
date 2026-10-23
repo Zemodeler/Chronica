@@ -73,6 +73,8 @@ export function payInWords(
    * day that stops is not a day he should learn about from the desertions.
    */
   fromTheirOwnChest = false,
+  /** What the chest actually holds, when it is the one the wages come from: "empty" is only said of a chest that is. */
+  chestBalance: number | null = null,
 ): string {
   if (obligation === undefined) return "Nobody has undertaken to pay them";
   if (obligation.arrears <= 0 && arrearsPeriods <= 0) {
@@ -84,7 +86,8 @@ export function payInWords(
     : `${periods === 1 ? "One period" : `${periods} periods`} of pay owed`;
   // Said plainly, because it is the commander's own doing and the remedy is
   // his: the chest is empty, and filling it means taking something.
-  return fromTheirOwnChest ? `${owed}, and their chest is empty` : owed;
+  if (!fromTheirOwnChest) return owed;
+  return chestBalance !== null && chestBalance > 0 ? `${owed}, though their chest still holds ${chestBalance.toLocaleString("en-GB")} that has not reached them` : `${owed}, and their chest is empty`;
 }
 
 /**

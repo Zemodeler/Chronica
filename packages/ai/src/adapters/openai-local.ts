@@ -11,8 +11,9 @@ import type {
 } from "../adapter";
 import { parseToolArguments } from "../adapter";
 import { getConfiguredApiKey, getSelectedLocalAiModel } from "../local-key-selection";
+import { answerGameRequest, gameEffortFor, gameInstructions, gameSchemaFor } from "../game-request";
 import { watchForDegeneration } from "../degeneration";
-import { effortOverrideFor, modelOverrideFor } from "../operation-overrides";
+import { modelOverrideFor } from "../operation-overrides";
 import { AiTimeoutError, aiMaxMs, aiMaxRetries, aiRequestTimeoutMs, stallWatchdog } from "../timeouts";
 
 const JSON_MODE_OPERATIONS = new Set<AiOperation>([
@@ -32,19 +33,10 @@ const JSON_MODE_OPERATIONS = new Set<AiOperation>([
   "reconcile_facts",
   "repair_deltas",
   "write_mechanic",
+  "voice_letters",
 ]);
 
-/**
- * Operations whose thinking is cheap, kept separate from the format decision above.
- *
- * These two were one list, which tied *how the answer is shaped* to *how hard
- * the model thinks about it*. The consequence was invisible and expensive: the
- * Chronicle was not in the JSON set, so it also got no reasoning ceiling, and
- * ran at the model's default effort -- the most deliberative setting in the
- * whole turn, spent on the one call whose output is a schema. Separating them
- * lets the historian keep the deliberation its prose depends on while the two
- * structured calls stay cheap.
- */
+/** Default low-effort operation table; actual effort comes from the shared game contract. */
 const LOW_EFFORT_OPERATIONS = new Set<AiOperation>([
   "enrich_npc_profile",
   "resolve_contact",
@@ -54,31 +46,12 @@ const LOW_EFFORT_OPERATIONS = new Set<AiOperation>([
   "confirm_character",
   "simulate_orchestrate",
   "simulate_cognition",
+  "compose_chronicle",
   "reconcile_facts",
   "repair_deltas",
   "write_mechanic",
+  "voice_letters",
 ]);
-
-type ReasoningEffort = "low" | "medium" | "high";
-
-/**
- * What the historian is allowed to spend on thinking.
- *
- * Left unset it is the provider's default, which is what the prose was written
- * against. It is an environment knob rather than a constant because in local
- * development every operation resolves to the same model -- the selected-model
- * override below bypasses the tier table entirely -- so the Chronicle runs on
- * the reasoning model rather than the cheap one, and that is worth being able
- * to dial without a code change.
- */
-const CHRONICLE_EFFORT = process.env.CHRONICA_AI_CHRONICLE_EFFORT?.trim() as ReasoningEffort | undefined;
-
-function reasoningEffortFor(operation: AiOperation): ReasoningEffort | undefined {
-  const override = effortOverrideFor(operation);
-  if (override !== undefined) return override;
-  if (operation === "compose_chronicle") return CHRONICLE_EFFORT;
-  return LOW_EFFORT_OPERATIONS.has(operation) ? "low" : undefined;
-}
 
 // Model assignments per tier. Override via env vars if needed.
 const TIER_MODELS: Record<AiTier, string> = {
@@ -121,6 +94,7 @@ const MAX_COMPLETION_TOKENS: Partial<Record<AiOperation, number>> = {
   compose_chronicle: 4_000,
   repair_deltas: 4_000,
   write_mechanic: 2_000,
+  voice_letters: 2_000,
 };
 
 // Responses-API budget for the tool loop: one step, not the whole turn. Set
@@ -257,34 +231,33 @@ export function createOpenAiLocalAdapter(): AiAdapter {
     async call(operation, systemPrompt, userMessage): Promise<AiCallResult> {
       const model = resolveModel(operation);
       const isJsonMode = JSON_MODE_OPERATIONS.has(operation);
-      const effort = reasoningEffortFor(operation);
+      const effort = gameEffortFor(operation);
+      const schema = gameSchemaFor(operation);
+      const instructions = gameInstructions(systemPrompt, schema !== undefined);
       const baseMaxCompletionTokens = MAX_COMPLETION_TOKENS[operation];
 
       // Streamed so the deadline can be a stall rather than a total. A
       // reasoning model is silent while it thinks and then answers steadily,
       // so "took longer than thirty seconds" and "stopped answering" are
       // entirely different events, and only the second is worth abandoning.
-      const attempt = async (maxCompletionTokens: number | undefined) => {
+      const attempt = async (asked: string, maxCompletionTokens: number | undefined) => {
         const watchdog = stallWatchdog(aiRequestTimeoutMs());
         const stream = await getClient().chat.completions.create({
           model,
           stream: true,
           stream_options: { include_usage: true },
           messages: [
-            { role: "system", content: isJsonMode ? mentionsJson(systemPrompt, userMessage) : systemPrompt },
-            { role: "user", content: userMessage },
+            { role: "system", content: isJsonMode ? mentionsJson(instructions, asked) : systemPrompt },
+            { role: "user", content: asked },
           ],
-          ...(isJsonMode ? { response_format: { type: "json_object" as const } } : {}),
+          ...(schema !== undefined ? { response_format: { type: "json_schema" as const, json_schema: { name: operation, strict: true, schema } } } : isJsonMode ? { response_format: { type: "json_object" as const } } : {}),
           ...(maxCompletionTokens !== undefined ? { max_completion_tokens: maxCompletionTokens } : {}),
-          // These are short, deterministic, schema-bound tasks (JSON in, JSON
-          // out) that never need deep deliberation. On a reasoning model, an
-          // unconstrained effort can spend the entire max_completion_tokens
-          // budget on hidden reasoning tokens and leave nothing for the
-          // visible answer -- message.content comes back "" even though
-          // completion_tokens usage is nonzero. Left unset (undefined) where
-          // prose quality benefits from the model's default effort.
-          ...(effort === undefined ? {} : { reasoning_effort: effort }),
-        }, { signal: watchdog.signal, timeout: aiMaxMs() });
+          reasoning_effort: effort,
+        }, { signal: watchdog.signal, timeout: aiMaxMs() }).catch((error: unknown) => {
+          watchdog.done();
+          if (watchdog.signal.aborted) throw new AiTimeoutError(operation, aiRequestTimeoutMs());
+          throw error;
+        });
 
         let content = "";
         let finishReason: string | null = null;
@@ -330,25 +303,27 @@ export function createOpenAiLocalAdapter(): AiAdapter {
         return { content, usage };
       };
 
-      let { content, usage } = await attempt(baseMaxCompletionTokens);
-      // Defensive retry: even at low reasoning effort, a sufficiently complex
-      // prompt can still exhaust the budget before emitting content. Retrying
-      // once with a larger ceiling is far cheaper than silently dropping the
-      // player's order (the caller has no other signal that this happened --
-      // it just sees an unparseable empty string).
-      if (content === "" && baseMaxCompletionTokens !== undefined) {
-        ({ content, usage } = await attempt(baseMaxCompletionTokens * 2));
-      }
+      let inputTokens = 0;
+      let outputTokens = 0;
+      let cacheReadTokens = 0;
+      let attempts = 0;
+      const send = async (asked: string) => {
+        const result = await attempt(asked, baseMaxCompletionTokens === undefined ? undefined : baseMaxCompletionTokens * (++attempts));
+        const cached = result.usage?.prompt_tokens_details?.cached_tokens ?? 0;
+        inputTokens += Math.max(0, (result.usage?.prompt_tokens ?? 0) - cached);
+        outputTokens += result.usage?.completion_tokens ?? 0;
+        cacheReadTokens += cached;
+        return result.content;
+      };
+      const content = isJsonMode ? await answerGameRequest(operation, userMessage, send) : await send(userMessage);
       // OpenAI reports prompt_tokens as the total prompt size, including tokens
       // read from its prompt cache.  The billing model stores mutually exclusive
       // categories, so remove cached tokens before recording regular input.
-      const cacheReadTokens = usage?.prompt_tokens_details?.cached_tokens ?? 0;
-      const inputTokens = Math.max(0, (usage?.prompt_tokens ?? 0) - cacheReadTokens);
       return {
         content,
         model,
         inputTokens,
-        outputTokens: usage?.completion_tokens ?? 0,
+        outputTokens,
         cacheReadTokens,
         cacheWriteTokens: 0,
       };

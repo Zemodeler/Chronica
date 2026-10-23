@@ -200,23 +200,37 @@ describe("a man in the ranks", () => {
     expect(him?.why).toContain("it touches a comrade in the same army");
   });
 
+  // A man of the people, who sits in no council: a senator does not stand in the ranks (`force_membership_set`, batch 3).
+  const aCommoner = (world: WorldState): string => world.characters.find((character) => character.polityId === "rome" && character.alive && character.gender === "male" && character.officeId === null
+    && !world.material.officeSeats.some((seat) => seat.holderCharacterId === character.id && seat.status === "held") && character.ageYearsAtStart < 45)!.id;
+
   it("lets a free man enlist without anybody's leave", () => {
+    const world = opening();
+    const man = aCommoner(world);
+    const enlist: WorldDelta = { op: "force_membership_set", characterRef: man, forceRef: "roman-field-army", change: "enlist", reason: "The man takes service." };
+    const result = applyDeltas(world, [enlist], context(man));
+    expect(result.rejected).toEqual([]);
+    expect(result.breaches).toEqual([]);
+    expect(forceOf(result.world, "roman-field-army").memberCharacterIds).toContain(man);
+  });
+
+  it("does not let a senator stand in the ranks: he goes as a tribune or a legate", () => {
     const world = opening();
     const enlist: WorldDelta = { op: "force_membership_set", characterRef: "manius-curius", forceRef: "roman-field-army", change: "enlist", reason: "The old man takes service again." };
     const result = applyDeltas(world, [enlist], context("manius-curius"));
-    expect(result.rejected).toEqual([]);
-    expect(result.breaches).toEqual([]);
-    expect(forceOf(result.world, "roman-field-army").memberCharacterIds).toContain("manius-curius");
+    expect(result.rejected[0]?.reason).toMatch(/a senator does not stand in the ranks/);
+    expect(forceOf(result.world, "roman-field-army").memberCharacterIds).not.toContain("manius-curius");
   });
 
   it("records a desertion as the deserter's breach, marks him, and tells his side", () => {
-    const enlisted = applyDeltas(opening(), [{ op: "force_membership_set", characterRef: "manius-curius", forceRef: "roman-field-army", change: "enlist", reason: "He takes service." }], context("manius-curius")).world;
-    const desert: WorldDelta = { op: "force_membership_set", characterRef: "manius-curius", forceRef: "roman-field-army", change: "desert", reason: "He goes home to his farm." };
-    const result = applyDeltas(enlisted, [desert], context("manius-curius"));
+    const man = aCommoner(opening());
+    const enlisted = applyDeltas(opening(), [{ op: "force_membership_set", characterRef: man, forceRef: "roman-field-army", change: "enlist", reason: "He takes service." }], context(man)).world;
+    const desert: WorldDelta = { op: "force_membership_set", characterRef: man, forceRef: "roman-field-army", change: "desert", reason: "He goes home to his farm." };
+    const result = applyDeltas(enlisted, [desert], context(man));
     expect(result.rejected).toEqual([]);
     expect(result.breaches).toHaveLength(1);
-    expect(forceOf(result.world, "roman-field-army").memberCharacterIds).not.toContain("manius-curius");
-    expect(result.world.characters.find((character) => character.id === "manius-curius")?.disqualifyingStatuses).toContain("deserter");
+    expect(forceOf(result.world, "roman-field-army").memberCharacterIds).not.toContain(man);
+    expect(result.world.characters.find((character) => character.id === man)?.disqualifyingStatuses).toContain("deserter");
     // His side hears of it: the fact names Rome, so a Roman can know it.
     const deserted = result.factProposals.find((fact) => fact.kind === "desertion");
     expect(deserted?.affectedRefs).toContainEqual({ kind: "polity", id: "rome" });

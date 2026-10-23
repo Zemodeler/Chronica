@@ -143,15 +143,15 @@ describe("orders about things that are not war", () => {
   it("borrows from a foreign banker nobody in this world has to be", () => {
     const result = order([{
       op: "loan_open", localId: "ptolemaic_credit", borrowerAccountRef: "rome-treasury",
-      lenderKind: "foreign", lenderRef: null, principal: 4_000, interestBps: 800,
+      lenderKind: "foreign", lenderRef: null, principal: 400_000, interestBps: 800,
       cadenceDays: 90, terms: "Credit advanced at Alexandria against the next tributum",
       collateralHoldingRef: null, reason: "The war chest is short and Egypt is rich.",
     }]);
 
     expect(result.engineRefusals).toEqual([]);
-    expect(result.world.material.loans.at(-1)!.outstanding).toBe(4_000);
+    expect(result.world.material.loans.at(-1)!.outstanding).toBe(400_000);
     // Money from outside the world really does come from outside it.
-    expect(result.world.material.accounts.find((a) => a.id === "rome-treasury")!.balance).toBe(13_000);
+    expect(result.world.material.accounts.find((a) => a.id === "rome-treasury")!.balance).toBe(3_190_000);
   });
 });
 

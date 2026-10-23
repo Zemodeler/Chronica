@@ -7,7 +7,6 @@ import {
   WorldStateSchema,
   ensureProvinceMaterial,
   orderPartStatus,
-  type Audit,
   type Commitment,
   type Force,
   type OrderPart,
@@ -144,7 +143,7 @@ describe("the report's probes, held to what they should have been", () => {
       audits: [{
         id: "audit-1", orderedByCharacterId: CONSUL, auditorCharacterId: HIERON, scope: { kind: "household", id: CONSUL },
         departmentId: null, startedAtStep: 0, dueAtStep: 5, status: "under_way", allegationPressureId: null,
-      } as Audit],
+      }],
     };
     const done = resolveAudits(dead, 6);
     expect(done.world.audits[0]!.status).toBe("interrupted");

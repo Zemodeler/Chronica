@@ -31,7 +31,6 @@ function createWindowStore(scope: string) {
 export interface WindowReference {
   readonly content: ReactNode;
   readonly open: (key: string) => void;
-  readonly navigation?: ReactNode;
 }
 const Reference = createContext<WindowReference | null>(null);
 

@@ -71,6 +71,13 @@ function tighten(node: unknown): unknown {
       ? Object.fromEntries(Object.entries(value as Json).map(([name, child]) => [name, tighten(child)]))
       : tighten(value);
   }
+  // The ChatGPT/Codex validator rejects siblings beside $ref, even a
+  // description. Preserve the field's explanation on a single-branch anyOf
+  // instead; the reference itself must stand alone.
+  if (typeof out.$ref === "string" && Object.keys(out).length > 1) {
+    const { $ref, ...annotations } = out;
+    return { ...annotations, anyOf: [{ $ref }] };
+  }
   if (out.type === "object") {
     const properties = isObject(out.properties) ? out.properties : undefined;
     if (properties === undefined && isObject(out.additionalProperties)) {

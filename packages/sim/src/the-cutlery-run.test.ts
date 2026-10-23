@@ -150,7 +150,7 @@ describe("the second run", () => {
     const world = opening();
     const byTheWorld = apply([spectacle], { actsForTheWorld: true, orderDeltas: new Set(), playerCharacterId: LEPTINES.id }, world);
     expect(byTheWorld.rejected).toHaveLength(1);
-    expect(byTheWorld.world.material.accounts.find((account) => account.id === "leptines-purse")!.balance).toBe(1_400);
+    expect(byTheWorld.world.material.accounts.find((account) => account.id === "leptines-purse")!.balance).toBe(42_000);
     const parsed = WorldDeltaSchema.parse(spectacle);
     const byHim = applyDeltas(world, [parsed], context({ actsForTheWorld: true, orderDeltas: new Set([parsed]), playerCharacterId: LEPTINES.id }));
     expect(byHim.rejected).toEqual([]);

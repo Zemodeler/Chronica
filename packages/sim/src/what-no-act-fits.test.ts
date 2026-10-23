@@ -28,6 +28,8 @@ const as = (): ApplyContext => ({
   terrains: definition.map.terrains, ids: createIdFactory("no-act-fits"), gameId: "game-1",
 });
 const balance = (world: WorldState, accountId: string) => world.material.accounts.find((account) => account.id === accountId)!.balance;
+/** Leptines with this much in his purse: at the ancient accounts' scale a stall costs more than he keeps, and a deposit more than he would part with. */
+const withPurse = (world: WorldState, amount: number): WorldState => ({ ...world, material: { ...world.material, accounts: world.material.accounts.map((account) => (account.id === "leptines-purse" ? { ...account, balance: amount } : account)) } });
 const STALL_EFFECTS = [{ quantity: "income" as const, direction: "raise" as const, band: "slight" as const, scope: "here" as const }];
 const stall = (extra: Record<string, unknown> = {}) => WorldDeltaSchema.parse({
   op: "generic_entity_create", localId: "stall", kind: "stall", label: "A cutler's stall", ownerRef: LEPTINES,
@@ -36,9 +38,10 @@ const stall = (extra: Record<string, unknown> = {}) => WorldDeltaSchema.parse({
 
 describe("an arrangement that pays has a price", () => {
   it("costs a venture's months of what it clears, and is kept from his own purse", () => {
-    const world = opening();
-    const clears = arrangementNetIncome(world, { provinceId: SYRACUSE, ownerRef: LEPTINES, effects: STALL_EFFECTS, upkeepBand: "slight" });
+    const clears = arrangementNetIncome(opening(), { provinceId: SYRACUSE, ownerRef: LEPTINES, effects: STALL_EFFECTS, upkeepBand: "slight" });
     expect(clears).toBeGreaterThan(0);
+    // Half the price: enough for the deposit, not for the whole.
+    const world = withPurse(opening(), Math.round((clears * VENTURE_PRICE_MONTHS) / 2));
     const result = applyDeltas(world, [stall()], as());
     expect(result.rejected).toEqual([]);
     const price = clears * VENTURE_PRICE_MONTHS;
@@ -57,7 +60,7 @@ describe("an arrangement that pays has a price", () => {
   });
 
   it("charges an update for what it adds, and nothing for a new name", () => {
-    const free = applyDeltas(opening(), [stall({ effects: [] })], as()).world;
+    const free = applyDeltas(withPurse(opening(), 2_000_000), [stall({ effects: [] })], as()).world;
     const id = free.genericEntities.find((entity) => entity.label === "A cutler's stall")!.id;
     const renamed = applyDeltas(free, [WorldDeltaSchema.parse({ op: "generic_entity_update", entityRef: id, label: "Leptines' knives", reason: "A sign." })], as());
     expect(balance(renamed.world, "leptines-purse")).toBe(balance(free, "leptines-purse"));
@@ -112,7 +115,7 @@ describe("an act the engine cannot read is kept, not dropped", () => {
   it("keeps what cannot be a venture or an estate as an arrangement", async () => {
     const pension = { ...FIGURE, kind: "pension", label: "A patron's allowance" };
     const port = scripted([answer([pension]), JSON.stringify({ deltas: [pension] })]);
-    const result = await runSimulationBurst(burst(port, "I take an allowance from a patron."));
+    const result = await runSimulationBurst(burst(port, "I take an allowance from a patron.", withPurse(opening(), 2_000_000)));
     expect(result.world.genericEntities.find((entity) => entity.label === "A patron's allowance")?.kind).toBe("business");
   });
 

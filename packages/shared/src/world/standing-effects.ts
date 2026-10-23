@@ -23,6 +23,9 @@ import { EntityIdSchema } from "../material-state";
  * - `stability`, `food_security`, `productive_capacity`: where the province
  *   settles back to. Levels, not bumps: a temple does not make a province
  *   calmer every month forever, it makes it a calmer place.
+ * - `development`: how developed a province can become, and how fast a war's
+ *   scar on it fades -- roads, harbours, drainage, a market-place, and the
+ *   works of rebuilding after a war (`ProvinceTargets.developmentShiftBps`).
  * - `manpower`: how many of its people can be called up.
  * - `legitimacy`: how the owning power is regarded, while the thing stands.
  * - `income`: money into its owner's account each month, scaled to what the
@@ -36,6 +39,7 @@ export const StandingEffectQuantitySchema = z.enum([
   "stability",
   "food_security",
   "productive_capacity",
+  "development",
   "manpower",
   "legitimacy",
   "income",
@@ -88,6 +92,8 @@ const SIGN = { raise: 1, lower: -1 } as const;
 
 /** Where a province settles back to, shifted by this many basis points. */
 const BASELINE_SHIFT_BPS: Record<EffectBand, number> = { slight: 500, marked: 1_200, great: 2_500 };
+/** Of its potential, how far a made thing lifts the development a province can reach. */
+const DEVELOPMENT_SHIFT_BPS: Record<EffectBand, number> = { slight: 300, marked: 700, great: 1_500 };
 /** Share of the province's people who can be called up, as a multiplier on the ordinary share. */
 const MANPOWER_SHIFT: Record<EffectBand, number> = { slight: 0.1, marked: 0.25, great: 0.5 };
 /** Once, while it stands, on the owner's legitimacy. */
@@ -106,6 +112,7 @@ const CONVERSION_BPS: Record<EffectBand, number> = { slight: 100, marked: 250, g
 
 export const effectWorth = {
   baselineShiftBps: (effect: StandingEffect): number => SIGN[effect.direction] * BASELINE_SHIFT_BPS[effect.band],
+  developmentShiftBps: (effect: StandingEffect): number => SIGN[effect.direction] * DEVELOPMENT_SHIFT_BPS[effect.band],
   manpowerShift: (effect: StandingEffect): number => SIGN[effect.direction] * MANPOWER_SHIFT[effect.band],
   legitimacyBps: (effect: StandingEffect): number => SIGN[effect.direction] * LEGITIMACY_BPS[effect.band],
   incomeShare: (effect: StandingEffect): number => SIGN[effect.direction] * INCOME_SHARE[effect.band],
@@ -130,7 +137,7 @@ export const DEFAULT_STRUCTURE_EFFECTS: Record<string, readonly StandingEffect[]
   depot: [{ quantity: "supply", direction: "raise", band: "marked", scope: "here" }],
   academy_building: [{ quantity: "recruit_skill", direction: "raise", band: "marked", scope: "here" }],
   temple: [{ quantity: "stability", direction: "raise", band: "slight", scope: "here" }],
-  market: [{ quantity: "income", direction: "raise", band: "slight", scope: "here" }],
+  market: [{ quantity: "income", direction: "raise", band: "slight", scope: "here" }, { quantity: "development", direction: "raise", band: "slight", scope: "here" }],
   monument: [{ quantity: "legitimacy", direction: "raise", band: "slight", scope: "here" }],
   other: [],
 };

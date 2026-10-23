@@ -1,5 +1,4 @@
-import { z } from "zod";
-import { abortsTheTurn } from "@chronica/shared";
+import { abortsTheTurn, ReconcileOutputSchema } from "@chronica/shared";
 import { extractJson } from "./json";
 import type { SimModelPort } from "./ports";
 import type { RejectedDelta } from "./apply/context";
@@ -40,11 +39,6 @@ record that contradicts itself.
 
 Never add a fact. Never describe the refusal itself; the record already has it.
 Answer with ONLY a JSON object: {"withdraw": [localIds], "rewrite": [{"localId": ..., "summary": ...}]}.`;
-
-const ReconcileOutputSchema = z.object({
-  withdraw: z.array(z.string()).max(32).default([]),
-  rewrite: z.array(z.object({ localId: z.string(), summary: z.string().trim().min(1).max(600) }).strict()).max(32).default([]),
-}).strict();
 
 export interface FactReconcileResult<F> {
   readonly facts: readonly F[];

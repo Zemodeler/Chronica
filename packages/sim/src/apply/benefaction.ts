@@ -6,7 +6,9 @@ import {
   type WorldDelta,
   type WorldState,
 } from "@chronica/shared";
+import { relieveAHub } from "../grain-purchases";
 import type { ApplyContext } from "./context";
+import { safeLocalId } from "../safe-local-id";
 
 /**
  * Games, feasts, doles and buildings given to the people (`public_benefaction`,
@@ -28,6 +30,9 @@ import type { ApplyContext } from "./context";
  *  - **An aedile's allowance**: out of his power's treasury he may spend on
  *    games, without the Senate, up to `AEDILE_ALLOWANCE_MONTHS` of that month's
  *    worth in his term. Past it, what is left is all that is spent.
+ *  - **A dole out of the treasury in a dearth is grain bought** (`grain-purchases.ts`): the money goes to the markets that hold more than they need and
+ *    sell it cheapest once it is carried, and the grain is sent to the hungry hub, where it lands when the road says. Where no market near enough has any to
+ *    spare, or the hub is not dear, it is given as it always was.
  */
 
 /** The most standing one gift can buy, and the scale it is bought on. */
@@ -145,21 +150,28 @@ export function giveToThePeople(
   const named = delta.provinceId !== null && world.map.provinces.some((province) => province.id === delta.provinceId) ? delta.provinceId : null;
   const provinceId = named ?? giver.locationProvinceId ?? capitalProvince(world, giver.polityId);
   const calm = Math.min(MAX_CALM_BPS, Math.round(gain / 2));
+  // A dole out of the chest in a dearth buys grain for the hungry hub, where there is grain to be bought.
+  const relief = delta.kind === "dole" && fromTreasury && provinceId !== null && giver.polityId !== null && payer.owner.id === giver.polityId
+    ? relieveAHub(world, { polityId: giver.polityId, payerAccountId: payerId, provinceId, budget: spent, atStep, ids: context.ids, cause: `${giver.id}_${atStep}` })
+    : null;
 
+  // What the people had of it: bought grain's price, which came out of the chest through the market door, or the plain gift.
+  const paid = relief === null ? spent : relief.spent;
+  const base = relief === null ? world : relief.world;
   let next: WorldState = {
-    ...world,
-    characters: world.characters.map((character) => (character.id === giver.id
-      ? { ...character, benefactions: [...(character.benefactions ?? []), { atStep, kind: delta.kind, amount: spent, fromTreasury }].slice(-12) }
+    ...base,
+    characters: base.characters.map((character) => (character.id === giver.id
+      ? { ...character, benefactions: [...(character.benefactions ?? []), { atStep, kind: delta.kind, amount: paid, fromTreasury }].slice(-12) }
       : character)),
     material: {
-      ...world.material,
-      accounts: world.material.accounts.map((account) => (account.id === payerId ? { ...account, balance: account.balance - spent } : account)),
-      transactions: [...world.material.transactions, {
+      ...base.material,
+      accounts: relief === null ? base.material.accounts.map((account) => (account.id === payerId ? { ...account, balance: account.balance - spent } : account)) : base.material.accounts,
+      transactions: relief === null ? [...base.material.transactions, {
         id: context.ids.next("txn"), atStep, kind: "purchase" as const, amount: spent, sourceAccountId: payerId,
         cause: { kind: "action" as const, id: giver.id, explanation: `${delta.kind === "building" ? "A building" : delta.kind === "dole" ? "A dole" : delta.kind === "feast" ? "A feast" : "Games"} for the people: ${delta.reason}`.slice(0, 240) },
         visibility: "public" as const,
-      }],
-      provinceMaterial: world.material.provinceMaterial.map((row) => (row.provinceId === provinceId && calm > 0 ? { ...row, stabilityBps: Math.min(10_000, row.stabilityBps + calm) } : row)),
+      }] : base.material.transactions,
+      provinceMaterial: base.material.provinceMaterial.map((row) => (row.provinceId === provinceId && calm > 0 ? { ...row, stabilityBps: Math.min(10_000, row.stabilityBps + calm) } : row)),
     },
   };
   next = shiftStanding(next, giver.id, gain, "games");
@@ -168,10 +180,10 @@ export function giveToThePeople(
   return {
     world: next,
     fact: {
-      localId: `benefaction_${context.ids.next("gift").replace(/[^a-z0-9_-]/gi, "_").toLowerCase()}`.slice(0, 60),
+      localId: safeLocalId(`benefaction_${context.ids.next("gift").replace(/[^a-z0-9_-]/gi, "_").toLowerCase()}`).slice(0, 60),
       kind: "public_benefaction",
-      summary: `${giver.name} gave the people of ${place} ${what}${fromTreasury ? " out of the treasury" : " at his own cost"}, ${spent} spent${spent < delta.amount ? ` of the ${delta.amount} meant` : ""}: ${delta.reason.replace(/[.\s]+$/, "")}. ${gain > 0 ? `His name is the better for it${repeats > 0 ? ", if less than the first time" : ""}.` : "It was hardly noticed."}`.slice(0, 600),
-      affectedRefs: [{ kind: "character", id: giver.id }, ...(provinceId === null ? [] : [{ kind: "province" as const, id: provinceId }])],
+      summary: `${giver.name} gave the people of ${place} ${what}${fromTreasury ? " out of the treasury" : " at his own cost"}, ${paid} spent${paid < delta.amount ? ` of the ${delta.amount} meant` : ""}: ${delta.reason.replace(/[.\s]+$/, "")}. ${relief === null ? "" : `${relief.fact.summary.replace(/^.*? bought /, "He bought ")} `}${gain > 0 ? `His name is the better for it${repeats > 0 ? ", if less than the first time" : ""}.` : "It was hardly noticed."}`.slice(0, 600),
+      affectedRefs: [{ kind: "character", id: giver.id }, ...(provinceId === null ? [] : [{ kind: "province" as const, id: provinceId }]), ...(relief === null ? [] : relief.legs.map((leg) => ({ kind: "province" as const, id: leg.hubId })))],
       knownToRefs: [{ kind: "character", id: giver.id }],
       visibility: "public",
       discoveryState: "public",

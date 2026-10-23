@@ -48,19 +48,11 @@ describe("a government that feels the pain", () => {
   });
 
   it("makes an officer caught with his hand in the chest a mark for those who dislike him", () => {
-    const opened = opening();
-    // The accounts' college names nobody; a man is put in it.
-    const accounts = opened.departments.find((department) => department.id === "carthage-accounts")!;
-    const clerk = opened.characters.find((character) => character.alive && character.polityId === "carthage" && character.id !== ruler(opened).id)!;
-    const world: WorldState = {
-      ...opened,
-      material: { ...opened.material, officeSeats: [...opened.material.officeSeats, {
-        id: "accounts-seat", officeId: accounts.headOfficeId ?? accounts.officeIds[0]!, seatIndex: 0, holderCharacterId: clerk.id, status: "held", vacancyCause: "none",
-        termStartedAtStep: 0, termExpiresAtStep: null, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: [],
-      }] },
-    };
+    // Carthage's accounts now have accountants of their own (the scenario names them), so the man
+    // caught is whoever the tax roll's college really holds, not one the test has to put there.
+    const world = opening();
     const officer = readDepartments(world).holding({ kind: "polity", id: "carthage" }, "tax_roll").people[0];
-    expect(officer?.id).toBe(clerk.id);
+    expect(officer).toBeDefined();
     const enemy = world.characters.find((character) => character.alive && character.polityId === "carthage" && character.id !== officer!.id
       && world.material.officeSeats.some((seat) => seat.holderCharacterId === character.id && seat.status === "held"))!;
     const caught: WorldState = {

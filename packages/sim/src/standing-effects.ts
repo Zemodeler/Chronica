@@ -9,6 +9,7 @@ import {
   convertIn,
   effectWorth,
   faithNamed,
+  neglectShiftBps,
   treasuryOf,
   type FactProposalDraft,
   type ProvinceTargets,
@@ -17,6 +18,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Made things doing what they were made to do (see `world/standing-effects.ts`).
@@ -106,19 +108,22 @@ function provincesOf(world: WorldState, carrier: Carrier, effect: StandingEffect
 /** No pile of buildings moves a province further than this from its ordinary level. */
 const MAX_SHIFT_BPS = 4_000;
 const MAX_MANPOWER_SHIFT = 1;
+/** Works lift what a province can become by no more than a fifth of its potential, however many are built. */
+const MAX_DEVELOPMENT_SHIFT_BPS = 2_000;
 
 /** Where each province now settles back to, from everything standing in or over it. */
 export function provinceTargetsFrom(world: WorldState): Map<string, ProvinceTargets> {
-  const sums = new Map<string, { stability: number; food: number; productive: number; manpower: number }>();
+  const sums = new Map<string, { stability: number; food: number; productive: number; manpower: number; development: number }>();
   for (const carrier of standingCarriers(world)) {
     for (const effect of carrier.effects) {
-      if (!["stability", "food_security", "productive_capacity", "manpower"].includes(effect.quantity)) continue;
+      if (!["stability", "food_security", "productive_capacity", "manpower", "development"].includes(effect.quantity)) continue;
       for (const provinceId of provincesOf(world, carrier, effect)) {
-        const sum = sums.get(provinceId) ?? { stability: 0, food: 0, productive: 0, manpower: 0 };
+        const sum = sums.get(provinceId) ?? { stability: 0, food: 0, productive: 0, manpower: 0, development: 0 };
         if (effect.quantity === "stability") sum.stability += effectWorth.baselineShiftBps(effect);
         if (effect.quantity === "food_security") sum.food += effectWorth.baselineShiftBps(effect);
         if (effect.quantity === "productive_capacity") sum.productive += effectWorth.baselineShiftBps(effect);
         if (effect.quantity === "manpower") sum.manpower += effectWorth.manpowerShift(effect);
+        if (effect.quantity === "development") sum.development += effectWorth.developmentShiftBps(effect);
         sums.set(provinceId, sum);
       }
     }
@@ -132,8 +137,23 @@ export function provinceTargetsFrom(world: WorldState): Map<string, ProvinceTarg
     for (const province of world.map.provinces) {
       const shift = province.controllerPolityId === null ? 0 : calling.get(province.controllerPolityId) ?? 0;
       if (shift === 0) continue;
-      const sum = sums.get(province.id) ?? { stability: 0, food: 0, productive: 0, manpower: 0 };
+      const sum = sums.get(province.id) ?? { stability: 0, food: 0, productive: 0, manpower: 0, development: 0 };
       sums.set(province.id, { ...sum, manpower: sum.manpower + shift });
+    }
+  }
+  // The decay of neglect: a power that has let the upkeep of what it holds lapse for more than half a year sees the ceiling of its
+  // provinces' development sink (`neglectShiftBps`, docs/economy.md "Where the money goes"). Nothing is read where nobody is behind.
+  const behind = new Map<string, number>();
+  for (const row of world.economy?.keeping ?? []) {
+    const shift = neglectShiftBps(row.behindMonths);
+    if (shift !== 0) behind.set(row.polityId, shift);
+  }
+  if (behind.size > 0) {
+    for (const province of world.map.provinces) {
+      const shift = province.controllerPolityId === null ? undefined : behind.get(province.controllerPolityId);
+      if (shift === undefined) continue;
+      const sum = sums.get(province.id) ?? { stability: 0, food: 0, productive: 0, manpower: 0, development: 0 };
+      sums.set(province.id, { ...sum, development: sum.development + shift });
     }
   }
   const clamp = (value: number, max: number) => Math.max(-max, Math.min(max, value));
@@ -142,6 +162,7 @@ export function provinceTargetsFrom(world: WorldState): Map<string, ProvinceTarg
     foodSecurityShiftBps: clamp(sum.food, MAX_SHIFT_BPS),
     productiveCapacityShiftBps: clamp(sum.productive, MAX_SHIFT_BPS),
     manpowerShift: clamp(sum.manpower, MAX_MANPOWER_SHIFT),
+    developmentShiftBps: clamp(sum.development, MAX_DEVELOPMENT_SHIFT_BPS),
   }]));
 }
 
@@ -233,11 +254,14 @@ export function settleStandingEffects(input: { readonly world: WorldState; reado
           atStep: input.toDay,
           kind,
           amount,
+          // A work's keep is paid to the masons and keepers nobody names; what it
+          // earns is what a market or a harbour pays its owner.
+          ...(from !== null && to !== null ? {} : { external: kind === "upkeep" ? "the_unnamed" as const : "market" as const }),
           ...(from === null ? {} : { sourceAccountId: from }),
           ...(to === null ? {} : { destinationAccountId: to }),
           cause: { kind: kind === "upkeep" ? "obligation" as const : "scheduled_income" as const, id: carrier.id, explanation: carrier.label },
           visibility: "polity" as const,
-        }].slice(-500),
+        }],
       },
     };
   };
@@ -281,7 +305,7 @@ export function settleStandingEffects(input: { readonly world: WorldState; reado
           legitimacy(carrier, -1, `${carrier.label} falls into disuse`);
           mark(carrier, { lapsedAtStep: input.toDay });
           facts.push({
-            localId: `lapsed_${(count += 1)}`,
+            localId: safeLocalId(`lapsed_${(count += 1)}`),
             kind: "arrangement_lapsed",
             summary: `${carrier.label} fell into disuse: nobody could pay for its keep.`,
             affectedRefs: [
@@ -314,7 +338,7 @@ export function settleStandingEffects(input: { readonly world: WorldState; reado
               const faith = world.faiths.find((candidate) => candidate.id === founded.faithId)!.name;
               const place = world.map.provinces.find((province) => province.id === provinceId)?.name ?? provinceId;
               facts.push({
-                localId: `faith_${(count += 1)}`,
+                localId: safeLocalId(`faith_${(count += 1)}`),
                 kind: "faith_majority",
                 summary: `Most of the people of ${place} now follow ${faith}.`,
                 affectedRefs: [{ kind: "province", id: provinceId }],

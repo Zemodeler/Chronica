@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo, useRef, type PointerEvent } from "react";
-import { applyMapOverlayDelta, DynamicMapOverlaySchema, isGeoJsonMapDocument, MapOverlayDeltaSchema, type GeoJsonMap, type DynamicMapOverlay, type AgendaDestination, type MatterFocus, type RoomStates, MAP_CHANGE_KINDS } from "@chronica/shared";
+import { applyMapOverlayDelta, DynamicMapOverlaySchema, isGeoJsonMapDocument, MapOverlayDeltaSchema, type GeoJsonMap, type DynamicMapOverlay, type AgendaDestination, type TradeProposalKind, type RoomStates, MAP_CHANGE_KINDS } from "@chronica/shared";
 import type { RoomContents } from "../../../../lib/room-service";
 
 // A map document never changes at its version, so each version is downloaded
@@ -251,12 +251,6 @@ export function GameShell({
     },
     onOpenEntry: openChronicleEntry,
   }), [room, gameId, openChronicleEntry]);
-  // Matters in hand's way into the record: at the thread of the row chosen.
-  const openChronicleAt = useCallback((focus: MatterFocus) => {
-    openSurface("chronicle");
-    setChronicleFocus({ filter: focus, entryId: null });
-  }, [openSurface]);
-
   // The agenda's way to the sheet an item belongs to, at the page and the row.
   const goTo = useCallback((to: AgendaDestination) => {
     setPlace("office");
@@ -297,6 +291,12 @@ export function GameShell({
   const [lettersSeed, setLettersSeed] = useState<string | null>(null);
   const writeTo = useCallback((polityLabel: string) => {
     setLettersSeed(polityLabel);
+    openSurface("people");
+  }, [openSurface]);
+  /** The treaties' "Propose trade": the tray opens on whoever decides it there, with the proposal form ready. */
+  const [proposeSeed, setProposeSeed] = useState<{ polityLabel: string; kind?: TradeProposalKind | undefined; nonce: number } | null>(null);
+  const proposeTrade = useCallback((polityLabel: string, kind?: TradeProposalKind) => {
+    setProposeSeed((previous) => ({ polityLabel, kind, nonce: (previous?.nonce ?? 0) + 1 }));
     openSurface("people");
   }, [openSurface]);
 
@@ -559,19 +559,10 @@ export function GameShell({
         return;
       }
       setHoveredProvince(provinceId);
-      // A province with a known owner is already named by its curved
-      // territory label (e.g. "ROMAN REPUBLIC") -- a second, redundant name
-      // tooltip stacked on top of it is just clutter. Only pop up the raw
-      // region name for genuinely unclaimed territory, which has no label.
-      const owner = political?.ownerByProvince.get(provinceId);
-      if (owner != null) {
-        tooltipRef.current?.hide();
-        return;
-      }
       const name = regionNames.get(provinceId) ?? provinceId;
       tooltipRef.current?.show(event.clientX, event.clientY, name);
     },
-    [clearMapHover, setHoveredProvince, regionNames, political],
+    [clearMapHover, setHoveredProvince, regionNames],
   );
 
   const handleProvinceClick = useCallback(
@@ -681,17 +672,6 @@ export function GameShell({
     <WindowWorkspace scope={gameId} reference={{
       open: (key) => setReferenceKeys((keys) => keys.at(-1) === key ? keys : [...keys, key]),
       content: referenceKeys.length === 0 ? null : <EntityReference onWrite={orderingCharacterId ? (name) => { setDeskDraft(`Regarding ${name}: `); openSurface("council"); } : undefined} entityKey={referenceKeys.at(-1)!} onClose={() => setReferenceKeys([])} onBack={referenceKeys.length > 1 ? () => setReferenceKeys((keys) => keys.slice(0, -1)) : undefined} />,
-      navigation: <>
-        {orderingCharacterId && <button type="button" className="word-button" onClick={() => openSurface("council")}>Writing desk</button>}
-        <button type="button" className="word-button" onClick={() => setSurface("orders")}>Orders under way</button>
-        {playerCharacterId && <button type="button" className="word-button" onClick={() => openSurface("people")}>Letters</button>}
-        <button type="button" className="word-button" onClick={() => openSurface("chronicle")}>Chronicle</button>
-        {room?.forces && <button type="button" className="word-button" onClick={() => openSurface("forces")}>Forces</button>}
-        {room?.standing && <button type="button" className="word-button" onClick={() => openSurface("standing")}>Your standing</button>}
-        {room?.books && <button type="button" className="word-button" onClick={() => openSurface("books")}>Public books</button>}
-        {room?.purse && <button type="button" className="word-button" onClick={() => openSurface("purse")}>Your purse</button>}
-        <button type="button" className="word-button" onClick={() => setSurface("agenda")}>Matters in hand</button>
-      </>,
     }}>
     <div className="game" data-culture={roomStyle}>
       <header className="shell-top-bar">
@@ -836,6 +816,7 @@ export function GameShell({
           side={sheetSideFor(roomStyle, "people")}
           openSessionId={openChatSessionId}
           searchSeed={lettersSeed}
+          proposeSeed={proposeSeed}
           directory={room?.sheets?.directory}
           initialContacts={room?.sheets?.contacts}
           onWorldChanged={controller.refresh}
@@ -857,6 +838,7 @@ export function GameShell({
           which={surface === "purse" ? "own" : "kept"}
           books={room?.sheets?.[surface === "purse" ? "own" : "kept"] ?? null}
           administration={surface === "books" ? room?.sheets?.administration ?? null : null}
+          onDraft={orderingCharacterId ? (text) => { setDeskDraft(text); openSurface("council"); } : undefined}
           focus={arrival?.surface === "books" && arrival.tab !== undefined ? { tab: arrival.tab, key: arrival.key } : undefined}
           onClose={closeSurface}
           side={sheetSideFor(roomStyle, surface)}
@@ -879,6 +861,8 @@ export function GameShell({
           state={room?.sheets?.state ?? null}
           constitution={room?.sheets?.constitution ?? null}
           laws={room?.sheets?.laws ?? null}
+          gens={room?.sheets?.gens ?? null}
+          office={room?.sheets?.office ?? null}
           peace={room?.sheets?.peace ?? null}
           gameId={gameId}
           onChanged={() => setRoomRevision((n) => n + 1)}
@@ -886,7 +870,10 @@ export function GameShell({
           onClose={closeSurface}
           side={sheetSideFor(roomStyle, "standing")}
           onWriteTo={orderingCharacterId ? writeTo : undefined}
+          onProposeTrade={orderingCharacterId ? proposeTrade : undefined}
           onOpenLetters={playerCharacterId ? () => openSurface("people") : undefined}
+          onDraft={orderingCharacterId ? (text) => { setDeskDraft(text); openSurface("council"); } : undefined}
+          onOpenBooks={(tab, key) => { openSurface("books"); setArrival({ surface: "books", tab, key, nonce: Date.now() }); }}
         />
       )}
       {surface === null && referenceKeys.length > 0 && <Sheet label="linked reference" title="Reference" width="narrow" side="right" reference={false} onClose={() => setReferenceKeys([])}>

@@ -12,6 +12,7 @@ import {
 import { resolveEngagement, type BattleAccount } from "./battle";
 import type { IdFactory } from "./ports";
 import { BREACH_AT, marchOut, pressSieges } from "./sieges";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * The besieging player's word at a siege's turning points
@@ -118,18 +119,30 @@ export function assaultSiege(
   const besieger = world.material.forces.find((force) => force.id === siege?.forceId);
   if (siege === undefined || besieger === undefined) return { world, facts: [], battles: [] };
   const garrison = world.material.forces.filter((force) => force.locationId === siege.provinceId && force.polityId === siege.defenderPolityId && fitOf(force) > 0);
-  const setSiege = (next: WorldState, changes: Partial<Siege>): WorldState => settle(next, siege.id, day, changes);
+  // One assault a day: the player's answer at the breach and an order to storm on the same day are the same storm said twice
+  // (hand run of 2026-10-22: "carried the breach" and "found nobody to hold it" under one date).
+  if (siege.told.includes(`storm@${day}`)) return { world, facts: [], battles: [] };
+  const setSiege = (next: WorldState, changes: Partial<Siege>): WorldState => settle(next, siege.id, day, { ...changes, told: [...siege.told, `storm@${day}`].slice(-20) });
   if (warfare === undefined && garrison.length > 0) return { world: setSiege(world, {}), facts: [], battles: [] };
   const stormed = stormSiege(world, siege, besieger, garrison, day, warfare, ids, player);
   const facts = [...stormed.facts];
   const battles = [...stormed.battles];
   const next = setSiege(stormed.world, { pressureBps: stormed.carried ? 10_000 : Math.max(0, siege.pressureBps - 1_500) });
-  if (!stormed.carried) return { world: next, facts, battles };
+  if (!stormed.carried) return { world: quietTheOthers(next, siege), facts, battles };
   const alone = { ...next, sieges: next.sieges.filter((candidate) => candidate.id === siege.id) };
   const pressed = pressSieges(alone, day, { warfare, ids, playerCharacterId: player });
   facts.push(...pressed.facts);
   battles.push(...pressed.battles);
-  return { world: { ...pressed.world, sieges: next.sieges.map((candidate) => pressed.world.sieges.find((one) => one.id === candidate.id) ?? candidate) }, facts, battles };
+  return { world: quietTheOthers({ ...pressed.world, sieges: next.sieges.map((candidate) => pressed.world.sieges.find((one) => one.id === candidate.id) ?? candidate) }, siege), facts, battles };
+}
+
+/** One city besieged by two forces of one power (an army and its squadron) is one question at its breach: answered once, it is not asked again of the other. */
+function quietTheOthers(world: WorldState, siege: Siege): WorldState {
+  return {
+    ...world,
+    sieges: world.sieges.map((candidate) => (candidate.id !== siege.id && candidate.status === "active" && candidate.awaiting !== null && candidate.provinceId === siege.provinceId
+      && candidate.settlementId === siege.settlementId && candidate.besiegerPolityId === siege.besiegerPolityId ? { ...candidate, awaiting: null } : candidate)),
+  };
 }
 
 /**
@@ -158,7 +171,7 @@ export function stormSiege(
   const stormed = garrison.length === 0 || warfare === undefined ? undefined : resolveEngagement({
     world: { ...world, structures: [...world.structures, walls], elapsedStep: day, instant: { ...world.instant, day } },
     attacker: besieger, defender: garrison[0]!, defenderAllies: garrison.slice(1), posture: "offer_battle",
-    tactic: null, warfare: warfareWith(world, warfare!), battleId: ids.next("battle"), seed: `${siege.id}:storm:${day}`, playerCharacterId: player,
+    tactic: null, warfare: warfareWith(world, warfare), battleId: ids.next("battle"), seed: `${siege.id}:storm:${day}`, playerCharacterId: player,
   }, 950);
   const after: WorldState = stormed === undefined ? world : { ...stormed.world, elapsedStep: world.elapsedStep, instant: world.instant, structures: stormed.world.structures.filter((structure) => structure.id !== walls.id) };
   if (stormed !== undefined) facts.push(...stormed.facts);
@@ -167,7 +180,7 @@ export function stormSiege(
   const carried = holding.length === 0;
   const where = breached ? `the breach at ${place}` : `the walls of ${place}`;
   facts.push({
-    localId: `storm_${siege.id}_${day}`.slice(0, 60),
+    localId: safeLocalId(`storm_${siege.id}_${day}`).slice(0, 60),
     kind: "siege_event",
     summary: garrison.length === 0
       ? `${besieger.name} went in at ${where} and found nobody to hold it: the city lay open.`

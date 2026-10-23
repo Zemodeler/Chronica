@@ -62,7 +62,7 @@ describe("what the player's government can see of the world", () => {
   it("tells the world plainly which countries have nobody in them", () => {
     const text = renderWorldSlice(slice());
     expect(text).toContain("COUNTRIES WITH NOBODY IN THEM");
-    expect(text).toContain("Give each of them the people and forces they plainly ought to have");
+    expect(text).toContain("Give each of them what it lacks, now");
   });
 
   it("stays small enough to send", () => {
@@ -141,7 +141,11 @@ describe("what the player's government can see of the world", () => {
     // Moved 19.5k -> 20k (2026-10-03): the play-test fixes -- every power named
     // with its id, the actor's standing and the gates ahead, a proconsul's
     // powers, and orders already answered kept apart from those awaiting one.
-    expect(text.length).toBeLessThan(20_000);
+    // Moved 20k -> 20.25k (2026-10-07): Rome opens with two trade pacts (v49), one line each among its agreements.
+    // Moved 20.25k -> 20.5k (2026-10-07): the merge of the economy rework with the work on moods and dispatches.
+    // Moved 20.5k -> 21.5k (2026-10-08): the opening now carries seventeen merchant houses (v54, with their stewards at v57) and sixty gentes (v56), and the
+    // foreign powers' figures (up to four a power) name the kin of a king and the man at a house's books beside the offices; measured 21.3k.
+    expect(text.length).toBeLessThan(21_500);
   });
 });
 
@@ -685,8 +689,8 @@ describe("what a soldier costs", () => {
     }));
 
   it("is told to whoever keeps the treasury, so new legions are priced at Rome's rate rather than guessed", () => {
-    // Twenty thousand men at 35 a thousand is 700 a month, of an income near 1 800.
-    expect(forConsul("gaius-genucius")).toContain("Our soldiers are paid 35/month for every 1,000 men.");
+    // Twenty thousand men at ten thousand a thousand is 200 000 a month, of an income near 160 000: four more legions are more than Rome can keep.
+    expect(forConsul("gaius-genucius")).toContain("Our soldiers are paid 10,000/month for every 1,000 men.");
   });
 });
 

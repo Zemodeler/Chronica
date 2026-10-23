@@ -41,8 +41,8 @@ export function reformOpenings(world: WorldState, polityId: string, toDay: numbe
   const establishment = world.establishments.find((candidate) => candidate.polityId === polityId);
 
   // 1. The men who may be called are running out.
-  const own = world.map.provinces.filter((province) => province.controllerPolityId === polityId).map((province) => province.id);
-  const rows = world.material.provinceMaterial.filter((row) => own.includes(row.provinceId));
+  const own = new Set(world.map.provinces.filter((province) => province.controllerPolityId === polityId).map((province) => province.id));
+  const rows = world.material.provinceMaterial.filter((row) => own.has(row.provinceId));
   const could = rows.reduce((sum, row) => sum + row.population * MANPOWER_FRACTION, 0);
   const left = rows.reduce((sum, row) => sum + row.availableManpower, 0);
   if (could > 5_000 && left / could < SPENT_MANPOWER_SHARE) {

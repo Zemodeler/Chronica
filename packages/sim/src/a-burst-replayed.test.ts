@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, stableHash, type WorldState } from "@chronica/shared";
 import { runSimulationBurst, type BurstInput, type BurstResult } from "./burst";
+import { withACast } from "./askable-test-kit";
 import type { SimModelPort, SimOperation } from "./ports";
 
 /**
@@ -22,7 +23,7 @@ import type { SimModelPort, SimOperation } from "./ports";
  */
 
 const definition = ScenarioDefinitionSchema.parse(firstPunicWarScenario.definition);
-const world = (): WorldState => WorldStateSchema.parse(structuredClone(firstPunicWarScenario.initialWorld));
+const world = (): WorldState => withACast(WorldStateSchema.parse(structuredClone(firstPunicWarScenario.initialWorld)), "marcus-atilius");
 
 const ORCHESTRATION = JSON.stringify({
   intent: { summary: "Raise two new legions and send word to Syracuse.", domains: ["military", "diplomacy"] },

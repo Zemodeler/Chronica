@@ -58,6 +58,7 @@ export const ATLAS = {
  */
 export const MAJOR_POLITY_PIGMENTS: Readonly<Record<string, string>> = {
   rome: "#9E2B25",
+  "rhegium-campanians": "#287C78",
   carthage: "#5B2A5E",
   syracuse: "#9A6A2E",
   macedon: "#2F5A8A",

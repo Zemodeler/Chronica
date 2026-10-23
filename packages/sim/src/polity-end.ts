@@ -11,6 +11,7 @@ import {
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
 import { deditio } from "./submission";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Powers ending, and rising again.
@@ -42,6 +43,10 @@ export const LANDLESS_ARMY_DAYS = 90;
 export const YEARNING_AT_SURRENDER_BPS = 4_000;
 /** A province rises for its yearning at this. */
 export const RISING_AT_BPS = 10_000;
+/** What a quiet, fed month adds to the firmness of ground still wanting its old master; a garrison of the holder's own adds as much again. */
+export const HOLD_SETTLES_BPS_PER_MONTH = 250;
+/** Ground held loosely settles to this and no further by time alone. */
+export const HOLD_SETTLES_UP_TO_BPS = 7_500;
 /** Men a rising province puts in the field, for each province that rises. */
 const RISING_MEN = 1_500;
 
@@ -118,6 +123,14 @@ export function endPolity(
     return account;
   });
 
+  // What was taken is written down, one line a chest, so that the money is seen to have gone where it went (the money audit asks for it).
+  const spoils = victorTreasury === undefined ? [] : world.material.accounts
+    .filter((account) => treasuryIds.has(account.id) && account.balance > 0)
+    .map((account) => ({
+      id: safeLocalId(`txn_end_${polityId}_${account.id}`).slice(0, 100), atStep, kind: "spoils" as const, amount: account.balance, sourceAccountId: account.id, destinationAccountId: victorTreasury.id,
+      cause: { kind: "action" as const, id: `end-${polityId}`, explanation: `The chests of ${name} taken into the treasury of its victor`.slice(0, 200) }, visibility: "public" as const,
+    }));
+
   const heirIds = new Set(heirs.map((force) => force.id));
   // Taken into service, they answer to whoever raises the victor's levies, or
   // its ruler, or the general of its largest army; a man who ruled the power
@@ -177,6 +190,7 @@ export function endPolity(
     material: {
       ...world.material,
       accounts,
+      transactions: spoils.length === 0 ? world.material.transactions : [...world.material.transactions, ...spoils],
       incomeSources,
       obligations,
       forces: heirIds.size === 0 ? world.material.forces
@@ -208,7 +222,7 @@ export function endPolity(
   return {
     world: cleared,
     facts: [{
-      localId: `polity_ended_${polityId}`.slice(0, 60),
+      localId: safeLocalId(`polity_ended_${polityId}`).slice(0, 60),
       kind: "polity_ended",
       summary,
       affectedRefs: [{ kind: "polity", id: polityId }, ...(into === null ? [] : [{ kind: "polity" as const, id: into }])],
@@ -269,6 +283,7 @@ export function reviewPowers(world: WorldState, toDay: number, ids: IdFactory, p
   // ── Yearning ───────────────────────────────────────────────────────────
   const material = new Map(next.material.provinceMaterial.map((row) => [row.provinceId, row]));
   const rising: string[] = [];
+  const garrisonedBy = new Set(next.material.forces.filter((force) => force.personnel.some((group) => group.fit > 0)).map((force) => `${force.locationId}|${force.polityId}`));
   const provinces = next.map.provinces.map((province) => {
     const yearning = province.yearning;
     if (yearning == null || province.controllerPolityId === null || province.controllerPolityId === yearning.polityId) return province;
@@ -280,7 +295,13 @@ export function reviewPowers(world: WorldState, toDay: number, ids: IdFactory, p
       + (stability < 4_000 ? 300 : stability >= 7_000 ? -150 : 0);
     const bps = Math.max(0, Math.min(10_000, Math.round(yearning.bps + perMonth * monthShare)));
     if (bps >= RISING_AT_BPS) rising.push(province.id);
-    return { ...province, yearning: bps === 0 ? null : { ...yearning, bps, updatedAtStep: toDay } };
+    // A hold settles. Nothing ever raised the firmness of ground taken or surrendered, so it stayed loose for ever, its yearning
+    // grew four hundred a month whatever its master did, and every absorbed province rose some fourteen months on (hand runs of
+    // 2026-10-16 and 2026-10-22). Peace and bread firm it; a garrison of the holder's own firms it faster; misery and war do not.
+    const garrisoned = garrisonedBy.has(`${province.id}|${province.controllerPolityId}`);
+    const settles = (stability >= 4_000 ? HOLD_SETTLES_BPS_PER_MONTH : 0) + (garrisoned && stability >= 2_500 ? HOLD_SETTLES_BPS_PER_MONTH : 0);
+    const firmness = Math.min(HOLD_SETTLES_UP_TO_BPS, province.controlFirmnessBps + Math.round(settles * monthShare));
+    return { ...province, controlFirmnessBps: Math.max(province.controlFirmnessBps, firmness), yearning: bps === 0 ? null : { ...yearning, bps, updatedAtStep: toDay } };
   });
   next = { ...next, map: { ...next.map, provinces } };
 
@@ -314,7 +335,15 @@ function rise(world: WorldState, provinceId: string, atStep: number, ids: IdFact
 
   // Who leads it: the man who swore to restore it, else a man of its people.
   let next = world;
-  let leaderId = world.characters.find((character) => character.alive && character.ambitions.some((ambition) => ambition.status === "active" && ambition.targetId === wanted))?.id ?? null;
+  // Only a man who stands for that power may lead it: an ambition AGAINST it ("peace" with it, "revenge" on it) is not a wish to rise for
+  // it, and a living officer of another standing power is never carried over to its side (a king would lead risings against his own crown).
+  const standsFor = (character: WorldState["characters"][number]): boolean => {
+    if (character.polityId === wanted) return true;
+    const home = world.map.polities.find((candidate) => candidate.id === character.polityId);
+    return home === undefined || !isStanding(home);
+  };
+  let leaderId = world.characters.find((character) => character.alive && standsFor(character)
+    && character.ambitions.some((ambition) => ambition.status === "active" && ambition.targetId === wanted && ambition.kind !== "peace" && ambition.kind !== "revenge"))?.id ?? null;
   if (leaderId === null) {
     const made = createCanonicalNpc(next, {
       characterId: ids.next("character"),
@@ -360,7 +389,7 @@ function rise(world: WorldState, provinceId: string, atStep: number, ids: IdFact
   return {
     world: next,
     facts: [{
-      localId: `rising_${provinceId}_${atStep}`.slice(0, 60),
+      localId: safeLocalId(`rising_${provinceId}_${atStep}`).slice(0, 60),
       kind: "rising",
       summary: restoring
         ? `${province.name} rose against ${nameOf(world, holder)} under ${who}, and ${polity.name} stood again.`

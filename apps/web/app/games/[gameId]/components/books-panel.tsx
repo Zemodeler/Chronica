@@ -8,6 +8,8 @@ import { spanInWords } from "@chronica/shared";
 import { Why } from "./notes";
 import { FinancialExposure } from "./office-insights";
 import { AdministrationSheet } from "./administration-sheet";
+import { RegionsSheet } from "./regions-sheet";
+import { TradeSheet } from "./trade-sheet";
 
 /**
  * The treasury, laid out the way VISION §7 lays it out.
@@ -31,9 +33,11 @@ import { AdministrationSheet } from "./administration-sheet";
 export type BooksView = Books & { readonly currencyName: string };
 
 /** `books` is null until the room has been read; the stand and the strongbox are not drawn before then. */
-export function BooksPanel({ which, books, administration = null, focus, onClose, side }: {
+export function BooksPanel({ which, books, administration = null, focus, onClose, onDraft, side }: {
   readonly which: "own" | "kept";
   readonly books: BooksView | null;
+  /** Put an order, written for the reader, on the desk: how the lands are taxed is changed that way. Absent for those who cannot give orders. */
+  readonly onDraft?: ((text: string) => void) | undefined;
   /** The departments of the state he keeps books for. Only the ledger stand has them. */
   readonly administration?: Administration | null;
   readonly focus?: { readonly tab: string; readonly key?: string | undefined } | undefined;
@@ -48,6 +52,12 @@ export function BooksPanel({ which, books, administration = null, focus, onClose
       : []),
     ...((books.lands?.length ?? 0) > 0 || books.stopped.length > 0
       ? [{ id: "lands", title: "Lands", marked: (books.lands ?? []).some((land) => land.strained), content: <Lands books={books} /> }]
+      : []),
+    ...(books.regions != null
+      ? [{ id: "regions", title: "Regions and tax", marked: books.regions.scarredProvinces > 0, content: <RegionsSheet regions={books.regions} onDraft={onDraft} /> }]
+      : []),
+    ...(books.trade != null
+      ? [{ id: "trade", title: "Markets and trade", marked: books.trade.shortHubs > 0, content: <TradeSheet trade={books.trade} /> }]
       : []),
     ...(departments && administration !== null
       ? [{ id: "administration", title: "Administration", marked: administration.wanting > 0, content: <AdministrationSheet administration={administration} focusKey={focus?.tab === "administration" ? focus.key : undefined} /> }]
@@ -79,8 +89,9 @@ function Accounts({ books }: { readonly books: BooksView }) {
         {books.accounts.length === 0
           ? <p className="quiet">You have nothing anybody keeps an account of.</p>
           : <ul>{books.accounts.map((account) => (
-            <li key={account.id}><span>{account.label}</span><strong>{money(account.balance)}</strong></li>
+            <li key={account.id}><span>{account.label}</span><AccountBalance account={account} /></li>
           ))}</ul>}
+        {books.coin != null && <CoinNote coin={books.coin} />}
       </section>
 
       <section className="books__side">
@@ -128,7 +139,7 @@ function SurplusMark({ books }: { readonly books: BooksView }) {
     <Tip label={word} note={() => (
       <TipCard kicker="Why it is marked" title={word}>
         {spent && (
-          <p>If nothing changes, what is in hand {books.runsOutInDays! <= 0 ? "is already spent" : `runs out in ${books.runsOutInDays! < 14 ? "days" : `about ${spanInWords(books.runsOutInDays!)}`}`}.</p>
+          <p>If nothing changes, what is in hand {books.runsOutInDays <= 0 ? "is already spent" : `runs out in ${books.runsOutInDays < 14 ? "days" : `about ${spanInWords(books.runsOutInDays)}`}`}.</p>
         )}
         {books.arrears > 0 && <p>{money(books.arrears)} is owed and has not been paid. A surplus with arrears under it is not a surplus.</p>}
       </TipCard>
@@ -234,3 +245,35 @@ function Lands({ books }: { readonly books: BooksView }) {
 }
 
 const capitalise = (text: string): string => (text.length === 0 ? text : `${text.charAt(0).toUpperCase()}${text.slice(1)}`);
+
+/** A balance in the coin it is held in, and what that is in silver where the two differ. */
+function AccountBalance({ account }: { readonly account: BooksView["accounts"][number] }) {
+  const coin = account.coinage;
+  if (coin === undefined || Math.abs(coin.silverBps - 10_000) < 100) return <strong>{money(account.balance)}</strong>;
+  return (
+    <strong>
+      <Tip label={coin.name} note={() => (
+        <TipCard kicker="The coin it is held in" title={coin.name}>
+          <p>{money(coin.face)} of {coin.name}, which is {money(coin.silverEquivalent)} in silver by weight against the Attic drachma.</p>
+          <p>A unit of it holds {Math.round(coin.silverBps / 100)} in a hundred of an Attic drachma's silver. Every other figure in these books is in silver.</p>
+        </TipCard>
+      )}>{money(coin.face)}</Tip>
+      <span className="books__silver"> ({money(coin.silverEquivalent)} in silver)</span>
+    </strong>
+  );
+}
+
+/** What the power's own coin stands at: its silver, prices, and what the money-changers give for it. */
+function CoinNote({ coin }: { readonly coin: NonNullable<BooksView["coin"]> }) {
+  const debased = coin.silverBps < coin.standardBps;
+  const dearer = coin.priceLevelBps >= 10_500;
+  const premium = coin.premiumBps;
+  return (
+    <p className="books__coin">
+      The treasury holds {coin.name}, {Math.round(coin.silverBps / 100)} in a hundred of an Attic drachma's silver to the unit
+      {debased && <>, struck down from {Math.round(coin.standardBps / 100)}{coin.silverBps * 4 < coin.standardBps * 3 && <> (billon now, silver with bronze in it)</>}</>}. Prices at home stand at {Math.round(coin.priceLevelBps / 100)} in a hundred of ordinary
+      {dearer && <span className="is-short"> (dearer, and still following the coin)</span>}.
+      {Math.abs(premium) >= 50 && <> Among the money-changers it fetches {Math.abs(Math.round(premium / 100))} in a hundred {premium > 0 ? "above" : "below"} its silver.</>}
+    </p>
+  );
+}

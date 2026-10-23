@@ -30,6 +30,25 @@ export function sameNegotiation(a: Offer, b: Offer): boolean {
     && [a.fromPolityId, a.toPolityId].sort().join(":") === [b.fromPolityId, b.toPolityId].sort().join(":");
 }
 
+/** An accepted peace resolves earlier requests to open talks between its parties. */
+export function settlePeaceTalks(world: WorldState): WorldState {
+  let changed = false;
+  const diplomacy = world.diplomacy.map((message) => {
+    if (message.kind !== "peace_talks" || message.status !== "awaiting_reply") return message;
+    const agreement = world.polityAgreements.find((entry) => entry.kind === "peace" && entry.status === "active"
+      && entry.sinceStep >= message.sentAtStep && entry.sourceMessageId !== null
+      && ((entry.polityId === message.fromPolityId && entry.otherPolityId === message.toPolityId)
+        || (entry.polityId === message.toPolityId && entry.otherPolityId === message.fromPolityId)));
+    const accepted = agreement === undefined ? undefined : world.diplomacy.find((entry) => entry.id === agreement.sourceMessageId && entry.answer === "accepted");
+    if (agreement === undefined || accepted === undefined) return message;
+    changed = true;
+    return { ...message, status: "answered" as const, answer: "accepted" as const,
+      answerText: `Resolved by the accepted peace agreement "${accepted.subject}".`.slice(0, 600),
+      answeredAtStep: accepted.answeredAtStep ?? agreement.sinceStep, agreementId: agreement.id };
+  });
+  return changed ? { ...world, diplomacy } : world;
+}
+
 /** Compare the actual positions/clauses; titles and JSON ordering are immaterial. */
 export function sameDiplomaticTerms(a: Offer, b: Offer): boolean {
   if (canonical(offeredAgreementKinds(a)) !== canonical(offeredAgreementKinds(b)) || canonical(a.clauses ?? []) !== canonical(b.clauses ?? []) || (a.onRefusal ?? null) !== (b.onRefusal ?? null) || (a.forDays ?? null) !== (b.forDays ?? null)) return false;

@@ -144,6 +144,10 @@ const FIXTURES: Readonly<Record<string, Record<string, unknown>>> = {
     op: "polity_stance_shift", polityId: "syracuse", towardPolityId: HANDLE, trustDelta: -40,
     reason: "Syracuse takes a view of the rising.",
   },
+  "tax_policy_set.polityId": {
+    op: "tax_policy_set", scope: "polity", polityId: HANDLE, regime: "tithe", rateBps: 1_000,
+    reason: "The free city settles how it will be taxed.",
+  },
   "polity_outlook_set.polityId": {
     op: "polity_outlook_set", polityId: HANDLE, primaryObjective: "Stay free of all three of them.",
     concerns: [{ label: "Syracuse will come for the strait", level: "high" }],
@@ -173,6 +177,10 @@ const FIXTURES: Readonly<Record<string, Record<string, unknown>>> = {
   "character_state_set.polityId": {
     op: "character_state_set", characterRef: "mamertine-spokesman", polityId: HANDLE,
     reason: "The spokesman throws in his lot with the city.",
+  },
+  "war_plan_set.polityId": {
+    op: "war_plan_set", polityId: HANDLE, enemyPolityId: "syracuse", aims: [{ kind: "sue_for_peace" }], posture: "defend",
+    reason: "The city means to stand, and to ask for peace.",
   },
   "polity_create.breaksFromPolityId": {
     op: "polity_create", localId: "a_further_rising", name: "The Sons of Messana",
@@ -228,7 +236,7 @@ describe("what the engine can make, the same answer can name", () => {
       expect(unsayable).toBeNull();
       // The refusal this is really about is "no such power exists" for a power
       // that was made four lines earlier.
-      expect(refusals).toEqual([]);
+      expect(refusals.filter((reason) => !/there is no war to plan/.test(reason))).toEqual([]);
     });
   }
 });

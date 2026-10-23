@@ -19,15 +19,20 @@
     "test": "npm run test --workspaces --if-present",
     "test:e2e": "npm run test:e2e --workspace @chronica/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "maps:graph": "tsx scripts/map-gen/build-map-graph.ts && node scripts/map-gen/add-polity-cities.mjs && tsx scripts/map-gen/resolve-extra-anchors.ts && tsx scripts/map-gen/describe-map-asset.ts",
+    "maps:graph": "tsx scripts/map-gen/build-map-graph.ts && python scripts/map-gen/add-ireland.py && node scripts/map-gen/add-polity-cities.mjs && tsx scripts/map-gen/resolve-extra-anchors.ts && tsx scripts/map-gen/describe-map-asset.ts",
     "maps:simplify": "node scripts/simplify-geojson.mjs",
     "validate:scenario": "tsx scripts/validate-scenario.ts",
     "play": "tsx scripts/hand-played-burst.mts",
     "world:alone": "tsx scripts/world-alone.mts",
+    "sanity:economy": "tsx scripts/economy-sanity.mts",
+    "sanity:war": "tsx scripts/war-sanity.mts",
+    "sanity:government": "tsx scripts/government-sanity.mts",
     "play:turn": "tsx --env-file=.env.local scripts/play-turn.mts",
     "eval:orders": "tsx scripts/eval-orders/run.mts",
     "audit:deltas": "tsx scripts/delta-audit.mts",
-    "dev:hand": "node scripts/dev-hand.mjs"
+    "dev:hand": "node scripts/dev-hand.mjs",
+    "scorecard": "tsx scripts/scorecard.mts",
+    "export:entries": "tsx --env-file=.env.local scripts/export-entries.mts"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

@@ -50,7 +50,7 @@ const answer = (deltas: readonly unknown[]) => JSON.stringify({
 });
 const burst = (port: SimModelPort, world: WorldState, spanDays = 1): BurstInput => ({
   world, clock: definition.clock, offices: definition.government.offices, warfare: definition.warfare, terrains: definition.map.terrains,
-  burstId: "cargo", gameId: "game-1", actorRef: LEPTINES, actorPolityId: "syracuse", orderText: "I buy a cargo of oil and ship it to Messana.", knownFacts: [], queue: [],
+  burstId: "cargo", gameId: "game-1", actorRef: LEPTINES, actorPolityId: "syracuse", orderText: "I buy a cargo of oil on credit and ship it to Messana.", knownFacts: [], queue: [],
   port, spanDays, narratorSeeds: [], budget: { ...DEFAULT_BUDGET, maxMechanicCalls: 0 },
 });
 
@@ -65,9 +65,12 @@ const REPAIRED = {
   effects: [{ quantity: "income", direction: "raise", band: "marked", scope: "here" }], upkeep: null, reason: "The cargo pays.",
 };
 
-describe("a merchant with two thousand drachmae ships one cargo", () => {
+// A purse that cannot pay the great cargo outright (at v47 prices a great venture costs more than any senator keeps in hand), but can pay the deposit.
+const SOME_MEANS = ventureTerms(withPurse(1), SYRACUSE, MESSANA, "great")!.price / 2;
+
+describe("a merchant whose purse is half the price of a cargo ships one cargo", () => {
   it("is charged once, keeps something back, and is paid when the ship comes in", async () => {
-    const start = withPurse(2_000);
+    const start = withPurse(SOME_MEANS);
     const price = ventureTerms(start, SYRACUSE, MESSANA, "great")!.price;
     const result = await runSimulationBurst(burst(scripted([answer([CARGO, ITS_INCOME]), JSON.stringify({ deltas: [REPAIRED] })]), start));
     // One venture, and no second business priced beside it.
@@ -79,7 +82,7 @@ describe("a merchant with two thousand drachmae ships one cargo", () => {
     const owed = result.world.material.loans.filter((loan) => loan.borrowerAccountId === "leptines-purse").reduce((sum, loan) => sum + loan.principal, 0);
     expect(paid + owed).toBe(price);
     // Never the whole purse: a tenth of it is kept back.
-    expect(balance(result.world, "leptines-purse")).toBeGreaterThanOrEqual(200);
+    expect(balance(result.world, "leptines-purse")).toBeGreaterThanOrEqual(SOME_MEANS / 10);
 
     const venture = result.world.material.ventures[0]!;
     const landed = runDeterministicTick({ world: result.world, toDay: venture.cargo!.arrivesAtStep, ids: createIdFactory("landed"), warfare: definition.warfare });

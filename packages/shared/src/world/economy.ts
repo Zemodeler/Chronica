@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { ElapsedStepSchema, EntityIdSchema } from "../material-state";
+import { ElapsedStepSchema, EntityIdSchema, MAX_TAX_RATE_BPS, TaxRegimeSchema } from "../material-state";
+import { GOODS, MAX_MARKET_HUBS, MarketHubSchema, goodSpec, marketPriceBps, openingMarkets, type GoodId } from "./markets";
+import { CoinageSchema, MAX_COINAGES, priceLevelBpsOf } from "./coinage";
+import { provinceOf } from "./movement";
+import { MAX_HOUSES, MerchantHouseSchema } from "./houses";
+import { MAX_KEEPING_ROWS, MAX_WORK_CONTRACTS, PublicWorkContractSchema, StateKeepingSchema } from "./keeping";
 import type { WorldState } from "./world-state";
 
 /**
@@ -15,6 +20,26 @@ import type { WorldState } from "./world-state";
  * Optional on the world, so every snapshot written before it still loads; a
  * world without one has simply never been reviewed.
  */
+/** No power lays more than this on a good entering its markets: past it nothing would come. */
+export const MAX_CUSTOMS_RATE_BPS = 5_000;
+
+/** What a treasury bought for a hungry hub: bought in one hub's market, paid for the day it sailed, landing in the other when the road says. */
+export const MAX_GRAIN_SHIPMENTS = 80;
+export const GrainShipmentSchema = z
+  .object({
+    id: EntityIdSchema,
+    polityId: EntityIdSchema,
+    fromHubId: EntityIdSchema,
+    toHubId: EntityIdSchema,
+    units: z.number().int().positive(),
+    paid: z.number().int().nonnegative(),
+    sentAtStep: ElapsedStepSchema,
+    arrivesAtStep: ElapsedStepSchema,
+    status: z.enum(["on_the_way", "landed", "lost"]),
+  })
+  .strict();
+export type GrainShipment = z.infer<typeof GrainShipmentSchema>;
+
 export const EconomyMemorySchema = z
   .object({
     /** The last day the land was reckoned: its people, its taxes, its migrants. */
@@ -58,6 +83,82 @@ export const EconomyMemorySchema = z
       leaderCharacterId: EntityIdSchema,
       sinceStep: ElapsedStepSchema,
     }).strict()).max(60).default([]),
+    /**
+     * How each power taxes its provinces unless a province has its own word
+     * (`ProvinceMaterial.taxRegime`): the regime and the share taken. Kept
+     * here and not on the rows because it is one line a power, where the rows
+     * are six thousand. A power with no line taxes as it always did.
+     */
+    taxPolicies: z.array(z.object({
+      polityId: EntityIdSchema,
+      regime: TaxRegimeSchema,
+      rateBps: z.number().int().min(0).max(MAX_TAX_RATE_BPS),
+    }).strict()).max(200).default([]),
+    /**
+     * How a province has always been taxed, whoever holds it: the custom of the
+     * country (the tithe of Sicily, the heavy levy on Libya). It stands between
+     * a province's own word (its row) and its holder's default, and is written
+     * only by a scenario: it stays with the ground when the ground changes hands.
+     */
+    provinceTaxPolicies: z.array(z.object({
+      provinceId: EntityIdSchema,
+      regime: TaxRegimeSchema,
+      rateBps: z.number().int().min(0).max(MAX_TAX_RATE_BPS),
+    }).strict()).max(400).default([]),
+    /**
+     * When a power last heard that its countryside lies waste, and of how many
+     * districts, so the news comes once a war and not once a month: again only
+     * when more of its ground has been laid waste, and never within two years.
+     */
+    wasteNews: z.array(z.object({ polityId: EntityIdSchema, atStep: ElapsedStepSchema, districts: z.number().int().nonnegative().default(0) }).strict()).max(200).default([]),
+    /**
+     * The markets: for each hub (some sixty on the Punic map), the stock, the
+     * target and the price of each of six goods (`world/markets.ts`). Empty
+     * until the land is first reckoned, when they open with a season's
+     * reserve (`ensureMarkets`); which provinces trade in which hub is
+     * geography, derived from the map and not stored.
+     */
+    markets: z.array(MarketHubSchema).max(MAX_MARKET_HUBS).default([]),
+    /** When a power last heard that grain had gone far too dear or too cheap in its country, so the news is told once a year and not once a month. */
+    marketNews: z.array(z.object({ polityId: EntityIdSchema, kind: z.enum(["shortage", "glut"]), atStep: ElapsedStepSchema }).strict()).max(200).default([]),
+    /**
+     * The customs each power lays on goods that enter its markets from another
+     * power's, in basis points of their value (`world/trade.ts`). A power with
+     * no line lays none. Set by `tax_policy_set` with the `customs` scope; a
+     * trade pact may cap what is charged on its partner's goods.
+     */
+    customsRates: z.array(z.object({ polityId: EntityIdSchema, rateBps: z.number().int().min(0).max(MAX_CUSTOMS_RATE_BPS) }).strict()).max(200).default([]),
+    /**
+     * Customs the month's trade flows have earned each power and not yet paid
+     * into its treasury (drachmae). The monthly pass of the markets accrues it
+     * and the tick pays it out the same day (`sim/customs.ts`), so a world run
+     * without the tick (the tests' bare months) simply holds it here.
+     */
+    customsDue: z.array(z.object({ polityId: EntityIdSchema, amount: z.number().int().nonnegative() }).strict()).max(200).default([]),
+    /** Which powers' hubs traded most with which last month, by value in drachmae: what a ruler's slice reads. Capped, largest first. */
+    tradeLanes: z.array(z.object({ fromPolityId: EntityIdSchema, toPolityId: EntityIdSchema, value: z.number().int().nonnegative() }).strict()).max(60).default([]),
+    /**
+     * What a power has been told of its trade, so news is told once and not each month. "cut": a trade pact
+     * between it and `otherPolityId` is held by war (told as resumed when the war ends); "relief": the day it
+     * last heard that grain had come by sea to its dear markets (`otherPolityId` is the first power it came from).
+     */
+    tradeNews: z.array(z.object({ polityId: EntityIdSchema, otherPolityId: EntityIdSchema, kind: z.enum(["resumed", "cut", "relief"]), atStep: ElapsedStepSchema }).strict()).max(200).default([]),
+    /**
+     * The world's coinages (`world/coinage.ts`): what each power's mint
+     * strikes, its silver content against the Attic drachma, its price level
+     * and what it fetches among the money-changers. Empty: one silver
+     * everywhere, no exchange, no price level.
+     */
+    coinages: z.array(CoinageSchema).max(MAX_COINAGES).default([]),
+    /** The merchant houses (`world/houses.ts`, `sim/merchant-houses.ts`): a handful of families whose cargoes and loans the markets feel. */
+    houses: z.array(MerchantHouseSchema).max(MAX_HOUSES).default([]),
+    /** The day the world last looked for a man to found a house (`sim/house-founding.ts`): once a month. */
+    housesLookedToAtStep: ElapsedStepSchema.optional(),
+    /** What each power spends to go on being one, and the public works let to contractors (`world/keeping.ts`, `sim/keeping-the-state.ts`). */
+    keeping: z.array(StateKeepingSchema).max(MAX_KEEPING_ROWS).default([]),
+    works: z.array(PublicWorkContractSchema).max(MAX_WORK_CONTRACTS).default([]),
+    /** Grain a power's treasury bought in a dearth and has on the way to a hungry hub (`sim/grain-purchases.ts`). */
+    shipments: z.array(GrainShipmentSchema).max(MAX_GRAIN_SHIPMENTS).default([]),
   })
   .strict();
 export type EconomyMemory = z.infer<typeof EconomyMemorySchema>;
@@ -73,39 +174,127 @@ export const EMPTY_ECONOMY_MEMORY: EconomyMemory = {
   pendingCalls: [],
   contingentsSent: [],
   civilWars: [],
+  taxPolicies: [],
+  provinceTaxPolicies: [],
+  wasteNews: [],
+  markets: [],
+  marketNews: [],
+  customsRates: [],
+  customsDue: [],
+  tradeLanes: [],
+  tradeNews: [],
+  coinages: [],
+  houses: [],
+  keeping: [],
+  works: [],
+  shipments: [],
 };
 
 export const economyOf = (world: Pick<WorldState, "economy">): EconomyMemory => world.economy ?? EMPTY_ECONOMY_MEMORY;
 
-/** Food security at which grain sells at its ordinary price. */
-const ORDINARY_FOOD_BPS = 8_000;
-
 /**
- * What grain costs in a province, as basis points of its ordinary price:
- * 10 000 in a fed year, dearer as food runs short, cheaper in a glut. Read off
- * food security, so it needs no market and no storage, and bounded to between
- * half and three times the ordinary price.
+ * What a legionary is owed a month, in drachmae, before stoppages: two obols a
+ * day, as Polybius gives it (6.39), thirty days to the month. The one rate
+ * every army's pay is counted from: the treasury's outlay for an army
+ * (`SOLDIER_PAY_PER_THOUSAND`), the pay of the named men in its ranks
+ * (`sim/money.ts`) and the price of the bread it buys (`ordinaryGrainPrice`)
+ * were three rates, a hundred and eighty times apart, until they were one.
  */
-export function grainPriceBps(foodSecurityBps: number): number {
-  const ratio = ORDINARY_FOOD_BPS / Math.max(1_000, foodSecurityBps);
-  return Math.max(5_000, Math.min(30_000, Math.round(ratio * 10_000)));
+export const LEGIONARY_PAY_GROSS = 10;
+/**
+ * And what is stopped out of it for his grain, his clothes and the arms he is
+ * issued, which Polybius says the quaestor deducted: about a third. A legionary
+ * keeps seven a month, a centurion twice that, a horseman three times.
+ */
+export const PAY_STOPPAGES_SHARE = 1 / 3;
+/**
+ * What the treasury pays out for every thousand men of an army each month:
+ * their gross pay, the part stopped out of it going on their grain, clothes and
+ * arms, which the treasury buys. A power that states no rate of its own pays
+ * this (`PolityMap.soldierPayPerThousand`).
+ */
+export const SOLDIER_PAY_PER_THOUSAND = LEGIONARY_PAY_GROSS * 1_000;
+/**
+ * A warship's crew a month, hull for hull: a trireme's oarsmen and marines are
+ * not each paid a legionary's wage -- most were citizens or allies serving
+ * their city's turn, and the pay is the keep of the rest.
+ */
+export const WARSHIP_PAY_PER_HULL = 500;
+
+/** A talent of silver, the unit indemnities and treasuries were reckoned in: 6,000 drachmae. */
+export const DRACHMAE_PER_TALENT = 6_000;
+
+/** A sum of drachmae in the words a treaty would use: "3,200 talents" where it is large enough to be counted so. */
+export function inTalents(drachmae: number): string {
+  const talents = drachmae / DRACHMAE_PER_TALENT;
+  return talents >= 1 ? `${Math.round(talents).toLocaleString("en-GB")} talents` : `${Math.round(drachmae).toLocaleString("en-GB")} drachmae`;
 }
 
 /**
- * What grain costs across a power's ground, weighted by the people who eat it.
+ * A world with its markets opened, if they were not: the stocks a world that
+ * has never been reckoned would start with (`openingMarkets`). The monthly
+ * pass does this itself the first time it runs; readers and tests that want a
+ * market to read or stress ask for it here. A world that has markets is
+ * returned as it is.
+ */
+export function ensureMarkets(world: WorldState, monthsToHarvest = 6): WorldState {
+  if (world.economy?.markets !== undefined && world.economy.markets.length > 0) return world;
+  return { ...world, economy: { ...(world.economy ?? EMPTY_ECONOMY_MEMORY), markets: openingMarkets(world, monthsToHarvest) } };
+}
+
+/**
+ * What bread for a thousand men for a day costs at a power's ordinary price:
+ * half a day's pay at its own rate.
+ */
+export function ordinaryGrainPrice(soldierPayPerThousand: number | null | undefined): number {
+  return (soldierPayPerThousand ?? SOLDIER_PAY_PER_THOUSAND) / 60;
+}
+
+/**
+ * The one price of bread for an army, at the grain price of the market it
+ * buys in (basis points of ordinary, `marketPriceBps`): the power's ordinary
+ * price times what grain costs there. `sim/grain.ts` used to read a second
+ * price off food security of its own, from 1 to 3 times, beside this
+ * module's from 0.5 to 3: a famine that made bread dear to the treasury did
+ * not make it dear to the legion. Both now read the market's stock.
+ */
+export function grainPriceFor(soldierPayPerThousand: number | null | undefined, grainBps: number): number {
+  return (ordinaryGrainPrice(soldierPayPerThousand) * grainBps) / 10_000;
+}
+
+/**
+ * What grain costs across a power's ground, weighted by the people who eat it:
+ * each province pays the price of its hub's market (`marketPriceBps`).
  * 10 000 for a power with no ground or no reckoning yet.
  */
-export function polityGrainPriceBps(world: Pick<WorldState, "map" | "material">, polityId: string): number {
-  const held = new Set(world.map.provinces.filter((province) => province.controllerPolityId === polityId).map((province) => province.id));
+export function polityGrainPriceBps(world: Pick<WorldState, "map" | "material" | "economy">, polityId: string): number {
+  if (!hasMarkets(world)) return 10_000;
   let people = 0;
   let weighted = 0;
   for (const row of world.material.provinceMaterial) {
-    if (!held.has(row.provinceId) || row.population <= 0) continue;
+    if (row.population <= 0 || provinceOf(world, row.provinceId)?.controllerPolityId !== polityId) continue;
     people += row.population;
-    weighted += row.population * grainPriceBps(row.foodSecurityBps);
+    weighted += row.population * marketPriceBps(world, row.provinceId, "grain");
   }
-  return people === 0 ? 10_000 : Math.round(weighted / people);
+  // What the people pay is the hub's price in the coin the power strikes: a debased coin buys less bread (`priceLevelBpsOf`).
+  return people === 0 ? 10_000 : Math.round((weighted / people) * priceLevelBpsOf(world, polityId) / 10_000);
 }
+
+/**
+ * What a good costs in a province's market in the coin of the power that holds
+ * the province: the hub's price (`marketPriceBps`, which is the silver price
+ * the markets settle among themselves) times the price level its coinage has
+ * built (`priceLevelBpsOf`). The army's bread, a ruler's slice and what a
+ * subject pays read this; the markets' own trade between hubs reads the
+ * silver price, so inflation in one country is not mistaken for a profit.
+ */
+export function nominalPriceBps(world: Pick<WorldState, "economy" | "map">, provinceId: string, good: GoodId): number {
+  const level = priceLevelBpsOf(world, provinceOf(world, provinceId)?.controllerPolityId ?? null);
+  return Math.round((marketPriceBps(world, provinceId, good) * level) / 10_000);
+}
+
+/** Whether the land has been reckoned and the markets opened. */
+export const hasMarkets = (world: Pick<WorldState, "economy">): boolean => (world.economy?.markets?.length ?? 0) > 0;
 
 /**
  * How much of a soldier's keep is bread, by what the obligation pays for: a
@@ -133,19 +322,44 @@ export function victualledAmount(amount: number, kind: string, grainBps: number)
  * What a trade route earns against its ordinary take, as basis points: a
  * merchant carrying from a cheap market to a dear one does well, the other way
  * badly. Half the price gap is his, bounded to between 0.7 and 1.5 times.
+ * Prices are in basis points of the good's own base, so any good's two prices
+ * will do (`bestGapGood` picks the one that pays most).
  */
-export function tradePremiumBps(fromGrainBps: number, toGrainBps: number): number {
-  return Math.max(7_000, Math.min(15_000, Math.round(10_000 + (toGrainBps - fromGrainBps) / 2)));
+export function tradePremiumBps(fromPriceBps: number, toPriceBps: number): number {
+  return Math.max(7_000, Math.min(15_000, Math.round(10_000 + (toPriceBps - fromPriceBps) / 2)));
 }
 
-/** Grain price in one province, 10 000 where nothing is reckoned for it. */
-export function provinceGrainPriceBps(world: Pick<WorldState, "material">, provinceId: string): number {
-  const row = world.material.provinceMaterial.find((candidate) => candidate.provinceId === provinceId);
-  return row === undefined || row.population <= 0 ? 10_000 : grainPriceBps(row.foodSecurityBps);
+/**
+ * Between two provinces' markets, the good that pays most to carry from the
+ * first to the second, and the two prices (basis points of base) it fetches:
+ * the one whose price at the far end most exceeds its price at the near end,
+ * weighed by the root of its base price so that a cheap bulk good does not
+ * beat a dear one on its percentage alone. With no good dearer at the far end
+ * it is the least bad one; between equal markets, grain (as every old venture
+ * was). Ties to the good listed first.
+ */
+export function bestGapGood(world: Pick<WorldState, "economy" | "map">, fromProvinceId: string, toProvinceId: string, among: readonly GoodId[] = GOODS.map((spec) => spec.id)): { readonly good: GoodId; readonly fromBps: number; readonly toBps: number } {
+  let best: { good: GoodId; fromBps: number; toBps: number } = { good: "grain", fromBps: 10_000, toBps: 10_000 };
+  let bestGap = -Infinity;
+  for (const good of among) {
+    const fromBps = marketPriceBps(world, fromProvinceId, good);
+    const toBps = marketPriceBps(world, toProvinceId, good);
+    const gap = (toBps - fromBps) * Math.sqrt(goodSpec(good).basePrice);
+    if (gap > bestGap + 1e-9) {
+      bestGap = gap;
+      best = { good, fromBps, toBps };
+    }
+  }
+  return best;
+}
+
+/** Grain price in one province's market, 10 000 where nothing is reckoned for it. */
+export function provinceGrainPriceBps(world: Pick<WorldState, "economy" | "map">, provinceId: string): number {
+  return nominalPriceBps(world, provinceId, "grain");
 }
 
 /** What grain costs where this account's owner buys it: his power's ground, or where he stands. */
-export function grainPriceForAccount(world: Pick<WorldState, "map" | "material" | "characters">, accountId: string): number {
+export function grainPriceForAccount(world: Pick<WorldState, "map" | "material" | "characters" | "economy">, accountId: string): number {
   const owner = world.material.accounts.find((account) => account.id === accountId)?.owner;
   if (owner?.kind === "polity") return polityGrainPriceBps(world, owner.id);
   if (owner?.kind === "character") {
@@ -156,6 +370,6 @@ export function grainPriceForAccount(world: Pick<WorldState, "map" | "material" 
 }
 
 /** One payment of this obligation as the market makes it today: its bread share at the payer's grain price. */
-export function obligationAmountNow(world: Pick<WorldState, "map" | "material" | "characters">, obligation: { readonly amount: number; readonly kind: string; readonly payerAccountId: string }): number {
+export function obligationAmountNow(world: Pick<WorldState, "map" | "material" | "characters" | "economy">, obligation: { readonly amount: number; readonly kind: string; readonly payerAccountId: string }): number {
   return victualledAmount(obligation.amount, obligation.kind, grainPriceForAccount(world, obligation.payerAccountId));
 }

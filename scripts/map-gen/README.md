@@ -55,6 +55,17 @@ Useful knobs: `nf` noise size, `crest`/`slope` ridge weight, `fill` filler spaci
 
 ## From polygons to a game map (stream F)
 
+Ireland is added by `add-ireland.py` after the base graph is built. Install its
+geometry dependency once with `python -m pip install --target .cache/map-gen-python
+-r scripts/map-gen/requirements.txt`. The `maps:graph` pipeline includes this step.
+It retains the existing Ulster districts, dissolves the modern Irish state border
+in the Natural Earth coastline, and partitions missing land into deterministic
+districts roughly 32 km apart. Shared boundaries are noded together with the old
+districts so the renderer and graph agree. Small coastal pieces are retained and
+island districts receive water crossings. `ireland-polities.json` records regional
+community approximations, city sites, sources, and dating uncertainty. The emitted
+`ireland-extension.json` identifies the additive provinces for existing saves.
+
 `generate-provinces.cjs` now also writes, per province, the facts the game map needs:
 its seed (Pleiades name and id), true area in km2 (the raster is stretched by latitude, so pixels are weighted by row),
 centroid, mean and max elevation, mean slope (m/km), whether it touches the sea, coast length, river and sand share,
@@ -95,7 +106,9 @@ size and walls in its `AUTHORED_TOWNS`. A city or town within 4 km of the AWMC c
 - **Ownership**: each province takes the polity holding most of its sample points in the old map; a pass then flips near-split
   provinces so each polity's land matches what its old ground now amounts to. Unowned Anatolian provinces take the first
   matching territory in `anatolia-polities.json`. A capital, and any town the Anatolian file names, pulls its province into its
-  polity. Each anchor province keeps its old province's owner.
+  polity. Each anchor province keeps its old province's owner, except Rhegium: its coastal province follows the rebel
+  Campanian legion holding the city at the March 270 BCE opening (Polybius 1.7), rather than inheriting the old broad
+  Bruttian region's owner. Neighbouring Bruttian provinces remain Bruttian, and the Mamertines at Messana are a separate polity.
 - **Anchors** (`anchors.json`, `PUNIC_ANCHORS`): for every old id the scenario hard-codes, the new province holding the
   historically right point, with a justification; `PUNIC_OLD_REGION_PROVINCES` lists every new province that lay mostly in it.
 

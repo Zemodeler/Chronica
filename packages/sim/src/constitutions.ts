@@ -16,13 +16,18 @@ import {
   seatCharacterInOffice,
   stableHash,
   staffOffices,
+  CUSTOMARY_TAX_RATE_BPS,
   CharacterSchema,
+  DepartmentSchema,
   vacateOfficeOf,
   type BlocInterest,
+  type Charge,
   type ChamberPower,
   type Character,
   type Constitution,
   type ConstitutionAmendment,
+  type Department,
+  type LeverId,
   type ConstitutionOrigin,
   type FactProposalDraft,
   type Franchise,
@@ -36,6 +41,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Every power's government, as parts that can change.
@@ -62,7 +68,7 @@ import type { IdFactory } from "./ports";
 // What an office may do, in the world's own ops -- the scenario's four grades.
 const CIVIL = ["social_events", "belief_set", "character_intent_set", "political_procedure_open", "political_support_set"];
 const MAGISTRATE = [...CIVIL, "project_create", "project_milestone_update", "generic_entity_create", "generic_entity_update", "province_material_shift", "legitimacy_shift"];
-const IMPERIUM = [...MAGISTRATE, "force_create", "force_modify", "force_engage", "political_procedure_resolve", "authority_grant_upsert", "character_create", "polity_stance_shift"];
+const IMPERIUM = [...MAGISTRATE, "force_create", "force_modify", "force_engage", "political_procedure_resolve", "authority_grant_upsert", "character_create", "polity_stance_shift", "war_plan_set", "campaign_plan_set"];
 const RULER = [...IMPERIUM, "capital_set"];
 const GRADES = { civil: CIVIL, magistrate: MAGISTRATE, imperium: IMPERIUM, ruler: RULER } as const;
 
@@ -99,6 +105,8 @@ interface OfficeSpec {
   readonly key: string;
   readonly label: string;
   readonly kind: "magistracy" | "membership" | "priesthood";
+  /** For a membership office: the chamber (by template key) its holders sit in. */
+  readonly seatChamberKey?: string;
   readonly grade: keyof typeof GRADES;
   readonly rank?: number;
   readonly seatCount?: number;
@@ -106,6 +114,92 @@ interface OfficeSpec {
   readonly succession: { readonly kind: SuccessionRule["kind"]; readonly chamberKey: string | null; readonly label: string };
   readonly enrolsFormerMagistrates?: boolean;
   readonly treasury?: boolean;
+  /** The office draws on the chest up to an allowance of its own, without a vote: what `spend_without_vote` means below a ruler. */
+  readonly allowance?: boolean;
+  /**
+   * What this form does differently from the common run for this office (`authority/competence.ts`): a line for
+   * each act it says something particular about. Acts it says nothing of are read from the chambers' powers.
+   */
+  readonly charge?: Charge;
+}
+
+/**
+ * The charges of the forms, as data.
+ *
+ * - A republic of the great houses keeps the purse in its council's hands: its magistrates move the tribute and the
+ *   tariff and the loans, and the council carries them. Its treasurer keeps the books and sets the rate inside the
+ *   customary, without leave, and a tariff inside a tenth.
+ * - A republic of its citizens elects strategoi to command, and the assembly holds everything else: its generals hold
+ *   the levy (with a colleague) and have no say in the purse.
+ * - A league's strategos answers to its synod for the tribute, the tariff and the loans.
+ * - A temple's treasurer keeps the god's money: the rate, within custom, and the tariff.
+ * - A king's general holds the levy and makes no war of his own.
+ */
+const HOUSES_MAGISTRATE: Charge = {
+  tax_rate: { grade: "by_the_body" }, customs: { grade: "by_the_body" }, loans: { grade: "by_the_body" },
+  grain: { grade: "with_colleague", within: 2, beyond: "by_the_body" }, levy: { grade: "with_colleague" },
+};
+const TREASURER: Charge = {
+  tax_rate: { grade: "alone", within: 1_200, beyond: "by_the_body" }, customs: { grade: "alone", within: 1_000, beyond: "by_the_body" },
+  loans: { grade: "alone", within: 1, beyond: "by_the_body" }, spending: { grade: "alone", within: 1, beyond: "by_the_body" },
+};
+const PEOPLES_GENERAL: Charge = { levy: { grade: "with_colleague" }, tax_rate: { grade: "by_the_body" }, customs: { grade: "by_the_body" }, loans: { grade: "by_the_body" } };
+const LEAGUE_STRATEGOS: Charge = { tax_rate: { grade: "by_the_body" }, customs: { grade: "by_the_body" }, loans: { grade: "by_the_body" }, levy: { grade: "alone" } };
+const KINGS_GENERAL: Charge = { levy: { grade: "alone" }, war: { grade: "forbidden" }, peace: { grade: "forbidden" } };
+/**
+ * A tribal chief (L-M; docs/plans/government.md): no standing tax or loan, tolls on his route, his retinue's stores and a copied coin all his own; war and
+ * peace of the whole people and every pact are the gathering's, as the head of any state without a king is read.
+ */
+const TRIBAL_CHIEF: Charge = {
+  tax_rate: { grade: "forbidden" }, loans: { grade: "forbidden" }, customs: { grade: "alone" }, coinage: { grade: "alone" }, grain: { grade: "alone" }, spending: { grade: "alone" },
+};
+/**
+ * The royal finance officers of the Hellenistic kings (M; Ptolemaic Egypt, the Seleucids). A dioiketes keeps the revenues, the rolls and the king's accounts, sets the
+ * rate within custom under the Revenue Laws and keeps the royal bank's and the granaries' terms; the king alone lays a new tax, so past custom nothing is his. The
+ * oikonomoi are his stewards of the nomes: the royal granaries, and nothing of the purse.
+ */
+const DIOIKETES: Charge = {
+  tax_rate: { grade: "alone", within: CUSTOMARY_TAX_RATE_BPS, beyond: "forbidden" },
+  customs: { grade: "alone", within: 2_500, beyond: "forbidden" },
+  loans: { grade: "alone", within: 1, beyond: "forbidden" },
+  coinage: { grade: "forbidden" },
+  // Treaties and embargoes are the king's, whoever keeps the customs: his friends give their counsel and his officers carry out.
+  pacts: { grade: "forbidden" },
+  embargoes: { grade: "forbidden" },
+  grain: { grade: "alone", within: 2, beyond: "forbidden" },
+  spending: { grade: "alone", within: 2, beyond: "forbidden" },
+};
+const OIKONOMOS: Charge = { grain: { grade: "alone", within: 1, beyond: "forbidden" }, tax_rate: { grade: "forbidden" }, spending: { grade: "forbidden" } };
+
+/**
+ * The kingdoms the sources let us give finance officers and the king's friends by their Greek names (docs/plans/government.md): the others keep a ruler's
+ * council and no named steward. Each office is a magistracy under the king, named by him, with seats as the sources suggest and the levers its department holds.
+ */
+const HELLENISTIC_COURTS: Readonly<Record<string, {
+  readonly friends: string;
+  readonly finance: readonly { readonly key: string; readonly label: string; readonly seats: number; readonly charge: Charge; readonly department: string; readonly levers: readonly LeverId[] }[];
+}>> = {
+  "ptolemaic-egypt": {
+    friends: "Friend of the king",
+    finance: [
+      { key: "dioiketes", label: "Dioiketes", seats: 1, charge: DIOIKETES, department: "The Royal Revenues", levers: ["tax_roll", "customs", "credit", "census"] },
+      { key: "oikonomos", label: "Oikonomos", seats: 3, charge: OIKONOMOS, department: "The Royal Granaries", levers: ["grain"] },
+    ],
+  },
+  "seleucid-empire": {
+    friends: "Friend of the king",
+    finance: [{ key: "dioiketes", label: "Dioiketes", seats: 1, charge: DIOIKETES, department: "The King's Revenues", levers: ["tax_roll", "customs"] }],
+  },
+  // Macedon: the king and his friends, and no finance officer the sources name.
+  macedon: { friends: "Friend of the king", finance: [] },
+};
+
+/** A department a form seeds with its offices (a charge: the levers it holds and the offices that staff it). */
+interface DepartmentSpec {
+  readonly key: string;
+  readonly name: string;
+  readonly levers: readonly LeverId[];
+  readonly officeKeys: readonly string[];
 }
 
 export interface ConstitutionTemplate {
@@ -114,6 +208,8 @@ export interface ConstitutionTemplate {
   readonly offices: readonly OfficeSpec[];
   /** The office that is head of state. */
   readonly rulerKey: string | null;
+  /** The charges the form puts offices to, where history says it had them (the royal finance officers of the Hellenistic kingdoms). */
+  readonly departments?: readonly DepartmentSpec[];
 }
 
 /** A seeded pick: the same power always draws the same name, and two powers rarely do. */
@@ -174,15 +270,22 @@ export function templateFor(polity: Polity, form: GovernmentForm): ConstitutionT
         blocs: [bloc("people", "The people", "the common people", ["commons"], 100, 0)],
         quorumBps: 4_000, passageThresholdBps: 5_001,
       };
+      const court = HELLENISTIC_COURTS[polity.id];
+      const finance = court?.finance ?? [];
       return {
         form, rulerKey: "ruler",
         chambers: keepsAssembly ? [council, assembly] : [council],
         offices: [
           { key: "ruler", label: `${title} ${of}`, kind: "magistracy", grade: "ruler", rank: 3, treasury: true, succession: { kind: "primogeniture", chamberKey: null, label: "Hereditary succession" } },
-          { key: "councillor", label: `Councillor ${of}`, kind: "membership", grade: "civil", seatCount: between(s("councillors"), 10, 30), succession: { kind: "appointment", chamberKey: null, label: "Named by the ruler" } },
-          { key: "general", label: `General ${of}`, kind: "magistracy", grade: "imperium", rank: 2, seatCount: between(s("generals"), 1, 3), succession: { kind: "appointment", chamberKey: null, label: "Named by the ruler" } },
+          { key: "councillor", label: `${court?.friends ?? "Councillor"} ${of}`, kind: "membership", seatChamberKey: "council", grade: "civil", seatCount: between(s("councillors"), 10, 30), succession: { kind: "appointment", chamberKey: null, label: "Named by the ruler" } },
+          { key: "general", label: `General ${of}`, kind: "magistracy", grade: "imperium", rank: 2, seatCount: between(s("generals"), 1, 3), charge: KINGS_GENERAL, succession: { kind: "appointment", chamberKey: null, label: "Named by the ruler" } },
+          ...finance.map((officer): OfficeSpec => ({
+            key: officer.key, label: `${officer.label} ${of}`, kind: "magistracy", grade: "magistrate", rank: 1, seatCount: officer.seats, treasury: true, allowance: true, charge: officer.charge,
+            succession: { kind: "appointment", chamberKey: null, label: "Named by the king" },
+          })),
           priest({ kind: "appointment", chamberKey: null, label: "Named by the ruler" }),
         ],
+        ...(finance.length === 0 ? {} : { departments: finance.map((officer): DepartmentSpec => ({ key: officer.key, name: officer.department, levers: officer.levers, officeKeys: [officer.key] })) }),
       };
     }
     case "oligarchic_republic": {
@@ -206,9 +309,9 @@ export function templateFor(polity: Polity, form: GovernmentForm): ConstitutionT
           },
         ],
         offices: [
-          { key: "magistrate", label: `${pick(s("magistrate"), ["Chief magistrate", "Archon", "Prytanis"])} ${of}`, kind: "magistracy", grade: "imperium", rank: 2, seatCount: pair ? 2 : 1, termDays: 365, treasury: true, succession: { kind: "elective", chamberKey: "assembly", label: "Elected by the citizens" } },
-          { key: "treasurer", label: `Treasurer ${of}`, kind: "magistracy", grade: "magistrate", rank: 1, seatCount: between(s("treasurers"), 1, 4), termDays: 365, treasury: true, succession: { kind: "elective", chamberKey: "assembly", label: "Elected by the citizens" } },
-          { key: "councillor", label: `Elder ${of}`, kind: "membership", grade: "civil", seatCount: between(s("elders"), 30, 120), enrolsFormerMagistrates: true, succession: { kind: "elective", chamberKey: "council", label: "Chosen by the council" } },
+          { key: "magistrate", label: `${pick(s("magistrate"), ["Chief magistrate", "Archon", "Prytanis"])} ${of}`, kind: "magistracy", grade: "imperium", rank: 2, seatCount: pair ? 2 : 1, termDays: 365, treasury: true, charge: HOUSES_MAGISTRATE, succession: { kind: "elective", chamberKey: "assembly", label: "Elected by the citizens" } },
+          { key: "treasurer", label: `Treasurer ${of}`, kind: "magistracy", grade: "magistrate", rank: 1, seatCount: between(s("treasurers"), 1, 4), termDays: 365, treasury: true, allowance: true, charge: TREASURER, succession: { kind: "elective", chamberKey: "assembly", label: "Elected by the citizens" } },
+          { key: "councillor", label: `Elder ${of}`, kind: "membership", seatChamberKey: "council", grade: "civil", seatCount: between(s("elders"), 30, 120), enrolsFormerMagistrates: true, succession: { kind: "elective", chamberKey: "council", label: "Chosen by the council" } },
           priest({ kind: "elective", chamberKey: "council", label: "Chosen by the council" }),
         ],
       };
@@ -232,9 +335,9 @@ export function templateFor(polity: Polity, form: GovernmentForm): ConstitutionT
           },
         ],
         offices: [
-          { key: "general", label: `${pick(s("general"), ["General", "Strategos"])} ${of}`, kind: "magistracy", grade: "imperium", rank: 2, seatCount: generals, termDays: 365, treasury: true, succession: { kind: "elective", chamberKey: "assembly", label: "Elected by the people" } },
+          { key: "general", label: `${pick(s("general"), ["General", "Strategos"])} ${of}`, kind: "magistracy", grade: "imperium", rank: 2, seatCount: generals, termDays: 365, treasury: true, charge: PEOPLES_GENERAL, succession: { kind: "elective", chamberKey: "assembly", label: "Elected by the people" } },
           { key: "magistrate", label: `Magistrate ${of}`, kind: "magistracy", grade: "magistrate", rank: 1, seatCount: between(s("magistrates"), 3, 9), termDays: 365, succession: { kind: "elective", chamberKey: "assembly", label: "Elected by the people" } },
-          { key: "councillor", label: `Councillor ${of}`, kind: "membership", grade: "civil", seatCount: between(s("council-size"), 50, 500), termDays: 365, succession: { kind: "elective", chamberKey: "assembly", label: "Chosen by lot from the citizens" } },
+          { key: "councillor", label: `Councillor ${of}`, kind: "membership", seatChamberKey: "council", grade: "civil", seatCount: between(s("council-size"), 50, 500), termDays: 365, succession: { kind: "elective", chamberKey: "assembly", label: "Chosen by lot from the citizens" } },
           priest({ kind: "elective", chamberKey: "assembly", label: "Elected by the people" }),
         ],
       };
@@ -259,8 +362,8 @@ export function templateFor(polity: Polity, form: GovernmentForm): ConstitutionT
         form, rulerKey: "ruler",
         chambers: warriors ? [gathering, host] : [gathering],
         offices: [
-          { key: "ruler", label: `${pick(s("title"), ["High chieftain", "War-king", "First chief"])} ${of}`, kind: "magistracy", grade: "ruler", rank: 2, ...(forLife ? {} : { termDays: 365 }), treasury: true, succession: { kind: "elective", chamberKey: "gathering", label: "Chosen by the chiefs" } },
-          { key: "councillor", label: `Chief ${of}`, kind: "membership", grade: "civil", seatCount: between(s("chiefs"), 8, 40), succession: { kind: "seniority", chamberKey: null, label: "The eldest of his house" } },
+          { key: "ruler", label: `${pick(s("title"), ["High chieftain", "War-king", "First chief"])} ${of}`, kind: "magistracy", grade: "ruler", rank: 2, ...(forLife ? {} : { termDays: 365 }), treasury: true, charge: TRIBAL_CHIEF, succession: { kind: "elective", chamberKey: "gathering", label: "Chosen by the chiefs" } },
+          { key: "councillor", label: `Chief ${of}`, kind: "membership", seatChamberKey: "gathering", grade: "civil", seatCount: between(s("chiefs"), 8, 40), succession: { kind: "seniority", chamberKey: null, label: "The eldest of his house" } },
           priest({ kind: "seniority", chamberKey: null, label: "The eldest of the order" }),
         ],
       };
@@ -285,7 +388,7 @@ export function templateFor(polity: Polity, form: GovernmentForm): ConstitutionT
         ],
         offices: [
           { key: "ruler", label: `${pick(s("title"), ["Leader", "Meddix", "Captain-general"])} ${of}`, kind: "magistracy", grade: "ruler", rank: 2, ...(annual ? { termDays: 365 } : {}), treasury: true, succession: { kind: "elective", chamberKey: "assembly", label: "Acclaimed by the soldiers" } },
-          { key: "councillor", label: `Captain ${of}`, kind: "membership", grade: "civil", seatCount: between(s("captains"), 8, 20), succession: { kind: "elective", chamberKey: "assembly", label: "Acclaimed by the soldiers" } },
+          { key: "councillor", label: `Captain ${of}`, kind: "membership", seatChamberKey: "council", grade: "civil", seatCount: between(s("captains"), 8, 20), succession: { kind: "elective", chamberKey: "assembly", label: "Acclaimed by the soldiers" } },
           priest({ kind: "appointment", chamberKey: null, label: "Named by the leader" }),
         ],
       };
@@ -309,9 +412,9 @@ export function templateFor(polity: Polity, form: GovernmentForm): ConstitutionT
           },
         ],
         offices: [
-          { key: "ruler", label: `${pick(s("title"), ["Strategos", "President", "Meddix tuticus"])} ${of}`, kind: "magistracy", grade: "imperium", rank: 2, termDays: twoYears ? 730 : 365, treasury: true, succession: { kind: "elective", chamberKey: "synod", label: "Elected by the league" } },
+          { key: "ruler", label: `${pick(s("title"), ["Strategos", "President", "Meddix tuticus"])} ${of}`, kind: "magistracy", grade: "imperium", rank: 2, termDays: twoYears ? 730 : 365, treasury: true, charge: LEAGUE_STRATEGOS, succession: { kind: "elective", chamberKey: "synod", label: "Elected by the league" } },
           { key: "hipparch", label: `Commander of horse ${of}`, kind: "magistracy", grade: "imperium", rank: 1, termDays: 365, succession: { kind: "elective", chamberKey: "synod", label: "Elected by the league" } },
-          { key: "councillor", label: `Delegate ${of}`, kind: "membership", grade: "civil", seatCount: between(s("delegates"), 20, 60), succession: { kind: "appointment", chamberKey: null, label: "Sent by his city" } },
+          { key: "councillor", label: `Delegate ${of}`, kind: "membership", seatChamberKey: "synod", grade: "civil", seatCount: between(s("delegates"), 20, 60), succession: { kind: "appointment", chamberKey: null, label: "Sent by his city" } },
           priest({ kind: "elective", chamberKey: "synod", label: "Elected by the league" }),
         ],
       };
@@ -336,7 +439,7 @@ export function templateFor(polity: Polity, form: GovernmentForm): ConstitutionT
         offices: [
           { key: "ruler", label: `High priest ${of}`, kind: "priesthood", grade: "ruler", rank: 3, treasury: true, succession: { kind: "elective", chamberKey: "college", label: "Chosen by the college" } },
           { key: "priest", label: `Priest ${of}`, kind: "priesthood", grade: "civil", seatCount: between(s("priests"), 10, 30), succession: { kind: "elective", chamberKey: "college", label: "Chosen by the college" } },
-          { key: "treasurer", label: `Treasurer of the temple ${of}`, kind: "magistracy", grade: "magistrate", rank: 1, treasury: true, succession: { kind: "appointment", chamberKey: null, label: "Named by the high priest" } },
+          { key: "treasurer", label: `Treasurer of the temple ${of}`, kind: "magistracy", grade: "magistrate", rank: 1, treasury: true, allowance: true, charge: TREASURER, succession: { kind: "appointment", chamberKey: null, label: "Named by the high priest" } },
         ],
       };
     }
@@ -409,6 +512,8 @@ export function readForm(world: WorldState, polityId: string, government: Govern
 // ── Building the parts ──────────────────────────────────────────────────────
 
 interface Built {
+  readonly departments: readonly DepartmentSpec[];
+  readonly officeIdOfKey: (key: string) => string;
   readonly institutions: GovernmentInstitution[];
   readonly offices: Office[];
   readonly rules: SuccessionRule[];
@@ -463,19 +568,42 @@ function build(polity: Polity, template: ConstitutionTemplate, treasuryAccountId
       authorisedActionIds: [...GRADES[spec.grade]],
       sponsorableCategories: [],
       treasuryAccountId: spec.treasury === true ? treasuryAccountId : null,
-      treasuryPermissions: spec.treasury === true && treasuryAccountId !== null ? (spec.grade === "ruler" ? ["view", "propose_spending", "spend_without_vote"] : ["view", "propose_spending"]) : [],
+      treasuryPermissions: spec.treasury === true && treasuryAccountId !== null ? (spec.grade === "ruler" || spec.allowance === true ? ["view", "propose_spending", "spend_without_vote"] : ["view", "propose_spending"]) : [],
       incomeSourceId: null,
       expectedBlocId: null,
       successionRuleId: ruleId,
       eligibilityRequirementIds: [...requirementIds],
       kind: spec.kind,
+      ...(spec.seatChamberKey === undefined ? {} : { chamberId: chamberId(polity.id, spec.seatChamberKey) }),
       ...(spec.rank === undefined ? {} : { rank: spec.rank }),
       ...(spec.seatCount === undefined ? {} : { seatCount: spec.seatCount }),
       ...(spec.termDays === undefined ? {} : { termDays: spec.termDays }),
       ...(spec.enrolsFormerMagistrates === true ? { enrolsFormerMagistrates: true } : {}),
+      ...(spec.charge === undefined ? {} : { charge: spec.charge }),
     };
   });
-  return { institutions, offices, rules, rulerOfficeId: template.rulerKey === null ? null : officeId(polity.id, template.rulerKey) };
+  return {
+    institutions, offices, rules, rulerOfficeId: template.rulerKey === null ? null : officeId(polity.id, template.rulerKey),
+    departments: template.departments ?? [], officeIdOfKey: (key) => officeId(polity.id, key),
+  };
+}
+
+/**
+ * The charges a form seeds, as departments (`Department`: the levers held and the offices that staff them). Made with the offices when a power's government is
+ * founded or recast, under ids the same on every replay, and replacing any that stood before under the same id: a power that falls to a king keeps no
+ * dioiketes, and a republic that is made a kingdom has its own. A world that opens with a power's parts (day 0) opens with departments as old as any a scenario seeds.
+ */
+function withDepartments(world: WorldState, polity: Polity, specs: readonly DepartmentSpec[], atStep: number): WorldState {
+  if (specs.length === 0) return world;
+  const old = atStep === 0;
+  const made = specs.map((spec): Department => DepartmentSchema.parse({
+    id: boundedId(polity.id, "dept", spec.key), scope: { kind: "polity", id: polity.id }, name: spec.name, levers: [...spec.levers],
+    officeIds: spec.officeKeys.map((key) => officeId(polity.id, key)), headOfficeId: null, deputyOfficeIds: [], pay: "honorary",
+    foundedAtStep: atStep, formsAtStep: old ? 0 : atStep + 60, experienceDays: old ? 3_600 : 0, countedAtStep: old ? 0 : null,
+    mechanicRuleId: null, standingEntityId: null, effects: [], gates: [], origin: old ? "scenario" : "reform", abolishedAtStep: null,
+  }));
+  const ids = new Set(made.map((department) => department.id));
+  return { ...world, departments: [...world.departments.filter((department) => !ids.has(department.id)), ...made] };
 }
 
 /** The requirements every office of a power asks: alive, one of its people, not disqualified. Made where missing. */
@@ -565,9 +693,27 @@ export function ensureConstitutions(input: EnsureConstitutionsInput): WorldState
     }
     const form = polity.governmentForm ?? formFromOffices(world, polity.id, input.government) ?? inferredGovernmentForm(polity);
     const installed = install(world, polity, form, input.government, input.toDay, "generated", null, NEW_CHAMBER_LEGITIMACY_BPS.lawful + 2_000);
-    world = MAJOR_NATIONS.has(polity.id) ? staffed(installed.world, polity.id, installed.built.offices, input.toDay) : installed.world;
+    world = retireTheTemplate(installed.world, polity, installed.built.offices, input.government, input.toDay);
+    world = MAJOR_NATIONS.has(polity.id) ? staffed(world, polity.id, installed.built.offices, input.toDay) : world;
   }
   return world;
+}
+
+/**
+ * The scenario's stand-in offices of a template power ("boii-ruler", "boii-councillor", "boii-priest") are reformed into the offices its constitution builds
+ * ("boii:ruler" ...), as the doc above says, rather than left beside them: a power has one chief office. A stand-in nobody holds is abolished (kept on
+ * record, empty of every power); one somebody holds is left alone, since the seat is the scenario's own.
+ */
+function retireTheTemplate(world: WorldState, polity: Polity, built: readonly Office[], government: GovernmentRules, atStep: number): WorldState {
+  let next = world;
+  const keys = new Set(built.map((office) => office.id.slice(polity.id.length + 1)));
+  for (const office of allOffices(world, government.offices)) {
+    const key = office.id.startsWith(`${polity.id}-`) ? office.id.slice(polity.id.length + 1) : null;
+    if (office.polityId !== polity.id || key === null || !["ruler", "councillor", "priest"].includes(key) || !keys.has(key) || office.successionRuleId === "abolished") continue;
+    if (next.material.officeSeats.some((seat) => seat.officeId === office.id && seat.status === "held")) continue;
+    next = abolishOffice(next, office, "abolished", atStep).world;
+  }
+  return next;
 }
 
 /**
@@ -612,6 +758,7 @@ function install(
     },
   };
   next = withOpeningSeats(next, built.offices, built.rules);
+  next = withDepartments(next, polity, built.departments, atStep);
   const constitution: Constitution = {
     polityId: polity.id,
     form,
@@ -799,6 +946,14 @@ export function recast(input: RecastInput): { world: WorldState; facts: FactProp
     world = gone.world;
     if (office.kind !== "priesthood") ousted.push(...gone.ousted);
   }
+  // A charge whose every office is gone has nobody to keep it: the department ends, and its work goes back to whoever governs (`departments.ts`).
+  world = {
+    ...world,
+    departments: world.departments.map((department) => (department.scope.kind === "polity" && department.scope.id === polity.id && department.abolishedAtStep === null
+      && department.officeIds.length > 0 && department.officeIds.every((id) => !keptIds.has(id))
+      ? { ...department, abolishedAtStep: input.atStep }
+      : department)),
+  };
   // A ruler who keeps his seat's key under a new form -- a king made a mere
   // magistrate -- is still put out when the state was taken from him.
   if (forced && oldRuler !== null && oldRuler.id !== input.seatRuler) {
@@ -846,7 +1001,7 @@ export function recast(input: RecastInput): { world: WorldState; facts: FactProp
   return {
     world,
     facts: [{
-      localId: `constitution_${polity.id}_${input.atStep}`.slice(0, 60),
+      localId: safeLocalId(`constitution_${polity.id}_${input.atStep}`).slice(0, 60),
       kind: "constitution_changed",
       summary: `${polity.name} is now ${GOVERNMENT_FORM_IN_WORDS[input.toForm]}${fromForm === input.toForm ? ", under new laws" : `, and no longer ${GOVERNMENT_FORM_IN_WORDS[fromForm]}`}. ${input.summary} ${chambers.length > 0 ? `It is governed through ${chambers.join(" and ")}.` : ""}`.trim().slice(0, 600),
       affectedRefs: [{ kind: "polity", id: polity.id }, ...(input.byCharacterId === null ? [] : [{ kind: "character" as const, id: input.byCharacterId }]), ...[...new Set(ousted)].slice(0, 4).map((id) => ({ kind: "character" as const, id }))],
@@ -1060,7 +1215,7 @@ export function keepThrones(input: KeepThronesInput): { world: WorldState; facts
       world = seatCharacterInOffice(world, heir.id, { office, vacantSeatId: seat.id }, input.toDay, null);
       const age = currentAgeYears(heir, input.toDay);
       facts.push({
-        localId: `throne_${office.id}_${input.toDay}`.slice(0, 60),
+        localId: safeLocalId(`throne_${office.id}_${input.toDay}`).slice(0, 60),
         kind: "succession",
         summary: `${heir.name} succeeds ${late!.name} as ${office.label}${age < MAJORITY_YEARS ? `, a child of ${age}, and will reign through a regent` : ""}.`,
         affectedRefs: [{ kind: "character", id: heir.id }, { kind: "character", id: late!.id }, { kind: "polity", id: polity.id }],
@@ -1088,7 +1243,7 @@ export function keepThrones(input: KeepThronesInput): { world: WorldState; facts
     };
     world = rereadForm(world, polity.id, input.government, input.toDay, "extinction", `The line of ${late?.name ?? "the old rulers"} died out; no heir was found, and ${council.name} took the choosing of the ${office.label} upon itself.`, null);
     facts.push({
-      localId: `extinct_${office.id}_${input.toDay}`.slice(0, 60),
+      localId: safeLocalId(`extinct_${office.id}_${input.toDay}`).slice(0, 60),
       kind: "constitution_changed",
       summary: `No heir came forward for the throne of ${polity.name}. ${council.name} will choose the next ${office.label}.`,
       affectedRefs: [{ kind: "polity", id: polity.id }],

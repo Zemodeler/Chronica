@@ -45,7 +45,7 @@ const as = (characterId: string): ApplyContext => ({
   offices: definition.government.offices,
   warfare: definition.warfare,
   terrains: definition.map.terrains,
-  ids: createIdFactory(`trade-${characterId}`),
+  ids: createIdFactory(`t5-${characterId}`),
   gameId: "game-1",
 });
 /** Parsed as the engine parses every answer, so each op carries its defaults. */
@@ -65,7 +65,7 @@ const balance = (world: WorldState, accountId: string) => world.material.account
 const tick = (world: WorldState, toDay: number) => runDeterministicTick({ world, toDay, ids: createIdFactory(`trade-tick-${toDay}`), warfare: definition.warfare });
 
 const THE_VENTURE: WorldDelta = {
-  op: "trade_venture_open", localId: "the_run", title: "The Messana run", ownerCharacterRef: "leptines-syracuse",
+  op: "trade_venture_open", localId: "the_oil_run", title: "The Messana run", ownerCharacterRef: "leptines-syracuse",
   fromProvinceId: SYRACUSE, toProvinceId: MESSANA, band: "marked", paidFromAccountRef: "leptines-purse",
   reason: "Leptines puts a ship and a cargo of oil on the strait.",
 };
@@ -76,8 +76,8 @@ function withTheVenture(): WorldState {
   return result.world;
 }
 
-/** Leptines' purse gained this month, less what his estate paid him. */
-const tradeReturn = (before: WorldState, after: WorldState): number => balance(after, "leptines-purse") - balance(before, "leptines-purse") - 90;
+/** Leptines' purse gained this month, less what his estate paid him (270 a month since v59, 2026-10-08: a tenth of the first drafts). */
+const tradeReturn = (before: WorldState, after: WorldState): number => balance(after, "leptines-purse") - balance(before, "leptines-purse") - 270;
 /** What his cargoes brought in, less the next cargoes bought, since `before`: his purse's trade rows. */
 const cargoReturn = (before: WorldState, after: WorldState): number => after.material.transactions.slice(before.material.transactions.length)
   .filter((row) => (row.destinationAccountId === "leptines-purse" && row.kind === "income" && row.cause.kind === "scheduled_income" && row.cause.explanation.startsWith("Sale of the cargo"))
@@ -86,7 +86,10 @@ const cargoReturn = (before: WorldState, after: WorldState): number => after.mat
 
 describe("a merchant and his trade", () => {
   it("opens a venture between two ports from his own purse, lawfully, at the engine's price", () => {
-    const world = opening();
+    // A purse that can bear the price: Syracuse, the most developed province of the opening, makes a
+    // "marked" venture dearer than Leptines's 42,000 (a purse is capped at what it holds).
+    const poor = opening();
+    const world = { ...poor, material: { ...poor.material, accounts: poor.material.accounts.map((account) => (account.id === "leptines-purse" ? { ...account, balance: account.balance + 20_000 } : account)) } };
     const terms = ventureTerms(world, SYRACUSE, MESSANA, "marked")!;
     const result = apply(world, [THE_VENTURE], as("leptines-syracuse"));
     expect(result.rejected).toEqual([]);
@@ -113,7 +116,9 @@ describe("a merchant and his trade", () => {
     // His own city: no foreign power at the far end to cut it.
     expect(result.world.material.incomeSources.find((source) => source.id === venture.incomeSourceId)!.counterpartyPolityId).toBeNull();
     const month = tick(result.world, 30).world;
-    expect(tradeReturn(result.world, month)).toBe(terms.monthlyReturn);
+    // The quoted return and the month's are read from the opening's department and the month's, and the officers' own natures are part of both:
+    // they may differ by the odd coin of rounding between the two readings -- a coin of the old reckoning is thirty of the age's.
+    expect(Math.abs(tradeReturn(result.world, month) - terms.monthlyReturn)).toBeLessThanOrEqual(30);
   });
 
   // Between two ports a venture is a cargo (play-test L9): no monthly trickle,
@@ -131,10 +136,10 @@ describe("a merchant and his trade", () => {
     const landed = tick(before.world, cargo.arrivesAtStep);
     const sold = landed.world.material.transactions.filter((row) => row.kind === "income" && row.cause.id === venture.incomeSourceId);
     expect(sold).toHaveLength(1);
-    // Between three twentieths and two fifths over what it cost.
-    expect(sold[0]!.amount).toBeGreaterThanOrEqual(Math.round(cargo.cost * 1.15));
-    expect(sold[0]!.amount).toBeLessThanOrEqual(Math.round(cargo.cost * 1.4));
-    expect(landed.factProposals.some((fact) => fact.kind === "cargo_sold" && fact.summary.includes("came in at") && fact.summary.includes(`sold for ${sold[0]!.amount}`))).toBe(true);
+    // Between a twentieth and a quarter over what it cost (five to twenty-four in the hundred a voyage, before the crew and the dock).
+    expect(sold[0]!.amount).toBeGreaterThanOrEqual(Math.round(cargo.cost * 1.04));
+    expect(sold[0]!.amount).toBeLessThanOrEqual(Math.round(cargo.cost * 1.25));
+    expect(landed.factProposals.some((fact) => fact.kind === "cargo_sold" && fact.summary.includes("landed at") && fact.summary.includes(`sold for ${sold[0]!.amount}`))).toBe(true);
     // A regular trade ("marked") buys the next cargo and sails again; the profit stays.
     expect(cargoReturn(opened, landed.world)).toBe(sold[0]!.amount - cargo.cost);
     expect(landed.world.material.ventures[0]!.status).toBe("running");
@@ -220,12 +225,13 @@ describe("a merchant and his trade", () => {
     const refused = apply(opening(), [privately], as("leptines-syracuse"));
     expect(refused.rejected.map((rejection) => rejection.kind)).toContain("reference");
 
-    const forTheCity = { ...(privately as unknown as Record<string, unknown>), localId: "the_harbour", label: "A harbour", sponsorRef: { kind: "polity", id: "syracuse" }, fundingAccountRef: "syracuse-treasury", completionOutcome: { kind: "income_source", label: "Harbour dues", amount: 100_000, provinceId: SYRACUSE, beneficiaryAccountRef: "syracuse-treasury", cadenceDays: 30 } } as unknown as WorldDelta;
+    const forTheCity = { ...(privately as unknown as Record<string, unknown>), localId: "the_harbour", label: "A harbour", sponsorRef: { kind: "polity", id: "syracuse" }, fundingAccountRef: "syracuse-treasury", completionOutcome: { kind: "income_source", label: "Harbour dues", amount: 10_000_000, provinceId: SYRACUSE, beneficiaryAccountRef: "syracuse-treasury", cadenceDays: 30 } } as unknown as WorldDelta;
     const built = apply(opening(), [forTheCity], as("hieron-ii"));
     expect(built.rejected).toEqual([]);
     const finished = tick(built.world, 30).world;
     const dues = finished.material.incomeSources.find((source) => source.label === "Harbour dues")!;
-    // A great market's share of Syracuse, not the hundred thousand the answer promised.
-    expect(dues.amount).toBeLessThan(5_000);
+    // A great market's share of Syracuse (a seventh of what its province can yield), not the ten million the answer promised.
+    // (Syracuse's province is the most developed in the opening, and what it can yield is reckoned from that: 6,683,500 a month, so 1,002,525 -- 2,155,968 and 323,395 before v52 raised the land's yield by 3.1.)
+    expect(dues.amount).toBeLessThanOrEqual(1_005_000);
   });
 });

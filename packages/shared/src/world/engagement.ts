@@ -134,6 +134,8 @@ export const ConvoySchema = z
     sentAtStep: ElapsedStepSchema,
     arrivesAtStep: ElapsedStepSchema,
     status: z.enum(["on_the_road", "delivered", "taken", "lost"]),
+    /** The victualling contract it is carried under, when a house sent it (`sim/army-victualling.ts`): what it fetches is the house's, and what is lost on the road is its loss. */
+    contractId: EntityIdSchema.nullable().optional(),
   })
   .strict();
 export type Convoy = z.infer<typeof ConvoySchema>;

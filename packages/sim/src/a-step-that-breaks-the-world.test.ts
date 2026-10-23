@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { punicWarsScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, type WorldState } from "@chronica/shared";
 import { runSimulationBurst } from "./burst";
@@ -38,6 +38,8 @@ const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 const silent: SimModelPort = { complete: () => Promise.resolve(JSON.stringify({ actors: [] })) };
 
 describe("a step that writes what will not load", () => {
+  // What a player's game does with a step that breaks the world: sets it aside and goes on. Strict, it would stop.
+  beforeEach(() => { vi.stubEnv("CHRONICA_STRICT", "0"); });
   it("is set aside, and the burst hands back a world that loads, saying where it broke", async () => {
     const world = ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
     const result = await runSimulationBurst({

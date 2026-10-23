@@ -24,6 +24,8 @@ interface Entry {
   readonly prestige: number;
   readonly gender?: "male" | "female";
   readonly traits?: readonly string[];
+  /** Said of a man the sources do not name: why he is here, in the words of his creation reason. */
+  readonly invented?: string;
 }
 
 interface PowerRoster {
@@ -71,8 +73,9 @@ const ROME: PowerRoster = {
     "roman-censor": [{ name: "Quintus Aemilius Papus", age: 62, focus: "learning", prestige: 8_600, traits: ["dutiful"] }, "manius-curius"],
     "roman-pontifex-maximus": ["tiberius-coruncanius"],
     "roman-pontiff": [
-      { name: "Publius Cornelius Arvina", age: 58, focus: "piety", prestige: 7_000 },
-      { name: "Gaius Marcius Rutilus", age: 50, focus: "piety", prestige: 6_800 },
+      { name: "Publius Cornelius Arvina", age: 78, focus: "piety", prestige: 7_000 },
+      // C. Marcius Rutilus Censorinus (v58): consul in 310, censor in 294 and again in 265, so born by 352 and eighty-four in 270 (Livy 9.38 and 10.47; Valerius Maximus 4.1.3).
+      { name: "Gaius Marcius Rutilus", age: 84, focus: "piety", prestige: 6_800 },
       { name: "Lucius Aemilius Barbula", age: 53, focus: "learning", prestige: 6_700 },
       { name: "Quintus Marcius Philippus", age: 50, focus: "piety", prestige: 6_600 },
     ],
@@ -82,6 +85,13 @@ const ROME: PowerRoster = {
       { name: "Publius Decius Mus", age: 48, focus: "piety", prestige: 6_600, traits: ["dutiful"] },
       { name: "Marcus Valerius Maximus Messalla", age: 44, focus: "diplomacy", prestige: 6_400 },
     ],
+    // The old rites (v58). The sources name no holder of any of the four in the 270s, so the four men are invented (docs/plans/gentes.md): patricians of gentes
+    // that kept the old rites, of the age the offices were given at (a flamen was inaugurated young, a rex sacrorum was an old man). The flamen Dialis is a Valerius
+    // because the first flamen Dialis the sources name, in 209, was a Valerius Flaccus (Livy 27.8), from a gens already in the world.
+    "roman-rex-sacrorum": [{ name: "Marcus Papirius Maso", age: 58, focus: "piety", prestige: 6_100, traits: ["dutiful"], invented: "Invented: the sources name no rex sacrorum in 270; a patrician of the Papirii, who kept old rites (Cicero, De legibus 2.54)." }],
+    "roman-flamen-dialis": [{ name: "Publius Valerius Falto", age: 38, focus: "piety", prestige: 5_800, traits: ["dutiful"], invented: "Invented: the sources name no flamen Dialis in 270; the first they name (209) was a Valerius Flaccus (Livy 27.8)." }],
+    "roman-flamen-martialis": [{ name: "Servius Cornelius Cossus", age: 46, focus: "piety", prestige: 5_600, invented: "Invented: the sources name no flamen Martialis in 270." }],
+    "roman-flamen-quirinalis": [{ name: "Quintus Sulpicius Camerinus", age: 49, focus: "piety", prestige: 5_500, invented: "Invented: the sources name no flamen Quirinalis in 270." }],
     "roman-vestal": [
       { name: "Aemilia the Vestal", age: 37, focus: "piety", prestige: 6_400, gender: "female" },
       { name: "Licinia the Vestal", age: 33, focus: "piety", prestige: 6_000, gender: "female" },
@@ -208,7 +218,7 @@ export function rosterPeople(offices: readonly Office[], takenSeats: readonly { 
           ...(holder.gender === undefined ? {} : { gender: holder.gender }),
           officeId: magistracy ? officeId : null,
         }, 0);
-        characters.push(character);
+        characters.push(holder.invented === undefined ? character : { ...character, creationReason: holder.invented });
         accounts.push(account);
         officeSeats.push(seatFor(office, seatIndex, id, 0));
       }
@@ -345,7 +355,7 @@ export function houseFamilies(people: readonly Record<string, unknown>[]): House
   const person = (head: Person, id: string, name: string, age: number, prestigeBps: number, gender: "male" | "female", why: string, traits: readonly string[] = []): Person => {
     const made = personFor({
       id, name, polityId: head.polityId, cultureId: head.cultureId, faithId: head.faithId, provinceId: head.locationProvinceId,
-      age, prestigeBps, focus: gender === "female" ? "diplomacy" : "learning", traits, gender, officeId: null, balance: age < 14 ? 0 : 100,
+      age, prestigeBps, focus: gender === "female" ? "diplomacy" : "learning", traits, gender, officeId: null, balance: age < 14 ? 0 : 3_000,
     }, 0);
     characters.push({ ...made.character, creationReason: why });
     accounts.push(made.account);

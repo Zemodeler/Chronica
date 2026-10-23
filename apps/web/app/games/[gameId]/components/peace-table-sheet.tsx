@@ -32,13 +32,11 @@ const ANSWER_WORDS: Readonly<Record<string, string>> = {
 
 const keyOf = (term: PeaceTerm): string => JSON.stringify(term);
 
-export function PeaceTableSheet({ gameId, peace, onChanged }: {
-  readonly gameId: string;
-  readonly peace: PeaceTablesView;
-  readonly onChanged: () => void;
-}) {
+type Said = { readonly kind: "answer" | "error"; readonly text: string } | null;
+
+function useTableActs(gameId: string, onChanged: () => void) {
   const [busy, setBusy] = useState(false);
-  const [said, setSaid] = useState<{ readonly kind: "answer" | "error"; readonly text: string } | null>(null);
+  const [said, setSaid] = useState<Said>(null);
 
   const act = async (body: Record<string, unknown>): Promise<void> => {
     setBusy(true);
@@ -55,6 +53,69 @@ export function PeaceTableSheet({ gameId, peace, onChanged }: {
       setBusy(false);
     }
   };
+  return { busy, said, act };
+}
+
+/**
+ * The war tab on a power's page: how the war stands, how much of our people
+ * still back it, and the way out. The player may open talks and put terms
+ * first, from here, without waiting for the other side to sue.
+ */
+export function WarTab({ gameId, peace, enemyId, onChanged }: {
+  readonly gameId: string;
+  readonly peace: PeaceTablesView;
+  readonly enemyId: string;
+  readonly onChanged: () => void;
+}) {
+  const { busy, said, act } = useTableActs(gameId, onChanged);
+  const table = peace.tables.find((candidate) => candidate.theirId === enemyId && candidate.status === "open");
+  const war = peace.wars.find((candidate) => candidate.enemyId === enemyId);
+  if (table === undefined && war === undefined) return <p className="quiet">No war with them that you may speak of.</p>;
+  return (
+    <div className="peace-table">
+      {!peace.speaks && (
+        <p className="quiet peace-table__watching">You do not speak for your power at the table. You may watch, and your purse ({peace.purse}) may speak for you.</p>
+      )}
+      {said !== null && <p className={said.kind === "error" ? "peace-table__said is-error" : "peace-table__said"} role="status">{said.text}</p>}
+      {table !== undefined
+        ? <Table table={table} speaks={peace.speaks} purse={peace.purse} busy={busy} act={act} />
+        : war !== undefined && (
+          <section className="dossier__section peace-table__war">
+            <h4>The war</h4>
+            <p className="peace-table__standing">
+              <WarScale score={war.warScore} />
+              <span>{war.warParts.slice(0, 4).join("; ") || "Neither side has the better of it."}</span>
+            </p>
+            <Support support={war.support} why={war.supportWhy} />
+            {peace.speaks && (
+              <button type="button" className="btn btn--primary" disabled={busy} onClick={() => void act({ action: "open", enemyId })}>
+                Send for peace talks
+              </button>
+            )}
+            <p className="quiet">Once the envoys are seated you may put your terms first.</p>
+          </section>
+        )}
+    </div>
+  );
+}
+
+function Support({ support, why }: { readonly support: number; readonly why: readonly string[] }) {
+  return (
+    <p className="peace-table__support">
+      <span className="peace-scale" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={support} aria-label={`Support for the war at home: ${support} of 100`}>
+        <span className={support >= 50 ? "peace-scale__fill is-ours" : "peace-scale__fill is-theirs"} style={{ left: 0, width: `${support}%` }} />
+      </span>
+      <span>Support for the war at home: <strong>{support}</strong>{why.length > 0 ? `, worn down by ${why.join("; ")}` : ""}.</span>
+    </p>
+  );
+}
+
+export function PeaceTableSheet({ gameId, peace, onChanged }: {
+  readonly gameId: string;
+  readonly peace: PeaceTablesView;
+  readonly onChanged: () => void;
+}) {
+  const { busy, said, act } = useTableActs(gameId, onChanged);
 
   if (peace.tables.length === 0 && peace.wars.length === 0) {
     return <p className="quiet">Your power is at war with nobody, and there is no peace to make.</p>;
@@ -133,6 +194,7 @@ function Table({ table, speaks, purse, busy, act }: {
           <WarScale score={table.warScore} />
           <span>{table.warParts.slice(0, 4).join("; ") || "Neither side has the better of it."}</span>
         </p>
+        <Support support={table.support} why={table.supportWhy} />
         <p className="peace-table__budget">They will bear up to <strong>{table.weCanAsk}</strong> of what we ask. We would bear up to <strong>{table.theyCanAsk}</strong> of theirs.</p>
       </header>
 

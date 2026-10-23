@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { BlocInterestSchema, ChamberPowerSchema, FranchiseSchema, QuestionConcernSchema } from "./political-parts";
+import { GoodIdSchema } from "./world/good-ids";
 
 // Named, so every JSON schema generated for a prompt states it once and points
 // at it: inlined, it was 73 copies of the same string in the orchestrator's.
@@ -53,6 +54,12 @@ export const MoneyAccountSchema = z.object({
   id: EntityIdSchema,
   owner: AccountOwnerSchema,
   currencyId: EntityIdSchema,
+  /**
+   * The coinage the money in it is struck in (`world/coinage.ts`). Absent: the
+   * coinage of the owner's power, or foreign silver. The balance itself is
+   * always in silver units, whatever coin it is held in.
+   */
+  coinageId: EntityIdSchema.optional(),
   balance: MoneyAmountSchema,
   status: z.enum(["active", "locked", "closed"]),
   visibility: VisibilitySchema,
@@ -193,10 +200,32 @@ export const MoneyReservationSchema = z
   });
 export type MoneyReservation = z.infer<typeof MoneyReservationSchema>;
 
+/**
+ * Where money enters or leaves the books other than between two accounts.
+ *
+ * A world's money is conserved except at these doors, each one a real thing
+ * outside the accounts the model keeps: the land and its people, who are
+ * taxed, rented and tithed but keep no purse of their own; the market, which
+ * buys what a merchant carries and sells what a ship is fitted with; plunder
+ * from a sacked town; credit from a banker the world does not name; the
+ * thousands nobody names, who are paid wages, and who bring what they have
+ * saved when they take service; bread bought from the country at large; money
+ * an order sends abroad (which is also where a money-changer's cut on a sum
+ * crossing from one coinage to another goes); the seigniorage a mint earns by
+ * striking the same silver into more coin; and the means a man arrives in the
+ * world with. A one-sided transaction that names none of them is money from nowhere
+ * (`sim/money-audit.ts`).
+ */
+export const EXTERNAL_MONEY_KINDS = ["harvest", "market", "plunder", "credit", "the_unnamed", "bread", "abroad", "seigniorage", "endowment"] as const;
+export const ExternalMoneyKindSchema = z.enum(EXTERNAL_MONEY_KINDS);
+export type ExternalMoneyKind = z.infer<typeof ExternalMoneyKindSchema>;
+
 export const MoneyTransactionSchema = z
   .object({
     id: EntityIdSchema,
     sourceActionId: EntityIdSchema.nullable().optional(),
+    /** For a transaction with only one side: which door in or out of the books it is (`EXTERNAL_MONEY_KINDS`). */
+    external: ExternalMoneyKindSchema.optional(),
     atStep: ElapsedStepSchema,
     kind: z.enum([
       "income",
@@ -385,6 +414,26 @@ export const VotingBlocSchema = z
   });
 export type VotingBloc = z.infer<typeof VotingBlocSchema>;
 
+/** The most questions a chamber remembers the votes of, and the most named members kept for each (a Senate of three hundred is not written out three hundred times). */
+export const RECENT_VOTES_KEPT = 20;
+export const RECENT_VOTERS_KEPT = 80;
+
+/** How a chamber's named members divided on one question lately settled: a bounded record, oldest dropped first. */
+export const RecentVoteSchema = z
+  .object({
+    procedureId: EntityIdSchema,
+    label: z.string().trim().min(1).max(160),
+    atStep: ElapsedStepSchema,
+    outcome: z.enum(["passed", "failed"]),
+    yesWeight: z.number().int().nonnegative(),
+    noWeight: z.number().int().nonnegative(),
+    yes: z.array(EntityIdSchema).max(RECENT_VOTERS_KEPT),
+    no: z.array(EntityIdSchema).max(RECENT_VOTERS_KEPT),
+    abstain: z.array(EntityIdSchema).max(RECENT_VOTERS_KEPT),
+  })
+  .strict();
+export type RecentVote = z.infer<typeof RecentVoteSchema>;
+
 export const GovernmentInstitutionSchema = z
   .object({
     id: EntityIdSchema,
@@ -419,6 +468,8 @@ export const GovernmentInstitutionSchema = z
     convenedByOfficeIds: z.array(EntityIdSchema).max(12).optional(),
     /** Where a question it rejects goes next, when a magistrate raised it: Carthage's council sent a split to the people. */
     refersFailuresTo: EntityIdSchema.nullable().optional(),
+    /** How its named members voted on the last questions it settled, newest last (`sim/vote-history.ts`). Bounded: `RECENT_VOTES_KEPT` questions of `RECENT_VOTERS_KEPT` names a side. */
+    recentVotes: z.array(RecentVoteSchema).max(RECENT_VOTES_KEPT).optional(),
   })
   .superRefine((institution, context) => {
     const weight = institution.votingBlocs.reduce((total, bloc) => total + bloc.weight, 0);
@@ -472,11 +523,23 @@ export const BlocVoteSchema = z.object({
 });
 export type BlocVote = z.infer<typeof BlocVoteSchema>;
 
+/** How one named member of a chamber voted, where the chamber votes by seat (`ballots.ts`). */
+export const BallotSchema = z.object({
+  characterId: EntityIdSchema,
+  name: z.string().trim().min(1).max(120),
+  blocId: EntityIdSchema,
+  choice: z.enum(["yes", "no", "abstain"]),
+  supportScore: SignedScoreSchema,
+}).strict();
+export type Ballot = z.infer<typeof BallotSchema>;
+
 export const VoteRecordSchema = z
   .object({
     id: EntityIdSchema,
     motionId: EntityIdSchema,
     votes: z.array(BlocVoteSchema).min(1),
+    /** The named members' own votes, where each seat votes for itself. The bloc totals above still sum every seat. */
+    ballots: z.array(BallotSchema).max(400).optional(),
     yesWeight: z.number().int().nonnegative(),
     noWeight: z.number().int().nonnegative(),
     abstainWeight: z.number().int().nonnegative(),
@@ -989,6 +1052,11 @@ export const ForceSchema = z.object({
    * old country's included, and no government's grant reaches it.
    */
   outlaw: z.boolean().optional(),
+  /**
+   * Kept at one man's own cost -- his clients, his retainers, men paid from his purse -- and so his own and not the state's. What such a
+   * band does is a quarrel of private men: it attacks without a war between the powers being declared by it.
+   */
+  private: z.boolean().optional(),
   commanderCharacterId: EntityIdSchema,
   controllerCharacterId: EntityIdSchema,
   locationId: EntityIdSchema,
@@ -1034,6 +1102,15 @@ export const ForceSchema = z.object({
   formations: z.array(ForceFormationSchema).max(40).optional(),
   /** Posts held by named people. Most posts are nobody in particular, and stay that way. */
   posts: z.array(ForcePostSchema).max(80).optional(),
+  /**
+   * The state of its kit, 0 (a spear and a cloak) to 10,000 (a full issue of new arms): worn by marching, sieges and battles, bought again out of the stoppage
+   * from its home markets, and read, bounded, as a modifier in a fight (`warfare/equipment.ts`, `sim/equipment.ts`). Absent until the engine first looks at the army.
+   */
+  equipmentBps: BasisPointsSchema.optional(),
+  /** The day the engine last reckoned its kit. */
+  equipmentReckonedToStep: ElapsedStepSchema.optional(),
+  /** The day a power at war last filled this army's thinned ranks from its levy (`sim/legion-refill.ts`). */
+  refilledAtStep: ElapsedStepSchema.optional(),
   /** A standing order to drill: in camp, paid and fed, the men get better at it every day. Lifted by an order or a march. */
   drilling: z.boolean().optional(),
   /**
@@ -1069,6 +1146,20 @@ export const ForceSchema = z.object({
 export type Force = z.infer<typeof ForceSchema>;
 
 /**
+ * How a power takes its share from a province.
+ *
+ * - `tithe`: a share of the harvest, so it swings with the year and costs little to gather.
+ * - `land_levy`: a fixed sum by the land, steady and resented.
+ * - `customs`: dues on what passes through its harbours and markets.
+ * - `men`: a tribute of manpower, owed by allies and subjects, which is no money at all.
+ */
+export const TAX_REGIMES = ["tithe", "land_levy", "customs", "men"] as const;
+export const TaxRegimeSchema = z.enum(TAX_REGIMES);
+export type TaxRegime = z.infer<typeof TaxRegimeSchema>;
+/** However a ruler writes it, no more than this share of what a province can bear is asked: past six tenths nothing is left to take. */
+export const MAX_TAX_RATE_BPS = 6_000;
+
+/**
  * Compact, canonical, per-province material state (docs/14 Phase 2:
  * background material society).
  *
@@ -1090,6 +1181,34 @@ export const ProvinceMaterialSchema = z
     displacedPopulation: z.number().int().nonnegative(),
     warDamageBps: BasisPointsSchema,
     lastMaterialUpdateStep: ElapsedStepSchema,
+    /**
+     * How developed the province is, 0-10 000: its roads, harbours, estates,
+     * drainage and the habit of trade, which is what sets how many people its
+     * ground can carry and how much of what they make a government can reach.
+     * Derived from its town, its ground and its harbour where a row has none
+     * (`deriveInitialDevelopment`), moved a few hundred points a year by peace,
+     * order and a light tax, and knocked down by war much faster than it comes
+     * back (`sim/economy.ts`). Absent on a row written before it existed; read
+     * through `developmentOf`.
+     */
+    developmentBps: BasisPointsSchema.optional(),
+    /**
+     * What war and plunder have left on it: a memory that caps development at
+     * its potential less this share and fades over decades, not years. A raid
+     * leaves a little and a sack a great deal; repeated campaigns stack.
+     */
+    scarBps: BasisPointsSchema.optional(),
+    /** How its people are taxed, where the power that holds it has said so for this province alone; else the power's own policy, else the old uniform levy. */
+    taxRegime: TaxRegimeSchema.optional(),
+    /** The share taken, in basis points of what the province can bear; with `taxRegime`. */
+    taxRateBps: z.number().int().min(0).max(MAX_TAX_RATE_BPS).optional(),
+    /**
+     * What a hand laid on the province's tax capacity (`province_material_shift`'s
+     * `taxCapacityDelta`) has left: the capacity is reckoned afresh every month
+     * from its people and their development, so a standing shift is kept here
+     * and added to each reckoning rather than overwritten by it.
+     */
+    taxCapacityOffset: z.number().int().min(-10_000_000).max(10_000_000).optional(),
   })
   .strict();
 export type ProvinceMaterial = z.infer<typeof ProvinceMaterialSchema>;
@@ -1179,10 +1298,19 @@ export const TradeVentureSchema = z
     cargo: z.object({
       /** What the goods cost: what is sold at the other end, at a margin. */
       cost: MoneyAmountSchema,
+      /**
+       * The good it carries (`world/markets.ts`): the margin is the gap
+       * between that good's price at the two ends. Absent on a cargo sailed
+       * before goods had markets, which is taken to be whichever pays best
+       * between its ports.
+       */
+      good: GoodIdSchema.optional(),
       sailedAtStep: ElapsedStepSchema,
       arrivesAtStep: ElapsedStepSchema,
       /** Cargoes landed so far. */
       voyages: z.number().int().nonnegative().max(10_000).default(0),
+      /** The units of `good` the cargo carries, where it was drawn from a market (a merchant house's): they go into the far market's stock when it lands. */
+      units: z.number().int().nonnegative().optional(),
       /** A regular trade buys the next cargo out of what the last one sold for; a single cargo is done when it is sold. */
       rollsOver: z.boolean(),
     }).strict().optional(),
@@ -1203,7 +1331,7 @@ export type TradeVenture = z.infer<typeof TradeVentureSchema>;
 export const ServiceContractSchema = z
   .object({
     id: EntityIdSchema,
-    role: z.enum(["mercenary", "assassin", "envoy", "engineer", "physician", "tax_farmer", "gladiator", "retainer", "steward", "agent"]),
+    role: z.enum(["mercenary", "assassin", "envoy", "engineer", "physician", "tax_farmer", "gladiator", "retainer", "steward", "agent", "victualler"]),
     label: z.string().trim().min(1).max(160),
     employerAccountId: EntityIdSchema,
     employeeCharacterId: EntityIdSchema,
@@ -1224,6 +1352,20 @@ export const ServiceContractSchema = z
     forceWas: z.object({ polityId: EntityIdSchema, controllerCharacterId: EntityIdSchema }).strict().nullable().default(null),
     provinceId: EntityIdSchema.nullable().default(null),
     counterpartPolityId: EntityIdSchema.nullable().default(null),
+    /**
+     * A victualler's bread (`sim/army-victualling.ts`): the army he feeds, the price he is paid for every thousand man-days of bread that reaches it, and what has
+     * reached it since he was last paid. The monthly pay is that price on those man-days, so a convoy taken or lost on the road is not paid for.
+     */
+    victuals: z.object({
+      forceId: EntityIdSchema,
+      houseId: EntityIdSchema,
+      pricePerThousand: z.number().int().positive(),
+      deliveredManDays: z.number().int().nonnegative().default(0),
+      sentManDays: z.number().int().nonnegative().default(0),
+      lostManDays: z.number().int().nonnegative().default(0),
+      /** The day the bread was last sent and the pay last reckoned: the house acts once a month. */
+      passedAtStep: ElapsedStepSchema.default(0),
+    }).strict().nullable().optional(),
     status: z.enum(["active", "ended", "lapsed", "broken"]),
   })
   .strict();

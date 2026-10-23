@@ -8,8 +8,9 @@ import {
   SignedScoreSchema,
 } from "../material-state";
 import { CharacterMindSchema, NEUTRAL_MIND } from "./mind";
-import { LessonSchema, MAX_LESSONS } from "./mind-drift";
+import { LessonSchema, MAX_LESSONS, MAX_MOODS, MoodSchema } from "./mind-drift";
 import { WatchPredicateSchema } from "../world/watch";
+import { ChargeSchema } from "../authority/charge-vocabulary";
 
 /**
  * What a soldier has done and where he stands. Kept by the engine
@@ -156,6 +157,8 @@ export const PlanStepSchema = z
     /** Time for the act after its reply arrives; waiting is not overdue work. */
     afterConditionDays: z.number().int().positive().max(730).optional(),
     waitingReviewOnDay: z.number().int().nonnegative().nullable().optional(),
+    /** Approved work the engine can finish without asking the owner to decide it again. */
+    routineProjectId: EntityIdSchema.optional(),
   })
   .strict();
 export type PlanStep = z.infer<typeof PlanStepSchema>;
@@ -242,6 +245,13 @@ export const CharacterSchema = z
     cultureId: EntityIdSchema,
     faithId: EntityIdSchema.nullable(),
     dynastyId: EntityIdSchema.nullable(),
+    /**
+     * The parts of a Roman's name, where he has them (`characters/roman-names.ts`): the given name, the gens, the branch.
+     * Read first for his order and his gens; a name written as one string is parsed when these are not there.
+     */
+    praenomen: z.string().trim().min(1).max(40).optional(),
+    nomen: z.string().trim().min(1).max(60).optional(),
+    cognomen: z.string().trim().min(1).max(80).optional(),
     locationProvinceId: EntityIdSchema,
     polityId: EntityIdSchema.nullable(),
 
@@ -293,6 +303,8 @@ export const CharacterSchema = z
     mind: CharacterMindSchema.default(NEUTRAL_MIND),
     /** What has happened to him since his last life review, which that review moves his mind by (`mind-drift.ts`). */
     lessons: z.array(LessonSchema).max(MAX_LESSONS).optional(),
+    /** What he feels just now, for a few weeks (`mind-drift.ts`, `sim/moods.ts`). */
+    moods: z.array(MoodSchema).max(MAX_MOODS).optional(),
 
     /** Named heir, where the succession law uses one. */
     heirCharacterId: EntityIdSchema.nullable(),
@@ -423,6 +435,11 @@ export const OfficeSchema = z
      */
     kind: z.enum(["magistracy", "membership", "priesthood"]).optional(),
     /**
+     * For a membership office: the chamber (a `GovernmentInstitution` id) its holders sit in. Said by the data where it is known, so no reader has to
+     * guess a seat's chamber from what the two are called; null says it sits in no chamber (a military tribune, an officer of his legion); absent falls back to the chamber its succession rule names, else the one council the power has.
+     */
+    chamberId: EntityIdSchema.nullable().optional(),
+    /**
      * How many hold it at once, where that is more than the world names. Only
      * named people have seats; the rest of a college of eight quaestors or a
      * Senate of three hundred is implied, and a college is elected whole once
@@ -447,6 +464,12 @@ export const OfficeSchema = z
     tribunician: z.boolean().optional(),
     /** Places that must go to men of an order: a plebeian consul every year since 342, a plebeian censor since 339. */
     ordoSeats: z.object({ patrician: z.number().int().min(1).max(100).optional(), plebeian: z.number().int().min(1).max(100).optional() }).strict().optional(),
+    /**
+     * What this office may do about the state's money and treaties, where its form says something particular
+     * (`authority/competence.ts`): a line for each act, which the form's template writes. Acts it says nothing of
+     * are read from the parts of the constitution, as they were before.
+     */
+    charge: ChargeSchema.optional(),
   })
   .strict();
 export type Office = z.infer<typeof OfficeSchema>;

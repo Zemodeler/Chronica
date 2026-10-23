@@ -33,6 +33,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * The passage of time for departments (docs/plans/departments.md §3, §4).
@@ -48,8 +49,13 @@ export interface KeepDepartmentsResult {
   readonly facts: readonly FactProposalDraft[];
 }
 
-export function keepDepartments(world: WorldState, toDay: number, before?: WorldState): KeepDepartmentsResult {
-  const money = before === undefined ? { world, facts: [] as FactProposalDraft[] } : settleMoney(world, toDay, before);
+/**
+ * `exempt` are the men the engine never robs the state for: the player, and any man a model plays. Their hands are their own to move: a man the
+ * player is does not find a month's graft in his purse that he never ordered (and is not condemned for it). He may take from the chest only by an
+ * order he writes, and an audit finds that like any other.
+ */
+export function keepDepartments(world: WorldState, toDay: number, before?: WorldState, exempt: ReadonlySet<string> = new Set()): KeepDepartmentsResult {
+  const money = before === undefined ? { world, facts: [] as FactProposalDraft[] } : settleMoney(world, toDay, before, exempt);
   const audited = resolveAudits(money.world, toDay);
   const settled = { world: audited.world, facts: [...money.facts, ...audited.facts] };
   world = settled.world;
@@ -84,7 +90,7 @@ export function keepDepartments(world: WorldState, toDay: number, before?: World
     if (!told) continue;
     const work = formed.levers.map((lever) => leverDefinition(lever).words);
     facts.push({
-      localId: `department_formed_${formed.id}`,
+      localId: safeLocalId(`department_formed_${formed.id}`),
       kind: "government",
       summary: `${formed.name} has been organised and takes charge of ${work.length === 0 ? "its work" : work.join(", ")}.`.slice(0, 400),
       affectedRefs: [formed.scope.kind === "polity" ? { kind: "polity", id: formed.scope.id } : { kind: "character", id: formed.scope.id }],
@@ -352,7 +358,7 @@ function remotenessFrom(world: WorldState, person: Character, polityId: string |
  * and what was taken is written down where an audit can find it -- the
  * treasury is short by exactly what somebody's purse is long.
  */
-function settleMoney(world: WorldState, toDay: number, before: WorldState): { world: WorldState; facts: FactProposalDraft[] } {
+function settleMoney(world: WorldState, toDay: number, before: WorldState, exempt: ReadonlySet<string>): { world: WorldState; facts: FactProposalDraft[] } {
   const earlier = new Set(before.material.transactions.map((transaction) => transaction.id));
   const fresh = world.material.transactions.filter((transaction) => !earlier.has(transaction.id));
   const facts: FactProposalDraft[] = [];
@@ -416,6 +422,7 @@ function settleMoney(world: WorldState, toDay: number, before: WorldState): { wo
     if (collected > 0 && working.length > 0) {
       const honest = working.filter((post) => greedOf(post.person) < 25).length / working.length;
       for (const post of working) {
+        if (exempt.has(post.person.id)) continue;
         const share = diversionShare(greedOf(post.person), paidShare.get(post.person.id) ?? 0, remotenessFrom(world, post.person, polityId));
         const take = Math.floor((collected / working.length) * share * (1 - honest / 2));
         if (take <= 0) continue;
@@ -429,7 +436,7 @@ function settleMoney(world: WorldState, toDay: number, before: WorldState): { wo
     if (diverted > 0 && diverted >= collected * RUMOUR_SHARE && (rumouredAtStep === null || toDay - rumouredAtStep >= RUMOUR_EVERY_DAYS)) {
       rumouredAtStep = toDay;
       facts.push({
-        localId: `department_short_${department.id}_${toDay}`.slice(0, 60),
+        localId: safeLocalId(`department_short_${department.id}_${toDay}`).slice(0, 60),
         kind: "government",
         summary: `Men say less reaches ${department.name} than the rolls promise.`,
         affectedRefs: [{ kind: "polity", id: polityId }],
@@ -448,7 +455,7 @@ function settleMoney(world: WorldState, toDay: number, before: WorldState): { wo
     if (contract.status !== "active" || (contract.role !== "steward" && contract.role !== "agent")) continue;
     const hand = world.characters.find((character) => character.id === contract.employeeCharacterId && character.alive);
     const ownerId = world.material.accounts.find((account) => account.id === contract.employerAccountId)?.owner;
-    if (hand === undefined || ownerId?.kind !== "character") continue;
+    if (hand === undefined || ownerId?.kind !== "character" || exempt.has(hand.id)) continue;
     const runs = (kind: string | undefined): boolean => kind === "venture" || (contract.role === "steward" && kind === "holding");
     const income = fresh.filter((transaction) => transaction.destinationAccountId === contract.employerAccountId && transaction.cause.kind === "scheduled_income" && runs(sourceKind.get(transaction.cause.id)));
     const collected = income.reduce((sum, transaction) => sum + transaction.amount, 0);
@@ -466,6 +473,43 @@ function settleMoney(world: WorldState, toDay: number, before: WorldState): { wo
   return {
     world: { ...world, departments, diversions, material: { ...world.material, accounts, transactions: [...world.material.transactions, ...transactions] } },
     facts,
+  };
+}
+
+/**
+ * What a magistrate's own hand keeps of what he spent for the state (docs/plans/government.md, "H2 as built"): the greedy man who gives out the
+ * bread keeps a share of it, as a department's officer keeps a share of what he collected. The same graft: a transfer from the chest to his purse
+ * (or his patron's), written down as a diversion an audit can find. Nothing for an honest man; at most `MAX_DIVERSION_SHARE`.
+ */
+export function skimTheHand(world: WorldState, input: { readonly manId: string; readonly polityId: string; readonly handled: number; readonly cause: string; readonly departmentId: string | null }): { world: WorldState; amount: number } {
+  const person = world.characters.find((character) => character.id === input.manId && character.alive);
+  const treasury = world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === input.polityId && account.status === "active");
+  if (person === undefined || treasury === undefined || input.handled <= 0) return { world, amount: 0 };
+  const share = diversionShare(greedOf(person), 1, remotenessFrom(world, person, input.polityId));
+  const take = Math.min(Math.floor(input.handled * share), Math.max(0, treasury.balance));
+  if (take <= 0) return { world, amount: 0 };
+  const to = destinationFor(world, person);
+  if (to === treasury.id) return { world, amount: 0 };
+  const toDay = world.elapsedStep;
+  const scope: DepartmentScope = { kind: "polity", id: input.polityId };
+  const found = world.diversions.findIndex((row) => row.byCharacterId === person.id && row.departmentId === input.departmentId && row.scope.id === scope.id && row.foundAtStep === null);
+  const diversions = found >= 0
+    ? world.diversions.map((row, index) => (index === found ? { ...row, amount: row.amount + take, lastAtStep: toDay, toAccountId: to } : row))
+    : [...world.diversions, { id: mintId("diversion", person.id, scope.id, input.departmentId ?? "office", toDay), byCharacterId: person.id, scope, departmentId: input.departmentId, amount: take, toAccountId: to, firstAtStep: toDay, lastAtStep: toDay, foundAtStep: null } satisfies Diversion].slice(-600);
+  return {
+    amount: take,
+    world: {
+      ...world,
+      diversions,
+      material: {
+        ...world.material,
+        accounts: world.material.accounts.map((account) => (account.id === treasury.id ? { ...account, balance: account.balance - take } : account.id === to ? { ...account, balance: account.balance + take } : account)),
+        transactions: [...world.material.transactions, {
+          id: mintId("txn", "diversion", person.id, to, toDay), atStep: toDay, kind: "diversion" as const, amount: take, sourceAccountId: treasury.id, destinationAccountId: to,
+          cause: { kind: "action" as const, id: person.id, explanation: `What ${person.name} kept back of ${input.cause}`.slice(0, 200) }, visibility: "private" as const,
+        }],
+      },
+    },
   };
 }
 
@@ -513,7 +557,7 @@ export function resolveAudits(world: WorldState, toDay: number): { world: WorldS
     const auditor = named ?? standIn(world, department, audit);
     if (auditor === undefined) {
       facts.push({
-        localId: `audit_${audit.id}`.slice(0, 60),
+        localId: safeLocalId(`audit_${audit.id}`).slice(0, 60),
         kind: "audit_interrupted",
         summary: `The inquiry into the books of ${department?.name ?? householdOf(audit.scope.id)} stopped: ${world.characters.find((character) => character.id === audit.auditorCharacterId)?.name ?? "the man sent"} could not finish it, and there was nobody to take it up. Nothing was found, and nobody was cleared.`.slice(0, 400),
         affectedRefs: told, visibility: "private", discoveryState: "private", knowableInDays: 0, knownToRefs: told, significance: 45,
@@ -548,7 +592,7 @@ export function resolveAudits(world: WorldState, toDay: number): { world: WorldS
     const status = found.length > 0 ? "found" as const : missed !== null ? "incomplete" as const : "no_discrepancy" as const;
     const by = auditor.id === audit.auditorCharacterId ? auditor.name : `${auditor.name}, taking it up after ${world.characters.find((character) => character.id === audit.auditorCharacterId)?.name ?? "the man first sent"},`;
     facts.push({
-      localId: `audit_${audit.id}`.slice(0, 60),
+      localId: safeLocalId(`audit_${audit.id}`).slice(0, 60),
       kind: found.length > 0 ? "peculation_found" : status === "incomplete" ? "audit_incomplete" : "audit_no_discrepancy",
       // What an inquiry that found nothing can say is that it found nothing:
       // "the books were in order" is a stronger thing than looking once.

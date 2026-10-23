@@ -17,7 +17,7 @@ const child = spawn(process.execPath, [process.env.npm_execpath, "run", "dev"], 
     CHRONICA_AI_MODE: "hand",
     CHRONICA_HAND_RESPONDER: "codex",
     ...(options.model ? { CHRONICA_HAND_MODEL: options.model } : {}),
-    // Medium unless told otherwise (packages/ai/src/local-key-selection.ts).
+    // Low unless told otherwise (packages/ai/src/local-key-selection.ts).
     ...(options.effort ? { CHRONICA_HAND_EFFORT: options.effort } : {}),
   },
 });

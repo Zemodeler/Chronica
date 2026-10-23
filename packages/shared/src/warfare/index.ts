@@ -10,3 +10,4 @@ export * from "./retreat";
 export * from "./establishment";
 export * from "./formation";
 export * from "./service";
+export * from "./equipment";

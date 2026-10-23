@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
-import { ScenarioDefinitionSchema, WorldStateSchema, type ScenarioClock, type WorldState } from "@chronica/shared";
+import { FactSchema, ScenarioDefinitionSchema, WorldStateSchema, type ScenarioClock, type WorldState } from "@chronica/shared";
 import type { RoutedActor } from "./attention";
-import { foldStrayProposalKeys, renderCharacterPortrait, deal, runCognition } from "./cognition";
+import { COGNITION_SYSTEM_PROMPT, foldStrayProposalKeys, renderCharacterPortrait, deal, cognitionWorkCalls, runCognition } from "./cognition";
 import type { SimModelPort } from "./ports";
 
 const definition = ScenarioDefinitionSchema.parse(firstPunicWarScenario.definition);
@@ -45,6 +45,22 @@ async function promptFor(world: WorldState, characterId: string): Promise<string
 const someone = (world: WorldState): string => world.characters.find((character) => character.alive)!.id;
 
 describe("what a person is told about themselves", () => {
+  it("removes duplicate event wording while keeping distinct events and every reference", () => {
+    const world = baseWorld();
+    const id = someone(world);
+    const fact = FactSchema.parse({ id: "first-news", time: world.instant, atStep: world.elapsedStep,
+      kind: "letter_sent", summary: "A courier brought the agreed terms.", discovery: { state: "public" } });
+    const facts = [fact,
+      { ...fact, id: "duplicate-news" }, { ...fact, id: "later-news", time: { ...fact.time, day: fact.time.day + 1 } },
+      { ...fact, id: "private-news", visibility: "private" }];
+    const prompt = renderCharacterPortrait(id, "Reader", world, clock, { knownFacts: facts });
+    expect(prompt).toContain("A courier brought the agreed terms. [first-news] [duplicate-news]");
+    expect(prompt).toContain("A courier brought the agreed terms. [later-news]");
+    expect(prompt).toContain("A courier brought the agreed terms. [private-news]");
+    expect(prompt.match(/A courier brought the agreed terms\./g)).toHaveLength(3);
+    expect(COGNITION_SYSTEM_PROMPT).toContain("important spoken");
+    expect(COGNITION_SYSTEM_PROMPT).toContain("necessary act, treaty term, dependency or consequence");
+  });
   it("shows the mind they were given rather than only their office", async () => {
     const world = baseWorld();
     const id = someone(world);
@@ -323,7 +339,7 @@ describe("an op written as a field of the proposal", () => {
   });
 });
 
-describe("a large cast, dealt onto two calls", () => {
+describe("a large cast, dealt onto concurrent calls", () => {
   /** Answers for whoever it was asked about, so a split can be told from a loss. */
   function answeringPort(): SimModelPort & { userMessages: string[] } {
     const port: SimModelPort & { userMessages: string[] } = {
@@ -367,10 +383,10 @@ describe("a large cast, dealt onto two calls", () => {
 
     const result = await runCognition(port, actors, world, clock);
 
-    // Two calls, one round: the split is what makes a round cost the longer
-    // half rather than the sum of the whole cast's answers.
-    expect(port.userMessages).toHaveLength(2);
-    expect(result.calls).toBe(2);
+    // Three concurrent groups still cover the same round.
+    expect(port.userMessages).toHaveLength(3);
+    expect(result.calls).toBe(3);
+    expect(result.parallelExtraCalls).toBe(1);
     expect(result.parseFailure).toBeNull();
     // Everybody the router picked, and in its order -- the deltas are applied
     // in this sequence, so a half finishing first must not reorder it.
@@ -389,7 +405,7 @@ describe("a large cast, dealt onto two calls", () => {
 
     const split = answeringPort();
     await runCognition(split, actors, world, clock);
-    expect(split.userMessages).toHaveLength(2);
+    expect(split.userMessages).toHaveLength(3);
 
     const sent = split.userMessages.join("\n\n");
     for (const actor of actors) {
@@ -403,7 +419,26 @@ describe("a large cast, dealt onto two calls", () => {
     }
   });
 
-  it("keeps half a round when the other half cannot be read", async () => {
+  it("starts every group before waiting and merges completions back into router order", async () => {
+    const world = peopled(baseWorld(), 10);
+    const actors = cast(world, 10);
+    const scripted = answeringPort();
+    const pending: (() => Promise<void>)[] = [];
+    const port: SimModelPort = {
+      complete(operation, system, user) {
+        const answer = scripted.complete(operation, system, user);
+        return new Promise<string>((resolve) => { pending.push(async () => { resolve(await answer); }); });
+      },
+    };
+    const running = runCognition(port, actors, world, clock);
+    expect(pending).toHaveLength(3);
+    for (const release of [...pending].reverse()) await release();
+    const result = await running;
+    expect(result.output.actors.map((actor) => actor.actorRef.id)).toEqual(actors.map((actor) => actor.characterId));
+    expect(result.answeredActorIds?.slice().sort()).toEqual(actors.map((actor) => actor.characterId).sort());
+  });
+
+  it("keeps the other groups when one cannot be read", async () => {
     const world = peopled(baseWorld(), 10);
     const actors = cast(world, 10);
     let calls = 0;
@@ -428,11 +463,12 @@ describe("a large cast, dealt onto two calls", () => {
 
     const result = await runCognition(port, actors, world, clock);
 
-    expect(calls).toBe(3);
+    expect(calls).toBe(4);
+    expect(result.parallelExtraCalls).toBe(1);
     expect(result.parseFailure).not.toBeNull();
     // The first five still acted. Before the split, one unreadable answer lost
     // the whole round.
-    expect(result.output.actors.map((actor) => actor.actorRef.id)).toEqual(actors.slice(0, 5).map((actor) => actor.characterId));
+    expect(result.output.actors.map((actor) => actor.actorRef.id)).toEqual(actors.filter((actor) => !deal(actors).find((group) => group.some((member) => member.characterId === actors[5]!.characterId))!.includes(actor)).map((actor) => actor.characterId));
   });
 });
 
@@ -491,19 +527,37 @@ describe("the actor's reasoning, written one level down", () => {
 });
 
 describe("how a cast is dealt onto calls", () => {
+  it("keeps the same work allowance when a cast is split more widely", () => {
+    expect(cognitionWorkCalls(0)).toBe(0);
+    expect(cognitionWorkCalls(3)).toBe(1);
+    expect(cognitionWorkCalls(8)).toBe(1);
+    expect(cognitionWorkCalls(10)).toBe(2);
+    expect(cognitionWorkCalls(12)).toBe(2);
+  });
+
+  it("separates previously long answers and keeps every actor exactly once", () => {
+    const state = baseWorld();
+    const cast = state.characters.filter((character) => character.alive).slice(0, 5).map((character) => actorFor(state, character.id));
+    const actors = [...cast, ...cast].map((actor, index) => ({ ...actor, characterId: `weighted-${index}` }));
+    const weights = new Map(actors.map((actor, index) => [actor.characterId, index < 3 ? 1_000 : 10]));
+    const groups = deal(actors, { maxBatches: 3, actorsPerCall: 3, weights });
+    expect(groups).toHaveLength(3);
+    expect(groups.map((group) => group.filter((actor) => weights.get(actor.characterId) === 1_000).length)).toEqual([1, 1, 1]);
+    expect(groups.flat().map((actor) => actor.characterId).sort()).toEqual(actors.map((actor) => actor.characterId).sort());
+  });
   it("keeps a small cast in one call, and deals a large one onto as many as asked, evenly", () => {
     const state = baseWorld();
     const cast = state.characters.filter((character) => character.alive).slice(0, 5).map((character) => actorFor(state, character.id));
     const ten = [...cast, ...cast].map((actor, index) => ({ ...actor, characterId: `${actor.characterId}-${index}` }));
-    expect(deal(cast)).toHaveLength(1);
-    // A cast of eight is one call, and ten are two (L17): a round is worth
-    // calls against the burst's cap, not only seconds.
-    expect(deal(ten.slice(0, 8))).toHaveLength(1);
-    expect(deal(ten).map((batch) => batch.length)).toEqual([5, 5]);
-    expect(deal([...ten, ...ten].slice(0, 12)).map((batch) => batch.length)).toEqual([6, 6]);
+    expect(deal(cast.slice(0, 3))).toHaveLength(1);
+    expect(deal(cast).map((batch) => batch.length)).toEqual([3, 2]);
+    // Smaller groups overlap generation without dropping actors.
+    expect(deal(ten.slice(0, 8)).map((batch) => batch.length)).toEqual([3, 3, 2]);
+    expect(deal(ten).map((batch) => batch.length)).toEqual([4, 3, 3]);
+    expect(deal([...ten, ...ten].slice(0, 12)).map((batch) => batch.length)).toEqual([4, 4, 4]);
     expect(deal(ten, { maxBatches: 2, actorsPerCall: 5 }).map((batch) => batch.length)).toEqual([5, 5]);
-    expect(deal(ten, { maxBatches: 4, actorsPerCall: 3 }).map((batch) => batch.length)).toEqual([3, 3, 3, 1]);
-    expect(deal(ten.slice(0, 9), { maxBatches: 4, actorsPerCall: 2 }).map((batch) => batch.length)).toEqual([3, 3, 3]);
+    expect(deal(ten, { maxBatches: 4, actorsPerCall: 3 }).map((batch) => batch.length)).toEqual([3, 3, 2, 2]);
+    expect(deal(ten.slice(0, 9), { maxBatches: 4, actorsPerCall: 2 }).map((batch) => batch.length)).toEqual([3, 2, 2, 2]);
   });
 });
 

@@ -90,7 +90,8 @@ describe("a kept act becomes a rule the engine runs", () => {
   it("runs it thereafter with no model involved: two months later the money has moved twice", async () => {
     const first = await runSimulationBurst(burst(scripted([answer([TOLL]), JSON.stringify({ deltas: [TOLL] })], [RULE]), "I set up a toll on the coast road."));
     const port = scripted([answer([], "Time passes.")]);
-    const later = await runSimulationBurst(burst(port, null, first.world, { spanDays: 90, budget: { ...DEFAULT_BUDGET, maxMechanicCalls: 0 } }));
+    // A burst of its own, as a game's next turn is: under the first one's name it wrote money lines under ids already taken (`ids.unique`).
+    const later = await runSimulationBurst(burst(port, null, first.world, { burstId: "stall-later", spanDays: 90, budget: { ...DEFAULT_BUDGET, maxMechanicCalls: 0 } }));
     expect(port.calls.filter((call) => call === "write_mechanic")).toHaveLength(0);
     const rows = later.world.material.transactions.filter((row) => row.cause.kind === "mechanic");
     expect(rows.length).toBeGreaterThanOrEqual(2);

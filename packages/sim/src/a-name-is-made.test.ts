@@ -23,7 +23,7 @@ import {
 } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import { lineOf } from "./order-outcomes";
-import { createIdFactory } from "./ports";
+import { freshIds } from "./fresh-ids-test-kit";
 import { recordTheFight } from "./ranks";
 import { buildWorldSlice, renderWorldSlice } from "./slice";
 import { BATTLE_WON_BPS, BATTLE_WON_WOUNDED_BPS, CITY_TAKEN_BPS, OFFICE_MONTH_BPS, ROUTED_BPS, creditTheSpeech, honourSieges, honourTheSitting } from "./standing-deeds";
@@ -69,16 +69,17 @@ const me = (world: WorldState) => world.characters.find((character) => character
 const withStanding = (world: WorldState, id: string, prestigeBps: number): WorldState => ({
   ...world, characters: world.characters.map((character) => (character.id === id ? { ...character, prestigeBps } : character)),
 });
+// Ids the world acted on has not used: one seed reused made two money lines with one id, and the books lost the second (`ids.unique`).
 const act = (world: WorldState, actor: string, raw: Record<string, unknown>, day = world.elapsedStep) => {
   const delta = WorldDeltaSchema.parse(raw);
   return applyDeltas(world, [delta], {
     now: { day, minute: 540 }, actorRef: { kind: "character", id: actor }, offices, successionRules: government.successionRules,
-    warfare: definition.warfare, ids: createIdFactory(`name-${actor}-${raw.op as string}-${day}`), gameId: "game-name", playerCharacterId: PLAYER, orderDeltas: new Set([delta]),
+    warfare: definition.warfare, ids: freshIds(`name-${actor}-${raw.op as string}-${day}`, world), gameId: "game-name", playerCharacterId: PLAYER, orderDeltas: new Set([delta]),
   });
 };
 const tick = (world: WorldState, toDay: number) => {
   const advanced = { ...world, elapsedStep: toDay, instant: { day: toDay, minute: 0 } };
-  const result = runDeterministicTick({ world: advanced, toDay, ids: createIdFactory(`name-tick-${toDay}`), warfare: definition.warfare, government, playerCharacterId: PLAYER });
+  const result = runDeterministicTick({ world: advanced, toDay, ids: freshIds(`name-tick-${toDay}`, advanced), warfare: definition.warfare, government, playerCharacterId: PLAYER });
   expect(WorldStateSchema.safeParse(result.world).success).toBe(true);
   return result;
 };
@@ -240,20 +241,20 @@ describe("L2: standing is earned by deeds, the same way every time", () => {
 });
 
 describe("L7: games, feasts and doles", () => {
-  const feast = { op: "public_benefaction", payerAccountRef: null, amount: 200, kind: "feast", provinceId: null, reason: "A feast and games for the neighbourhood" };
+  const feast = { op: "public_benefaction", payerAccountRef: null, amount: 500, kind: "feast", provinceId: null, reason: "A feast and games for the neighbourhood" };
 
-  it("spends 200 of his own drachmae on a feast and games, as his own business, and is the better spoken of", () => {
-    const world = legionary(300);
+  it("spends 500 of his own drachmae on a feast and games, as his own business, and is the better spoken of", () => {
+    const world = legionary(600);
     const purse = me(world).personalAccountId;
     const balance = (state: WorldState) => state.material.accounts.find((account) => account.id === purse)!.balance;
     const result = act(world, PLAYER, feast);
     expect(result.rejected).toHaveLength(0);
     expect(result.breaches).toHaveLength(0);
-    expect(balance(result.world)).toBe(balance(world) - 200);
+    expect(balance(result.world)).toBe(balance(world) - 500);
     const gain = me(result.world).prestigeBps - 2_000;
     expect(gain).toBeGreaterThan(0);
     expect(gain).toBeLessThanOrEqual(800);
-    expect(result.factProposals.some((fact) => fact.kind === "public_benefaction" && /Titus Vettius gave the people of .* a feast at his own cost, 200 spent/.test(fact.summary))).toBe(true);
+    expect(result.factProposals.some((fact) => fact.kind === "public_benefaction" && /Titus Vettius gave the people of .* a feast at his own cost, 500 spent/.test(fact.summary))).toBe(true);
     // The same again within the year is worth less.
     const again = act(result.world, PLAYER, feast);
     expect(me(again.world).prestigeBps - me(result.world).prestigeBps).toBeLessThan(gain);
@@ -349,7 +350,9 @@ describe("E16, L3: a man learns why he was or was not elected", { timeout: 120_0
     expect(candidaciesOf(mine)[0]!.outcome).toBeNull();
     // A man of more standing stands against him.
     const praetorship = offices.find((office) => office.id === "roman-praetor")!;
-    const rival = electableFor(mine, praetorship, new Map(offices.map((office) => [office.id, office])), 365, PLAYER)[0]!;
+    // A man the election of the day will not hand to another office as well: nobody holds two (`cursus.ts`).
+    const busy = new Set(mine.material.officeSeats.filter((seat) => seat.officeId !== "roman-senator" && (seat.status === "held" || seat.designateCharacterId != null)).flatMap((seat) => [seat.holderCharacterId, seat.designateCharacterId]));
+    const rival = electableFor(mine, praetorship, new Map(offices.map((office) => [office.id, office])), 365, PLAYER).find((man) => !busy.has(man.id) && man.prestigeBps > 5_100)!;
     expect(rival.prestigeBps).toBeGreaterThan(5_100);
     const opened = act(mine, rival.id, {
       op: "political_procedure_open", localId: "rival", type: "nomination", institutionRef: null, sponsorCharacterRef: rival.id,

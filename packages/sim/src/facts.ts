@@ -4,6 +4,7 @@ import {
   fitStrengthOf,
   type Fact,
   type FactDraft,
+  FactStorySchema,
   type FactProposalDraft,
   type Force,
   type OrderPartyRef,
@@ -103,6 +104,7 @@ export function materializeFacts(input: MaterializeFactsInput): MaterializedFact
       sourceActionId: null,
       causalDepth: input.causalDepth,
       ...(forcesAsReported.length === 0 ? {} : { forcesAsReported }),
+      ...(proposal.story === null || proposal.story === undefined ? {} : { story: FactStorySchema.parse(proposal.story) }),
     };
   });
 

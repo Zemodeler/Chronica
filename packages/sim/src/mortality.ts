@@ -12,6 +12,7 @@ import {
   stableHash,
   vacateOfficesOf,
   deriveRelationDimension,
+  ageNudge,
   driftMind,
   type Character,
   type FactProposalDraft,
@@ -19,8 +20,10 @@ import {
   type WorldState,
   type WorldStoryline,
 } from "@chronica/shared";
+import { teach } from "./grievances";
 import { bearChild, birthChance, CHILDBED_MORTALITY_BPS } from "./births";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Ageing, illness, and death that is earned (slice 9).
@@ -157,10 +160,29 @@ function openPerilFor(world: WorldState, characterId: string): WorldStoryline | 
  * what happened to him, the traits it no longer bears out let go, and the
  * lessons spent (`mind-drift.ts`).
  */
-function grownBy(character: Character): Partial<Character> {
-  if (character.lessons === undefined || character.lessons.length === 0) return {};
-  const grown = driftMind(character.mind, character.traits, character.lessons);
+function grownBy(character: Character, due: number, interval: number): Partial<Character> {
+  // The birthdays since the last review move a man a little whether or not anything happened to him.
+  const years = ageNudge(character.id, currentAgeYears(character, due - interval), currentAgeYears(character, due));
+  if ((character.lessons === undefined || character.lessons.length === 0) && Object.keys(years).length === 0) return {};
+  const grown = driftMind(character.mind, character.traits, character.lessons ?? [], years);
   return { mind: grown.mind, traits: [...grown.traits], lessons: [] };
+}
+
+/**
+ * A ruler's anniversaries on his throne: each year he has held it is a lesson
+ * in what holding it does to a man (`ruled_long`). Taught on the review the
+ * year turns over in, so it is the same however the clock is stepped.
+ */
+function teachReign(world: WorldState, characterId: string, due: number, interval: number): WorldState {
+  const person = world.characters.find((candidate) => candidate.id === characterId);
+  if (person === undefined || person.polityId === null) return world;
+  const rulerOffice = world.constitutions?.find((constitution) => constitution.polityId === person.polityId)?.rulerOfficeId ?? null;
+  if (rulerOffice === null) return world;
+  const seat = world.material.officeSeats.find((candidate) => candidate.officeId === rulerOffice && candidate.holderCharacterId === characterId && candidate.status === "held");
+  if (seat === undefined || seat.termStartedAtStep === null) return world;
+  const now = Math.floor((due - seat.termStartedAtStep) / 365);
+  const before = Math.floor((due - interval - seat.termStartedAtStep) / 365);
+  return now >= 1 && now > before ? teach(world, characterId, "ruled_long", due) : world;
 }
 
 /**
@@ -211,9 +233,10 @@ export function reviewLives(input: LifeReviewInput): LifeReviewResult {
       world = {
         ...world,
         characters: world.characters.map((candidate) => (candidate.id === living.id
-          ? { ...candidate, nextLifeReviewAtStep: due + interval, ...grownBy(candidate) }
+          ? { ...candidate, nextLifeReviewAtStep: due + interval, ...grownBy(candidate, due, interval) }
           : candidate)),
       };
+      world = teachReign(world, living.id, due, interval);
       if (stage === undefined) continue;
 
       // Rates are per year in basis points; a review covers `interval` days.
@@ -408,7 +431,7 @@ function openPeril(
       characterPressures: [...pressured.characterPressures],
     },
     facts: [{
-      localId: `peril_${character.id}_${atStep}`,
+      localId: safeLocalId(`peril_${character.id}_${atStep}`),
       kind: worsening ? "failing_health" : "illness",
       summary: worsening
         ? `${character.name} is worse, and ${pronouns(character).his} people have begun to speak of what comes after ${pronouns(character).him}.`
@@ -461,11 +484,12 @@ export function killCharacter(
   if (principal !== undefined) next = applyLegacy(next, characterId, principal, atStep);
   const inheritance = estateFacts(next, person, settled, atStep);
   next = inheritance.world;
+  const creditorsFact = creditorsFactOf(person, settled, atStep);
 
   return {
     world: next,
     facts: [{
-      localId: `death_${characterId}_${atStep}`,
+      localId: safeLocalId(`death_${characterId}_${atStep}`),
       kind: "death",
       summary: `${person.name} is dead. ${cause}`.slice(0, 600),
       affectedRefs: [{ kind: "character", id: characterId }],
@@ -473,8 +497,28 @@ export function killCharacter(
       discoveryState: "public",
       knowableInDays: 0,
       significance: 90,
-    }, ...inheritance.facts],
+    }, ...inheritance.facts, ...creditorsFact],
   };
+}
+
+/** One line for what a dead man's creditors had of the estate, where he owed on loans (docs/economy.md, "The creditors are paid first"). */
+function creditorsFactOf(person: Character, settled: ReturnType<typeof settleEstate>, atStep: number): FactProposalDraft[] {
+  const debts = settled.debts;
+  if (debts === undefined || debts === null) return [];
+  const paid = debts.paidInCoin + debts.paidInKind;
+  const how = debts.abstained ? "his heir refused the estate and it was sold to his creditors"
+    : debts.soldUp ? "with no heir, the estate was sold to his creditors"
+      : "his heir took the estate and the debts with it";
+  return [{
+    localId: safeLocalId(`creditors_${person.id}_${atStep}`),
+    kind: "estate_creditors",
+    summary: `${person.name} died owing ${debts.owed}: ${how}. The creditors had ${paid} of it${debts.lost > 0 ? `, and ${debts.lost} is lost to them` : debts.leftOnHeir > 0 ? `, and ${debts.leftOnHeir} is still owed` : ""}.`.slice(0, 600),
+    affectedRefs: [{ kind: "character", id: person.id }, ...settled.beneficiaryIds.slice(0, 2).map((id) => ({ kind: "character" as const, id }))],
+    visibility: "polity",
+    discoveryState: "polity",
+    knowableInDays: 1,
+    significance: debts.lost > 0 ? 40 : 25,
+  }];
 }
 
 /**
@@ -517,7 +561,7 @@ function estateFacts(
     return {
       world: land.length === 0 ? world : { ...world, storylines: [...world.storylines, storyline] },
       facts: [{
-        localId: `estate_${person.id}_${atStep}`,
+        localId: safeLocalId(`estate_${person.id}_${atStep}`),
         kind: "estate_escheated",
         summary: `${person.name} left no heir. ${settled.coin > 0 ? `${settled.escheatedToAccountId === null ? "The coin lies sealed" : `${settled.coin} in coin went to the state`}` : "There was little coin"}${land.length === 0 ? "." : `, and ${land.join(", ")} ${land.length === 1 ? "waits" : "wait"} for somebody to claim ${land.length === 1 ? "it" : "them"}.`}`.slice(0, 600),
         affectedRefs: affected,
@@ -540,7 +584,7 @@ function estateFacts(
   return {
     world,
     facts: [{
-      localId: `estate_${person.id}_${atStep}`,
+      localId: safeLocalId(`estate_${person.id}_${atStep}`),
       kind: "inheritance",
       summary: `${settled.reason} To ${parts.join("; to ")}.`.slice(0, 600),
       affectedRefs: affected,

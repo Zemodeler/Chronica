@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { punicWarsScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial } from "@chronica/shared";
 import { DEFAULT_BUDGET, runSimulationBurst } from "./burst";
-import { reviewCast } from "./cast";
+import { plotsOf, reviewCast } from "./cast";
 import { ensureConstitutions } from "./constitutions";
 import type { SimModelPort } from "./ports";
 
@@ -16,21 +16,32 @@ const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 const opening = () => ensureConstitutions({ world: ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0), government: definition.government, toDay: 0 });
 
 describe("the standing cast", { timeout: 120_000 }, () => {
-  it("is the consul's colleague, the power across the strait, and the men in the Rhegium thread", () => {
+  it("is the consul's colleague and the men of the Rhegium thread the player is party to, and not the powers across the sea", () => {
     const cast = reviewCast(opening(), "gaius-genucius").cast.members;
     const ids = cast.map((member) => member.characterId);
     expect(ids).toContain("gnaeus-cornelius");
-    expect(ids).toContain("hanno-carthage");
+    expect(ids).toContain("decius-vibellius");
+    // The cast rule of 2026-10-08 ("anything that interacts directly with the player"): Hanno, Hieron and the Mamertines' spokesman were in it for the Messana thread and for
+    // commanding or ruling; none of them has written to the player, been ordered or written to by him, or stands in his army, office or household, so they run on the rules.
+    for (const far of ["hanno-carthage", "hieron-ii", "mamertine-spokesman"]) expect(ids, far).not.toContain(far);
     // Never the player, and never more than the seats.
     expect(ids).not.toContain("gaius-genucius");
     expect(cast.length).toBeLessThanOrEqual(8);
-    // The wider world has a voice: a seat held by a foreign ruler.
-    expect(cast.some((member) => member.seat === "world")).toBe(true);
+  });
+
+  it("gives a foreign ruler the wider world's seat for the turns he deals with the player, and not before", () => {
+    const world = opening();
+    const hieron = world.characters.find((character) => character.id === "hieron-ii")!;
+    const letter = { id: "m-hieron", kind: "letter", fromPolityId: "syracuse", fromCharacterId: "hieron-ii", toPolityId: "rome", toCharacterId: "gaius-genucius", subject: "Messana", terms: "Send aid.", sentAtStep: 0, replyDueByStep: 30, status: "awaiting_reply", answer: null, answerText: null, answeredAtStep: null, inReplyToMessageId: null, visibility: "private", onRefusal: null } as never;
+    expect(plotsOf(world, hieron, "gaius-genucius")).toEqual([]);
+    const written = plotsOf({ ...world, diplomacy: [...world.diplomacy, letter] }, hieron, "gaius-genucius");
+    expect(written.map((plot) => plot.kind)).toContain("letter");
+    expect(written.find((plot) => plot.kind === "letter")!.earns).toBe("world");
   });
 
   it("keeps a member through a quiet review, and lets him go only after his stay", () => {
     let world = reviewCast(opening(), "gaius-genucius");
-    const hanno = () => world.cast.members.find((member) => member.characterId === "hanno-carthage");
+    const hanno = () => world.cast.members.find((member) => member.characterId === "decius-vibellius");
     expect(hanno()?.reviews).toBe(0);
     // His thread closes: he matters less, but not at once out of the story.
     world = { ...world, storylines: world.storylines.map((storyline) => ({ ...storyline, phase: "closed" as const, closedAtStep: 0 })) };
@@ -54,11 +65,14 @@ describe("the standing cast", { timeout: 120_000 }, () => {
     });
     expect(result.world.cast.members.length).toBeGreaterThan(0);
     const all = sections.join("\n");
-    expect(all).toContain("## Hanno of Carthage [hanno-carthage]");
+    // The cast rule (2026-10-08, docs/plans/government.md): a person is in it for an interaction with the player. At the opening that is the consul's colleague, who rules
+    // with him, and Decius Vibellius, in the Rhegium thread the player is party to; both are asked in the first round, as cast.
+    expect(all).toMatch(/^## .+ \[decius-vibellius\]/m);
     expect(all).toMatch(/one of the people who matter now/);
     // His standing look comes once a burst; he may be asked again for his
     // own business -- news that lands on him, a letter owed -- but not as cast.
-    const hanno = sections.flatMap((section) => section.split(/^(?=## )/m)).filter((part) => part.startsWith("## Hanno of Carthage"));
-    expect(hanno.filter((part) => part.includes("one of the people who matter now"))).toHaveLength(1);
+    const decius = sections.flatMap((section) => section.split(/^(?=## )/m)).filter((part) => /^## .+ \[decius-vibellius\]/.test(part));
+    expect(decius.filter((part) => part.includes("one of the people who matter now"))).toHaveLength(1);
+    expect(decius.some((part) => /caught up in Rhegium/.test(part))).toBe(true);
   });
 });

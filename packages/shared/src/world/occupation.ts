@@ -1,4 +1,4 @@
-import { atWar, type PolityAgreement } from "./agreements";
+import { atWar, sameConfederation, type PolityAgreement } from "./agreements";
 import type { Province } from "./map";
 
 /**
@@ -48,6 +48,12 @@ export function takenBy(province: Pick<Province, "controllerPolityId" | "ownerPo
   const owner = ownerOf(province);
   if (owner === null || owner === takerId) return { controllerPolityId: takerId, ownerPolityId: null };
   if (atWar(agreements, owner, takerId)) return { controllerPolityId: takerId, ownerPolityId: owner };
+  // A friend's ground won back from the enemy is the friend's again: Rome, driving the Campanians out of Bruttian districts,
+  // kept them as its own lands (consul-run-issues M14).
+  const allied = agreements.some((agreement) => agreement.status === "active" && agreement.kind === "alliance"
+    && ((agreement.polityId === owner && agreement.otherPolityId === takerId) || (agreement.polityId === takerId && agreement.otherPolityId === owner)));
+  // Only ground the friend had lost: what it holds itself and gives up -- a cession, a union -- changes hands.
+  if (province.controllerPolityId !== owner && (sameConfederation(agreements, owner, takerId) || allied)) return { controllerPolityId: owner, ownerPolityId: null };
   return { controllerPolityId: takerId, ownerPolityId: null };
 }
 

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { firstPunicWarScenario, punicWarsScenario } from "@chronica/db";
-import { WorldStateSchema, ensureProvinceMaterial, type WorldState } from "@chronica/shared";
+import { firstPunicWarScenario, punicWarsScenario, PUNIC_IDS } from "@chronica/db";
+
+const MESSANA = PUNIC_IDS.messana;
+import { WorldStateSchema, ensureProvinceMaterial, leaderOf, type WorldState } from "@chronica/shared";
 import { decideNarratorSeed, decideNarratorSeeds, livePressures, readTension, recordSeedOffered, recordSeedOutcome, recordSeedsOffered, seedWasTaken, type NarratorInput } from "./narrator";
 
 const small = (): WorldState => WorldStateSchema.parse(structuredClone(firstPunicWarScenario.initialWorld));
@@ -256,7 +258,7 @@ describe("how much stirs in a season", () => {
     // Nothing in the table could ever open one: a whole match ran with a
     // single war in it, and that one only because a rebellion seceded.
     const world = large();
-    const found = Array.from({ length: 60 }, (_, index) =>
+    const found = Array.from({ length: 300 }, (_, index) =>
       decideNarratorSeeds(input(later(world, 45), { gameId: `game-war-${index}` })))
       .flat()
       .find((seed) => seed.archetype === "war");
@@ -269,6 +271,25 @@ describe("how much stirs in a season", () => {
     // Both parties are named by id, so the orchestrator never invents one.
     expect(found.brief).toContain(found.target.otherPolityId!);
     expect(found.brief).toContain(found.target.polityId!);
+  });
+
+  it("never sets a power against the league it belongs to", () => {
+    // A seed once put Rome at war with the Apulian cities, which follow Rome by foedus, and the war was written in a censor's name.
+    const world = large();
+    const wars = Array.from({ length: 400 }, (_, index) =>
+      decideNarratorSeeds(input(later(world, 45), { gameId: `game-kin-${index}` })))
+      .flat()
+      .filter((seed) => seed.archetype === "war");
+    expect(wars.length).toBeGreaterThan(0);
+    for (const seed of wars) {
+      const [a, b] = [seed.target.polityId!, seed.target.otherPolityId!];
+      const leaderOfA = leaderOf(world.polityAgreements, a);
+      const leaderOfB = leaderOf(world.polityAgreements, b);
+      expect(leaderOfA === b || leaderOfB === a || (leaderOfA !== null && leaderOfA === leaderOfB)).toBe(false);
+      // A follower makes no war of its own, so none is sent against one (or from one) by a seed.
+      expect(leaderOfA).toBeNull();
+      expect(leaderOfB).toBeNull();
+    }
   });
 
   it("goes on making ordinary business while a war is on", () => {
@@ -378,5 +399,79 @@ describe("the player's own troubles", () => {
     expect(hard.summary).toMatch(/3 men hate him/);
     // Rome is exactly as comfortable as it was.
     expect(readTension(hated, "rome").comfort).toBeCloseTo(readTension(world, "rome").comfort);
+  });
+});
+
+describe("trouble that finds the player where he is looking", () => {
+  // Plan chronicle-and-order-truth, 5.1: complications aimed at open order parts.
+  const withOpenOrder = (world: WorldState): WorldState => {
+    const legion = world.material.forces.find((force) => force.id === "roman-field-army")!;
+    return {
+      ...world,
+      orders: [{
+        id: "order-aim", actorCharacterId: "marcus-atilius", text: "Carry Legio I to Messana.", givenAtStep: 0,
+        parts: [{
+          said: "Carry Legio I to Messana", workRefs: [], refusal: null, goals: [{ kind: "force_at", forceId: legion.id, provinceId: MESSANA }], spend: null,
+          attribution: "tagged", note: null, whyNot: null, factIds: [], closedAtStep: null, refusedAtStep: null, actsCarried: 0, actsRefused: 0,
+          // Held for something still to come: an open part, which an act written and nothing more is not.
+          stages: [{ held: { op: "force_modify" }, waitsOn: [{ kind: "force_named", name: "Nobody", polityId: "rome" }], status: "waiting", reason: null, heldSinceStep: 0, failedAtStep: null, reviewAtStep: 14 }],
+        }],
+      }],
+    };
+  };
+
+  it("names the ground of his open orders", async () => {
+    const { groundOfOpenOrders } = await import("./narrator");
+    const world = large();
+    expect(groundOfOpenOrders(world, "marcus-atilius").size).toBe(0);
+    const ground = groundOfOpenOrders(withOpenOrder(world), "marcus-atilius");
+    expect(ground.has(MESSANA)).toBe(true);
+    expect(groundOfOpenOrders(withOpenOrder(world), null).size).toBe(0);
+  });
+
+  it("lands some of a season's seeds there, which a world without the order never does", () => {
+    const landedOn = (world: WorldState): number => {
+      let hits = 0;
+      for (let ordinal = 0; ordinal < 40; ordinal += 1) {
+        const stirred = { ...later(world, 200), narrator: { ...world.narrator, seedCount: ordinal } };
+        for (const seed of decideNarratorSeeds(input(stirred, { spanDays: 90 }))) if (seed.target.provinceId === MESSANA) hits += 1;
+      }
+      return hits;
+    };
+    expect(landedOn(withOpenOrder(large()))).toBeGreaterThan(landedOn(large()));
+  });
+});
+
+describe("a thread given its next beat", () => {
+  // Plan chronicle-and-order-truth, 5.3: omen, escalation, crisis, resolution, a fortnight apart.
+  const thread = (change: Record<string, unknown>) => ({
+    id: "arc-1", title: "The Sickness in Latium", participantIds: [], provinceId: null, phase: "brewing", stakes: "Whether Rome can feed itself.", history: ["It began."],
+    nextDevelopment: "It spreads or burns out.", visibility: "public", origin: "world", openedByRef: null, openedAtStep: 0, updatedAtStep: 100, closedAtStep: null, causalFactIds: [], seedKey: null,
+    ...change,
+  }) as unknown as WorldState["storylines"][number];
+  const at = (day: number, storylines: WorldState["storylines"]): NarratorInput => input({ ...later(large(), day), storylines });
+
+  it("moves a quiet thread on one phase, and says which", async () => {
+    const { arcBeat } = await import("./narrator");
+    const beat = arcBeat(at(120, [thread({})]))!;
+    expect(beat.archetype).toBe("arc_beat");
+    expect(beat.brief).toContain('phase "escalating"');
+    expect(beat.brief).toContain("[arc-1]");
+    expect(arcBeat(at(120, [thread({ phase: "escalating" })]))!.brief).toContain('phase "crisis"');
+    expect(arcBeat(at(120, [thread({ phase: "crisis" })]))!.severity).toBe("minor");
+  });
+
+  it("leaves a thread alone inside its fortnight, once it is resolving or closed, or when the world did not open it", async () => {
+    const { arcBeat } = await import("./narrator");
+    expect(arcBeat(at(105, [thread({})]))).toBeNull();
+    expect(arcBeat(at(200, [thread({ phase: "resolving" })]))).toBeNull();
+    expect(arcBeat(at(200, [thread({ phase: "closed" })]))).toBeNull();
+    expect(arcBeat(at(200, [thread({ origin: "scenario" })]))).toBeNull();
+  });
+
+  it("puts one beat among a season's seeds, ahead of anything new", () => {
+    const seeds = decideNarratorSeeds(input({ ...later(large(), 200), storylines: [thread({ updatedAtStep: 150 })] }, { spanDays: 90 }));
+    expect(seeds.filter((seed) => seed.archetype === "arc_beat")).toHaveLength(1);
+    expect(seeds[0]!.archetype).toBe("arc_beat");
   });
 });

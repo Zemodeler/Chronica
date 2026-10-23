@@ -328,3 +328,8 @@ these reached them.
 - A blockade's effect on trade is all or nothing at 5,000 tightness; the
   monthly reckoning does not split an income.
 - None of this has been hand-played.
+
+## War plans
+
+The plan of battle, the manoeuvres, the siege's turning points and the blockade above are now chosen by rule for every army nobody
+plays, from a plan of the war and orders to each army: see `docs/plans/war-plans.md`.

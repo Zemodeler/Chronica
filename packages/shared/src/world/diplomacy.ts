@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ElapsedStepSchema, EntityIdSchema, SignedScoreSchema, VisibilitySchema } from "../material-state";
-import { PolityAgreementKindSchema, type PolityAgreementKind } from "./agreements";
+import { PolityAgreementKindSchema, TradeTermsSchema, type PolityAgreementKind } from "./agreements";
 import { aptitude, skillShare } from "../characters/aptitude";
 import { leaning } from "../characters/traits";
 import type { Character } from "../characters/character";
@@ -30,6 +30,13 @@ export const DiplomaticMessageKindSchema = z.enum([
   "warning",
   "protest",
   "congratulation",
+  /**
+   * "Open your markets to us, or we shut ours": an embargo announced, not bargained. An embargo is one power's own act
+   * and cannot be accepted into being, so the letter is a threat of the ultimatum's kind -- what it asks is yielded to
+   * or it is carried out (`onRefusal: "embargo"`): a refusal, or no answer by the day, and the sender lays the embargo
+   * named in `trade.goods` (empty is every good). Accepted, nothing is laid and the matter is settled.
+   */
+  "embargo_notice",
   /** "Let us discuss peace": accepted, it seats both sides at the peace table (`world/peace-table.ts`). */
   "peace_talks",
 ]);
@@ -79,6 +86,8 @@ export const DiplomaticMessageSchema = z
     /** Set when this message is itself a counter-offer to an earlier one. */
     inReplyToMessageId: EntityIdSchema.nullable().default(null),
     negotiation: NegotiationProposalSchema.optional(),
+    /** Worded by the model for the player, once (`sim/letter-voice.ts`): a rule-written letter is not asked of it again. */
+    voicedByModel: z.boolean().optional(),
     /** Stable business and its original owner, kept across counteroffers. */
     negotiationId: EntityIdSchema.optional(),
     negotiationOwnerCharacterId: EntityIdSchema.optional(),
@@ -100,13 +109,15 @@ export const DiplomaticMessageSchema = z
      * and carried out when it is accepted, not when it is written.
      */
     clauses: z.array(z.record(z.string(), z.unknown())).max(24).optional(),
+    /** For a trade offer: the terms of the pact it opens when accepted (a customs cap, most-favoured status, goods let in free). */
+    trade: TradeTermsSchema.optional(),
     /**
      * What its sender does if it is refused or goes unanswered: an ultimatum's
      * threat. Rome sent Syracuse "if you are not with us you are against us"
      * and declared the war in the same breath, before Hieron could answer; the
      * refusal that came afterwards arrived ten days after the battle.
      */
-    onRefusal: z.enum(["war", "war_if_attacked"]).nullable().optional(),
+    onRefusal: z.enum(["war", "war_if_attacked", "embargo"]).nullable().optional(),
     /**
      * The day a conditional threat was refused or went unanswered, so it now
      * stands: "cease hostilities or face war" answered with a refusal of the
@@ -131,12 +142,34 @@ export const DiplomaticMessageSchema = z
      */
     deliveredOnDay: ElapsedStepSchema.nullable().optional(),
     /**
+     * The answer already decided, for a letter the player wrote: the model was
+     * called when it was sent, as it is when he speaks with a man in the room,
+     * and what it had the reader say is kept here until the story reaches the
+     * day it can come back -- the road there, and the road back. On that day
+     * the engine applies these acts as the reader's own (`letter-reply.ts`);
+     * until then the letter is still awaiting its reply, and nobody is asked
+     * about it a second time. The acts are kept as written and read again
+     * when they are applied, so a world that has changed since is judged as it
+     * then stands.
+     */
+    heldAnswer: z.object({
+      decidedOnDay: ElapsedStepSchema,
+      comesOnDay: ElapsedStepSchema,
+      deltas: z.array(z.record(z.string(), z.unknown())).min(1).max(3),
+    }).strict().optional(),
+    /**
      * Written over the government's name by a man whose office does not make
      * treaties. Accepted, it binds nothing until the chamber that makes them
      * ratifies it -- as Rome's people threw out Catulus's first terms with
      * Carthage in 241 and sent ten commissioners to write better ones.
      */
     withoutAuthority: z.boolean().optional(),
+    /**
+     * For an offer of trade or a notice of embargo written to somebody who does not decide it: the person who does
+     * (`tradeAddresseeFinder`), stamped when it was sent, with the engine's reading of the offices. The one it was
+     * written to answers by pointing the writer there rather than speaking for a government he does not speak for.
+     */
+    decidedBy: EntityIdSchema.optional(),
     /** The ratification its acceptance waits on, and how it was accepted. */
     ratification: z.object({
       procedureId: EntityIdSchema,
@@ -169,7 +202,8 @@ const MEANT_BY_KIND: Partial<Record<DiplomaticMessageKind, PolityAgreementKind>>
 
 export function offeredAgreementKinds(message: Pick<DiplomaticMessage, "kind" | "proposes">): readonly PolityAgreementKind[] {
   const meant = MEANT_BY_KIND[message.kind];
-  return [...new Set([...(message.proposes ?? []), ...(meant === undefined ? [] : [meant])])];
+  // An embargo is one power's own act, not a bargain that can be accepted: a letter does not offer one.
+  return [...new Set([...(message.proposes ?? []), ...(meant === undefined ? [] : [meant])])].filter((kind) => kind !== "embargo");
 }
 
 /** Plain correspondence must not lose an explicit offer merely because it came from the tray. */

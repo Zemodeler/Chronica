@@ -120,7 +120,9 @@ function candidatesFor(rejection: RejectedDelta, world: WorldState | undefined):
   ];
   const others = named.filter((id) => id.length >= 8).flatMap((id) => people.filter((place) => place.id !== id && place.id.startsWith(id)).slice(0, 4))
     .map((place) => `${place.id} (${place.name})`);
-  const found = [...new Set([...provinces, ...others])];
+  const forceNamed = /^No force "([^"]+)" exists/.exec(rejection.reason)?.[1];
+  const forces = forceNamed === undefined ? [] : forcesItCouldMean(forceNamed, world);
+  const found = [...new Set([...forces, ...provinces, ...others])];
   return found.length === 0 ? "" : `\n   COULD HAVE MEANT: ${found.join("; ")}`;
 }
 
@@ -194,6 +196,34 @@ const BEYOND_REPAIR = [
   /^Nothing to pay: /,
 ];
 
-export function worthRepairing(rejection: { readonly reason: string }): boolean {
-  return !BEYOND_REPAIR.some((pattern) => pattern.test(rejection.reason));
+/**
+ * A force that was never raised. A model asked to move or command "the Roman
+ * force at Rhegium" invents a handle for an army the world does not hold, and
+ * the repair can only invent another or answer with nothing: three of four
+ * repairs in one live turn were this, each an empty list after ten seconds.
+ * Worth a call only where some force's id could be what was meant.
+ */
+function namesNoForceAtAll(reason: string, world: WorldState | undefined): boolean {
+  const named = /^No force "([^"]+)" exists/.exec(reason)?.[1];
+  if (named === undefined || world === undefined) return false;
+  return forcesItCouldMean(named, world).length === 0;
+}
+
+/**
+ * The forces a wrong force handle could have meant: those whose id, name or
+ * power shares a word with it. "rhegium-campanians" is the power, and its
+ * force is `campanian-legion`; the refusal said only that nothing had the
+ * first name, so the correction could not find the second.
+ */
+function forcesItCouldMean(named: string, world: WorldState): string[] {
+  const wordsOf = (text: string) => text.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4 && !["force", "forces", "army", "armies"].includes(word));
+  const handle = wordsOf(named);
+  return world.material.forces
+    .filter((force) => force.id.startsWith(named) || force.id.endsWith(named) || named.startsWith(force.id)
+      || wordsOf(`${force.id} ${force.name} ${force.polityId}`).some((word) => handle.some((mine) => mine.includes(word) || word.includes(mine))))
+    .slice(0, 4).map((force) => `${force.id} (${force.name})`);
+}
+
+export function worthRepairing(rejection: { readonly reason: string }, world?: WorldState): boolean {
+  return !BEYOND_REPAIR.some((pattern) => pattern.test(rejection.reason)) && !namesNoForceAtAll(rejection.reason, world);
 }

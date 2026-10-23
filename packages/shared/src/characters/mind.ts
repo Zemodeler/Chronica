@@ -90,30 +90,35 @@ export interface DeriveMindContext {
  * predate this field.
  */
 export function deriveDefaultMind(context: DeriveMindContext): CharacterMind {
-  const { officeId, skills, ageYears } = context;
+  const { officeId, skills } = context;
   const holdsOffice = officeId !== null;
 
+  // Everybody is somebody. Skills and station pull a mind a little; the person pulls it a great deal: each part is spread on the
+  // person's own id across most of its range, at any age, so a council of senators or a pool of generated captains holds the
+  // timid and the reckless, the greedy and the dutiful, the forgiving and the vengeful side by side. Nothing here depends on age:
+  // an old man is as likely to be bold as a young one (what the years then do is theirs to do, one person at a time -- `mind-drift.ts`).
+  const own = (part: string, reach: number): number => (context.id === undefined ? 0 : personalSpread(context.id, part, reach));
   const drives: CharacterDrives = {
-    security: clamp(50 + (ageYears > 45 ? 10 : 0)),
-    status: clamp(50 + (holdsOffice ? 15 : 0) + Math.round((skills.diplomacy - 50) / 4)),
-    wealth: clamp(50 + Math.round((skills.stewardship - 50) / 4)),
-    family: 50,
-    faith: clamp(50 + Math.round((skills.piety - 50) / 4)),
-    duty: clamp(50 + (holdsOffice ? 10 : 0) + Math.round((skills.stewardship - 50) / 6)),
-    revenge: 50,
+    security: clamp(50 + own("security", 34)),
+    status: clamp(50 + (holdsOffice ? 10 : 0) + Math.round((skills.diplomacy - 50) / 5) + own("status", 34)),
+    wealth: clamp(50 + Math.round((skills.stewardship - 50) / 5) + own("wealth", 34)),
+    family: clamp(50 + own("family", 34)),
+    faith: clamp(50 + Math.round((skills.piety - 50) / 4) + own("faith", 34)),
+    duty: clamp(50 + (holdsOffice ? 8 : 0) + Math.round((skills.stewardship - 50) / 8) + own("duty", 34)),
+    revenge: clamp(50 + own("revenge", 34)),
   };
 
   const temperament: CharacterTemperament = {
-    boldness: clamp(50 + Math.round((skills.martial - 50) / 3) - (ageYears > 50 ? 10 : 0)),
-    caution: clamp(50 + (ageYears > 45 ? 10 : 0) + (holdsOffice ? 10 : 0) - Math.round((skills.martial - 50) / 4)),
-    honesty: clamp(50 - Math.round((skills.intrigue - 50) / 4) + (context.id === undefined ? 0 : honestySpread(context.id))),
-    sociability: clamp(50 + Math.round((skills.diplomacy - 50) / 4)),
-    discipline: clamp(50 + Math.round((skills.stewardship - 50) / 6) + (holdsOffice ? 5 : 0)),
-    cruelty: 50,
+    boldness: clamp(50 + Math.round((skills.martial - 50) / 5) + own("boldness", 36)),
+    caution: clamp(50 + (holdsOffice ? 6 : 0) - Math.round((skills.martial - 50) / 8) + own("caution", 36)),
+    honesty: clamp(50 - Math.round((skills.intrigue - 50) / 5) + own("honesty", 34)),
+    sociability: clamp(50 + Math.round((skills.diplomacy - 50) / 5) + own("sociability", 34)),
+    discipline: clamp(50 + Math.round((skills.stewardship - 50) / 8) + (holdsOffice ? 4 : 0) + own("discipline", 34)),
+    cruelty: clamp(50 + own("cruelty", 36)),
   };
 
-  const riskTolerance = clamp(50 + Math.round((skills.martial - 50) / 4) - (ageYears > 45 ? 10 : 0) - (holdsOffice ? 5 : 0));
-
+  // Appetite for risk follows boldness and caution half way and is the person's own the rest.
+  const riskTolerance = clamp(50 + Math.round(((temperament.boldness - 50) - (temperament.caution - 50)) / 3) + Math.round((skills.martial - 50) / 8) + own("risk", 24));
   return { drives, temperament, riskTolerance, values: [], taboos: [], currentPressures: [] };
 }
 
@@ -122,6 +127,23 @@ export function deriveDefaultMind(context: DeriveMindContext): CharacterMind {
  * time. Derived minds put nearly everybody between 37 and 62, so that one
  * treasurer was as tempted as the next.
  */
+/**
+ * A person's own deviation on one part of their mind: triangular within +/-`reach`
+ * (so most are moderate and few extreme) with one in ten drawn from the whole
+ * width, so that every part has real extremes in any large company. Fixed for
+ * the person: the same id and part always give the same number.
+ */
+export function personalSpread(id: string, part: string, reach: number): number {
+  const unit = (salt: string): number => {
+    let hash = 2166136261;
+    for (const char of `${id}:mind:${part}:${salt}`) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619) >>> 0;
+    return hash / 4294967296;
+  };
+  const triangular = unit("a") + unit("b") - 1;
+  const wide = unit("c") < 0.1 ? (unit("d") * 2 - 1) * 1.35 : triangular;
+  return Math.round(wide * reach);
+}
+
 export function honestySpread(id: string): number {
   let hash = 2166136261;
   for (const char of `${id}:honesty`) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619) >>> 0;

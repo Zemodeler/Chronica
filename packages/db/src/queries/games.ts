@@ -4,6 +4,7 @@ import { ScenarioDefinitionSchema, WORLD_SCHEMA_VERSION } from "@chronica/shared
 import type { ChronicaDatabase } from "../database";
 import { users } from "../schema/auth";
 import { characterClaims, gameInvites, games, players, scenarioMapAssets, scenarioVersions, scenarios } from "../schema/game";
+import { gameWorlds } from "../schema/simulation";
 import { creditHolds, creditLedgerEntries, creditLots, creditWallets } from "../schema/billing";
 import { CHRONICA_SYSTEM_USER_ID, FIRST_PUNIC_WAR_SCENARIO_ID, FIRST_PUNIC_WAR_SLUG, firstPunicWarScenario } from "../built-in-scenarios";
 import { PUNIC_WARS_SCENARIO_ID, PUNIC_WARS_SLUG, punicWarsScenario } from "../punic-wars-scenario";
@@ -271,13 +272,18 @@ export interface GameSummaryRow {
   readonly gameId: string;
   readonly title: string;
   readonly status: "lobby" | "active" | "finished" | "abandoned";
+  /** When the save was made. */
+  readonly createdAt?: Date;
+  /** When the world was last changed: the last order or burst. Null for a save never played. */
+  readonly lastPlayedAt?: Date | null;
 }
 
 /** All saves created by this account, including paused and historical saves. */
 export async function listHostedGames(db: ChronicaDatabase, userId: string): Promise<GameSummaryRow[]> {
   return db
-    .select({ gameId: games.id, title: games.title, status: games.status })
+    .select({ gameId: games.id, title: games.title, status: games.status, createdAt: games.createdAt, lastPlayedAt: gameWorlds.updatedAt })
     .from(games)
+    .leftJoin(gameWorlds, eq(gameWorlds.gameId, games.id))
     .where(eq(games.createdBy, userId))
     .orderBy(desc(games.createdAt));
 }

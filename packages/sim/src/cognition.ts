@@ -1,5 +1,8 @@
+import { LARGE_MATTERS, adviceOnALetter, letterVerdict } from "./letter-verdict";
+import { conductInWords } from "./nature";
 import { z } from "zod";
 import {
+  shownWarPlanVariant,
   CognitionOutputSchema,
   ORDER_PART_STATUS_LABEL,
   orderPartStatus,
@@ -47,6 +50,8 @@ import { ruleInWords } from "./mechanics/mechanic-words";
 import { describePlans } from "./plans";
 import { describeDiplomaticBusiness } from "./negotiation-business";
 import { describeNeighbourhood } from "./board";
+import { KEPT_BY_THE_OFFICERS, ROUTINE_OPS, stateCrisisLine } from "./kept-by-the-officers";
+import { intentionsToTell, worriesToTell } from "./management-talk";
 
 /**
  * NPC cognition (VISION §28).
@@ -74,14 +79,26 @@ import { describeNeighbourhood } from "./board";
 function shownSchema(): string {
   const schema = z.toJSONSchema(CognitionOutputSchema, { io: "input" }) as Record<string, unknown>;
   const actor = (schema.properties as { actors?: { items?: { properties?: Record<string, unknown>; required?: string[] } } } | undefined)?.actors?.items;
-  if (actor?.properties !== undefined) delete actor.properties.reasoning;
+  // One sentence of why, which the Chronicle tells as the person's own reason (`burst.ts`); the long form stays unasked.
+  if (actor?.properties !== undefined) actor.properties.reasoning = { type: "string", minLength: 1, maxLength: 240, description: "One sentence: why this person chose as they did." };
   const proposal = actor?.properties?.proposal as { properties?: Record<string, unknown>; required?: string[] } | undefined;
   if (proposal?.properties !== undefined) delete proposal.properties.narrativeSummary;
   if (proposal?.required !== undefined) proposal.required = proposal.required.filter((key) => key !== "narrativeSummary");
-  if (actor?.required !== undefined) actor.required = actor.required.filter((key) => key !== "reasoning");
+  if (actor?.required !== undefined && !actor.required.includes("reasoning")) actor.required.push("reasoning");
   // A person hands on no part of an order: parts are the orchestrator's.
   const delegation = (proposal?.properties?.delegations as { items?: { properties?: Record<string, unknown> } } | undefined)?.items;
   if (delegation?.properties !== undefined) delete delegation.properties.part;
+  // The routine government is kept by the officers (`kept-by-the-officers.ts`): its acts are not on the menu a person is shown, nor the
+  // terms of a trade pact or the offer of a loan to a state. The parser above still reads them, and the engine sets them aside.
+  const defs = (schema.$defs as { WorldDelta?: { oneOf?: Record<string, unknown>[] } } | undefined)?.WorldDelta;
+  if (defs?.oneOf !== undefined) {
+    defs.oneOf = defs.oneOf.filter((variant) => !ROUTINE_OPS.has(String(((variant.properties as Record<string, { const?: unknown }> | undefined)?.op)?.const))).map((variant) => shownWarPlanVariant(variant));
+    for (const variant of defs.oneOf) {
+      const fields = variant.properties as Record<string, { const?: unknown }> | undefined;
+      if (fields?.op?.const === "agreement_open") delete fields.trade;
+      if (fields?.op?.const === "loan_open") delete fields.offerId;
+    }
+  }
   return JSON.stringify(schema);
 }
 
@@ -207,34 +224,27 @@ export function foldStrayProposalKeys(value: unknown): unknown {
 
 export const COGNITION_SYSTEM_PROMPT = `You are several people in a historical world, reasoning separately.
 
+Keep answers compact: write the decision and its meaningful consequences, not a
+review of the supplied context. For each person write "reasoning": one sentence,
+under 35 words, saying why they chose as they did, in plain words -- the
+Chronicle tells it as their reason. Do not write narrativeSummary.
+One fact records one event. Preserve motives that explain a choice, important spoken
+words, secrecy, affected people and consequences: these feed the Chronicle.
+Leave empty optional collections empty. Never shorten an answer by dropping a
+necessary act, treaty term, dependency or consequence.
+
 You will be given one section per person. Each section contains only what that
 person currently knows. Treat it as the whole of their knowledge: if something is
 not in their section, they have not heard it, and they must not act on it.
 
+${KEPT_BY_THE_OFFICERS}
+
 For each person, decide what they actually do now. Nobody is here by accident, and
 "nothing" is an answer only when it is a choice: leave them out of "actors" when
 their business truly waits. Where a section says what lies open to them, take one,
-do better, or decline it knowing what they decline. Play people as they are: the
-ambitious reach, the cruel are cruel, the faithless break faith when it pays.
+do better, or decline it knowing what they decline. Play people as they are: the ambitious reach, the cruel are cruel.
 
-That is also an answer for someone whose business is waiting on a real dependency.
-Do not invent activity to fill a round. It is otherwise rarely the answer for
-someone whose section says nobody has brought them news: they are in the batch
-because they have a war to press, a promise to keep, a city to hold or a rival to
-manage, and a month of their own is not nothing. Move their business on by a step
-they could actually take from where they stand -- an act the world takes: an
-army moved or engaged, a letter sent, money spent, a man hired, a question put
-to a chamber -- with the fact that says it happened beside it. Reviewing,
-maintaining and reaffirming change nothing; an answer of
-only those is "nothing", and a step is not done by it. Waiting on a courier,
-reply or vote is legitimate: leave the actor out until it arrives or its deadline
-expires, and make the plan depend on that exact letter ("letter_answered", with
-"messageId") or question, with "afterConditionDays" for the time to act after
-the reply arrives. Never count another version of an outstanding request
-as progress. Each actor carries their own responsibility forward: a negotiator
-settles terms, a commander prepares or moves troops, a treasury officer funds the
-work. Shared government aims do not require everyone to negotiate them. They are not waiting for the ruler; they do not know
-what the ruler is doing. Business that will take months is a plan: give it in
+That is also an answer for someone whose business waits on a real dependency; do not invent activity to fill a round. Otherwise it is rarely the answer for someone with a war to press, a promise to keep, a city to hold or a rival to manage: move their business on by a step they could take from where they stand -- an army moved or engaged, a letter sent, money spent, a man hired, a question put to a chamber -- with the fact that says it happened beside it. Reviewing, maintaining and reaffirming change nothing. Waiting on a courier, reply or vote is legitimate: leave the actor out until it arrives or its deadline expires, and make the plan depend on that exact letter ("letter_answered", with "messageId") or question, with "afterConditionDays" for the time to act after the reply. Never count another version of an outstanding request as progress. Each actor carries their own responsibility forward: a negotiator settles terms, a commander moves troops; they do not know what the ruler is doing. Business that will take months is a plan: give it in
 "plan" as up to four steps in order, each an act of that kind, with the days
 by which it should be done and, if it must wait for something, "when". What an act
 is for goes in "serves": the step's, order's or promise's id, and the act's place in "deltas"; only
@@ -242,12 +252,13 @@ an act that changes the world counts. A step shown as
 missed means the plan has fallen behind, and they carry on late, lay it again,
 or give it up. What their government means to do is somebody's to carry out,
 and if it is theirs -- their office, their army -- it is their plan.
+For a step whose work is already approved and running as a project, name that
+project in routineProjectRef (an existing id, or local:handle of a project made
+in this answer). The engine carries its stages, payments and travel through and
+marks the step done when the project completes; do not redo the work. Use it only
+for a step with no further dependency (when: null); failed or overdue projects need a decision.
 
-Someone may act within their authority, beyond it, or against it. A general may
-march without orders; an official may quietly divert funds; a senator may begin
-opposing the very policy they were told to support. None of these are invalid. They
-are what makes the world political. Where someone acts outside their authority, do
-it anyway and record it honestly as a fact.
+Someone may act within their authority, beyond it, or against it -- a general may march without orders, an official divert funds, a senator oppose his party's policy. None is invalid: do it, and record it honestly as a fact.
 
 The same engine rules apply as elsewhere:
 
@@ -270,9 +281,7 @@ The same engine rules apply as elsewhere:
   something expected. "Holding the province rather than advancing" is a posture,
   "is expected to answer" is a diary entry: neither happened. If nothing
   happened, write no fact. Say what was done, never what was not ("made no pledge").
-- Someone who sets out to find something out, and succeeds, records it in
-  "discoveries" -- the fact already existed; what changed is that they now know
-  it. Someone who sets out to deceive uses "belief_set" on the person they are
+- Someone who sets out to find something out, and succeeds, records it in "discoveries": the fact already existed; they now know it. Someone who sets out to deceive uses "belief_set" on the person they are
   deceiving. A belief is never checked against the truth.
 - An army can only fight what it is standing next to. To attack, step it into
   the enemy's province with "force_modify" and engage in the same answer; if
@@ -322,19 +331,8 @@ The same engine rules apply as elsewhere:
   entry per direction that changed, scored -20 to 20 with the dimensions it
   moves (trust, respect, fear, affection, obligation). A season in which
   nobody's opinion of anybody moved is a season nobody lived through.
-- And where somebody has now seen enough of another person to say what they
-  are like, put it in that same event's "observedTraits": the person judged,
-  the person judging, and one of cautious, bold, ambitious, dutiful, vengeful,
-  sociable, disciplined, deceitful, compassionate, cruel -- those ten words
-  and no others. Say only what this person actually saw. It takes two
-  different people to make it true, so one opinion is an opinion, and that is
-  deliberate.
-- Something they have found out that somebody did without the authority to do
-  it is theirs to make of what they will. They may sit on it, tell somebody
-  ("belief_set"), demand an accounting, or put it to the body that can judge it
-  ("political_procedure_open"). Whatever they do, write what *they* did as a
-  fact in their own words: the ledger entry that caught it is not the event, and
-  a man saying so is.
+- Where somebody has seen enough of another to say what they are like, put it in that event's "observedTraits": the person judged, the person judging, and one of cautious, bold, ambitious, dutiful, vengeful, sociable, disciplined, deceitful, compassionate, cruel -- no other word. Say only what they actually saw.
+- Something they have found out that somebody did without authority is theirs to make of what they will: sit on it, tell somebody ("belief_set"), demand an accounting, or put it to the body that can judge it ("political_procedure_open"). Write what *they* did as a fact in their own words; the ledger entry that caught it is not the event.
 - An order or a request put to them is theirs to answer: "order_attempt_decide",
   naming it and saying why in their own words. "accept" means they do it -- so
   actually do it, in the same answer, with the deltas it takes. "refuse",
@@ -342,16 +340,8 @@ The same engine rules apply as elsewhere:
   has no standing to command them, or when obeying would cost them more than
   refusing. "subvert" is appearing to comply and doing otherwise. Answer every
   one of them: an order left unanswered is simply put to them again next time.
-  A refusal is an event, and the man who gave the order will hear of it.
-- A letter put to them is theirs to answer: "diplomatic_message_answer", naming
-  the letter, accepting, refusing or countering it, and saying why in their own
-  words. Answer it as the person who received it, weighing what it would cost
-  them -- not as the power that sent it would like. Accepting an offer makes
-  the agreement it offered; where it offered more than one, name the one taken
-  in "agreementKind". To counter, answer
-  "countered" and send a letter back with "diplomatic_message_send" in the same
-  breath, naming the original in "inReplyToRef". They may also write first, to
-  anyone they have reason to.
+  A refusal is an event the giver hears of.
+- A letter put to them is theirs to answer: "diplomatic_message_answer", naming it, accepting, refusing or countering, and saying why in their own words -- as the person who received it, weighing what it would cost them, not as the sending power would like. Accepting makes the agreement offered; where it offered more than one, name the one taken in "agreementKind". To counter, answer "countered" and send a letter back with "diplomatic_message_send" in the same breath, naming the original in "inReplyToRef". They may also write first, to anyone they have reason to.
 
 Answer with a single JSON object and nothing else, matching this schema:
 
@@ -360,6 +350,10 @@ ${OUTPUT_JSON_SCHEMA}`;
 export interface CognitionResult {
   readonly output: CognitionOutput;
   readonly calls: number;
+  /** Extra initial requests caused only by splitting the same work more widely. Repairs still count fully. */
+  readonly parallelExtraCalls?: number;
+  /** A valid empty answer still considered its assigned actors; a failed group did not. */
+  readonly answeredActorIds?: readonly string[];
   readonly parseFailure: string | null;
   /** What was dropped to make an otherwise good answer parse, without a call. */
   readonly salvaged: readonly string[];
@@ -372,7 +366,7 @@ export interface CognitionResult {
  * several people at once, so a section that grows by ten lines grows the call by
  * thirty, and a prompt nobody can hold in view is worse than a thin one.
  */
-const ACTOR_CAPS = { beliefs: 8, pressures: 6, commitments: 6, relations: 6, ambitions: 4, arrangements: 3, drives: 3, skills: 3, storylines: 2, intents: 3 } as const;
+const ACTOR_CAPS = { beliefs: 5, pressures: 4, commitments: 4, relations: 4, ambitions: 3, arrangements: 3, drives: 3, skills: 3, storylines: 2, intents: 2 } as const;
 
 /** Scores at the ends of the scale say something; a 50 says nothing worth a line. */
 const NOTABLE_HIGH = 65;
@@ -420,11 +414,12 @@ const SUBSKILL_WORDS: Readonly<Record<string, string>> = {
  * Printed only where there is something to say, since it is carried for
  * every person in the batch.
  */
-function describeCharge(character: Character, world: WorldState): string[] {
+function describeCharge(character: Character, world: WorldState, routineIsKept = false): string[] {
   if (character.polityId === null) return [];
   const reader = readDepartments(world);
   const scope = { kind: "polity" as const, id: character.polityId };
-  const held = STANDARD_LEVERS.filter((lever) => reader.holding(scope, lever).people.some((person) => person.id === character.id));
+  // The model's own people are not told the routine work of their office: the officers keep it (`kept-by-the-officers.ts`).
+  const held = routineIsKept ? [] : STANDARD_LEVERS.filter((lever) => reader.holding(scope, lever).people.some((person) => person.id === character.id));
   const lines: string[] = [];
   if (held.length > 0) {
     const by = new Map<string, string[]>();
@@ -538,7 +533,7 @@ function describeMind(character: Character): string[] {
   // the batch and most people have no signature instrument at all.
   const instruments: string[] = [];
   if (mind.drives.wealth >= 65 || (character.skills.stewardship ?? 0) >= 70) {
-    instruments.push('money, moved where it obliges somebody -- "money_transfer", "loan_open"');
+    instruments.push('money, moved where it obliges somebody -- "money_transfer", a private "loan_open"');
   }
   if ((character.skills.intrigue ?? 0) >= 70) instruments.push('what others would rather was not known -- agents, "discoveries", "belief_set"');
   if ((character.skills.diplomacy ?? 0) >= 70) instruments.push('other powers, written to directly with "diplomatic_message_send"');
@@ -578,6 +573,10 @@ const placeOf = (world: WorldState, provinceId: string): string =>
  * Armies within a couple of days' ride are the kind of thing scouts, merchants and
  * rumour make known; further off, what they know is what they have been told.
  */
+/** Whether a force is ships, whose strength counts hulls (a transport carries a hundred and twenty men, a warship thirty). */
+export const countsShips = (force: { readonly personnel: readonly { readonly categoryId: string }[] }): boolean =>
+  force.personnel.length > 0 && force.personnel.every((group) => /ship|transport|hull|galley|trireme|quinquereme/i.test(group.categoryId));
+
 function describeWars(character: Character, world: WorldState): string[] {
   if (character.polityId === null) return [];
   const polityId = character.polityId;
@@ -597,10 +596,19 @@ function describeWars(character: Character, world: WorldState): string[] {
     return `Their power is at war with ${polityName(enemy)} [${enemy}]${allies.length === 0 ? "" : ", and the allies who follow it"}${days === null ? "" : `, and has been for ${days} days`}${war === undefined ? "" : `: ${war.terms}`}. It stands at ${standing.score} of 100 for them -- ${how}${standing.parts.length === 0 ? "" : ` (${standing.parts.join("; ")})`}.`;
   });
   const own = world.material.forces.filter((force) => force.commanderCharacterId === character.id || force.controllerCharacterId === character.id);
-  const from = [...new Set([character.locationProvinceId, ...own.map((force) => force.locationId)].filter((id): id is string => id !== null))];
+  // Near whom: the man himself, or which of his forces. "Here, in the same province" measured from an eighteen-man
+  // flotilla while the consul and his legions stood a march away sent the legions the wrong way (consul-run-issues H5).
+  const from: { readonly at: string; readonly who: string }[] = [
+    ...(character.locationProvinceId === null ? [] : [{ at: character.locationProvinceId, who: "him" }]),
+    ...own.map((force) => ({ at: force.locationId, who: force.name })),
+  ];
   const near = world.material.forces
     .filter((force) => enemies.includes(force.polityId))
-    .map((force) => ({ force, km: Math.min(...from.map((here) => kmBetween(world, here, force.locationId, ENEMY_NEAR_KM) ?? Infinity)) }))
+    .map((force) => {
+      const measured = from.map((origin) => ({ who: origin.who, km: kmBetween(world, origin.at, force.locationId, ENEMY_NEAR_KM) ?? Infinity }))
+        .sort((a, b) => a.km - b.km || Number(b.who === "him") - Number(a.who === "him"))[0];
+      return { force, km: measured?.km ?? Infinity, who: measured?.who ?? "him" };
+    })
     .filter((entry) => entry.km <= ENEMY_NEAR_KM)
     .sort((a, b) => a.km - b.km)
     .slice(0, 6);
@@ -609,9 +617,9 @@ function describeWars(character: Character, world: WorldState): string[] {
   // the consul's in Sicily, and his colleague, told nothing, advocated. A man
   // holding a magistracy of a power at war is told when none of its armies is
   // within reach of the enemy -- raising one, or sending one, is somebody's.
-  // A magistracy, not a seat in a council or a priesthood: a senator does not raise legions.
+  // A magistracy, not a seat in a council, a priesthood or the censorship: a senator or a censor does not raise legions.
   const magistrate = world.material.officeSeats.some((seat) => seat.status === "held" && seat.holderCharacterId === character.id
-    && !/(senat|council|elder|priest|member|assembly)/i.test(seat.officeId));
+    && !/(senat|council|elder|priest|member|assembly|censor)/i.test(seat.officeId));
   if (magistrate) {
     // Armies, not fleets: ships and armies do not give battle to each other.
     const afloat = (force: WorldState["material"]["forces"][number]): boolean => force.personnel.length > 0 && force.personnel.every((group) => /ship|galley|fleet|naval|trireme|quinquereme/i.test(group.categoryId));
@@ -643,11 +651,12 @@ function describeWars(character: Character, world: WorldState): string[] {
     // Counted as the player's own scouts would count them (`estimateMen`): by
     // eye where they stand in the same province, by report a day or two
     // off -- never the true muster, which a portrait printed to the man.
-    lines.push("Enemy forces near them:", ...near.map(({ force, km }) => {
+    lines.push("Enemy forces near them:", ...near.map(({ force, km, who }) => {
       const fit = force.personnel.reduce((sum, category) => sum + category.fit, 0);
       const seenThisWeek = Math.floor(world.elapsedStep / 7);
       const count = estimateMen(fit, km === 0 ? "own_eyes" : "report", 0, [force.id, character.id, seenThisWeek]).label;
-      const where = km === 0 ? "here, in the same province" : `about ${describeKm(km)} off`;
+      // Named only when it is one of his forces and not the man himself: the prompt is at the size it may be.
+      const where = km === 0 ? (who === "him" ? "here, in the same province" : `here, with ${who}`) : `about ${describeKm(km)} ${who === "him" ? "off" : `from ${who}`}`;
       return `  - ${force.name} [${force.id}] of ${polityName(force.polityId)} — ${count} at ${placeOf(world, force.locationId)}, ${where}`;
     }));
   }
@@ -681,7 +690,7 @@ function describeMeans(character: Character, world: WorldState): string[] {
       "Forces answering to them:",
       ...commanded.map((force) => {
         const fit = force.personnel.reduce((sum, category) => sum + category.fit, 0);
-        return `  - ${force.name} [${force.id}] — ${fit} men at ${placeOf(world, force.locationId)}, morale ${Math.round(force.moraleBps / 100)}/100, ${force.provisionStatus}`;
+        return `  - ${force.name} [${force.id}] — ${fit} ${countsShips(force) ? "ships" : "men"} at ${placeOf(world, force.locationId)}, morale ${Math.round(force.moraleBps / 100)}/100, ${force.provisionStatus}`;
       }),
     );
   }
@@ -694,6 +703,14 @@ function describeMeans(character: Character, world: WorldState): string[] {
     lines.push("Arrangements in their hands:", ...arrangements.map((entity) =>
       `  - ${entity.label} [${entity.id}] (${entity.kind})${entity.mechanic === undefined || entity.mechanic.endedAtStep !== null ? "" : `; rule: ${ruleInWords(entity.mechanic, world, entity.id)}`}`));
   }
+
+  const forceIds = new Set(commanded.map((force) => force.id));
+  const work = world.projects.filter((project) => ["funded", "in_progress"].includes(project.status)
+    && ((project.sponsorEntityRef.kind === "character" && project.sponsorEntityRef.id === character.id)
+      || project.overseerCharacterId === character.id
+      || (project.completionOutcome?.kind === "force_move" && forceIds.has(project.completionOutcome.forceId ?? ""))));
+  if (work.length > 0) lines.push("Approved work the engine is carrying through:", ...work.map((project) =>
+    `  - ${project.label} [${project.id}]: ${project.status}${project.targetCompletionStep === null ? "" : `; due on day ${project.targetCompletionStep}`}. Do not restart it.`));
 
   return lines;
 }
@@ -754,6 +771,8 @@ export interface PortraitOptions {
   readonly extra?: readonly string[] | undefined;
   /** The slice prints the date once, at its head. */
   readonly closeWithDate?: boolean | undefined;
+  /** A person the model plays: the routine government is not his business, so its charges are not listed to him. */
+  readonly routineIsKept?: boolean | undefined;
 }
 
 export function renderCharacterPortrait(
@@ -772,10 +791,13 @@ export function renderCharacterPortrait(
     lines.push(describeBody(character, world));
     lines.push(...describeTraits(character));
     lines.push(...describeMind(character));
-    lines.push(...describeCharge(character, world));
+    // How they decide, in the terms the engine will hold them to (`nature.ts`).
+    const conduct = conductInWords(world, character);
+    if (conduct.length > 0) lines.push("How they decide:", ...conduct.map((line) => `  - ${line}`));
+    lines.push(...describeCharge(character, world, options.routineIsKept === true));
     // What they want, with the plan for it where they have one. Its own
     // block because a plan needs the calendar, and a mind does not.
-    lines.push(...describePlans(character, world, clock, ACTOR_CAPS.ambitions));
+    lines.push(...describePlans(character, world, clock, ACTOR_CAPS.ambitions, options.routineIsKept === true));
     lines.push(...describeMeans(character, world));
     lines.push(...describeWars(character, world));
     lines.push(...describeGround(character, world));
@@ -799,8 +821,8 @@ export function renderCharacterPortrait(
     if (outlook !== undefined) {
       lines.push(
         `What their government is trying to do: ${outlook.primaryObjective} (it will risk ${outlook.riskTolerance}/100).`,
-        ...outlook.concerns.map((concern) => `  - worried about ${concern.label}: ${concern.level}`),
-        ...outlook.intentions.map((intention) => `  - it means to ${intention}`),
+        ...(options.routineIsKept === true ? worriesToTell(world, characterId, outlook.concerns) : outlook.concerns).map((concern) => `  - worried about ${concern.label}: ${concern.level}`),
+        ...(options.routineIsKept === true ? intentionsToTell(world, characterId, outlook.intentions) : outlook.intentions).map((intention) => `  - it means to ${intention}`),
       );
     }
     // A ruler sees his neighbourhood: who is across his borders, how strong,
@@ -920,7 +942,7 @@ export function renderCharacterPortrait(
   const polityName = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
   const letters = world.diplomacy.filter(
     (message) =>
-      message.status === "awaiting_reply" && isDelivered(message, world.instant.day) &&
+      message.status === "awaiting_reply" && isDelivered(message, world.instant.day) && message.heldAnswer === undefined &&
       (message.toCharacterId === characterId || (message.toCharacterId === null && character?.polityId != null && message.toPolityId === character.polityId)),
   );
   const enemyPowers = new Set(character?.polityId == null ? [] : enemiesOf(world.polityAgreements, character.polityId));
@@ -930,12 +952,27 @@ export function renderCharacterPortrait(
       "Letters awaiting their answer:",
       // A letter from the enemy says so: a power at war was answered as though
       // the letter came from a neutral, because nothing on it said otherwise.
-      ...letters.map((message) => `  - [${message.id}] ${message.kind} from ${polityName(message.fromPolityId)}${enemyPowers.has(message.fromPolityId) ? " (the enemy: their power is at war with it)" : ""}, by ${name(message.fromCharacterId)} — ${message.subject}: ${message.terms}`),
+      ...letters.flatMap((message) => {
+        const line = `  - [${message.id}] ${message.kind} from ${polityName(message.fromPolityId)}${enemyPowers.has(message.fromPolityId) ? " (the enemy: their power is at war with it)" : ""}, by ${name(message.fromCharacterId)} — ${message.subject}: ${message.terms}`;
+        // On the large matters his interests and nature say what they say, as counsel; the answer is the model's (`letter-verdict.ts`).
+        const verdict = character !== undefined && LARGE_MATTERS.has(message.kind) ? letterVerdict(world, message, character) : null;
+        return verdict === null ? [line] : [line, adviceOnALetter(verdict)];
+      }),
     );
   }
 
   if (options.knownFacts !== undefined) {
-    lines.push("What they know of recent events:", ...options.knownFacts.map((fact) => `  - ${fact.summary} [${fact.id}]`));
+    // Duplicate records can describe the same event. Distinct dates, secrecy
+    // or consequences stay separate even when their wording is identical.
+    const events = new Map<string, { summary: string; ids: string[] }>();
+    for (const fact of options.knownFacts) {
+      const { id, ...event } = fact;
+      const key = JSON.stringify(event);
+      const held = events.get(key) ?? { summary: fact.summary, ids: [] };
+      if (!held.ids.includes(id)) held.ids.push(id);
+      events.set(key, held);
+    }
+    lines.push("What they know of recent events:", ...[...events.values()].map(({ summary, ids }) => `  - ${summary} ${ids.map((id) => `[${id}]`).join(" ")}`));
   }
   if (options.extra !== undefined && options.extra.length > 0) lines.push(...options.extra);
   if (options.closeWithDate === true) lines.push(`Today is ${formatWorldDate(world.instant, clock)}.`);
@@ -944,11 +981,14 @@ export function renderCharacterPortrait(
 
 /** One person's section of the batched cognition call. Byte-identical to what it always was. */
 function renderActor(actor: RoutedActor, world: WorldState, clock: ScenarioClock, others: readonly string[]): string {
+  const crisis = stateCrisisLine(world, actor.characterId);
   return renderCharacterPortrait(actor.characterId, actor.name, world, clock, {
     knownFacts: actor.knownFacts,
     impetus: { why: actor.why, ownBusiness: actor.impetus === "own_business" },
     others,
-    ...(actor.note === undefined ? {} : { extra: [actor.note] }),
+    // The state's chest and granary are told only when they have become a quarrel (`stateCrisisLine`).
+    extra: [...(actor.note === undefined ? [] : [actor.note]), ...(crisis === null ? [] : [crisis])],
+    routineIsKept: true,
     closeWithDate: true,
   });
 }
@@ -956,57 +996,44 @@ function renderActor(actor: RoutedActor, world: WorldState, clock: ScenarioClock
 
 const EMPTY: CognitionOutput = { actors: [] };
 
-/**
- * How many people one call answers for before the batch is split in two.
- *
- * The batch is one generation, and generation is serial: ten people's
- * proposals come back one after another in a single stream, so the round takes
- * as long as the whole cast's output put together. Nothing about that is
- * required -- each person's section is built only from what that person knows
- * and never refers to another's -- so past this size the cast is dealt onto two
- * calls that run at once, and the round costs the longer half instead of the
- * sum.
- *
- * This buys wall time, not tokens: the same portraits go out and the same
- * proposals come back. The only duplication is a second copy of the system
- * prompt, which is the one part of the request that is cached.
- *
- * Nine, not six (L17): the split was tuned for a provider that answered in
- * seconds and ran calls side by side for free. In hand mode every call is a
- * minute or two and counts against the burst's call cap, and a round of ten
- * dealt onto three calls spent three of a month's eighteen. A cast of eight
- * is one call.
- */
-const BATCH_SPLIT_THRESHOLD = 9;
-
-/**
- * Roughly how many people one call should answer for once the cast is split.
- *
- * A round costs the slowest of its calls, so the shorter each one's answer the
- * sooner the round is done. Not smaller than this, though: every call repeats
- * the whole cast's context, and past a point the fixed cost of another request
- * outweighs the shorter answer it produces. Seven, under the twelve a single
- * answer may hold (`CognitionOutputSchema`).
- */
-const ACTORS_PER_CALL = 7;
-
-/** Not wider than the database pool is prepared to hold coin holds open, and two since a round is worth calls, not seconds (L17). */
-const MAX_BATCHES = 2;
+/** Four or more independent decisions can benefit from overlapping generation. */
+const BATCH_SPLIT_THRESHOLD = 4;
+/** Keep responses short enough to finish together without repeating the system prompt for every actor. */
+const ACTORS_PER_CALL = 3;
+/** Bound concurrency for both transports. Later rounds use previous answer sizes to balance the work. */
+const MAX_BATCHES = 3;
 
 /** How a cast is dealt onto calls. The defaults are the measured guess; `CHRONICA_COGNITION_SHARDS` overrides them to measure another. */
 export interface CognitionSharding {
   readonly maxBatches: number;
   readonly actorsPerCall: number;
+  /** Previous answer sizes, when known, help keep one long decision from sharing a group with another. */
+  readonly weights?: ReadonlyMap<string, number>;
 }
 export const DEFAULT_SHARDING: CognitionSharding = { maxBatches: MAX_BATCHES, actorsPerCall: ACTORS_PER_CALL };
 
 /** The cast, dealt into the calls that will answer for it, in the router's order. */
 export function deal(actors: readonly RoutedActor[], sharding: CognitionSharding = DEFAULT_SHARDING): readonly (readonly RoutedActor[])[] {
   if (actors.length < BATCH_SPLIT_THRESHOLD) return [actors];
-  const batches = Math.max(1, Math.min(sharding.maxBatches, Math.ceil(actors.length / Math.max(1, sharding.actorsPerCall))));
-  const size = Math.ceil(actors.length / batches);
-  return Array.from({ length: batches }, (_, index) => actors.slice(index * size, (index + 1) * size))
-    .filter((batch) => batch.length > 0);
+  const batches = Math.max(1, Math.min(actors.length, Math.floor(sharding.maxBatches), Math.ceil(actors.length / Math.max(1, sharding.actorsPerCall))));
+  const groups: RoutedActor[][] = Array.from({ length: batches }, () => []);
+  const loads = groups.map(() => 0);
+  const capacity = Math.ceil(actors.length / batches);
+  const rank = new Map(actors.map((actor, index) => [actor.characterId, index]));
+  const weight = (actor: RoutedActor) => Math.max(1, sharding.weights?.get(actor.characterId) ?? 1);
+  const ordered = [...actors].sort((a, b) => weight(b) - weight(a));
+  for (const actor of ordered) {
+    const index = groups.reduce((best, group, candidate) => group.length < capacity
+      && (best === -1 || loads[candidate]! < loads[best]! || (loads[candidate] === loads[best] && group.length < groups[best]!.length)) ? candidate : best, -1);
+    groups[index]!.push(actor);
+    loads[index]! += weight(actor);
+  }
+  return groups.map((group) => group.sort((a, b) => rank.get(a.characterId)! - rank.get(b.characterId)!));
+}
+
+/** The previous one/two-call allocation: parallel transport overhead must not reduce later simulation work. */
+export function cognitionWorkCalls(actorCount: number): number {
+  return actorCount === 0 ? 0 : actorCount < 9 ? 1 : Math.min(2, Math.ceil(actorCount / 7));
 }
 
 /** One call's worth: the actors it answers for, against the whole cast's context. */
@@ -1035,7 +1062,7 @@ async function runOneBatch(
   let failure: string;
   try {
     const parsed = read(await port.complete("simulate_cognition", COGNITION_SYSTEM_PROMPT, userMessage));
-    if (parsed.success) return { output: parsed.data, calls: 1, parseFailure: null, salvaged };
+    if (parsed.success) return { output: parsed.data, calls: 1, parseFailure: null, salvaged, answeredActorIds: actors.map((actor) => actor.characterId) };
     failure = complain(parsed.error.issues);
   } catch (error) {
     if (abortsTheTurn(error)) throw error;
@@ -1069,7 +1096,7 @@ async function runOneBatch(
       `${userMessage}\n\nYour previous answer was rejected. Fix exactly these problems and answer again with the whole object:\n${failure}`,
     );
     const repaired = read(raw);
-    if (repaired.success) return { output: repaired.data, calls: 2, parseFailure: null, salvaged };
+    if (repaired.success) return { output: repaired.data, calls: 2, parseFailure: null, salvaged, answeredActorIds: actors.map((actor) => actor.characterId) };
     return { output: EMPTY, calls: 2, parseFailure: complain(repaired.error.issues), salvaged };
   } catch (error) {
     if (abortsTheTurn(error)) throw error;
@@ -1081,10 +1108,10 @@ async function runOneBatch(
  * NPC cognition for one round (VISION §28).
  *
  * Every actor the router selected is answered for, from their own knowledge
- * and nobody else's. A large cast is dealt onto two concurrent calls rather
+ * and nobody else's. A large cast is dealt onto up to three concurrent calls rather
  * than one long one -- see `BATCH_SPLIT_THRESHOLD` -- and the answers are put
  * back in the order the router chose, so the deltas are applied in the same
- * sequence whether the round took one call or two.
+ * sequence regardless of which group finishes first.
  */
 export async function runCognition(
   port: SimModelPort,
@@ -1122,6 +1149,8 @@ export async function runCognition(
   return {
     output: { actors: merged },
     calls: results.reduce((sum, result) => sum + result.calls, 0),
+    parallelExtraCalls: Math.max(0, chunks.length - cognitionWorkCalls(actors.length)),
+    answeredActorIds: results.flatMap((result) => result.answeredActorIds ?? []),
     parseFailure: failures.length === 0 ? null : failures.join(" | "),
     salvaged: results.flatMap((result) => result.salvaged),
   };

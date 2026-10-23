@@ -33,16 +33,17 @@ describe("developer AI selection", () => {
     vi.stubEnv("OPENAI_API_KEY", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "");
     const api = await import("./local-key-selection");
-    expect(api.getLocalAiProviderConfiguration()).toMatchObject({ available: true, codexModels: expect.arrayContaining(["gpt-6-luna"]) });
+    expect(api.getLocalAiProviderConfiguration().available).toBe(true);
+    expect(api.getLocalAiProviderConfiguration().codexModels).toContain("gpt-6-luna");
     api.selectLocalAiConfiguration("codex", "gpt-6-luna");
     expect(api.getLocalAiProviderConfiguration()).toMatchObject({ activeProvider: "codex", activeModel: "gpt-6-luna" });
     expect(JSON.parse(readFileSync(settings, "utf8"))).toEqual({ activeProvider: "codex", activeModel: "gpt-6-luna" });
   });
 
-  it("defaults the Codex effort to medium, keeps a chosen effort across a model change, and refuses an unknown one", async () => {
+  it("defaults the Codex effort to low, keeps a chosen effort across a model change, and refuses an unknown one", async () => {
     vi.stubEnv("OPENAI_API_KEY", "");
     const api = await import("./local-key-selection");
-    expect(api.getSelectedLocalAiEffort()).toBe("medium");
+    expect(api.getSelectedLocalAiEffort()).toBe("low");
     api.selectLocalAiConfiguration("codex", "gpt-6-luna", "high");
     expect(api.getLocalAiProviderConfiguration()).toMatchObject({ activeEffort: "high", efforts: ["low", "medium", "high"] });
     api.selectLocalAiConfiguration("codex", "gpt-6-sol");

@@ -67,9 +67,26 @@ export const OrderStageSchema = z
     heldSinceStep: ElapsedStepSchema.nullable().default(null),
     /** When it failed, so the record can say on what day, not only that it did. */
     failedAtStep: ElapsedStepSchema.nullable().default(null),
+    /**
+     * The day the wait is looked at again: told to the player as "still waiting
+     * for X, your word?", then put back a fortnight. A wait with no such day
+     * could outlive the order that made it (plan chronicle-and-order-truth, 2.3).
+     */
+    reviewAtStep: ElapsedStepSchema.nullable().default(null),
   })
   .strict();
 export type OrderStage = z.infer<typeof OrderStageSchema>;
+
+/** How long a held act waits before the player is asked again, and how long before it lapses for good. */
+export const STAGE_REVIEW_DAYS = 14;
+/** How long a delegate may have accepted an order, with nothing done for it, before it reads as stalled. */
+export const DELEGATION_STALLED_DAYS = 21;
+export const STAGE_LAPSE_DAYS = 90;
+
+/** The day a waiting stage is next looked at: its own, else a fortnight after it was held. */
+export function stageReviewDay(stage: Pick<OrderStage, "reviewAtStep" | "heldSinceStep">, orderGivenAtStep: number): number {
+  return stage.reviewAtStep ?? (stage.heldSinceStep ?? orderGivenAtStep) + STAGE_REVIEW_DAYS;
+}
 
 /**
  * What the order allowed to be spent on a part, and from where: "allocate up
@@ -99,6 +116,12 @@ export const OrderPartSchema = z
      * kept the goals of the first four, and the other four were nobody's.
      */
     goals: z.array(OrderGoalSchema).max(MAX_PART_GOALS).default([]),
+    /**
+     * Whether every goal was already so on the day the order was given. Only a
+     * change counts as progress: an army already in Messana was not carried
+     * there by an order that found it so (plan chronicle-and-order-truth, 1.2).
+     */
+    metAtOrder: z.boolean().optional(),
     /** Everything this part set going, in the order it was made. */
     workRefs: z.array(OrderWorkRefSchema).max(12).default([]),
     /** Why the world would not have it, when it would not. */
@@ -112,6 +135,11 @@ export const OrderPartSchema = z
      * only by being said is one the answer wrote no act for.
      */
     actsCarried: z.number().int().nonnegative().max(99).default(0),
+    /**
+     * How many of the carried acts were done by being done: a purse debited, a holding made, a loan opened (`DONE_ON_APPLICATION_OPS`). Where every carried
+     * act is of that kind the part is done, and the world shows it; "ordered; no sign of it yet" is for acts whose effect is still to come.
+     */
+    actsDone: z.number().int().nonnegative().max(99).optional(),
     actsRefused: z.number().int().nonnegative().max(99).default(0),
     /**
      * What the player should know about how it was done, when it was done in a
@@ -148,6 +176,27 @@ export const OrderRecordSchema = z
   })
   .strict();
 export type OrderRecord = z.infer<typeof OrderRecordSchema>;
+
+/**
+ * What a person last decided on, kept between bursts (player-focused simulation
+ * plan, S4): so a new burst does not buy every relevant character another
+ * first review. Hashes, not text: the portrait it was made from is long and
+ * is rebuilt on the day. Another `version` is another policy and is ignored.
+ */
+export const COGNITION_REVIEW_VERSION = 1;
+/** How long a kept review stands before the person is looked at again whatever has changed (the elapsed review interval). */
+export const COGNITION_REVIEW_DAYS = 14;
+export const CognitionReviewSchema = z
+  .object({
+    characterId: EntityIdSchema,
+    context: z.string().max(16),
+    reason: z.string().max(16),
+    atStep: ElapsedStepSchema,
+    weight: z.number().int().min(1).max(10_000).default(1),
+    version: z.number().int().nonnegative().default(COGNITION_REVIEW_VERSION),
+  })
+  .strict();
+export type CognitionReview = z.infer<typeof CognitionReviewSchema>;
 
 /** Somebody the burst had to ask and could not pay to (`WorldState.owed`). */
 export const OwedTurnSchema = z
@@ -214,21 +263,31 @@ export function findOrderPart(world: WorldState, ref: string): { readonly order:
  */
 export const ORDER_PART_STATUSES = [
   "achieved", "partly_done", "under_way", "acknowledged", "authorized", "awaiting_authority", "awaiting_reply", "awaiting_condition", "pending",
-  "blocked", "failed", "refused", "unanswered",
+  "blocked", "failed", "refused", "unanswered", "carried_unverified", "already_so", "stalled",
 ] as const;
 export type OrderPartStatus = (typeof ORDER_PART_STATUSES)[number];
 
 /** Least finished first: a part stands where its least finished work stands. */
 const RANK: Record<OrderPartStatus, number> = {
   blocked: 0, failed: 1, under_way: 2, acknowledged: 3, awaiting_authority: 4, awaiting_reply: 5, awaiting_condition: 6, pending: 7, authorized: 8,
-  refused: 9, unanswered: 10, partly_done: 11, achieved: 12,
+  refused: 9, unanswered: 10, carried_unverified: 11, already_so: 12, partly_done: 13, achieved: 14, stalled: 2.5,
 };
 
 /** The statuses a part is finished at, one way or another. */
-const FINISHED: ReadonlySet<OrderPartStatus> = new Set(["achieved", "partly_done", "failed", "refused", "unanswered"]);
+const FINISHED: ReadonlySet<OrderPartStatus> = new Set(["achieved", "partly_done", "failed", "refused", "unanswered", "carried_unverified", "already_so"]);
 
 /** Statuses with something still moving in the world: a march, a vote, a letter on the road, an act held for its moment. */
 const MOVING: ReadonlySet<OrderPartStatus> = new Set(["under_way", "awaiting_authority", "awaiting_reply", "awaiting_condition"]);
+
+/**
+ * Acts that are their own evidence: when the world has applied them the thing is so (the purse is debited, the holding is made, the loan is open, the house is
+ * founded, the men are raised). An act that sets a process going (a march, a letter, a vote, a plot, a work) is not here: it is read from the work it made.
+ */
+export const DONE_ON_APPLICATION_OPS: ReadonlySet<string> = new Set([
+  "money_transfer", "income_source_upsert", "obligation_upsert", "force_create", "force_reinforce", "holding_create", "holding_improve", "holding_transfer",
+  "trade_venture_open", "trade_venture_close", "house_found", "loan_open", "loan_settle", "public_benefaction", "tax_policy_set", "coinage_debase",
+  "force_post_set", "force_membership_set", "office_seat_set", "family_tie_set", "adopt", "service_contract_open", "service_contract_close", "legal_status_set",
+]);
 
 /** Where one piece of work stands, or null when it has no life of its own to read (a made army, an arrangement) or no longer exists. */
 export function workStatus(world: WorldState, ref: OrderWorkRef): OrderPartStatus | null {
@@ -285,7 +344,8 @@ export function workStatus(world: WorldState, ref: OrderWorkRef): OrderPartStatu
       if (attempt === undefined) return null;
       if (attempt.status === "carried_out") return "achieved";
       if (attempt.status === "issued" || attempt.status === "received" || attempt.status === "delayed") return "pending";
-      if (attempt.status === "accepted") return "acknowledged";
+      // Taken up and nothing done for three weeks is not "taken up": it is stuck, and said so (plan chronicle-and-order-truth, 2.6).
+      if (attempt.status === "accepted") return attempt.decidedAtStep !== null && world.elapsedStep - attempt.decidedAtStep >= DELEGATION_STALLED_DAYS ? "stalled" : "acknowledged";
       if (attempt.status === "abandoned") return "failed";
       return "refused";
     }
@@ -375,7 +435,11 @@ export function orderPartStatus(world: WorldState, part: OrderPart, options: { r
   // Several letters are read together, and the answer each one wanted with them.
   const tally = letterTally(world, { workRefs: work });
   const gathered = new Set(tally === null ? [] : work.filter((ref) => ref.kind === "message").map((ref) => ref.id));
-  const reading = goalsMet(world, part.goals.filter((goal) => goal.kind !== "answer_from" || !gathered.has(goal.messageId)));
+  const relevantGoals = part.goals.filter((goal) => goal.kind !== "answer_from" || !gathered.has(goal.messageId));
+  // Legacy records sometimes attached an existing army to an unexecuted
+  // attack. Existence cannot override the record's explicit nonexecution.
+  const reading = part.whyNot != null && relevantGoals.length > 0 && relevantGoals.every((goal) => goal.kind === "exists")
+    ? "not_yet" : goalsMet(world, relevantGoals);
   const statuses = [
     ...work.filter((ref) => !gathered.has(ref.id)).map((ref) => workStatus(world, ref)),
     ...(tally === null ? [] : [tallyStatus(tally)]),
@@ -389,6 +453,8 @@ export function orderPartStatus(world: WorldState, part: OrderPart, options: { r
     // Rome" read done with the man discharged and the journey refused (E5).
     const tallied = tally === null ? null : tallyStatus(tally);
     if (part.actsRefused > 0 || part.stages.some((stage) => stage.status === "failed") || (tallied !== null && tallied !== "achieved" && tallied !== "awaiting_reply")) return "partly_done";
+    // Found so on the day it was given, and nothing set going since: no change to call progress.
+    if (part.metAtOrder === true && work.length === 0 && part.stages.length === 0) return "already_so";
     return tallied === "awaiting_reply" ? "awaiting_reply" : "achieved";
   }
   if (reading === "impossible") {
@@ -397,21 +463,40 @@ export function orderPartStatus(world: WorldState, part: OrderPart, options: { r
   }
   if (statuses.length === 0) {
     if (part.refusal !== null) return "refused";
+    // An army sent to where an order wants it, and on its way: under way, not "nothing came of it".
+    const onTheRoad = relevantGoals.some((goal) => {
+      if (goal.kind !== "force_at") return false;
+      const name = world.material.forces.find((force) => force.id === goal.forceId)?.name.toLowerCase();
+      return name !== undefined && world.projects.some((project) => project.status !== "completed" && project.status !== "failed" && /march|sail|mov/i.test(project.label) && project.label.toLowerCase().includes(name));
+    });
+    if (reading === "not_yet" && onTheRoad) return "under_way";
     if (reading === "not_yet") return "unanswered";
-    // A part with nothing to read the world for was done by the act written
-    // for it; and one the answer wrote no act for at all was answered by
-    // being said. Never by its facts when its only acts were refused.
-    if (part.actsCarried > 0) return part.actsRefused > 0 ? "partly_done" : "achieved";
-    return part.actsRefused === 0 && part.factIds.length > 0 ? "achieved" : "unanswered";
+    // One-off work requires an executed act. A fact is an account of the
+    // answer, not proof that the requested change happened.
+    // Nothing in the world was named to check it against: it was ordered,
+    // and "done" would be a claim nobody can see the evidence for.
+    if (part.actsCarried > 0) {
+      if (part.actsRefused > 0) return "partly_done";
+      // Every act it wrote was done by being done: the world shows it.
+      return (part.actsDone ?? 0) >= part.actsCarried ? "achieved" : "carried_unverified";
+    }
+    return "unanswered";
   }
   const worst = statuses.reduce((least, status) => (RANK[status] < RANK[least] ? status : least));
   // Its work is finished and what it was for is not so: finishing was not enough.
-  if (reading === "not_yet" && (worst === "achieved" || worst === "partly_done")) return "failed";
+  // ...unless something of it was carried out: raised to the strength allowed, short of the strength asked, is partly done.
+  // ...but only for work that claimed to put the thing there. A hired fleet "ready to carry the army to Messana" is done when it is
+  // hired; the army not yet at Messana is what comes next, not a failure (`partly_done`).
+  if (reading === "not_yet" && (worst === "achieved" || worst === "partly_done")) {
+    const claimedToMoveIt = work.some((ref) => ref.kind === "project" && (world.projects.find((project) => project.id === ref.id)?.completionOutcome?.kind ?? "force_move") === "force_move");
+    const something = work.length > 0 || (part.actsCarried > 0 && part.actsRefused === 0);
+    return !claimedToMoveIt && something && part.actsRefused === 0 ? "partly_done" : "failed";
+  }
   return worst === "achieved" && part.actsRefused > 0 ? "partly_done" : worst;
 }
 
 /** A note that says how a part came out, not that it was done beyond his authority. */
-const NOT_A_BREACH = /^(Not needed|Not all of it|It could not be carried out as written|Lapsed)/;
+const NOT_A_BREACH = /^(Not needed|Not all of it|It could not be carried out as written|Lapsed|Check:)/;
 
 /**
  * The status word for a part, as the player reads it. Done beyond the actor's
@@ -447,6 +532,8 @@ export function isOrderPartStale(world: WorldState, order: Pick<OrderRecord, "gi
   if (part.closedAtStep !== null || world.elapsedStep - order.givenAtStep < ORDER_PART_LAPSES_DAYS) return false;
   if (part.stages.some((stage) => stage.status === "waiting")) return false;
   const status = orderPartStatus(world, part);
+  // Ordered, with nothing to see for it two months on, is a part nobody will ever see done: it lapses as any other.
+  if (status === "carried_unverified") return true;
   return !FINISHED.has(status) && !MOVING.has(status);
 }
 
@@ -476,8 +563,13 @@ export function conditionAwaitedInWords(world: WorldState, condition: StageCondi
 
 /** What a part's held acts wait on, in words, or null when nothing is held. */
 export function waitingUntil(world: WorldState, part: Pick<OrderPart, "stages">): string | null {
-  const awaited = [...new Set(part.stages.filter((stage) => stage.status === "waiting").flatMap((stage) => stage.waitsOn).map((condition) => conditionAwaitedInWords(world, condition)))];
-  return awaited.length === 0 ? null : awaited.slice(0, 3).join(" and ");
+  const waiting = part.stages.filter((stage) => stage.status === "waiting");
+  const awaited = [...new Set(waiting.flatMap((stage) => stage.waitsOn).map((condition) => conditionAwaitedInWords(world, condition)))];
+  if (awaited.length === 0) return null;
+  // Since when, and the day it lapses: a wait is never open-ended (plan chronicle-and-order-truth, 2.7).
+  const since = waiting.reduce<number | null>((earliest, stage) => stage.heldSinceStep === null ? earliest : Math.min(earliest ?? stage.heldSinceStep, stage.heldSinceStep), null);
+  const dates = since === null ? "" : ` (since day ${since}, lapses day ${since + STAGE_LAPSE_DAYS})`;
+  return `${awaited.slice(0, 3).join(" and ")}${dates}`;
 }
 
 /** A short, plain word for the status, as the player reads it. */
@@ -495,6 +587,9 @@ export const ORDER_PART_STATUS_LABEL: Record<OrderPartStatus, string> = {
   failed: "failed",
   refused: "refused",
   unanswered: "nothing came of it",
+  carried_unverified: "ordered; no sign of it yet",
+  already_so: "already so when ordered",
+  stalled: "accepted, but nothing done for weeks",
 };
 
 /** Records past the cap drop their oldest wholly-closed ones first, then the oldest of all. */

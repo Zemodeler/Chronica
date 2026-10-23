@@ -1,16 +1,20 @@
+import { TradeProposalRequestSchema } from "@chronica/shared";
 import { writeLetter } from "../../../../../lib/letter-service";
 
 /**
- * A letter to somebody out of the player's region. It goes out now, and is
- * answered when the world next moves.
+ * A letter to somebody out of the player's region. It goes out now, and the one it is written to
+ * is asked for his answer at once: it is decided now, and comes on the day the road allows.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ gameId: string }> }) {
   const { gameId } = await params;
-  const body = await request.json().catch(() => null) as { toCharacterId?: unknown; subject?: unknown; body?: unknown } | null;
+  const body = await request.json().catch(() => null) as { toCharacterId?: unknown; subject?: unknown; body?: unknown; proposal?: unknown } | null;
   if (typeof body?.toCharacterId !== "string" || typeof body.body !== "string" || (body.subject !== undefined && typeof body.subject !== "string")) {
     return Response.json({ error: "Invalid request body." }, { status: 400 });
   }
-  const outcome = await writeLetter(gameId, { toCharacterId: body.toCharacterId, body: body.body, subject: body.subject });
+  // Trade put in the letter: its terms are read as the engine reads them, or the letter does not go.
+  const proposal = body.proposal === undefined ? undefined : TradeProposalRequestSchema.safeParse(body.proposal);
+  if (proposal !== undefined && !proposal.success) return Response.json({ error: "The terms of that proposal could not be read." }, { status: 400 });
+  const outcome = await writeLetter(gameId, { toCharacterId: body.toCharacterId, body: body.body, subject: body.subject, proposal: proposal?.data });
   if (outcome.status === "error") return Response.json({ error: outcome.message }, { status: outcome.code });
-  return Response.json({ status: "sent" });
+  return Response.json({ status: "sent", notes: outcome.notes });
 }

@@ -62,27 +62,33 @@ describe("a question before the Senate", () => {
     expect(early.facts).toEqual([]);
   });
 
-  it("is counted on its day by the blocs, and does what it said it would once carried", () => {
+  it("is counted on its day seat by seat, and does what it said it would once carried", () => {
     const { world, id } = warTaxes();
     const counted = vote(world, 30);
     expect(WorldStateSchema.safeParse(counted.world).success).toBe(true);
     const settled = question(counted.world, id);
-    // The Patricians lean for the government's business (20, all for at 15);
-    // the Populars (-10) sit between their thresholds and divide by their
-    // lean: two thirds of the way to their line against, so 27 of their 40
-    // vote against and 13 abstain.
+    // The Patricians lean for the government's business and the Populars
+    // against; each of the hundred seats answers that pull as the man he is,
+    // so the house divides within its blocs, not only between them.
     expect(settled.outcome).toBe("passed");
     const record = counted.world.material.voteRecords.find((candidate) => candidate.id === settled.voteRecordId)!;
-    expect(record).toMatchObject({ yesWeight: 60, noWeight: 27, abstainWeight: 13, quorumMet: true, thresholdMet: true });
-    expect(counted.facts[0]!.summary).toContain("The Senate carried \"Wartime taxes and a Roman navy\", 60 to 27, 13 abstaining");
-    expect(counted.facts[0]!.summary).toContain("the plebeian new men 27 against and 13 abstaining");
+    expect(record).toMatchObject({ quorumMet: true, thresholdMet: true });
+    // Every seat is counted but those of the men who are away with the armies (`quorum.ts`): a consul in the field is not in the house.
+    expect(record.yesWeight + record.noWeight + record.abstainWeight).toBeGreaterThanOrEqual(95);
+    expect(record.yesWeight + record.noWeight + record.abstainWeight).toBeLessThanOrEqual(100);
+    expect(record.yesWeight).toBeGreaterThan(record.noWeight);
+    // Both blocs divide: the Patricians are not all for it, the Populars not all against.
+    for (const blocId of ["patrician-bloc", "popular-bloc"]) {
+      const parts = record.votes.filter((vote) => vote.blocId === blocId);
+      expect(parts.length).toBeGreaterThan(1);
+    }
+    expect(counted.facts[0]!.summary).toMatch(/The Senate carried "Wartime taxes and a Roman navy", [0-9]+ to [0-9]+/);
     expect(counted.world.genericEntities.some((entity) => entity.kind === "law")).toBe(true);
   });
 
   it("is carried by the votes cast, however many abstain", () => {
-    // The fleet for the southern allies: 49 for, the rest undecided or mildly
-    // against. Counted over the whole house it failed, as if the undecided had
-    // voted no; counted over the votes cast, 49 to 34 carries it.
+    // Counted over the whole house, undecided seats would have counted as no;
+    // counted over the votes cast, a plurality of those who took a side carries it.
     const { world, id } = warTaxes();
     const reweighed: WorldState = { ...world, material: { ...world.material, institutions: world.material.institutions.map((institution) => (institution.id !== "roman-senate" ? institution : {
       ...institution,
@@ -91,8 +97,9 @@ describe("a question before the Senate", () => {
     const counted = vote(reweighed, 30);
     const settled = question(counted.world, id);
     const record = counted.world.material.voteRecords.find((candidate) => candidate.id === settled.voteRecordId)!;
-    expect(record).toMatchObject({ yesWeight: 49, noWeight: 34, abstainWeight: 17 });
-    expect(settled.outcome).toBe("passed");
+    expect(record.yesWeight + record.noWeight + record.abstainWeight).toBeGreaterThanOrEqual(95);
+    expect(record.abstainWeight).toBeGreaterThan(0);
+    expect(settled.outcome).toBe(record.yesWeight > record.noWeight ? "passed" : "failed");
   });
 
   it("every chamber of the opening decides by the votes cast", () => {

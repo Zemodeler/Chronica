@@ -131,3 +131,53 @@ describe("what kind of work a project is", () => {
     expect(domainOfWork("road", "The Via Appia to Capua")).toBe("civil");
   });
 });
+
+describe("every person is their own hand", () => {
+  const zero = base().characters[0]!;
+  const skillsOf = (stewardship: number): Character["skills"] => ({ ...zero.skills, stewardship, subSkills: { taxation: stewardship } });
+  const mindOf = (temperament: Partial<Character["mind"]["temperament"]>, drives: Partial<Character["mind"]["drives"]>): Partial<Character["mind"]> =>
+    ({ temperament: { ...zero.mind.temperament, ...temperament }, drives: { ...zero.mind.drives, ...drives } });
+  const hand = (m: { world: WorldState; id: string }) => assessExecution(m.world, m.id, "fiscal")!;
+
+  it("makes a loyal veteran cheaper and quicker than a hungry beginner, who is quicker than a dud", () => {
+    const veteran = hand(withMan({ skills: skillsOf(80), ageYearsAtStart: 52, traits: [] }, mindOf({ honesty: 85, discipline: 70 }, { duty: 85, status: 30, wealth: 30 })));
+    const beginner = hand(withMan({ skills: skillsOf(35), ageYearsAtStart: 24, traits: ["ambitious"] }, mindOf({ honesty: 60, discipline: 40 }, { duty: 55, status: 90, wealth: 40 })));
+    const dud = hand(withMan({ skills: skillsOf(15), ageYearsAtStart: 45, traits: [] }, mindOf({ honesty: 85, discipline: 70 }, { duty: 85, status: 30, wealth: 30 })));
+
+    expect(throughHand(1_000, veteran).cost).toBeLessThan(throughHand(1_000, beginner).cost);
+    expect(throughHand(1_000, beginner).cost).toBeLessThan(throughHand(1_000, dud).cost);
+    expect(daysInHand(60, veteran)).toBeLessThan(daysInHand(60, beginner));
+    expect(daysInHand(60, beginner)).toBeLessThan(daysInHand(60, dud));
+    // Large enough to see in one project.
+    expect(throughHand(1_000, dud).cost).toBeGreaterThanOrEqual(1.5 * throughHand(1_000, veteran).cost);
+    expect(daysInHand(60, dud)).toBeGreaterThanOrEqual(2 * daysInHand(60, veteran));
+  });
+
+  it("does not sort anybody into a bucket: changing one trait moves the numbers a little, not a lot", () => {
+    const at = (ambitionDrive: number) => hand(withMan({ skills: skillsOf(50), ageYearsAtStart: 35, traits: [] }, mindOf({}, { status: ambitionDrive })));
+    const steps = [30, 40, 50, 60, 70, 80, 90].map((drive) => at(drive).delayBps);
+    // Strictly smoother than a threshold: every step is a change, none is a cliff.
+    for (let i = 1; i < steps.length; i += 1) {
+      expect(steps[i]!).toBeLessThan(steps[i - 1]!);
+      expect(steps[i - 1]! - steps[i]!).toBeLessThan(700);
+    }
+  });
+
+  it("gives two equally skilled people different hands when their temperaments differ", () => {
+    const careful = hand(withMan({ skills: skillsOf(50), ageYearsAtStart: 40 }, mindOf({ caution: 85, discipline: 80 }, {})));
+    const rash = hand(withMan({ skills: skillsOf(50), ageYearsAtStart: 40 }, mindOf({ caution: 15, discipline: 25 }, {})));
+    // The careful one is slower and cheaper; the rash one quicker and dearer.
+    expect(careful.delayBps).toBeGreaterThan(rash.delayBps);
+    expect(careful.wasteBps).toBeLessThan(rash.wasteBps);
+    expect(careful.words).not.toBe(rash.words);
+  });
+
+  it("describes only what is marked in the person", () => {
+    const plain = hand(withMan({ skills: skillsOf(50), ageYearsAtStart: 35, traits: [] }, mindOf({ honesty: 50, discipline: 50, caution: 50 }, { status: 60, duty: 50, wealth: 50 })));
+    const driven = hand(withMan({ skills: skillsOf(30), ageYearsAtStart: 22, traits: ["ambitious"] }, mindOf({ discipline: 30 }, { status: 90 })));
+    expect(plain.words).not.toMatch(/hurry|slapdash|meticulous|slowness|new to/);
+    expect(driven.words).toMatch(/hurry/);
+    expect(driven.words).toMatch(/new to this kind of work/);
+    expect(driven.words).toMatch(/slapdash/);
+  });
+});

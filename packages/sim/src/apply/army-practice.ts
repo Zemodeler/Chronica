@@ -10,6 +10,7 @@ import {
   type WorldDelta,
   type WorldState,
 } from "@chronica/shared";
+import { safeLocalId } from "../safe-local-id";
 
 /**
  * What an order to rest, rouse or work an army is worth, by its size and not
@@ -131,7 +132,7 @@ export function practiseInArmy(
     doctrines = [...doctrines.filter((candidate) => candidate.id !== id), doctrine].slice(-400);
     next = refitFor(next, doctrine, atStep);
     facts.push({
-      localId: `practice_${force.id}`.slice(0, 60),
+      localId: safeLocalId(`practice_${force.id}`).slice(0, 60),
       kind: "army_practice",
       summary: `${force.name} begins to train in a new way: ${doctrine.label}. ${doctrine.description}`.slice(0, 600),
       affectedRefs: [{ kind: "force", id: force.id }, { kind: "polity", id: force.polityId }],

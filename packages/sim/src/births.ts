@@ -3,13 +3,18 @@ import {
   childrenOf,
   createCanonicalNpc,
   currentAgeYears,
+  daughterName,
   DAYS_PER_YEAR,
   familyLinksOf,
+  ordoOfRomanName,
+  parseRomanName,
+  praenomenForSon,
   stableHash,
   type Character,
   type FactProposalDraft,
   type WorldState,
 } from "@chronica/shared";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Children, born to the couples the world already records.
@@ -106,6 +111,30 @@ function nameFor(world: WorldState, father: Character, gender: Character["gender
 }
 
 /**
+ * What a Roman child is called, by the rules the Romans kept (`characters/roman-names.ts`): the eldest son
+ * bears his father's three names (and is "the Younger" to tell them apart), the next sons the gens's own given
+ * names in turn, a daughter her father's nomen in the feminine and, among sisters, the order she came in.
+ * Null where the father has no Roman name: the old rule then names the child.
+ */
+function romanChild(world: WorldState, father: Character, gender: Character["gender"]): { name: string; praenomen?: string; nomen: string; cognomen?: string } | null {
+  const parts = parseRomanName(father.name);
+  const nomen = father.nomen ?? parts.nomen;
+  if (nomen === null || nomen === undefined || father.cultureId !== "roman") return null;
+  const praenomen = father.praenomen ?? parts.praenomen;
+  const cognomen = father.cognomen ?? parts.cognomen;
+  const siblings = childrenOf(world, father.id)
+    .map((id) => world.characters.find((character) => character.id === id))
+    .filter((child): child is Character => child !== undefined && child.gender === gender);
+  if (gender === "female") {
+    const name = `${daughterName(nomen, siblings.length)}, daughter of ${father.name}`.slice(0, 120);
+    return { name, nomen };
+  }
+  if (siblings.length === 0) return { name: `${father.name} the Younger`.slice(0, 120), nomen, ...(praenomen === null ? {} : { praenomen }), ...(cognomen === null ? {} : { cognomen }) };
+  const given = praenomenForSon(nomen, praenomen, siblings.map((brother) => brother.praenomen ?? parseRomanName(brother.name).praenomen));
+  return { name: [given, nomen, cognomen].filter((part): part is string => part !== null).join(" ").slice(0, 120), praenomen: given, nomen, ...(cognomen === null ? {} : { cognomen }) };
+}
+
+/**
  * A child, born today to this mother and her husband.
  *
  * The child belongs to the father's power and house, lives where the mother
@@ -131,9 +160,10 @@ export function bearChild(
   const gender: Character["gender"] = stableHash([mother.id, atStep, "birth", "sex"]) % 2 === 0 ? "male" : "female";
   const average = (a: number, b: number): number => Math.round((a + b) / 2);
   const childId = boundedId("child", mother.id, atStep);
+  const roman = romanChild(world, father, gender);
   const created = createCanonicalNpc(world, {
     characterId: childId,
-    name: nameFor(world, father, gender),
+    name: roman?.name ?? nameFor(world, father, gender),
     locationProvinceId: mother.locationProvinceId,
     polityId: father.polityId ?? mother.polityId,
     createdAtStep: atStep,
@@ -157,6 +187,14 @@ export function bearChild(
     },
   });
   if (created === null) return null;
+  // He is of his father's gens, and of his order (a Roman's went with it), and bears the parts of his name.
+  const born = created.world.characters.find((character) => character.id === childId);
+  const grown: WorldState = born === undefined || roman === null ? created.world : {
+    ...created.world,
+    characters: created.world.characters.map((character) => (character.id === childId
+      ? { ...character, ordo: father.ordo ?? ordoOfRomanName(father.name), nomen: roman.nomen, ...(roman.praenomen === undefined ? {} : { praenomen: roman.praenomen }), ...(roman.cognomen === undefined ? {} : { cognomen: roman.cognomen }) }
+      : character)),
+  };
 
   const parentLink = (parentId: string, suffix: string): WorldState["familyLinks"][number] => ({
     id: `family-${childId}-${suffix}`,
@@ -169,8 +207,8 @@ export function bearChild(
     provenanceEventId: null,
   });
   const next: WorldState = {
-    ...created.world,
-    familyLinks: [...created.world.familyLinks, parentLink(mother.id, "mother"), parentLink(father.id, "father")],
+    ...grown,
+    familyLinks: [...grown.familyLinks, parentLink(mother.id, "mother"), parentLink(father.id, "father")],
   };
 
   // A great house's heir is the whole world's news; a farmer's daughter is her
@@ -182,7 +220,7 @@ export function bearChild(
     world: next,
     childId,
     facts: [{
-      localId: `birth_${childId}`,
+      localId: safeLocalId(`birth_${childId}`),
       kind: "birth",
       summary: `${mother.name} has given ${father.name} a ${gender === "male" ? "son" : "daughter"}, ${created.character.name}.`,
       affectedRefs: [

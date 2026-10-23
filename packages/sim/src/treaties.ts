@@ -1,3 +1,4 @@
+import { lessonsOfBreach } from "./state-lessons";
 import {
   adjustPolityLegitimacy,
   agreementsBetween,
@@ -14,6 +15,7 @@ import {
   openWar,
   provinceTaxCapacity,
   stableHash,
+  tradeTermsBetween,
   warsOf,
   type EconomyMemory,
   type FactProposalDraft,
@@ -22,7 +24,8 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
-import { ALLIED_HULL_CATEGORY, alliedHullsAvailable, requisitionAlliedHulls } from "./socii-navales";
+import { ALLIED_HULL_CATEGORY, alliedHullsAvailable, alliedPay, requisitionAlliedHulls } from "./socii-navales";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * What a treaty makes happen, done on the calendar (VISION §3, §27).
@@ -76,6 +79,9 @@ export const trustOf = (world: WorldState, polityId: string, towardPolityId: str
   world.polityStances.find((stance) => stance.polityId === polityId && stance.towardPolityId === towardPolityId)?.trustScore ?? 0;
 
 /** One power's trust in another moved, bounded as every stance is. */
+/** What embargoing a power while a trade pact stood with it costs, in the trust that power has in the embargoer: a quarter of a broken peace's forty. */
+export const EMBARGO_BREACH_TRUST = 10;
+
 export function shiftTrust(stances: readonly PolityStance[], polityId: string, towardPolityId: string, delta: number, reason: string, atStep: number): PolityStance[] {
   if (polityId === towardPolityId || delta === 0) return [...stances];
   const existing = stances.find((stance) => stance.polityId === polityId && stance.towardPolityId === towardPolityId);
@@ -169,7 +175,7 @@ export function keepTreaties(input: TreatyInput): { world: WorldState; facts: Fa
       }),
     };
     facts.push({
-      localId: `threat_kept_${message.id}`.slice(0, 60),
+      localId: safeLocalId(`threat_kept_${message.id}`).slice(0, 60),
       kind: "war_declared",
       summary: `${nameOf(world, message.fromPolityId)} made war on ${nameOf(world, message.toPolityId)}: it had attacked again, as "${message.subject}" had warned it not to.`.slice(0, 600),
       affectedRefs: [{ kind: "polity", id: message.fromPolityId }, { kind: "polity", id: message.toPolityId }],
@@ -226,7 +232,7 @@ export function keepTreaties(input: TreatyInput): { world: WorldState; facts: Fa
     world = { ...world, polityStances: shiftTrust(world.polityStances, creditor, debtor, -30, `${nameOf(world, debtor)} stopped paying what the ${treaty.kind} owes`, toDay) };
     world = addGrievance(world, creditor, debtor, `${nameOf(world, debtor)} broke the ${treaty.kind} by not paying it`, toDay);
     facts.push({
-      localId: `breach_${obligation.id}`.slice(0, 60),
+      localId: safeLocalId(`breach_${obligation.id}`).slice(0, 60),
       kind: "treaty_breached",
       summary: `${nameOf(world, debtor)} has broken its treaty with ${nameOf(world, creditor)}: ${obligation.label.toLowerCase()} has gone unpaid ${obligation.missedPeriods} times, ${obligation.arrears} in arrears. ${nameOf(world, creditor)} has cause for war.`.slice(0, 600),
       affectedRefs: [{ kind: "polity", id: debtor }, { kind: "polity", id: creditor }],
@@ -247,7 +253,7 @@ export function keepTreaties(input: TreatyInput): { world: WorldState; facts: Fa
         }),
       };
       facts.push({
-        localId: `collect_${obligation.id}`.slice(0, 60),
+        localId: safeLocalId(`collect_${obligation.id}`).slice(0, 60),
         kind: "war_declared",
         summary: `${nameOf(world, creditor)} made war on ${nameOf(world, debtor)} to collect the tribute it had stopped paying.`,
         affectedRefs: [{ kind: "polity", id: creditor }, { kind: "polity", id: debtor }],
@@ -273,6 +279,8 @@ export function keepTreaties(input: TreatyInput): { world: WorldState; facts: Fa
     const broke = brokenPeace(world, war);
     facts.push(...broke.facts);
     world = broke.world;
+    // A trade pact the war finds standing is held, not broken: it costs trust, but a good deal less than a peace did.
+    if (broke.facts.length === 0) world = holdTradePact(world, war);
     const levied = levyContingents(world, war, ids, input.playerPolityId);
     facts.push(...levied.facts);
     world = levied.world;
@@ -296,8 +304,72 @@ export function keepTreaties(input: TreatyInput): { world: WorldState; facts: Fa
     world = withMemory(world, { pendingCalls: still });
   }
 
+  const pacts = trackHeldPacts(world, toDay);
+  facts.push(...pacts.facts);
+  world = pacts.world;
   return { world: endObligationsOfEndedAgreements(world), facts };
 }
+
+/** What a war opened against a power holding a trade pact with the other costs the warmaker in the other's trust: a quarter of a broken peace's forty. */
+export const SUSPENDED_PACT_TRUST = 10;
+
+/**
+ * A war opened between powers who hold a trade pact does not end the pact
+ * (`ENDED_BY_WAR` leaves it out; trade between them is simply shut while the
+ * war lasts, `tradeTermsBetween`, and comes back with the peace). It still
+ * says something of the power that made the war: its victim loses a little
+ * trust in it, unless the victim had given it cause.
+ */
+function holdTradePact(world: WorldState, war: PolityAgreement): WorldState {
+  const breaker = war.polityId;
+  const victim = war.otherPolityId;
+  const pact = agreementsBetween(world.polityAgreements, breaker, victim).find((agreement) => agreement.kind === "trade_pact");
+  if (pact === undefined || hasGrievance(world, breaker, victim)) return world;
+  return { ...world, polityStances: shiftTrust(world.polityStances, victim, breaker, -SUSPENDED_PACT_TRUST, `${nameOf(world, breaker)} made war on them while a trade pact stood`, war.sinceStep) };
+}
+
+/**
+ * Trade pacts held by war, and let go again. A pact between powers at war is
+ * suspended and the markets treat their border as shut; the day the war is
+ * over its terms are back, because the pact was never ended. Held pacts are
+ * remembered in `tradeNews` so that the resumption is news once, as one line
+ * for the pair of powers, and a pact that was never held is no news at all.
+ */
+function trackHeldPacts(world: WorldState, toDay: number): { world: WorldState; facts: FactProposalDraft[] } {
+  const memory = economyOf(world);
+  const facts: FactProposalDraft[] = [];
+  let held = memory.tradeNews.filter((entry) => entry.kind === "cut");
+  for (const pact of world.polityAgreements.filter((agreement) => agreement.status === "active" && agreement.kind === "trade_pact")) {
+    const suspended = tradeTermsBetween(world, pact.polityId, pact.otherPolityId).pactSuspended;
+    const was = held.find((entry) => entry.polityId === pact.polityId && entry.otherPolityId === pact.otherPolityId);
+    if (suspended && was === undefined) {
+      held = [...held, { polityId: pact.polityId, otherPolityId: pact.otherPolityId, kind: "cut" as const, atStep: toDay }];
+    } else if (!suspended && was !== undefined) {
+      held = held.filter((entry) => entry !== was);
+      if (facts.length < MAX_TRADE_FACTS_PER_DAY) {
+        facts.push({
+          localId: safeLocalId(`trade_resumed_${pact.id}_${toDay}`).slice(0, 60),
+          kind: "trade_resumed",
+          summary: `Trade between ${nameOf(world, pact.polityId)} and ${nameOf(world, pact.otherPolityId)} resumes under their pact: the war that closed the border is over.`,
+          affectedRefs: [{ kind: "polity", id: pact.polityId }, { kind: "polity", id: pact.otherPolityId }],
+          visibility: "public",
+          discoveryState: "public",
+          knowableInDays: 0,
+          significance: 35,
+        });
+      }
+    }
+  }
+  // A pact that ended in the meantime is not waited on.
+  const standing = new Set(world.polityAgreements.filter((agreement) => agreement.status === "active" && agreement.kind === "trade_pact").map((agreement) => `${agreement.polityId}|${agreement.otherPolityId}`));
+  held = held.filter((entry) => standing.has(`${entry.polityId}|${entry.otherPolityId}`));
+  const before = memory.tradeNews.filter((entry) => entry.kind === "cut");
+  if (held.length === before.length && held.every((entry, index) => entry === before[index])) return { world, facts };
+  // The news of relief ships is kept; only the held pacts are what this reckons.
+  return { world: withMemory(world, { tradeNews: [...memory.tradeNews.filter((entry) => entry.kind !== "cut"), ...held].slice(-200) }), facts };
+}
+
+const MAX_TRADE_FACTS_PER_DAY = 4;
 
 /** Kinds a war breaks faith by ending. A foedus ended by war is a revolt, and is its own story. */
 const FAITH_KINDS: readonly PolityAgreement["kind"][] = ["peace", "truce", "non_aggression", "alliance"];
@@ -324,9 +396,9 @@ function brokenPeace(world: WorldState, war: PolityAgreement): { world: WorldSta
     material: { ...world.material, polityLegitimacy: adjustPolityLegitimacy(world.material.polityLegitimacy, breaker, -600, `Broke its ${broken.kind} with ${nameOf(world, victim)}`, `broken-${war.id}`) },
   };
   return {
-    world: addGrievance(next, victim, breaker, `${breakerName} broke the ${broken.kind}`, war.sinceStep),
+    world: lessonsOfBreach(addGrievance(next, victim, breaker, `${breakerName} broke the ${broken.kind}`, war.sinceStep), breaker, victim, war.sinceStep),
     facts: [{
-      localId: `faith_broken_${war.id}`.slice(0, 60),
+      localId: safeLocalId(`faith_broken_${war.id}`).slice(0, 60),
       kind: "peace_broken",
       summary: `${breakerName} broke its ${broken.kind} with ${nameOf(world, victim)} to make this war, and every power that deals with it has seen what its word is worth.`,
       affectedRefs: [{ kind: "polity", id: breaker }, { kind: "polity", id: victim }],
@@ -363,7 +435,7 @@ function levyContingents(world: WorldState, war: PolityAgreement, ids: IdFactory
       next = withMemory(next, { contingentsSent: [...economyOf(next).contingentsSent.filter((entry) => entry.polityId !== ally), { polityId: ally, atStep: war.sinceStep }].slice(-200) });
       if (ally === playerPolityId) {
         facts.push({
-          localId: `levy_called_${war.id}_${ally}`.slice(0, 60),
+          localId: safeLocalId(`levy_called_${war.id}_${ally}`).slice(0, 60),
           kind: "call_to_arms",
           summary: `${nameOf(next, leader)} calls on ${nameOf(next, ally)} for its contingent, as the foedus binds it, for the war with ${nameOf(next, enemy)}.`,
           affectedRefs: [{ kind: "polity", id: ally }, { kind: "polity", id: leader }, { kind: "polity", id: enemy }],
@@ -378,7 +450,7 @@ function levyContingents(world: WorldState, war: PolityAgreement, ids: IdFactory
       const captain = next.characters.filter((character) => character.alive && character.polityId === ally).sort((a, b) => b.prestigeBps - a.prestigeBps || a.id.localeCompare(b.id))[0];
       if (captain !== undefined && alliedHullsAvailable(next, ally).hulls > 0) {
         const forceId = ids.next("force");
-        const afloat = requisitionAlliedHulls(next, { id: forceId, chestId: ids.next("account"), allyId: ally, name: `The ${polity.name} hulls`.slice(0, 120), wanted: Number.MAX_SAFE_INTEGER, commanderId: captain.id, controllerId: captain.id, categoryId: ALLIED_HULL_CATEGORY, label: "Allied transports", atStep: war.sinceStep });
+        const afloat = requisitionAlliedHulls(next, { id: forceId, chestId: ids.next("account"), obligationId: ids.next("obligation"), allyId: ally, name: `The ${polity.name} hulls`.slice(0, 120), wanted: Number.MAX_SAFE_INTEGER, commanderId: captain.id, controllerId: captain.id, categoryId: ALLIED_HULL_CATEGORY, label: "Allied transports", atStep: war.sinceStep });
         if (typeof afloat !== "string") {
           next = afloat.world;
           shipsSent.push({ polityId: ally, hulls: afloat.hulls });
@@ -416,20 +488,24 @@ function levyContingents(world: WorldState, war: PolityAgreement, ids: IdFactory
         next = made.world;
         commander = made.character.id;
       }
-      // Drawn from each of its provinces in proportion to the men it has.
+      // Drawn from each of its provinces in proportion to the men it has, and paid by its own treasury (`socii-navales.ts`).
       const share = men / Math.max(1, available);
+      const contingentId = ids.next("force");
+      const name = `The ${polity.name} contingent`.slice(0, 120);
+      const pay = alliedPay(next, { allyId: ally, obligationId: ids.next("obligation"), name, categoryId: "infantry", fit: men, atStep: war.sinceStep });
       next = {
         ...next,
         material: {
           ...next.material,
+          ...(pay === null ? {} : { obligations: [...next.material.obligations, pay] }),
           provinceMaterial: next.material.provinceMaterial.map((row) => (lands.some((land) => land.provinceId === row.provinceId)
             ? applyRecruitmentToMaterial(row, Math.floor(row.availableManpower * share), war.sinceStep) : row)),
           forces: [...next.material.forces, {
-            id: ids.next("force"), name: `The ${polity.name} contingent`.slice(0, 120), polityId: ally,
+            id: contingentId, name, polityId: ally,
             commanderCharacterId: commander, controllerCharacterId: commander, locationId: muster, positionId: null, authorizedStrength: men,
             personnel: [{ categoryId: "infantry", label: "Allied infantry", fit: men, unavailable: [] }],
             moraleBps: 6_000, cohesionBps: 5_500, fatigueBps: 0, provisionStatus: "provisioned", provisionedThroughStep: war.sinceStep + 30,
-            payObligationId: null, payArrearsPeriods: 0, history: [], memberCharacterIds: [],
+            payObligationId: pay?.id ?? null, payArrearsPeriods: 0, history: [], memberCharacterIds: [],
           }],
         },
         characters: next.characters.map((character) => (character.id === commander ? { ...character, locationProvinceId: muster } : character)),
@@ -439,7 +515,7 @@ function levyContingents(world: WorldState, war: PolityAgreement, ids: IdFactory
     if (sent.length > 0) {
       const total = sent.reduce((sum, entry) => sum + entry.men, 0);
       facts.push({
-        localId: `levied_${war.id}_${leader}`.slice(0, 60),
+        localId: safeLocalId(`levied_${war.id}_${leader}`).slice(0, 60),
         kind: "allies_levied",
         summary: `${listed(sent.map((entry) => nameOf(next, entry.polityId)))} sent ${total} men to ${nameOf(next, leader)}'s war with ${nameOf(next, enemy)}, as the foedus binds them.`.slice(0, 600),
         affectedRefs: [{ kind: "polity", id: leader }, { kind: "polity", id: enemy }, ...sent.slice(0, 6).map((entry) => ({ kind: "polity" as const, id: entry.polityId }))],
@@ -451,7 +527,7 @@ function levyContingents(world: WorldState, war: PolityAgreement, ids: IdFactory
     }
     if (shipsSent.length > 0) {
       facts.push({
-        localId: `hulls_levied_${war.id}_${leader}`.slice(0, 60),
+        localId: safeLocalId(`hulls_levied_${war.id}_${leader}`).slice(0, 60),
         kind: "allies_levied",
         summary: `${listed(shipsSent.map((entry) => nameOf(next, entry.polityId)))} sent ${shipsSent.reduce((sum, entry) => sum + entry.hulls, 0)} transports to ${nameOf(next, leader)}'s war with ${nameOf(next, enemy)}, as their treaties bind their harbours.`.slice(0, 600),
         affectedRefs: [{ kind: "polity", id: leader }, { kind: "polity", id: enemy }, ...shipsSent.slice(0, 6).map((entry) => ({ kind: "polity" as const, id: entry.polityId }))],
@@ -489,7 +565,7 @@ function callAllies(world: WorldState, war: PolityAgreement, ids: IdFactory, pla
     if (ally === playerPolityId) {
       next = withMemory(next, { pendingCalls: [...economyOf(next).pendingCalls, { warId: war.id, allyPolityId: ally, callerPolityId: defender, enemyPolityId: attacker, dueStep: toDay + CALL_DAYS }].slice(-40) });
       facts.push({
-        localId: `called_${war.id}_${ally}`.slice(0, 60),
+        localId: safeLocalId(`called_${war.id}_${ally}`).slice(0, 60),
         kind: "call_to_arms",
         summary: `${nameOf(next, defender)} has been attacked by ${nameOf(next, attacker)} and calls on ${nameOf(next, ally)} to honour their alliance. It will count ${CALL_DAYS} days without a declaration of war as a refusal.`,
         affectedRefs: [{ kind: "polity", id: ally }, { kind: "polity", id: defender }, { kind: "polity", id: attacker }],
@@ -517,7 +593,7 @@ function callAllies(world: WorldState, war: PolityAgreement, ids: IdFactory, pla
       next = withMemory(next, { reviewedWarIds: [...economyOf(next).reviewedWarIds, next.polityAgreements.at(-1)!.id].slice(-400) });
       next = { ...next, polityStances: shiftTrust(next.polityStances, defender, ally, 15, `${nameOf(next, ally)} came to its aid`, toDay) };
       facts.push({
-        localId: `ally_joined_${war.id}_${ally}`.slice(0, 60),
+        localId: safeLocalId(`ally_joined_${war.id}_${ally}`).slice(0, 60),
         kind: "war_declared",
         summary: `${nameOf(next, ally)} went to war with ${nameOf(next, attacker)}, as its alliance with ${nameOf(next, defender)} bound it to.`,
         affectedRefs: [{ kind: "polity", id: ally }, { kind: "polity", id: attacker }, { kind: "polity", id: defender }],
@@ -543,7 +619,7 @@ function refuseCall(world: WorldState, ally: string, caller: string, enemy: stri
   return {
     world: next,
     fact: {
-      localId: `ally_refused_${caller}_${ally}_${toDay}`.slice(0, 60),
+      localId: safeLocalId(`ally_refused_${caller}_${ally}_${toDay}`).slice(0, 60),
       kind: "alliance_refused",
       summary: `${nameOf(world, ally)} would not go to war for ${nameOf(world, caller)}, its ally, against ${nameOf(world, enemy)}; ${nameOf(world, caller)} will not forget it.`,
       affectedRefs: [{ kind: "polity", id: ally }, { kind: "polity", id: caller }, { kind: "polity", id: enemy }],

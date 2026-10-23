@@ -23,7 +23,7 @@ export const ConstitutionAmendmentSchema = z
         /** Null founds a new one. */
         institutionId: EntityIdSchema.nullable().default(null),
         name: z.string().trim().min(1).max(120).nullable().default(null),
-        powers: z.array(ChamberPowerSchema).max(6).nullable().default(null),
+        powers: z.array(ChamberPowerSchema).max(10).nullable().default(null),
         advisory: z.boolean().nullable().default(null),
         franchise: FranchiseSchema.nullable().default(null),
         abolish: z.boolean().default(false),

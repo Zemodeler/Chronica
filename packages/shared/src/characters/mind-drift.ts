@@ -26,11 +26,35 @@ export const LessonKindSchema = z.enum([
   "honoured",
   "disgraced",
   "bereaved",
+  // What a state's life teaches the man who holds it (a-living-world.md).
+  "war_won",
+  "war_lost",
+  "city_lost",
+  "sacked_a_city",
+  "oath_broken",
+  "ruled_long",
 ]);
 export type LessonKind = z.infer<typeof LessonKindSchema>;
 
 export const LessonSchema = z.object({ kind: LessonKindSchema, atStep: ElapsedStepSchema }).strict();
 export type Lesson = z.infer<typeof LessonSchema>;
+
+/**
+ * What a man feels just now, as against what he is.
+ *
+ * A lesson changes a man a little, over seasons. A feeling changes how he acts
+ * for a few weeks and then goes: the anger of a refused peace, the grief of a
+ * death, the fear of a plot found out, the elation of a victory, the shame of
+ * a humiliation. It is put on him the day it happens (`sim/moods.ts`), halves
+ * every thirty days, and while it lasts it moves how the rules read him
+ * (`sim/disposition.ts`) and how he writes.
+ */
+export const MoodKindSchema = z.enum(["anger", "grief", "fear", "elation", "shame"]);
+export type MoodKind = z.infer<typeof MoodKindSchema>;
+export const MoodSchema = z.object({ kind: MoodKindSchema, strength: z.number().int().min(1).max(100), atStep: ElapsedStepSchema }).strict();
+export type Mood = z.infer<typeof MoodSchema>;
+/** The most feelings a man carries at once; the weakest go first. */
+export const MAX_MOODS = 6;
 
 /** The most lessons a man carries between reviews; past this the oldest go unlearned. */
 export const MAX_LESSONS = 16;
@@ -51,7 +75,78 @@ const TAUGHT: Readonly<Record<LessonKind, Nudge>> = {
   honoured: { status: 1, duty: 1 },
   disgraced: { revenge: 2, duty: -1 },
   bereaved: { revenge: 3, family: 1 },
+  // Winning a war feeds the hunger it was fought for; losing one teaches the opposite.
+  war_won: { boldness: 2, status: 2, riskTolerance: 2, caution: -1, wealth: 1 },
+  war_lost: { caution: 3, boldness: -2, riskTolerance: -3, security: 2, revenge: 1, status: -1 },
+  // A city lost is a wound that is not forgiven and a lesson in what is not safe.
+  city_lost: { security: 3, revenge: 2, caution: 1, duty: 1 },
+  // Putting a city to the sword and keeping what it held makes a man greedier and harder, and no more honest.
+  sacked_a_city: { wealth: 2, cruelty: 2, boldness: 1, honesty: -1 },
+  // A man who breaks his word finds the next breaking easier, and trusts nobody else to keep theirs.
+  oath_broken: { honesty: -2, duty: -2, sociability: -1, security: 1 },
+  // Years of rule: certainty of his place, a wish to keep what he has, and the duty of a man who has held it.
+  ruled_long: { status: 1, duty: 1, caution: 1, security: 1, boldness: -1 },
 };
+
+/** A fixed number in [0, 1) for this person and this question; the same every time it is asked. */
+function personalRoll(key: string): number {
+  let hash = 2166136261;
+  for (const char of key) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619) >>> 0;
+  return hash / 4294967296;
+}
+
+/**
+ * How far the years move one part of one particular person.
+ *
+ * Ageing is not a rule. Some people mellow with age and some do not; a few
+ * harden and grow bolder or angrier as they go. So each person has their own
+ * response to each part of themselves, fixed for life: about three in ten are
+ * untouched by the years in that part, the rest are moved by up to half again
+ * the usual amount, and about one in seven moves the *other* way. Nothing
+ * says an old man is timid.
+ */
+export function ageSusceptibility(id: string, part: string): number {
+  const u = personalRoll(`${id}:ages:${part}`);
+  if (u < 0.3) return 0;
+  if (u < 0.86) return 0.4 + ((u - 0.3) / 0.56) * 1.1;
+  return -(0.2 + ((u - 0.86) / 0.14) * 0.6);
+}
+
+/** What age tends to do to each part, and from when, as a chance per birthday for the typical person. */
+const AGEING: readonly { readonly part: string; readonly from: number; readonly to: number; readonly step: 1 | -1; readonly chance: number }[] = [
+  { part: "discipline", from: 18, to: 34, step: 1, chance: 0.33 },
+  { part: "caution", from: 18, to: 34, step: 1, chance: 0.2 },
+  { part: "security", from: 40, to: 200, step: 1, chance: 0.25 },
+  { part: "boldness", from: 45, to: 200, step: -1, chance: 0.5 },
+  { part: "riskTolerance", from: 45, to: 200, step: -1, chance: 0.5 },
+  { part: "caution", from: 45, to: 200, step: 1, chance: 0.33 },
+  { part: "status", from: 55, to: 200, step: -1, chance: 0.25 },
+  { part: "revenge", from: 55, to: 200, step: -1, chance: 0.25 },
+  { part: "duty", from: 55, to: 200, step: 1, chance: 0.2 },
+  { part: "faith", from: 55, to: 200, step: 1, chance: 0.33 },
+];
+
+/**
+ * What the years alone do to this person, birthday by birthday since the last
+ * review. Each birthday is rolled for each part, on the person's own id and
+ * the year, weighted by how much that part of them is moved by age at all
+ * (`ageSusceptibility`) -- so it is deterministic, the same however finely the
+ * clock is stepped, and different for everybody.
+ */
+export function ageNudge(id: string, ageBefore: number, ageNow: number): Nudge {
+  const total: Record<string, number> = {};
+  for (let year = Math.floor(ageBefore) + 1; year <= Math.floor(ageNow); year += 1) {
+    for (const rule of AGEING) {
+      if (year < rule.from || year > rule.to) continue;
+      const feel = ageSusceptibility(id, rule.part);
+      if (feel === 0) continue;
+      if (personalRoll(`${id}:birthday:${rule.part}:${rule.from}:${year}`) < Math.min(1, rule.chance * Math.abs(feel))) {
+        total[rule.part] = (total[rule.part] ?? 0) + rule.step * Math.sign(feel);
+      }
+    }
+  }
+  return total;
+}
 
 const clamp = (value: number): number => Math.max(0, Math.min(100, Math.round(value)));
 
@@ -74,9 +169,10 @@ export function driftMind(
   mind: CharacterMind,
   traits: readonly string[],
   lessons: readonly Lesson[],
+  years: Nudge = {},
 ): { readonly mind: CharacterMind; readonly traits: readonly string[]; readonly shed: readonly string[] } {
-  if (lessons.length === 0) return { mind, traits, shed: [] };
-  const total: Record<string, number> = {};
+  if (lessons.length === 0 && Object.keys(years).length === 0) return { mind, traits, shed: [] };
+  const total: Record<string, number> = { ...(years as Record<string, number>) };
   for (const lesson of lessons) {
     for (const [part, amount] of Object.entries(TAUGHT[lesson.kind])) total[part] = (total[part] ?? 0) + (amount ?? 0);
   }

@@ -1293,3 +1293,114 @@ describe("the audit of a Roman consul's spring", () => {
     expect(result.entries).toHaveLength(0);
   });
 });
+
+describe("the clerk's register", () => {
+  // Plan chronicle-and-order-truth, 3.2: caught locally, written once more, the better stands.
+  const write = (bodies: string[]): SimModelPort & { calls: string[] } => {
+    const port = {
+      calls: [] as string[],
+      complete(_operation: Parameters<SimModelPort["complete"]>[0], _system: string, user: string) {
+        port.calls.push(user);
+        const body = bodies.shift() ?? "Rome raised two legions.";
+        return Promise.resolve(JSON.stringify({ entries: [{ thread: 1, title: "The levy", body }] }));
+      },
+    };
+    return port;
+  };
+  const run = (port: SimModelPort) => composeChronicle({
+    port, clock, observer: { kind: "character", id: "marcus-atilius" }, observerPolityId: "rome",
+    facts: [fact({ summary: "Rome begins raising two new legions." })], from: { day: 0, minute: 0 }, to: { day: 30, minute: 0 }, narrative: [], frictions: [],
+  });
+
+  it("writes the passage once more, quoting the sentence, and keeps the plainer one", async () => {
+    const port = write(["The levy was recorded as two legions in accordance with the law. Men came in.", "Rome raised two legions, and the men came in."]);
+    const result = await run(port);
+    expect(port.calls).toHaveLength(2);
+    expect(port.calls[1]).toContain("clerk's register");
+    expect(port.calls[1]).toContain("recorded as two legions");
+    expect(result.entries[0]!.body).toBe("Rome raised two legions, and the men came in.");
+    expect(result.calls).toBe(2);
+  });
+
+  it("keeps the first passage when the second is no better, and never asks a third time", async () => {
+    const port = write(["The levy was recorded as two legions.", "The levy was recorded as two legions again, pursuant to the law."]);
+    const result = await run(port);
+    expect(port.calls).toHaveLength(2);
+    expect(result.entries[0]!.body).toBe("The levy was recorded as two legions.");
+  });
+
+  it("spends nothing extra on a passage without it", async () => {
+    const port = write(["Rome raised two legions."]);
+    await run(port);
+    expect(port.calls).toHaveLength(1);
+  });
+});
+
+describe("a fact's story seeds", () => {
+  // Plan chronicle-and-order-truth, 3.1 and 3.4: who did what, why, at what cost, and how the court knows.
+  const tell = async (story: Fact["story"]) => {
+    const port = capturingPort();
+    await composeChronicle({
+      port, clock, observer: { kind: "character", id: "marcus-atilius" }, observerPolityId: "rome",
+      facts: [{ ...fact({ summary: "The legate refused the crossing." }), ...(story === undefined ? {} : { story }) }],
+      from: { day: 0, minute: 0 }, to: { day: 30, minute: 0 }, narrative: [], frictions: [],
+    });
+    return port.lastUserMessage;
+  };
+
+  it("hands the historian who, what, why and the cost", async () => {
+    const message = await tell({ subject: "the legate Antuvi", deed: "refused leave to cross", motive: "he would not move without the Senate's word", cost: "a week of the season", source: "observed" });
+    expect(message).toContain("who: the legate Antuvi");
+    expect(message).toContain("did: refused leave to cross");
+    expect(message).toContain("why: he would not move without the Senate's word");
+    expect(message).toContain("cost: a week of the season");
+  });
+
+  it("has the prose hedge as the source does", async () => {
+    expect(await tell({ subject: null, deed: null, motive: null, cost: null, source: "rumoured" })).toContain("rumour only");
+    expect(await tell({ subject: null, deed: null, motive: null, cost: null, source: "reported" })).toContain("an agent's report");
+  });
+
+  it("tells a fact with no story from its summary alone", async () => {
+    const message = await tell(undefined);
+    expect(message).toContain("The legate refused the crossing.");
+    expect(message).not.toContain("who:");
+  });
+});
+
+describe("the dev inspector", () => {
+  // Plan chronicle-and-order-truth, 6.1.
+  it("says what each entry was made of, with the weight each fact carried", async () => {
+    const made = fact({ summary: "Rome begins raising two new legions." });
+    const result = await composeChronicle({
+      port: capturingPort(), clock, observer: { kind: "character", id: "marcus-atilius" }, observerPolityId: "rome", facts: [made],
+      from: { day: 0, minute: 0 }, to: { day: 30, minute: 0 }, narrative: [], frictions: [], significanceByFactId: new Map([[made.id, 77]]),
+    });
+    expect(result.inspection!.entries).toHaveLength(1);
+    expect(result.inspection!.entries[0]!.facts).toEqual([{ id: made.id, kind: made.kind, weight: 77 }]);
+    expect(result.inspection!.carriedCount).toBe(0);
+  });
+});
+
+describe("the overstatement alarm", () => {
+  // Plan item 2: how often the historian says more than the world shows, counted even when the engine's line replaces it.
+  const compose = (body: string, status: "unanswered" | "achieved") => composeChronicle({
+    port: { complete: () => Promise.resolve(JSON.stringify({ entries: [{ thread: 1, title: "The crossing", body }] })) },
+    clock, observer: { kind: "character", id: "marcus-atilius" }, observerPolityId: "rome",
+    facts: [{ ...fact({ summary: "The consul ordered the legion carried over." }), sourceActionId: "order-1-p0" }],
+    from: { day: 0, minute: 0 }, to: { day: 30, minute: 0 }, narrative: [], frictions: [],
+    orderOutcome: () => ({ line: '"Carry the legion over" -- nothing came of it.', status }),
+  });
+
+  it("counts a passage that says the legion arrived when the part came to nothing, and prints the engine's line instead", async () => {
+    const result = await compose("The legion arrived at Messana on the third day.", "unanswered");
+    expect(result.inspection!.overstated).toBe(1);
+    expect(result.inspection!.passages).toBe(1);
+    expect(result.entries[0]!.body).toContain("nothing came of it");
+  });
+
+  it("counts nothing when the part is done, or the passage says no more than was done", async () => {
+    expect((await compose("The legion arrived at Messana on the third day.", "achieved")).inspection!.overstated).toBe(0);
+    expect((await compose("The consul ordered the legion over, and it set about the work.", "unanswered")).inspection!.overstated).toBe(0);
+  });
+});

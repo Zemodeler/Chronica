@@ -42,8 +42,16 @@ export const STANDARD_LEVERS = [
   "courts",
   "grain",
 ] as const;
-export type StandardLever = (typeof STANDARD_LEVERS)[number];
-export const StandardLeverSchema = z.enum(STANDARD_LEVERS);
+/**
+ * The economic charges (docs/plans/government.md, "H0 as built"), each with a number of its own that a monthly pass reads
+ * (`ECONOMIC_LEVER_REACH`). They are charges a department may be given and a ruler has by default, but they are not part of
+ * the portfolio a ruler is counted as holding for his workload (that is `STANDARD_LEVERS`): a consul who holds the mint
+ * because nobody else does is not worse at the war for it.
+ */
+export const ECONOMIC_LEVERS = ["customs", "mint", "markets", "credit", "census"] as const;
+export const ALL_LEVERS = [...STANDARD_LEVERS, ...ECONOMIC_LEVERS] as const;
+export type StandardLever = (typeof ALL_LEVERS)[number];
+export const StandardLeverSchema = z.enum(ALL_LEVERS);
 
 /**
  * A lever: one of the power's, or one of a household's, named for the income
@@ -77,7 +85,52 @@ export const LEVERS: Readonly<Record<StandardLever, LeverDefinition>> = {
   public_rites: { family: "religion", skills: ["rites"], words: "the public rites", handlesMoney: false },
   courts: { family: "justice", skills: ["arbitration"], words: "the courts", handlesMoney: false },
   grain: { family: "provision", skills: ["logistics", "stewardship"], words: "the grain supply", handlesMoney: true },
+  // What the harbour dues bring in, and how much of the trade slips by them.
+  customs: { family: "treasury", skills: ["taxation", "logistics"], words: "the harbour dues and the customs", handlesMoney: true },
+  // The moneyers: the gain from a coin struck lighter, and what the money-changers think of the coin.
+  mint: { family: "treasury", skills: ["stewardship"], words: "the mint and the coin", handlesMoney: true },
+  // The weights and measures, the hoarders, the stalls: how far a market's price swings.
+  markets: { family: "provision", skills: ["logistics", "arbitration"], words: "the markets and their weights and measures", handlesMoney: false },
+  // The terms the state borrows on.
+  credit: { family: "treasury", skills: ["stewardship", "rhetoric"], words: "what the state borrows and on what terms", handlesMoney: true },
+  // The roll of the people and their goods: how truly the tax roll and the muster roll count them.
+  census: { family: "treasury", skills: ["taxation", "stewardship"], words: "the census and the rolls of the people", handlesMoney: false },
 };
+
+/**
+ * How far the economic levers move their numbers: the reach of `1 + skillShare(skill, reach)`, the same shape
+ * the tax roll has in `tick.ts` (a seventh either way at the extremes, none at fifty). A lever nobody has been
+ * given is held by the ruler, whose own skill then counts.
+ */
+export const ECONOMIC_LEVER_REACH = {
+  /** Customs: the share of the duty on the month's trade that reaches the chest and does not slip past the collectors. */
+  customs: 0.2,
+  /** Mint: the gain from a coin struck lighter, and the cost of striking it better. */
+  mint: 0.15,
+  /** Mint, the other face: how much of a coin's bad name (war, arrears, high prices) sticks to what it fetches. */
+  mintName: 0.3,
+  /** Markets: how far a hub's price strays from the base price. */
+  markets: 0.2,
+  /** Credit: the interest the state is asked to pay. */
+  credit: 0.15,
+  /** Census: how many of the people who are there the tax roll and the muster roll count. */
+  census: 0.08,
+} as const;
+
+/**
+ * How well a charge is kept, for the five economic levers: the skill of the men a department has put to it, and the middling
+ * run (fifty) where nobody has been given it. A ruler who holds the mint because nobody else does has not made it his study:
+ * the number moves only for a power that has set somebody to the work, which is what a charge is.
+ */
+export function chargeSkill(reader: Pick<DepartmentReader, "skill" | "holding">, polityId: string, lever: StandardLever): number {
+  const scope = { kind: "polity" as const, id: polityId };
+  return reader.holding(scope, lever).department === null ? 50 : reader.skill(scope, lever);
+}
+
+/** What a charge's work is worth as a multiplier near one: `1 + skillShare(skill, reach)`, the skill of the charge. */
+export function leverFactor(reader: Pick<DepartmentReader, "skill" | "holding">, polityId: string, lever: StandardLever, reach: number): number {
+  return 1 + ((chargeSkill(reader, polityId, lever) - 50) / 50) * reach;
+}
 
 export function leverDefinition(lever: LeverId): LeverDefinition {
   if (lever.startsWith("estate:")) return { family: "household", skills: ["stewardship"], words: "an estate", handlesMoney: true };
@@ -90,6 +143,37 @@ export function leverAptitude(character: Pick<Character, "skills">, lever: Lever
   const skills = leverDefinition(lever).skills;
   const total = skills.reduce((sum, skill) => sum + (skill === "stewardship" ? character.skills.stewardship : aptitude(character, skill)), 0);
   return total / skills.length;
+}
+
+/**
+ * What a person is like at the work of an office, apart from what they are
+ * good at: the whole of their mind bearing on the job, in points of skill.
+ *
+ * Two officers equally skilled do not run a department alike. The disciplined
+ * and dutiful keep it in order; the honest are not skimming it; one who wants
+ * the standing the post gives works to be seen at it; a greedy man with a weak
+ * conscience takes his share out of the lever's yield, and the department
+ * runs a little worse for it; a slack, impulsive one lets it drift. Up to
+ * fourteen points either way -- enough to see, never enough to make a fool of
+ * a gifted man or a genius of a dull one.
+ */
+export function officeTemper(character: Pick<Character, "mind">): number {
+  // Whatever of a mind was never written is the middling man's: no better or worse at the work for it.
+  const temperament: Partial<Record<string, number>> = character.mind?.temperament ?? {};
+  const drives: Partial<Record<string, number>> = character.mind?.drives ?? {};
+  const discipline = temperament.discipline ?? 50;
+  const honesty = temperament.honesty ?? 50;
+  const caution = temperament.caution ?? 50;
+  const duty = drives.duty ?? 50;
+  const wealth = drives.wealth ?? 50;
+  const status = drives.status ?? 50;
+  const conscientiousness = (discipline - 50) * 0.16 + (duty - 50) * 0.1 + (honesty - 50) * 0.05;
+  const zeal = (status - 50) * 0.04;
+  // Appetite for gain against a conscience: nothing from a man who is honest, a good deal from one who is not.
+  const skimming = Math.max(0, wealth - 55) * (1 - honesty / 100) * 0.22;
+  // Caution costs speed in a department that has to move and saves it from the worst mistakes: a small net drag at the extremes.
+  const hesitation = Math.abs(caution - 50) * 0.02;
+  return Math.max(-14, Math.min(14, Math.round(conscientiousness + zeal - skimming - hesitation)));
 }
 
 /** Whose department it is: a power's, or one man's household. */
@@ -360,7 +444,7 @@ export function readDepartments(world: DepartmentWorld): DepartmentReader {
     return { department: null, people, head: people[0] ?? null };
   };
 
-  const skillOf = (person: Character, lever: LeverId): number => leverAptitude(person, lever) + workload(person.id);
+  const skillOf = (person: Character, lever: LeverId): number => leverAptitude(person, lever) + workload(person.id) + officeTemper(person);
 
   const friction = (people: readonly Character[]): number => {
     let pairs = 0;
@@ -434,6 +518,11 @@ const LEVERS_BY_WORD: readonly (readonly [RegExp, readonly StandardLever[]])[] =
   [/court|justice|judge|praetor|law|tribunal/i, ["courts"]],
   [/grain|corn|annona|food|provision|granar|market|aedil/i, ["grain"]],
   [/works|building|aqueduct|road|curator/i, ["public_works_cost"]],
+  [/customs|portoria|harbou?r|toll/i, ["customs"]],
+  [/\bmint\b|moneyer|triumvir/i, ["mint"]],
+  [/weights|measures/i, ["markets"]],
+  [/census|registrar/i, ["census"]],
+  [/lender|banker|credit/i, ["credit"]],
 ];
 
 export function leversNamedBy(name: string): StandardLever[] {

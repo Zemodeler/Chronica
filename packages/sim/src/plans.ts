@@ -13,6 +13,7 @@ import {
 import type { IdFactory } from "./ports";
 import { firedBetween, holdsIn, watchReading } from "./watch";
 import { predicateInWords } from "./mechanics/mechanic-words";
+import { isManagementWant } from "./management-talk";
 
 /**
  * People who plan, not only react (gap document §5).
@@ -172,6 +173,7 @@ export function layPlan(world: WorldState, ownerId: string, plan: PlanProposal, 
     status: "pending",
     wokenOnDay: null,
     settledOnDay: null,
+    ...(step.when === null ? routineProject(world, ownerId, step.routineProjectRef, assignedIds) : {}),
   }));
 
   const held = activeAmbitions(owner).find((ambition) => sameWant(ambition.label, plan.ambition));
@@ -201,6 +203,37 @@ export function layPlan(world: WorldState, ownerId: string, plan: PlanProposal, 
   };
 }
 
+/** Link only approved work the owner actually sponsors, oversees or commands. */
+function routineProject(world: WorldState, ownerId: string, ref: string | null | undefined, assignedIds: ReadonlyMap<string, string>): { routineProjectId?: string } {
+  if (ref == null) return {};
+  const id = ref.startsWith("local:") ? assignedIds.get(ref.slice(6)) : ref;
+  const project = world.projects.find((entry) => entry.id === id);
+  if (project === undefined || !["funded", "in_progress", "completed"].includes(project.status)) return {};
+  const force = world.material.forces.find((entry) => entry.id === project.completionOutcome?.forceId);
+  const theirs = (project.sponsorEntityRef.kind === "character" && project.sponsorEntityRef.id === ownerId)
+    || project.overseerCharacterId === ownerId
+    || (project.completionOutcome?.kind === "force_move" && force !== undefined
+      && (force.commanderCharacterId === ownerId || force.controllerCharacterId === ownerId));
+  return theirs ? { routineProjectId: project.id } : {};
+}
+
+/** Completion is read from engine work, never inferred from the plan's prose. */
+export function settleRoutineSteps(world: WorldState): { readonly world: WorldState; readonly taken: number } {
+  let taken = 0;
+  let settled = world;
+  for (const character of world.characters) {
+    if (!character.alive) continue;
+    const completed = activeAmbitions(character).flatMap((ambition) => ambition.steps)
+      .filter((step) => step.status !== "done" && step.routineProjectId !== undefined
+        && world.projects.some((project) => project.id === step.routineProjectId && project.status === "completed"))
+      .map((step) => step.id);
+    const result = takeSteps(settled, character.id, completed);
+    settled = result.world;
+    taken += result.taken;
+  }
+  return { world: settled, taken };
+}
+
 /**
  * Steps a man's answer carried out: the ones an act that changed the world
  * was written for (`servedByChange`).
@@ -223,6 +256,7 @@ export function takeSteps(world: WorldState, ownerId: string, stepIds: readonly 
       ...ambition,
       steps: ambition.steps.map((step) => {
         if (!wanted.has(step.id) || step.status === "done") return step;
+        if (step.routineProjectId !== undefined && !world.projects.some((project) => project.id === step.routineProjectId && project.status === "completed")) return step;
         taken += 1;
         return { ...step, status: "done" as const, settledOnDay: today };
       }),
@@ -255,6 +289,15 @@ export function dueSteps(world: WorldState, clock: ScenarioClock, excludeIds: re
       }
       const next = ambition.steps.find((step) => step.status === "pending");
       if (next === undefined || next.wokenOnDay !== null) continue;
+      if (next.routineProjectId !== undefined) {
+        const project = world.projects.find((entry) => entry.id === next.routineProjectId);
+        if (project?.status === "completed") continue;
+        const running = project !== undefined && ["funded", "in_progress"].includes(project.status);
+        if (running && today <= effectiveDueDay(next, world)) continue;
+        found = { ownerId: character.id, ambitionId: ambition.id, stepId: next.id,
+          why: `the approved work for "${next.act}" ${running ? "is overdue" : "is no longer running"}; decide how to proceed` };
+        break;
+      }
       if (waitsForExternalDecision(next) && !waitIsOver(next, world)) {
         if (today >= dependencyReviewDay(next, world) && next.waitingReviewOnDay == null) {
           found = { ownerId: character.id, ambitionId: ambition.id, stepId: next.id, waiting: true,
@@ -386,7 +429,7 @@ export function nextPlanDay(world: WorldState): number | undefined {
     for (const ambition of activeAmbitions(character)) {
       for (const step of ambition.steps) {
         if (step.status !== "pending") continue;
-        if (step.waitsOn === null && step.wokenOnDay === null) consider(wakeDay(step));
+        if (step.routineProjectId === undefined && step.waitsOn === null && step.wokenOnDay === null) consider(wakeDay(step));
         if (waitsForExternalDecision(step) && !waitIsOver(step, world)) {
           if (step.waitingReviewOnDay == null) consider(dependencyReviewDay(step, world));
           for (const message of dependencyLetters(step, world)) if (message.status === "answered") consider(replyArrivalDay(message));
@@ -409,9 +452,9 @@ function dayInWords(day: number, clock: ScenarioClock): string {
  * "serves"; the ones done and missed are printed because a plan he
  * cannot see the history of is a plan he will lay again from the start.
  */
-export function describePlans(character: Character, world: WorldState, clock: ScenarioClock, limit: number): string[] {
+export function describePlans(character: Character, world: WorldState, clock: ScenarioClock, limit: number, leaveOutManagement = false): string[] {
   const today = world.instant.day;
-  const ambitions = activeAmbitions(character).slice(0, limit);
+  const ambitions = activeAmbitions(character).filter((ambition) => !leaveOutManagement || !isManagementWant(ambition)).slice(0, limit);
   if (ambitions.length === 0) return [];
   const lines = ["They want:"];
   for (const ambition of ambitions) {
@@ -424,6 +467,7 @@ export function describePlans(character: Character, world: WorldState, clock: Sc
       const days = dueDay - today;
       const when = `by ${dayInWords(dueDay, clock)} (${days <= 0 ? "today" : `in ${days} day${days === 1 ? "" : "s"}`})`;
       const waits = step.waitsOn === null ? "" : `, once ${predicateInWords(step.waitsOn, world)}${waitIsOver(step, world) ? " -- which has happened" : ""}`;
+      if (step.routineProjectId !== undefined) lines.push(`      approved work [${step.routineProjectId}]; the engine carries it through, without another instruction.`);
       if (waitsForExternalDecision(step) && !waitIsOver(step, world)) lines.push(`      waiting on an external decision; review day ${dependencyReviewDay(step, world)}. Waiting itself is not a missed action.`);
       lines.push(`      ${nextShown ? "then" : "next"} [${step.id}] ${when}${waits}: ${step.act}`);
       nextShown = true;

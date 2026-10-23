@@ -32,6 +32,30 @@ describe("a man at war", () => {
     expect(text).toMatch(/\[roman-field-army\].*here, in the same province/);
   });
 
+  it("is told which of his forces the enemy stands near, not only that it is near one of them", () => {
+    // The consul's army a march away, his small flotilla at Rhegium: the legion there is near the flotilla, not near him.
+    const world = legionAtRhegium();
+    const hulls = world.material.forces.find((force) => force.commanderCharacterId === "gaius-genucius" && force.id !== "roman-field-army")!;
+    const consul = world.characters.find((character) => character.id === "gaius-genucius")!;
+    const away = world.map.provinces.find((province) => province.id !== BRUTTIUM && province.controllerPolityId === "rome")!.id;
+    const split: WorldState = {
+      ...world,
+      characters: world.characters.map((character) => (character.id === consul.id ? { ...character, locationProvinceId: away } : character)),
+      material: { ...world.material, forces: world.material.forces.map((force) => (force.id === "roman-field-army" ? { ...force, locationId: away } : force.id === hulls.id ? { ...force, locationId: BRUTTIUM } : force)) },
+    };
+    const campanians = split.material.forces.find((force) => force.polityId === "rhegium-campanians")!;
+    const placed = { ...split, material: { ...split.material, forces: split.material.forces.map((force) => (force.id === campanians.id ? { ...force, locationId: BRUTTIUM } : force)) } };
+    const text = renderCharacterPortrait("gaius-genucius", consul.name, placed, clock);
+    expect(text).toMatch(new RegExp(`\\[${campanians.id}\\].*here, with ${hulls.name}`));
+  });
+
+  it("counts his fleet in ships, not men (consul-run-issues M18)", () => {
+    const world = legionAtRhegium();
+    const hulls = world.material.forces.find((force) => force.commanderCharacterId === "gaius-genucius" && force.id !== "roman-field-army")!;
+    const text = renderCharacterPortrait("gaius-genucius", "Gaius Genucius Clepsina", world, clock);
+    expect(text).toMatch(new RegExp(`${hulls.name} \\[${hulls.id}\\] — \\d+ ships at`));
+  });
+
   it("is asked, and pressed, with the enemy in his province", () => {
     const routed = routeAmbientActors({ world: legionAtRhegium(), facts: [], offices: definition.government.offices, excludeCharacterIds: [], max: 40 });
     const decius = routed.find((actor) => actor.characterId === "decius-vibellius");

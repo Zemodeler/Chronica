@@ -23,6 +23,7 @@ const WORDS: readonly (readonly [RegExp, QuestionConcern])[] = [
   [/\b(land|lands|allot|allotment|colony|colonies|ager|redistribut)/iu, "land"],
   [/\b(debt|debts|loan|loans|interest|usury|bondage|nexum)\b/iu, "debt"],
   [/\b(trade|market|harbou?r|port|merchants?|commerce|customs)\b/iu, "trade"],
+  [/\b(coin|coinage|mint|debase|debasement|silver content)\b/iu, "coinage"],
   [/\b(gods?|temple|cult|priest|sacrifice|oracle|rites|festival)\b/iu, "religion"],
   [/\b(levy|legion|legions|recruit|conscript|muster|enrol)\b/iu, "levy"],
   [/\b(grain|corn|bread|dole|famine)\b/iu, "grain"],

@@ -1,5 +1,6 @@
 import type { WorldState } from "../world/world-state";
 import type { EffectBand } from "../world/standing-effects";
+import { PRIVATE_WEALTH_SCALE } from "./estates";
 import { provinceTaxCapacity } from "./province-material";
 
 /**
@@ -14,9 +15,16 @@ import { provinceTaxCapacity } from "./province-material";
  */
 
 /** Of the lesser province's monthly tax capacity: what a venture of each size returns its owner each month. */
-const VENTURE_RETURN_SHARE: Record<EffectBand, number> = { slight: 0.003, marked: 0.008, great: 0.018 };
+const VENTURE_RETURN_SHARE: Record<EffectBand, number> = { slight: 0.00064 * PRIVATE_WEALTH_SCALE, marked: 0.0017 * PRIVATE_WEALTH_SCALE, great: 0.0039 * PRIVATE_WEALTH_SCALE };
 /** Months of its return a venture costs to set going: ships hired, goods bought, agents placed. */
 export const VENTURE_PRICE_MONTHS = 15;
+/**
+ * Months of its return a venture costs to set going, as trade was reckoned: seventy, so a venture pays seventeen in a hundred a year of what it cost, after the
+ * losses and the crews and the customs a cargo bears (Rome's rate on money was twelve; a merchant ran a risk the lender did not and was paid for it, a few
+ * more). They had cost fifteen months and paid eighty a year, so a man who put his money in a venture made a fortune of it in three. `VENTURE_PRICE_MONTHS`
+ * stays what an arrangement that pays is priced at (`apply-deltas.ts`, `priceTheYield`), which is not a venture's.
+ */
+export const VENTURE_TRADE_PRICE_MONTHS = 70;
 
 const capacityOf = provinceTaxCapacity;
 
@@ -31,7 +39,7 @@ export function ventureTerms(
   const to = capacityOf(world, toProvinceId);
   if (from === null || to === null) return null;
   const monthlyReturn = Math.max(1, Math.round(Math.min(from, to) * VENTURE_RETURN_SHARE[band]));
-  return { monthlyReturn, price: monthlyReturn * VENTURE_PRICE_MONTHS };
+  return { monthlyReturn, price: monthlyReturn * VENTURE_TRADE_PRICE_MONTHS };
 }
 
 /** Whether a province can take part in trade by sea: it has a port. */

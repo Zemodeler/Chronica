@@ -12,6 +12,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { stoodIdle } from "./engagements";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * The player's word at a turning point of a fight (docs/plans/battles-that-last.md, phase 3).
@@ -72,7 +73,9 @@ function odds(mine: readonly Force[], theirs: readonly Force[], rules: ScenarioW
   if (ratio >= 1.15) return "You are the stronger";
   if (ratio > 0.87) return "The two sides are about even";
   if (ratio > 0.55) return "They are the stronger";
-  return "They have nearly twice your strength";
+  if (ratio > 0.4) return "They have nearly twice your strength";
+  if (ratio > 0.25) return "They outnumber you about three to one";
+  return "They outnumber you many times over";
 }
 
 const OPTIONS: Readonly<Record<TurningPointKind, readonly FightAction[]>> = {
@@ -149,7 +152,12 @@ export function answerEngagement(world: WorldState, player: string | null, answe
     awaiting: null,
     // He answers for today: the fight goes on from here, not from the day it stopped.
     lastRoundStep: Math.max(engagement.lastRoundStep, day - 1),
-    ...(action === "fight" ? (attacking ? { seeking: "battle" as const } : { playerStance: "fight" as const }) : {}),
+    // An attacker who has been offering battle and been refused day after day is not answered by offering it again: "Offer
+    // battle" is then the camp stormed, which takes the fight the other side will not give (a playtest asked the same question
+    // three times, the answer changing nothing, until a hand-written storm_camp ended it).
+    ...(action === "fight" ? (attacking
+      ? { seeking: "battle" as const, ...(engagement.seeking === "battle" && engagement.rounds > 0 && engagement.manoeuvre === null && mine[0] !== undefined ? { manoeuvre: { kind: "storm_camp" as const, side: "attacker" as const, byForceId: mine[0].id } } : {}) }
+      : { playerStance: "fight" as const }) : {}),
     ...(action === "refuse" && !attacking ? { playerStance: "refuse" as const } : {}),
   };
   let next: WorldState = { ...world, engagements: world.engagements.map((candidate) => (candidate.id === engagement.id ? released : candidate)) };
@@ -182,7 +190,7 @@ export function answerEngagement(world: WorldState, player: string | null, answe
       };
       const toName = world.map.provinces.find((province) => province.id === to)?.name ?? to;
       facts.push({
-        localId: `fell_back_${engagement.id}_${day}`.slice(0, 60),
+        localId: safeLocalId(`fell_back_${engagement.id}_${day}`).slice(0, 60),
         kind: "force_withdrew",
         summary: `${names(mine)} left ${mine.length === 1 ? "its" : "their"} fires burning at ${where} and slipped away by night into ${toName}, leaving the field to ${names(theirs)}.`.slice(0, 600),
         affectedRefs: [{ kind: "province", id: engagement.provinceId }, { kind: "province", id: to }, ...[...mine, ...theirs].slice(0, 6).map((force) => ({ kind: "force" as const, id: force.id }))],

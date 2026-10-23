@@ -4,6 +4,7 @@ import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, war
 import { ensureConstitutions } from "./constitutions";
 import { createIdFactory } from "./ports";
 import { sueForPeace } from "./sue-for-peace";
+import { ungarrisonedTowns } from "./ungarrisoned";
 
 const { government } = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 const base = (): WorldState => ensureConstitutions({ world: ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0), government, toDay: 0 });
@@ -49,6 +50,34 @@ describe("a power tired of its war", () => {
   });
 });
 
+
+describe("the player's own power", () => {
+  it("is urged to ask for an end, and writes nothing in his name unasked", () => {
+    const world = beaten();
+    const before = world.diplomacy.length;
+    const sued = sueForPeace(world, 720, createIdFactory("urged"), CAMPANIANS);
+    expect(sued.world.diplomacy.length).toBe(before);
+    expect(sued.facts.some((fact) => fact.kind === "war_weariness" && /urged him to ask for/.test(fact.summary))).toBe(true);
+    // An enemy of the player still sues for itself.
+    const rome = sueForPeace(beaten(), 720, createIdFactory("rome-sues"), "rome");
+    expect(rome.world.diplomacy.some((message) => message.fromPolityId === CAMPANIANS)).toBe(true);
+  });
+});
+
+describe("walls with nobody in them", () => {
+  it("says so when an enemy stands in a province whose town has none of the player's men", () => {
+    const world = base();
+    const province = world.map.provinces.find((candidate) => candidate.settlements.some((settlement) => settlement.controllerPolityId === CAMPANIANS))!;
+    const ours = world.material.forces.filter((force) => force.polityId === CAMPANIANS);
+    const rome = world.material.forces.find((force) => force.polityId === "rome")!;
+    const moved: WorldState = {
+      ...world,
+      material: { ...world.material, forces: world.material.forces.map((force) => (ours.some((own) => own.id === force.id) ? { ...force, locationId: "elsewhere" } : force.id === rome.id ? { ...force, locationId: province.id } : force)) },
+    };
+    expect(ungarrisonedTowns(moved, CAMPANIANS, 100)[0]?.summary).toMatch(/no garrison of ours/);
+    expect(ungarrisonedTowns(world, CAMPANIANS, 100)).toEqual([]);
+  });
+});
 
 describe("one opening offer per exhausted war", () => {
   it("lets the other exhausted side answer rather than opening a crossing negotiation", () => {

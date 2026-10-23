@@ -7,11 +7,13 @@ import {
   AGREEMENT_KIND_IN_WORDS,
   alliesLedBy,
   leaderOf,
+  tradeTermsBetween,
   type PolityAgreement,
   type PolityAgreementKind,
 } from "../world/agreements";
 import type { WorldState } from "../world/world-state";
 import { formatWorldDate, type ScenarioClock } from "../world/clock";
+import { GOODS } from "../world/markets";
 
 /**
  * Where a power stands with every other, as one of its people could know it.
@@ -60,6 +62,21 @@ export interface TreatyLine {
   readonly throughLabel: string | null;
   /** The letter that made it, when there was one and you could have read it. */
   readonly letter: TreatyLetter | null;
+  /** For a trade pact or an embargo: what the markets read of it, in words the sheet can set out. */
+  readonly trade: TreatyTradeTerms | null;
+}
+
+/** The terms of a trade pact or an embargo, ready to show. */
+export interface TreatyTradeTerms {
+  /** The most customs either may lay on the other's goods, in basis points; null: no cap. */
+  readonly tariffCapBps: number | null;
+  readonly mostFavoured: boolean;
+  /** Goods let in free of customs (a pact), by name. */
+  readonly exempt: readonly string[];
+  /** Goods an embargo forbids by name; empty is all trade. */
+  readonly forbidden: readonly string[];
+  /** A pact that war holds suspended: it comes back with the peace. */
+  readonly heldByWar: boolean;
 }
 
 export type TreatyPosture = "war" | "answer_to" | "bound_to_us" | "equals" | "none" | "ended";
@@ -125,6 +142,20 @@ function summaryOf(agreement: PolityAgreement, name: (id: string) => string): st
     case "protectorate": return `${second}'s protection over ${first}`;
     case "foedus": return `${first} bound to ${second} by foedus`;
     case "military_access": return `Passage for ${first}'s armies through ${second}'s land`;
+    // Ordered by who laid it, but not a posture: neither answers to the other for it.
+    case "embargo": {
+      const goods = agreement.trade?.goods ?? [];
+      return `${first}'s embargo on trade with ${second}${goods.length === 0 ? "" : `, of ${goods.map((good) => good.replace(/_/g, " ")).join(", ")}`}`;
+    }
+    case "trade_pact": {
+      const terms = agreement.trade;
+      const parts = [
+        terms?.tariffCapBps != null ? `customs capped at ${(terms.tariffCapBps / 100).toFixed(terms.tariffCapBps % 100 === 0 ? 0 : 1)} in a hundred` : null,
+        terms?.mostFavoured === true ? "most-favoured terms" : null,
+        (terms?.exempt ?? []).length > 0 ? `${terms!.exempt.map((good) => good.replace(/_/g, " ")).join(", ")} free of customs` : null,
+      ].filter((part): part is string => part !== null);
+      return `Trade pact between ${first} and ${second}${parts.length === 0 ? "" : `: ${parts.join("; ")}`}`;
+    }
     default: {
       const kind = AGREEMENT_KIND_IN_WORDS[agreement.kind];
       return `${kind.charAt(0).toUpperCase()}${kind.slice(1)} between ${first} and ${second}`;
@@ -174,6 +205,19 @@ export function readAbroad(
     };
   };
 
+  const goodNames = (ids: readonly string[]): string[] => ids.map((id) => GOODS.find((spec) => spec.id === id)?.name ?? id.replace(/_/g, " "));
+  const tradeOf = (agreement: PolityAgreement): TreatyTradeTerms | null => {
+    if (agreement.kind !== "trade_pact" && agreement.kind !== "embargo") return null;
+    const terms = agreement.trade;
+    const pact = agreement.kind === "trade_pact";
+    return {
+      tariffCapBps: pact ? terms?.tariffCapBps ?? null : null,
+      mostFavoured: pact && terms?.mostFavoured === true,
+      exempt: pact ? goodNames(terms?.exempt ?? []) : [],
+      forbidden: pact ? [] : goodNames(terms?.goods ?? []),
+      heldByWar: pact && agreement.status === "active" && tradeTermsBetween(world, agreement.polityId, agreement.otherPolityId).pactSuspended,
+    };
+  };
   const lineOf = (agreement: PolityAgreement, throughLabel: string | null): TreatyLine => ({
     key: agreement.id,
     kind: agreement.kind,
@@ -186,6 +230,7 @@ export function readAbroad(
     secret: !agreementIsOpen(agreement),
     throughLabel,
     letter: letterOf(agreement),
+    trade: tradeOf(agreement),
   });
 
   const otherOf = (agreement: PolityAgreement, side: string): string | null =>

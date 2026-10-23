@@ -920,8 +920,8 @@ any scope by polity. When it's true, the act is judged against the actor alone. 
 
 - **Speech and opinion.** `social_events` and `belief_set` where the actor is the speaker, and
   `political_support_set` inside a body the actor sits in.
-- **Letters.** Writing to anyone. The recipient decides whether to answer, through their own
-  cognition. This makes the access ladder's promised "you may always write" step real. Today it
+- **Letters.** Writing to anyone. The recipient answers, by the model, at the moment the letter is sent
+  (`letter-reply.ts`). This makes the access ladder's promised "you may always write" step real. Today it
   has nothing behind it.
 - **The actor's own foundations.** `generic_entity_create`, `holding_create` and structures, when
   they are paid from the actor's own purse and stand on land the actor holds or buys in the same
@@ -1311,9 +1311,16 @@ to from the letter tray (`letter-service.ts`):
 - **An answer** is one `diplomatic_message_answer`. Writing back also sends a letter in the same
   words, the way the cognition prompt tells an NPC to counter.
 
-Each is applied by `applyDeltas` and committed as a burst of its own, with no model call. The
-reader is asked in the next real burst, because `lettersOwed` wakes them, and their answer comes
-back as the letter's `answerText`. `correspondenceOf` reads the letters with each person as dated
+Each is applied by `applyDeltas` and committed as a burst of its own. The model is always called
+for the reader: between the player and the people of the world, writing is asking, as speaking is.
+At send time one call (`answerALetterNow`, `letter-reply.ts`) has the reader answer, whoever he is; the
+commit records `modelCalls: 1` and the player is told in how many days the answer comes. The answer is
+kept on the letter (`heldAnswer`) and given, as the reader's own act, on the day the road there and back
+has been walked (`heldAnswersDue`, released at each hop of a burst). The rules advise and do not decide:
+what the reader's interests and nature say is counsel in his section (`adviceOnALetter`), and only what he
+cannot do is held (`holdAnswerToAuthority`: not his to decide). If the call fails or the coins are short
+the letter stays pending as before, and the reader is asked in the next round that is paid for
+(`lettersOwed` wakes them); their answer comes back as the letter's `answerText`. `correspondenceOf` reads the letters with each person as dated
 pages. A reply to a personal letter addressed to you by name is your own business
 (`own-business.ts`). An offer that a power would have to keep is still judged against authority,
 and the tray refuses it when answering would be a breach.

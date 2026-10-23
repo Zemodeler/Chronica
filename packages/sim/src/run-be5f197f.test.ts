@@ -155,7 +155,7 @@ describe("a promise to put a question", () => {
     id: "c1", promisorCharacterId: "gnaeus-cornelius", beneficiaryCharacterId: CONSUL, actionKind: "political_support", description, conditions: "",
     requiredOfficeId: null, requiredResource: null, visibility: "private", sourceEventId: "e1", breachPressureKind: "humiliation",
     status: "pending", createdAtStep: 0, reviewAtStep: 6, resolvedAtStep: null, resolutionReason: null,
-  } as Commitment);
+  });
 
   it("is his to keep, not an occasion that lapses", () => {
     const world = { ...opening(), elapsedStep: 6, instant: { day: 6, minute: 0 }, commitments: [promise("I will carry the Sicilian matter before the Senate and seek its decree.")] };
@@ -183,7 +183,7 @@ describe("the order's record", () => {
     const world: WorldState = { ...opening(), orders: [{
       id: "order-1", actorCharacterId: CONSUL, text: "Sail Legio I to Messana", givenAtStep: 0,
       parts: [{ said: "Sail Legio I to Messana", goals: [], workRefs: [], refusal: null, note: null, whyNot: null, factIds: [], spend: null, attribution: "tagged", closedAtStep: null,
-        stages: [{ held: { op: "resume_instruction" }, waitsOn: [{ kind: "transport_capacity", forceId: "roman-field-army", provinceId: MESSANA }], status: "waiting", reason: null, heldSinceStep: 0, failedAtStep: null }], refusedAtStep: null, actsCarried: 0, actsRefused: 0 }],
+        stages: [{ held: { op: "resume_instruction" }, waitsOn: [{ kind: "transport_capacity", forceId: "roman-field-army", provinceId: MESSANA }], status: "waiting", reason: null, heldSinceStep: 0, failedAtStep: null, reviewAtStep: null }], refusedAtStep: null, actsCarried: 0, actsRefused: 0 }],
     }] };
     const rows = readStandingOrders(world, CONSUL, offices, definition.clock).rows;
     expect(rows[0]!.summary).toMatch(/ to /);

@@ -1,4 +1,5 @@
-import type { FactProposalDraft, ServiceContract, WorldState } from "@chronica/shared";
+import { economyOf, employerPolityOf, mercenaryGracePeriods, silverDeficitBps, type FactProposalDraft, type ServiceContract, type WorldState } from "@chronica/shared";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Service contracts over time (roles plan phase 5): a term that runs out, and
@@ -38,28 +39,58 @@ export function keepContracts(world: WorldState, toDay: number): { world: WorldS
     const employee = world.characters.find((character) => character.id === contract.employeeCharacterId);
     const pay = world.material.obligations.find((obligation) => obligation.id === contract.obligationId);
     const died = employee === undefined || !employee.alive;
-    const unpaid = pay !== undefined && pay.missedPeriods > 0;
+    // A hired company waits a period or two for a late wage in sound coin, and none for one in debased (`mercenary-pay.ts`); anyone else lapses at the first miss.
+    const grace = contract.role === "mercenary" || contract.role === "victualler" ? mercenaryGracePeriods(world, contract) : 0;
+    const unpaid = pay !== undefined && pay.missedPeriods > grace;
     const over = contract.endsAtStep !== null && contract.endsAtStep <= toDay;
     if (!died && !unpaid && !over) {
       if (contract.journey != null && contract.journey.arrivedAtStep === null && contract.journey.arrivesAtStep <= toDay) {
         const arrived = contract.journey.arrivesAtStep;
         next = { ...next, characters: next.characters.map((character) => character.id === employee.id ? { ...character, locationProvinceId: contract.journey!.toProvinceId } : character),
           material: { ...next.material, contracts: next.material.contracts.map((candidate) => candidate.id === contract.id ? { ...candidate, journey: { ...contract.journey!, arrivedAtStep: arrived } } : candidate) } };
-        facts.push({ localId: `arrival_${contract.id}`.slice(0, 60), kind: "contract_agent_arrived", summary: `${employee.name} reached ${world.map.provinces.find((province) => province.id === contract.journey!.toProvinceId)?.name ?? contract.journey.toProvinceId} for ${contract.label}.`, affectedRefs: [{ kind: "character", id: employee.id }, { kind: "account", id: contract.employerAccountId }], visibility: contract.role === "agent" ? "private" : "polity", discoveryState: contract.role === "agent" ? "private" : "polity", knownToRefs: [{ kind: "character", id: employee.id }, ...(world.material.accounts.find((account) => account.id === contract.employerAccountId)?.owner.kind === "character" ? [{ kind: "character" as const, id: world.material.accounts.find((account) => account.id === contract.employerAccountId)!.owner.id }] : [])], knowableInDays: 0, significance: 25 });
+        facts.push({ localId: safeLocalId(`arrival_${contract.id}`).slice(0, 60), kind: "contract_agent_arrived", summary: `${employee.name} reached ${world.map.provinces.find((province) => province.id === contract.journey!.toProvinceId)?.name ?? contract.journey.toProvinceId} for ${contract.label}.`, affectedRefs: [{ kind: "character", id: employee.id }, { kind: "account", id: contract.employerAccountId }], visibility: contract.role === "agent" ? "private" : "polity", discoveryState: contract.role === "agent" ? "private" : "polity", knownToRefs: [{ kind: "character", id: employee.id }, ...(world.material.accounts.find((account) => account.id === contract.employerAccountId)?.owner.kind === "character" ? [{ kind: "character" as const, id: world.material.accounts.find((account) => account.id === contract.employerAccountId)!.owner.id }] : [])], knowableInDays: 0, significance: 25 });
       }
       continue;
     }
     next = endContract(next, contract, unpaid ? "lapsed" : "ended", toDay);
+    // A company of the employer's own that is not paid does not go home: it has nowhere to go but the road, and the arrears are its to collect (Sicca, 241).
+    // It is held by no power and answers to the man who leads it; its own country's land is as much its prey as any other's.
+    const revolting = unpaid && contract.role === "mercenary" && contract.forceId !== null && contract.forceWas !== null && contract.forceWas.polityId === employerPolityOf(world, contract);
+    if (revolting) {
+      const company = next.material.forces.find((force) => force.id === contract.forceId);
+      if (company !== undefined && company.outlaw !== true) {
+        next = { ...next, material: { ...next.material, forces: next.material.forces.map((force) => (force.id === company.id ? { ...force, outlaw: true } : force)) } };
+        facts.push({
+          localId: safeLocalId(`mercenary_revolt_${contract.id}`).slice(0, 60),
+          kind: "mercenary_revolt",
+          summary: `${company.name} will not go home unpaid: ${name(contract.employeeCharacterId)}'s men have taken the road with their arms and what is owed them (${pay.arrears} behind), and answer now to nobody in ${next.map.polities.find((polity) => polity.id === contract.forceWas!.polityId)?.name ?? "their old country"}.`.slice(0, 600),
+          affectedRefs: [{ kind: "force", id: company.id }, { kind: "polity", id: contract.forceWas!.polityId }],
+          visibility: "public",
+          discoveryState: "public",
+          knowableInDays: 0,
+          significance: 75,
+        });
+      }
+    }
+    // A house that was not paid for the bread it sent is out of what it laid out, and it is written against it.
+    if (unpaid && contract.role === "victualler" && contract.victuals != null) {
+      const memory = economyOf(next);
+      next = { ...next, economy: { ...memory, houses: memory.houses.map((house) => (house.id === contract.victuals!.houseId ? { ...house, losses: house.losses + 1 } : house)) } };
+    }
     const who = name(contract.employeeCharacterId);
     facts.push({
-      localId: `contract_${contract.id}`.slice(0, 60),
+      localId: safeLocalId(`contract_${contract.id}`).slice(0, 60),
       kind: unpaid ? "contract_lapsed" : "contract_ended",
       summary: died
         ? `${who}'s contract -- ${contract.label} -- ended with his life.`
         : unpaid
           ? contract.role === "tax_farmer"
             ? `${who} missed the rent on his tax farm, and the farm was taken back: ${contract.label}.`
-            : `${who} was not paid, and his contract lapsed: ${contract.label}. He owes nobody anything now.`
+            : contract.role === "victualler"
+              ? `${who}'s house went ${pay.missedPeriods} period(s) without being paid for the bread it sent, and stopped sending it: ${contract.label}. It is out of what it laid out, and the army must be fed some other way.`
+            : contract.role === "mercenary"
+              ? `${who}'s company went ${pay.missedPeriods} period(s) without its pay${silverDeficitBps(world, employerPolityOf(world, contract)) > 0 ? `, and what pay it had was in coin worth ${Math.round((10_000 - silverDeficitBps(world, employerPolityOf(world, contract))) / 100)} in a hundred of its silver` : ""}, and walked out of the contract: ${contract.label}. It owes nobody anything now.`
+              : `${who} was not paid, and his contract lapsed: ${contract.label}. He owes nobody anything now.`
           : `${who}'s term ran out: ${contract.label}.`,
       affectedRefs: [{ kind: "character", id: contract.employeeCharacterId }, { kind: "account", id: contract.employerAccountId }],
       visibility: "polity",

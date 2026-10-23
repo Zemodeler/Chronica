@@ -1,10 +1,17 @@
+import { regionalSummary } from "./regional-summary";
+import { marketSummary, polityMarkets } from "./market-summary";
+import { coinageSummary } from "./coinage";
+import { tradeSummary } from "./trade-summary";
+import { fiscalSliceLine } from "./fiscal-officers";
+import { houseFolkOf } from "./merchant-houses";
 import { powersDealtWith } from "./far-powers";
 import { powersNamedIn } from "./powers-named";
 import { armyInWords, serviceInWords } from "./army-words";
 import { findPolityGaps } from "./population";
 import { distancesFrom, placeIndex, provinceIdsIn, provincesNamedIn } from "./place-index";
 import type { NarratorSeed } from "./narrator";
-import { renderCharacterPortrait } from "./cognition";
+import { countsShips, renderCharacterPortrait } from "./cognition";
+import { isManagementWorry } from "./management-talk";
 import { isOpenIntent, mostPressingFirst } from "./intents";
 import { ruleInWords } from "./mechanics/mechanic-words";
 import { forecastInWords, isChamberQuestion, voteDayOf } from "./senate";
@@ -14,6 +21,7 @@ import { loanOfferLines } from "./money";
 
 import {
   standingLine,
+  gensPhrase,
   ORDER_PART_STATUS_LABEL,
   isOrderPartOpen,
   orderPartStatus,
@@ -166,6 +174,16 @@ export interface WorldSlice {
   readonly loanOffers: readonly string[];
   /** How hard the power's own lands are being taxed, for whoever can open its treasury. */
   readonly taxBurden: { readonly asked: number; readonly bearable: number; readonly inWords: string } | null;
+  /** How its provinces are taxed and how they fare, one line a power (`regional-summary.ts`), for whoever can open its treasury. */
+  readonly regional?: string | null;
+  /** What its markets are doing when there is news in them: grain in store and its price, what is dear and cheap, hubs short of bread; one line a power (`market-summary.ts`). */
+  readonly markets?: string | null;
+  /** Its trade: partners, what it sells and buys, customs, pacts and embargoes, shortages eased or worsened; one line a power, when there is any to say (`trade-summary.ts`). */
+  readonly tradeNote?: string | null;
+  /** What the man who keeps its books has done lately -- a rate raised, a loan taken, a pact opened -- one line, only for a month or two after (`fiscal-officers.ts`). */
+  readonly accountsNote?: string | null;
+  /** Its money: the coin, its silver against the standard, price pressure and exchange; one line, only when notable (`coinage.ts`). */
+  readonly coinageNote?: string | null;
   /** Coin a month per thousand men, for whoever can open the power's treasury and the scenario names it. */
   readonly soldierPayPerThousand: number | null;
   readonly military: readonly {
@@ -190,6 +208,8 @@ export interface WorldSlice {
     readonly holding: boolean;
     /** What it is made of and how good it is, in a line, for whoever answers for it. */
     readonly make: string | null;
+    /** What its strength counts: men, or -- a fleet -- ships. */
+    readonly unit?: "men" | "ships";
   }[];
   /**
    * Places, with what stands in them.
@@ -550,6 +570,12 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     account.owner.kind === "polity" && account.owner.id === ownPolity && reachesAccount(account.id));
   const burden = opensTreasury ? taxBurdens(world).get(ownPolity) : undefined;
   const taxBurden = burden === undefined ? null : { asked: burden.asked, bearable: burden.bearable, inWords: taxBurdenInWords(burden) };
+  const regional = opensTreasury && ownPolity !== null ? regionalSummary(world, ownPolity, burden) : null;
+  // Prices are what anybody in the country knows: no key to the treasury is needed to read them.
+  const markets = ownPolity === null ? null : marketSummary(polityMarkets(world).get(ownPolity));
+  const tradeNote = ownPolity === null ? null : tradeSummary(world, ownPolity);
+  const coinageNote = ownPolity === null ? null : coinageSummary(world, ownPolity);
+  const accountsNote = ownPolity === null ? null : fiscalSliceLine(world, ownPolity);
   const soldierPayPerThousand = opensTreasury ? world.map.polities.find((polity) => polity.id === ownPolity)?.soldierPayPerThousand ?? null : null;
   const monthlyExpenditure = Math.round(
     world.material.obligations
@@ -585,6 +611,8 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       plan: reachesForce(force.id) && force.battlePlan != null ? force.battlePlan.rationale.slice(0, 160) : null,
       holding: force.hold === true,
       make: reachesForce(force.id) ? armyInWords(world, force) : null,
+      // A fleet's strength is its hulls: "Allied Greek hulls -- 18 men" was eighteen ships (consul-run-issues M18).
+      unit: countsShips(force) ? "ships" as const : "men" as const,
     }));
 
   // Every place the order might need to name, by the id it must name it by --
@@ -640,8 +668,9 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
   for (const siege of world.conflicts.sieges) matters(places.provinceOfSettlement.get(siege.settlementId), 1);
   for (const siege of world.sieges) if (siege.status === "active") matters(siege.provinceId, 1);
   for (const storyline of openStorylines(world.storylines)) matters(storyline.provinceId, 2);
+  const merchants = houseFolkOf(world);
   for (const character of world.characters) {
-    if (character.alive && character.polityId === ownPolity) matters(character.locationProvinceId, 3);
+    if (character.alive && character.polityId === ownPolity && (character.officeId !== null || !merchants.has(character.id))) matters(character.locationProvinceId, 3);
   }
 
   const reach = distancesFrom(places, pressing.size > 0 ? pressing.keys() : ourProvinceIds);
@@ -749,7 +778,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     .map((category) => ({ id: category.id, label: category.label }));
 
   const politics = world.characters
-    .filter((character) => character.alive && (ownPolity === null || character.polityId === ownPolity))
+    .filter((character) => character.alive && (ownPolity === null || character.polityId === ownPolity) && (character.officeId !== null || !merchants.has(character.id)))
     .slice(0, CAPS.characters)
     .map((character) => ({
       id: character.id,
@@ -759,6 +788,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       faith: character.faithId === null ? null : world.faiths.find((faith) => faith.id === character.faithId)?.name ?? null,
       standing: [
         character.gender === "female" ? "a woman" : null,
+        gensPhrase(world, character),
         character.legalStatus === "enslaved" ? `slave of ${world.characters.find((owner) => owner.id === character.ownerCharacterId)?.name ?? "a master"}` : null,
         character.legalStatus === "freed" ? `freedman of ${world.characters.find((owner) => owner.id === character.ownerCharacterId)?.name ?? "a patron"}` : null,
       ].filter((part): part is string => part !== null).join(", ") || null,
@@ -1166,12 +1196,13 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       // agreement struck with one Boii chieftain binds the chieftain.
       cohesion: cohesionInWords(polity.cohesionBps),
       leaders: world.characters
-        .filter((character) => character.alive && character.polityId === polity.id)
+        .filter((character) => character.alive && character.polityId === polity.id && (character.officeId !== null || !merchants.has(character.id)))
         .slice(0, 4)
         .map((character) => `${character.name} [${character.id}]${character.officeId === null ? "" : `, ${character.officeId}`}`),
       forces: world.material.forces
         .filter((force) => force.polityId === polity.id)
-        .slice(0, 4)
+        // Three, not four: Carthage keeps an army and two garrisons in Sicily now (`punic-wars-sicily.ts`), and the slice does not grow for them.
+        .slice(0, 3)
         // Another power's numbers are a guess, and as good as the source: the
         // model hears what the character could, never the true count.
         .map((force) => `${force.name}${force.outlaw === true ? " (outlaw)" : ""} [${force.id}] — ${station === null ? `${force.personnel.reduce((sum, category) => sum + category.fit, 0)} men` : strangerStrength(force, station.provinceIds, knownToActor, station.characterId, world.elapsedStep).label.replace("unknown to you", "strength unknown")} at ${provinceName(force.locationId)} [${force.locationId}]`),
@@ -1316,6 +1347,11 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     monthlyExpenditure,
     loanOffers: input.actorRef.kind === "character" ? loanOfferLines(world, input.actorRef.id) : [],
     taxBurden,
+    regional,
+    markets,
+    tradeNote,
+    accountsNote,
+    coinageNote,
     soldierPayPerThousand,
     military,
     foreignPowers,
@@ -1406,16 +1442,18 @@ export function renderWorldSlice(slice: WorldSlice): string {
     ...(slice.taxBurden === null ? [] : [
       `Our lands' taxes: ~${slice.taxBurden.asked}/month asked of ~${slice.taxBurden.bearable} bearable (${slice.taxBurden.inWords}); more is not collected, and past half, order sours.`,
     ]),
+    ...(slice.regional == null ? [] : [slice.regional]),
     ...(slice.soldierPayPerThousand === null ? [] : [
-      `Our soldiers are paid ${slice.soldierPayPerThousand}/month for every 1,000 men.`,
+      `Our soldiers are paid ${slice.soldierPayPerThousand.toLocaleString("en-GB")}/month for every 1,000 men.`,
     ]),
   ]);
   section("MILITARY", slice.military.map((force) => {
     const where = `at ${force.location} [${force.locationId}], under ${force.commander}${force.ranks.length === 0 ? "" : `, with ${force.ranks.join(", ")} in the ranks`}`;
-    if (force.banded) return `${force.name} [${force.id}] — about ${force.strength} men ${where}`;
+    const unit = force.unit ?? "men";
+    if (force.banded) return `${force.name} [${force.id}] — about ${force.strength} ${unit} ${where}`;
     const short = force.paperStrength !== null && force.strength < force.paperStrength ? ` of ${force.paperStrength} on the books` : "";
     const fed = force.provisions === null || force.provisions === "provisioned" ? "" : `, ${force.provisions} of supply`;
-    return `${force.name} [${force.id}] — ${force.strength} men${short} ${where}, morale ${force.morale}/100${fed}${force.holding ? ", under orders to hold" : ""}${force.make === null ? "" : `; ${force.make}`}${force.plan === null ? "" : `; if attacked: ${force.plan}`}`;
+    return `${force.name} [${force.id}] — ${force.strength} ${unit}${short} ${where}, morale ${force.morale}/100${fed}${force.holding ? ", under orders to hold" : ""}${force.make === null ? "" : `; ${force.make}`}${force.plan === null ? "" : `; if attacked: ${force.plan}`}`;
   }));
   section("PLANS STANDING", slice.standingPlans.map((plan) =>
     `${plan.label} [${plan.id}] — ${plan.effect === "spring_trap" ? "prepared, and springs by itself" : "waiting to raise the alarm"}, in ${plan.where}`));
@@ -1503,8 +1541,11 @@ export function renderWorldSlice(slice: WorldSlice): string {
         slice.country.governs
           ? `${slice.country.provinces} province(s), ${slice.country.population} people, ${slice.country.availableManpower} men available to raise${slice.country.alliedManpower > 0 ? `, and ${slice.country.alliedManpower} more our allies send by foedus when a war opens` : ""}.`
           : `${slice.country.provinces} province(s), ${slice.country.population} people.`,
-        // Said only when it is news: bread at its ordinary price is no line of prompt.
-        ...(Math.abs(slice.country.grainPriceBps - 10_000) < 1_500 ? [] : [`Grain sells at ${Math.round(slice.country.grainPriceBps / 100)}% of its ordinary price${slice.country.grainPriceBps > 10_000 ? ": bread is dear, and armies cost more to keep" : ": bread is cheap"}.`]),
+        // Said only when it is news: bread at its ordinary price, and no good far from its own, is no line of prompt.
+        ...(slice.markets == null ? [] : [slice.markets]),
+        ...(slice.tradeNote == null ? [] : [slice.tradeNote]),
+        ...(slice.accountsNote == null ? [] : [slice.accountsNote]),
+        ...(slice.coinageNote == null ? [] : [slice.coinageNote]),
         ...slice.country.strained.map((province) =>
           slice.country.governs
             ? `${province.name} [${province.id}] — ${province.manpower} men, food ${province.food}/100, order ${province.stability}/100, war damage ${province.warDamage}/100, taxable ${province.taxCapacity}`
@@ -1580,8 +1621,8 @@ export function renderWorldSlice(slice: WorldSlice): string {
     "STANDING AIMS",
     slice.outlooks.flatMap((outlook) => [
       `${outlook.name} [${outlook.polityId}]${outlook.own ? " (ours)" : ""} — ${outlook.objective}. Will risk ${outlook.riskTolerance}/100.`,
-      ...outlook.concerns.map((concern) => `  worried about ${concern}`),
-      ...outlook.intentions.map((intention) => `  means to ${intention}`),
+      ...(outlook.own ? outlook.concerns : outlook.concerns.filter((concern) => !isManagementWorry(concern))).map((concern) => `  worried about ${concern}`),
+      ...(outlook.own ? outlook.intentions : outlook.intentions.filter((intention) => !isManagementWorry(intention))).map((intention) => `  means to ${intention}`),
     ]),
   );
   section("OPEN THREADS", slice.threads.map((thread) => {
@@ -1598,7 +1639,8 @@ export function renderWorldSlice(slice: WorldSlice): string {
         const land = gap.land.length === 0 ? "" : ` Their land: ${gap.land.join("; ")}.`;
         return `  ${gap.name} [${gap.polityId}] holds land but has ${missing === "" ? "nobody" : `no ${missing}`} — ${gap.why}.${land}`;
       }),
-      "  Give each of them the people and forces they plainly ought to have, now.",
+      // Only what it lacks: a power with a ruler and no army was given a second ruler (consul-run-issues M4).
+      "  Give each of them what it lacks, now: a leader, forces, or both.",
       "",
     );
   }
@@ -1616,7 +1658,8 @@ export function renderWorldSlice(slice: WorldSlice): string {
       lines.push(
         `  (seed ${seed.key}) ${seed.why}`,
         `  ${seed.brief}`,
-        `  Scale: ${seed.severity}.${seed.oneShot ? " This one runs its course; it needs no thread." : ` Open its thread with "storyline_open" carrying seedKey "${seed.key}".`}`,
+        // A turn of a thread already open is advanced, not opened again: asked for both, an answer made two threads of one matter (consul-run-issues M1).
+        `  Scale: ${seed.severity}.${seed.oneShot ? " This one runs its course; it needs no thread." : seed.archetype === "arc_beat" ? " Its thread is already open: advance it, and open no other." : ` Open its thread with "storyline_open" carrying seedKey "${seed.key}".`}`,
         ...(seed.repeated ? ["  This was asked before and did not happen. It happens now."] : []),
         ...(seed.secret
           ? [`  It is a secret. Every fact of it is "private" with "knownToRefs" naming only those in it; its thread is "private"; nothing of it appears in narrativeSummary, frictions or a playerDecision.`]

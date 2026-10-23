@@ -16,5 +16,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ gam
     agreementKind: body.agreementKind,
   });
   if (outcome.status === "error") return Response.json({ error: outcome.message }, { status: outcome.code });
-  return Response.json({ status: "sent" });
+  return Response.json({ status: "sent", notes: outcome.notes });
 }

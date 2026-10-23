@@ -424,7 +424,7 @@ describe("E9: held acts that named nothing", () => {
     const state = world();
     const done = part({
       goals: [{ kind: "force_at", forceId: "roman-field-army", provinceId: ROME }],
-      stages: [{ held: { op: "force_modify" }, waitsOn: [{ kind: "force_at", forceId: "roman-field-army", provinceId: ROME }], status: "failed", reason: "It could not be carried out as written.", heldSinceStep: 0, failedAtStep: 1 }],
+      stages: [{ held: { op: "force_modify" }, waitsOn: [{ kind: "force_at", forceId: "roman-field-army", provinceId: ROME }], status: "failed", reason: "It could not be carried out as written.", heldSinceStep: 0, failedAtStep: 1, reviewAtStep: null }],
     });
     expect(orderPartStatus(state, done)).toBe("partly_done");
   });
@@ -433,7 +433,7 @@ describe("E9: held acts that named nothing", () => {
 describe("E10: the consul's own crossing", () => {
   it("is waiting until what it needs is so, not handed on", () => {
     const state = world();
-    const held = part({ stages: [{ held: { op: "resume_instruction", instruction: "Carry the legion over" }, waitsOn: [{ kind: "force_at", forceId: "roman-field-army", provinceId: MESSANA }], status: "waiting", reason: null, heldSinceStep: 0, failedAtStep: null }] });
+    const held = part({ stages: [{ held: { op: "resume_instruction", instruction: "Carry the legion over" }, waitsOn: [{ kind: "force_at", forceId: "roman-field-army", provinceId: MESSANA }], status: "waiting", reason: null, heldSinceStep: 0, failedAtStep: null, reviewAtStep: null }] });
     const status = orderPartStatus(state, held);
     expect(status).toBe("awaiting_condition");
     expect(orderPartLabel(status, held, state)).toMatch(/^waiting until .* reaches /);
@@ -443,7 +443,7 @@ describe("E10: the consul's own crossing", () => {
     const state: WorldState = { ...world(), instant: { day: 1, minute: 540 }, elapsedStep: 1, orders: [record([part({
       said: "March the legion into Campania once it is mustered",
       goals: [{ kind: "force_at", forceId: "roman-field-army", provinceId: CAMPANIA }],
-      stages: [{ held: { op: "resume_instruction", instruction: "March the legion into Campania" }, waitsOn: [{ kind: "force_at", forceId: "roman-field-army", provinceId: ROME }], status: "waiting", reason: null, heldSinceStep: 0, failedAtStep: null }],
+      stages: [{ held: { op: "resume_instruction", instruction: "March the legion into Campania" }, waitsOn: [{ kind: "force_at", forceId: "roman-field-army", provinceId: ROME }], status: "waiting", reason: null, heldSinceStep: 0, failedAtStep: null, reviewAtStep: null }],
     })])] };
     const result = await runSimulationBurst(input(scripted({}), null, state));
     const resumed = result.world.orders[0]!.parts[0]!;
@@ -460,7 +460,7 @@ describe("E10: the consul's own crossing", () => {
       orders: [record([part({
         said: "Carry Legio I to Messana",
         goals: [{ kind: "force_at", forceId: "roman-field-army", provinceId: MESSANA }],
-        stages: [{ held: { op: "force_modify", forceRef: "roman-field-army", locationId: MESSANA, reason: "Over." }, waitsOn: [{ kind: "transport_capacity", forceId: "roman-field-army", provinceId: MESSANA }], status: "waiting", reason: null, heldSinceStep: 5, failedAtStep: null }],
+        stages: [{ held: { op: "force_modify", forceRef: "roman-field-army", locationId: MESSANA, reason: "Over." }, waitsOn: [{ kind: "transport_capacity", forceId: "roman-field-army", provinceId: MESSANA }], status: "waiting", reason: null, heldSinceStep: 5, failedAtStep: null, reviewAtStep: null }],
       })])],
     };
     const result = await runSimulationBurst(input(scripted({}), null, ashore));
@@ -470,7 +470,7 @@ describe("E10: the consul's own crossing", () => {
   });
 
   it("holds the same act on the same conditions once, however many orders held it", () => {
-    const held = { held: { op: "force_modify", forceRef: "roman-field-army", locationId: MESSANA, reason: "Over." }, waitsOn: [{ kind: "transport_capacity" as const, forceId: "roman-field-army", provinceId: MESSANA }], status: "waiting" as const, reason: null, heldSinceStep: 0, failedAtStep: null };
+    const held = { held: { op: "force_modify", forceRef: "roman-field-army", locationId: MESSANA, reason: "Over." }, waitsOn: [{ kind: "transport_capacity" as const, forceId: "roman-field-army", provinceId: MESSANA }], status: "waiting" as const, reason: null, heldSinceStep: 0, failedAtStep: null, reviewAtStep: null };
     expect(dedupeStages([held, { ...held, heldSinceStep: 3 }, { ...held, status: "failed" as const }])).toHaveLength(2);
   });
 
@@ -487,7 +487,7 @@ describe("E11: the engine's refusals", () => {
   it("never reach the part a held act failed for", async () => {
     const state: WorldState = { ...world(), instant: { day: 1, minute: 540 }, elapsedStep: 1, orders: [record([part({
       said: "Bring up the phantom legion",
-      stages: [{ held: { op: "force_modify", forceRef: "legio-phantasma", locationId: CAMPANIA, reason: "Up." }, waitsOn: [{ kind: "force_at", forceId: "roman-field-army", provinceId: ROME }], status: "waiting", reason: null, heldSinceStep: 0, failedAtStep: null }],
+      stages: [{ held: { op: "force_modify", forceRef: "legio-phantasma", locationId: CAMPANIA, reason: "Up." }, waitsOn: [{ kind: "force_at", forceId: "roman-field-army", provinceId: ROME }], status: "waiting", reason: null, heldSinceStep: 0, failedAtStep: null, reviewAtStep: null }],
     })])] };
     const result = await runSimulationBurst(input(scripted({}), null, state));
     const failed = result.world.orders[0]!.parts[0]!;

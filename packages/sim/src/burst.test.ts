@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario, FIRST_PUNIC_IDS } from "@chronica/db";
 import { FactSchema, ScenarioDefinitionSchema, WorldStateSchema, answerDueOf, factsKnownTo, factsVisibleTo, type Office, type ScenarioClock, type WorldState } from "@chronica/shared";
 import { DEFAULT_BUDGET, runSimulationBurst, type BurstInput, type WindowSnapshot } from "./burst";
-import { composeChronicle } from "./chronicle";
+import { NEVER_PUBLISHED, composeChronicle } from "./chronicle";
+import { withPlans } from "./askable-test-kit";
 import type { SimModelPort, SimOperation } from "./ports";
 
 const definition = ScenarioDefinitionSchema.parse(firstPunicWarScenario.definition);
@@ -423,7 +424,7 @@ describe("budget and termination", () => {
     // Somebody is in the batch on their own account rather than as a reaction,
     // and is told so: asked to react to news nobody brought them, the world
     // elsewhere sensibly answers that it will do nothing.
-    expect(seen.join("\n")).toContain("Nobody has brought them news");
+    expect(seen.join("\n")).toContain("They are here because of their own affairs:");
   });
 
   it("carries an open-ended order to the thing it was waiting for", async () => {
@@ -604,7 +605,7 @@ const ORDER_AND_PLOT = JSON.stringify({
   frictions: [],
   deltas: [
     { op: "force_modify", forceRef: "legio-i", moraleBpsDelta: 200, reason: "The consul's inspection lifts spirits." },
-    { op: "storyline_open", localId: "plot", seedKey: "seed-plot", title: "The Quaestor's Silence", participantRefs: ["quintus-fabius"], provinceId: null, phase: "brewing", stakes: "Whether the Senate can be turned against the consul unnoticed.", nextDevelopment: "Fabius sounds out the patrician bloc.", visibility: "private", reason: "The world stirs." },
+    { op: "storyline_open", localId: "plot", seedKey: "seed-plot", title: "The Quaestor's Silence", participantRefs: ["quintus-fabius", "marcus-atilius"], provinceId: world().map.provinces.find((province) => province.settlements.some((city) => city.id === "settlement-rome"))!.id, phase: "brewing", stakes: "Whether the Senate can be turned against the consul unnoticed.", nextDevelopment: "Fabius sounds out the patrician bloc.", visibility: "private", reason: "The world stirs." },
     { op: "character_pressure_set", characterRef: "quintus-fabius", action: "create", kind: "political_danger", intensity: 80, label: "Afraid the consul suspects him.", reviewInDays: 30, expiresInDays: null, visibility: "private", reason: "A plotter's fear." },
     { op: "character_intent_set", actorCharacterRef: "quintus-fabius", actionType: "seek_support", targetRefs: [], rationale: "Gather senators against the consul.", priority: 70, visibility: "private" },
   ],
@@ -632,6 +633,73 @@ const FABIUS_ACTS = JSON.stringify({
       delegations: [], schedule: [],
     },
   }],
+});
+
+/** The same overreach, done in the open: nothing secret in it, so those who answer for him can learn of it. */
+const FABIUS_OPENLY = JSON.stringify({
+  actors: [{
+    actorRef: FABIUS,
+    reasoning: "The officers need a firm hand.",
+    proposal: {
+      narrativeSummary: "Fabius takes the legion's officers in hand.",
+      frictions: [],
+      deltas: [{ op: "force_modify", forceRef: "legio-i", moraleBpsDelta: -300, reason: "A harsh review." }],
+      facts: [{ localId: "review", kind: "camp_review", summary: "Fabius held a harsh review of the legion's officers.", affectedRefs: [FABIUS], visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 35, knownToRefs: [FABIUS] }],
+      delegations: [], schedule: [],
+    },
+  }],
+});
+
+describe("a subordinate who goes ahead without leave (5.2)", () => {
+  it("is told as a person acting once somebody would come to know of it, never as the ledger line", async () => {
+    const port = capturingScriptedPort({ simulate_orchestrate: [ORDER_AND_PLOT], simulate_cognition: [FABIUS_OPENLY, JSON.stringify({ actors: [] }), JSON.stringify({ actors: [] }), JSON.stringify({ actors: [] })] });
+    const result = await runSimulationBurst(input(port, { orderText: "Inspect the legion.", narratorSeed: PLOT_SEED }));
+    const breaches = result.newFacts.filter((fact) => fact.kind === "authority_breach");
+    const told = result.newFacts.filter((fact) => fact.kind === "insubordination");
+    // Whenever there was a breach somebody would find out, it is told as a deed.
+    expect(breaches.some((fact) => fact.discovery.state === "delayed")).toBe(true);
+    expect(told.length).toBeGreaterThan(0);
+    expect(told[0]!.story?.source).toBe("reported");
+    expect(told[0]!.summary).not.toMatch(/grant|domain/);
+    expect(NEVER_PUBLISHED.has(told[0]!.kind)).toBe(false);
+  });
+});
+
+describe("a ranking subordinate's big act without leave, put to the player (item 5)", () => {
+  const NOBODY = JSON.stringify({ actors: [] });
+  // Fabius made a magistrate for the test: the same overreach is then a ranking man moving a legion of three thousand.
+  const asMagistrate = (): WorldState => {
+    const state = world();
+    const seat = state.material.officeSeats.find((candidate) => candidate.status === "held")!;
+    return { ...state, material: { ...state.material, officeSeats: [...state.material.officeSeats, { ...seat, id: "fabius-seat", officeId: "roman-praetor", seatIndex: 9, holderCharacterId: "quintus-fabius" }] } };
+  };
+  const run = (overrides: Partial<BurstInput> = {}) => runSimulationBurst(input(
+    capturingScriptedPort({ simulate_orchestrate: [ORDER_AND_PLOT], simulate_cognition: [FABIUS_OPENLY, NOBODY, NOBODY, NOBODY] }),
+    { orderText: "Inspect the legion.", narratorSeed: PLOT_SEED, world: asMagistrate(), ...overrides },
+  ));
+
+  it("ends the report on the question, with the three answers", async () => {
+    const result = await run();
+    expect(result.playerDecision?.options.map((option) => option.id)).toEqual(["breach-censure", "breach-endorse", "breach-ignore"]);
+    expect(result.world.answerable.some((entry) => entry.characterId === "quintus-fabius" && entry.grand === true)).toBe(true);
+  });
+
+  it("takes the answer at the start of the next report, and does not ask twice", async () => {
+    const first = await run();
+    const second = await runSimulationBurst(input(capturingScriptedPort({ simulate_orchestrate: [ORDER_AND_PLOT], simulate_cognition: [NOBODY, NOBODY, NOBODY, NOBODY] }), {
+      world: first.world, orderText: null, burstId: "after", knownFacts: first.newFacts,
+      answeredDecision: { prompt: first.playerDecision!.prompt, label: "Censure him", summary: "Rebuke him.", optionId: "breach-censure" },
+    }));
+    expect(second.newFacts.some((fact) => fact.kind === "subordinate_censured")).toBe(true);
+    expect(second.world.answerable.some((entry) => entry.grand === true)).toBe(false);
+    expect(second.playerDecision?.options.some((option) => option.id.startsWith("breach-"))).not.toBe(true);
+  });
+
+  it("is not put to him for a man of no rank", async () => {
+    const result = await run({ world: world() });
+    expect(result.world.answerable.some((entry) => entry.grand === true)).toBe(false);
+    expect(result.playerDecision?.options.some((option) => option.id.startsWith("breach-"))).not.toBe(true);
+  });
 });
 
 describe("the world stirs: a secret plot", () => {
@@ -692,6 +760,19 @@ describe("the world stirs: a secret plot", () => {
     expect(strike!.discovery.discoveredBy.map((entry) => entry.observerRef.id)).toEqual(["quintus-fabius"]);
   });
 
+  it("lets the court hear a rumour of it weeks late, never the secret itself (5.4)", async () => {
+    const { result } = await run();
+    const thread = result.world.storylines.find((storyline) => storyline.seedKey === "seed-plot")!;
+    const province = result.world.map.provinces.find((candidate) => candidate.id === thread.provinceId);
+    const rumour = result.newFacts.find((fact) => fact.kind === "rumour_of_trouble");
+    expect(province?.controllerPolityId).toBe("rome");
+    expect(rumour).toBeDefined();
+    expect(rumour!.discovery.state).toBe("rumoured");
+    expect(rumour!.discovery.knowableAtInstant!.day).toBeGreaterThan(result.world.instant.day - 90 + 13);
+    expect(rumour!.summary).not.toContain("conspir");
+    expect(rumour!.story?.source).toBe("rumoured");
+  });
+
   it("lets nothing of it reach the ruler's record", async () => {
     const { result } = await run();
     const known = factsKnownTo(result.newFacts, player, "rome", result.world.instant).map((fact) => fact.kind);
@@ -704,7 +785,7 @@ describe("the world stirs: a secret plot", () => {
     // it describes the visible order too -- which is what the secrecy principle (7) is for.
     const historian = capturingScriptedPort({ compose_chronicle: [JSON.stringify({ entries: [] })] });
     const record = await composeChronicle({
-      port: historian, clock, observer: player, observerPolityId: "rome", facts: result.newFacts, from: { day: 0, minute: 0 }, to: result.world.instant,
+      port: historian, clock, observer: player, observerPolityId: "rome", facts: result.newFacts.filter((fact) => fact.kind !== "rumour_of_trouble"), from: { day: 0, minute: 0 }, to: result.world.instant,
       narrative: result.narrative, frictions: result.frictions, significanceByFactId: result.significanceByFactId, storylines: result.world.storylines,
     });
     // Whatever reaches the record: what the historian was shown, and what the
@@ -943,10 +1024,11 @@ describe("the burst hands out its windows as the clock leaves them", () => {
 describe("calls the burst decides not to make", () => {
   it("does not ask a cast of nobody pressing past the rounds it pays for, and says so", async () => {
     const port = scriptedPort({ simulate_orchestrate: [QUIET], simulate_cognition: [QUIET, QUIET, QUIET, QUIET] });
-    const result = await runSimulationBurst(input(port, { budget: { ...DEFAULT_BUDGET, maxAmbientOnlyRounds: 0 } }));
+    // Four men near the consul have a plan of their own, none of its steps due: askable on their own business, and none of them pressing.
+    const result = await runSimulationBurst(input(port, { world: withPlans(world(), "marcus-atilius"), spanDays: 5, budget: { ...DEFAULT_BUDGET, maxAmbientOnlyRounds: 0 } }));
     expect(port.calls.filter((call) => call === "simulate_cognition")).toHaveLength(0);
     expect(result.skipped.some((skip) => skip.stage === "cognition" && skip.reason.includes("nobody pressing"))).toBe(true);
-    expect(result.stopReason).toBe("no_due_events");
+    expect(result.stopReason).toBe("max_span");
   });
 
   it("still asks when somebody is pressing, however many quiet rounds went before", async () => {

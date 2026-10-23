@@ -67,7 +67,9 @@ describe("an army's ground", () => {
     const before = world().material.forces.find((force) => force.id === "carthaginian-army")!.locationId;
     expect(before).not.toBe(FIRST_PUNIC_IDS.messana);
     const result = await runSimulationBurst({
-      world: world(), clock: definition.clock, offices: definition.government.offices, warfare: definition.warfare,
+      // Hanno is far from the consul and has no plot with him: he is asked only as one of the voices of the wider world (the cast, `cognition-policy.ts`).
+      world: { ...world(), cast: { ...world().cast, members: [{ characterId: "hanno", seat: "world" as const, sinceStep: 0, salience: 40, why: "commands the main army of Carthage", belowFor: 0, reviews: 0 }] } },
+      clock: definition.clock, offices: definition.government.offices, warfare: definition.warfare,
       burstId: "march", gameId: "a-march-named", actorRef: { kind: "character", id: "marcus-atilius" }, actorPolityId: "rome",
       orderText: "Watch the coast.", spanDays: 1, knownFacts: [], queue: [], port, narratorSeeds: [],
     });

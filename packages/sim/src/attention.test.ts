@@ -226,6 +226,12 @@ describe("who is asked, and in what order, when calls are dear (L17)", () => {
     expect(hasSomethingNew(ambient, new Set([seen.id]), new Map([["hanno", "a step of his plan is due"]]), new Set())).toBe(true);
     expect(hasSomethingNew(ambient, new Set([seen.id]), new Map(), new Set(["hanno"]))).toBe(true);
     // A reactor was woken by news he had not been shown.
-    expect(hasSomethingNew({ ...ambient, impetus: "reaction" }, new Set([seen.id]), new Map(), new Set())).toBe(true);
+    expect(hasSomethingNew({ ...ambient, impetus: "reaction" }, new Set([seen.id]), new Map(), new Set())).toBe(false);
+    // Repeating an outstanding obligation cannot wake an unchanged decision.
+    expect(hasSomethingNew(ambient, new Set([seen.id]), new Map([["hanno", "same order"]]), new Set(["hanno"]), false)).toBe(false);
+    // New news wins even when the circumstances comparison is unchanged.
+    expect(hasSomethingNew({ ...ambient, knownFacts: [seen, news] }, new Set([seen.id]), new Map(), new Set(), false)).toBe(true);
+    // Changed circumstances or a plan's wake-up can require a fresh answer without news.
+    expect(hasSomethingNew(ambient, new Set([seen.id]), new Map(), new Set(), true)).toBe(true);
   });
 });

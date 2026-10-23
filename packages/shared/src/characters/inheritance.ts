@@ -14,6 +14,9 @@ import type { Character } from "./character";
 import { childrenOf, familyLinksOf, type FamilyLink } from "./family";
 import type { LegacyCause } from "../continuity/continuity";
 import { computeOpinion } from "./opinion";
+import { payTheCreditors, type DebtsSettled } from "./estate-creditors";
+
+export { estateWasSoldUp, landValue, LAND_PRICE_YEARS, SOLD_TO_CREDITORS, type DebtsSettled } from "./estate-creditors";
 
 // Estates, inheritance, legacy causes, and player succession
 // (character-sim phase 5).
@@ -249,6 +252,8 @@ export interface EstateSettlement {
   /** Where the coin went when there was no heir. */
   readonly escheatedToAccountId: string | null;
   readonly coin: number;
+  /** What the creditors were paid before the heirs saw anything (`estate-creditors.ts`), where he owed on loans. */
+  readonly debts?: DebtsSettled | null;
 }
 
 /**
@@ -265,29 +270,57 @@ export interface EstateSettlement {
  * - Slaves and freedmen pass to the principal heir, as patronage did.
  * - His accounts are emptied and locked, so nothing pays into a dead man.
  *
- * With nobody to inherit, the coin and the rents go to his power's treasury
- * and his debts die unpaid; the land stays in his name until someone claims it.
+ * Before any of that, his creditors are paid out of the estate
+ * (`estate-creditors.ts`): the secured, the public debts, then the private loans
+ * in proportion. An heir who takes an estate that covers its debts takes what is
+ * left of them with it; an heir (or none) facing more debt than estate leaves it
+ * to be sold to the creditors, and a debt beyond it is lost to them.
+ *
+ * With nobody to inherit, what the creditors did not take of the coin and the
+ * rents goes to his power's treasury; the land stays in his name until someone
+ * claims it.
  */
-export function settleEstate(world: WorldState, deceasedId: string, atStep: number): EstateSettlement {
+export function settleEstate(startWorld: WorldState, deceasedId: string, atStep: number): EstateSettlement {
+  let world = startWorld;
   const deceased = world.characters.find((character) => character.id === deceasedId);
   const authored = world.material.estates.find((estate) => estate.ownerCharacterId === deceasedId && estate.status !== "settled" && estate.status !== "escheated");
   const nothing: EstateSettlement = { world, estateId: null, transfers: [], beneficiaryIds: [], portions: [], reason: "", heirless: false, escheatedToAccountId: null, coin: 0 };
   if (deceased === undefined) return nothing;
 
-  const gathered = gatherEstate(world, deceased, authored);
+  let gathered = gatherEstate(world, deceased, authored);
   const heirs = heirsOf(world, deceased, authored, atStep);
-  const coin = gathered.accounts.reduce((sum, account) => sum + Math.max(0, account.balance), 0);
+  let coin = gathered.accounts.reduce((sum, account) => sum + Math.max(0, account.balance), 0);
   const owesAnything = gathered.holdingIds.length + gathered.ventureIds.length + gathered.dependantIds.length + gathered.debtIds.length + gathered.creditIds.length + gathered.incomeIds.length > 0;
   if (coin === 0 && !owesAnything && authored === undefined) return nothing;
+
+  const debtsTransfer = authored === undefined
+    ? true
+    : world.material.inheritanceRules.find((rule) => rule.id === authored.inheritanceRuleId)?.debtsTransfer ?? true;
+
+  // His creditors come before his heirs and the treasury: what he owed on loans is paid out of the estate in the order of
+  // `estate-creditors.ts`, and what the creditors took is no longer the estate's.
+  const creditors = payTheCreditors({
+    world, deceasedId, accounts: gathered.accounts, holdingIds: gathered.holdingIds, ventureIds: gathered.ventureIds,
+    hasHeir: heirs.ids.length > 0,
+    principalPurseId: heirs.ids[0] === undefined ? null : world.characters.find((character) => character.id === heirs.ids[0])?.personalAccountId ?? null,
+    debtsTransfer, estateId: authored?.id ?? boundedId(deceasedId, "estate", atStep), atStep,
+  });
+  if (creditors.debts !== null) {
+    world = creditors.world;
+    const again = gatherEstate(world, deceased, authored);
+    gathered = {
+      ...again,
+      holdingIds: again.holdingIds.filter((id) => !creditors.takenHoldingIds.has(id)),
+      ventureIds: again.ventureIds.filter((id) => !creditors.takenVentureIds.has(id)),
+    };
+    coin = gathered.accounts.reduce((sum, account) => sum + Math.max(0, account.balance), 0);
+  }
 
   let material = world.material;
   let characters = world.characters;
 
   // The rule the settlement went by, kept as a record because a transfer must
   // name an estate and an estate must name a rule.
-  const debtsTransfer = authored === undefined
-    ? true
-    : world.material.inheritanceRules.find((rule) => rule.id === authored.inheritanceRuleId)?.debtsTransfer ?? true;
   const ruleId = authored?.inheritanceRuleId ?? `customary-${heirs.rule}`;
   if (!material.inheritanceRules.some((rule) => rule.id === ruleId)) {
     material = { ...material, inheritanceRules: [...material.inheritanceRules, { id: ruleId, kind: heirs.rule, institutionId: null, debtsTransfer: true }] };
@@ -312,7 +345,7 @@ export function settleEstate(world: WorldState, deceasedId: string, atStep: numb
     }
     : { ...material, estates: material.estates.map((estate) => (estate.id === estateId ? { ...estate, status, settledAtStep: atStep } : estate)) };
 
-  const transfers: InheritanceTransfer[] = [];
+  const transfers: InheritanceTransfer[] = [...creditors.transfers];
   const transfer = (assetKind: InheritanceTransfer["assetKind"], assetId: string, beneficiaryId: string | null, reason: string): void => {
     transfers.push({
       id: boundedId(estateId, "transfer", assetKind, assetId, beneficiaryId ?? "none"),
@@ -445,7 +478,7 @@ export function settleEstate(world: WorldState, deceasedId: string, atStep: numb
     ...material,
     obligations: material.obligations.map((obligation) => {
       if (debts.has(obligation.id)) {
-        if (principal !== null && debtsTransfer) {
+        if (principal !== null && debtsTransfer && creditors.debts?.abstained !== true) {
           portions.get(principal)!.debtIds.push(obligation.id);
           transfer("obligation", obligation.id, principal, "The debt passes to the heir with the estate.");
           return { ...obligation, payerAccountId: purseOf(principal) };
@@ -480,6 +513,15 @@ export function settleEstate(world: WorldState, deceasedId: string, atStep: numb
     }
   }
 
+  // What he lent follows what was owed him: to his heir, else to his power.
+  const lentBy = (loan: { lenderKind: string; lenderId: string | null; status: string }): boolean => loan.lenderKind === "character" && loan.lenderId === deceasedId && loan.status === "active";
+  if (material.loans.some(lentBy)) {
+    material = {
+      ...material,
+      loans: material.loans.map((loan) => (!lentBy(loan) ? loan : principal !== null ? { ...loan, lenderId: principal } : treasury !== null && deceased.polityId !== null ? { ...loan, lenderKind: "polity" as const, lenderId: deceased.polityId } : loan)),
+    };
+  }
+
   material = { ...material, inheritanceTransfers: [...material.inheritanceTransfers, ...transfers] };
   return {
     world: { ...world, material, characters },
@@ -491,6 +533,7 @@ export function settleEstate(world: WorldState, deceasedId: string, atStep: numb
     heirless,
     escheatedToAccountId: treasury,
     coin,
+    debts: creditors.debts,
   };
 }
 

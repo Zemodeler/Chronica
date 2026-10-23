@@ -3,6 +3,7 @@ import {
   boundedId,
   computeOpinion,
   isMagistracy,
+  readDepartments,
   kmBetween,
   marchDaysFor,
   type CommandHold,
@@ -16,6 +17,7 @@ import { commandTenureOf } from "./constitutions";
 import type { ElectionGovernment } from "./elections";
 import type { IdFactory } from "./ports";
 import { promagistrateGrants, revokeHoldGrants } from "./promagistrate";
+import { allotTheProvinces, allotmentInWords, type Allotment, type Front } from "./the-provinces";
 
 /**
  * What becomes of a commander's army when his year of office runs out
@@ -144,6 +146,16 @@ export function tenureLean(world: WorldState, procedure: PoliticalProcedure): { 
     lean += war;
     reasons.push(war > 0 ? "the war is not yet won, and a new man would have to learn it (+6)" : "there is no war to keep him for (-10)");
   }
+  // A man whose accounts did not square, or who is under a charge of breach, is not given the year (`close-of-office.ts`).
+  const gap = world.diversions.some((row) => row.byCharacterId === man.id && row.foundAtStep !== null && procedure.openedAtStep - row.foundAtStep <= 400);
+  const breach = world.answerable.filter((entry) => entry.characterId === man.id && entry.kind === "breach").reduce((sum, entry) => sum + entry.weight, 0);
+  // A man who did a great act without the chamber's leave is not given the year: the Senate that was not asked does not ask him to stay (`usurpation.ts`).
+  const usurped = world.answerable.some((entry) => entry.characterId === man.id && entry.kind === "usurpation");
+  if (isProrogation(procedure) && (gap || breach > 0 || usurped)) {
+    const against = gap || usurped ? 14 + (usurped ? 8 : 0) : Math.min(10, 4 * breach);
+    lean -= against;
+    reasons.push(`his accounts do not square (-${against})`);
+  }
   if (isTriumphVote(procedure) && record.won + record.taken === 0) {
     lean -= 20;
     reasons.push("he won no victory worth a triumph (-20)");
@@ -163,7 +175,7 @@ function procedureOf(input: {
     openedAtStep: input.openedAt, deadlineStep: input.deadline, resolvedAtStep: null, visibility: "public",
     voteRecordId: null, outcome: null, outcomeReason: null, sourceEventIds: [], resultingEventIds: [],
     concerns: [...input.concerns], ...(input.sentence === undefined ? {} : { sentence: input.sentence }),
-  } as PoliticalProcedure;
+  };
 }
 
 export function keepCommandTenure(input: CommandTenureInput): { world: WorldState; facts: FactProposalDraft[] } {
@@ -182,7 +194,7 @@ export function keepCommandTenure(input: CommandTenureInput): { world: WorldStat
   let serial = 0;
   const localId = (kind: string): string => `tenure_${kind}_${(serial += 1)}`;
   const tell = (fact: Omit<FactProposalDraft, "localId"> & { readonly kind: string }): void => {
-    facts.push({ localId: localId(fact.kind), ...fact } as FactProposalDraft);
+    facts.push({ localId: localId(fact.kind), ...fact });
   };
   const addProcedure = (procedure: PoliticalProcedure): void => {
     world = { ...world, material: { ...world.material, politicalProcedures: [...world.material.politicalProcedures, procedure] } };
@@ -230,6 +242,40 @@ export function keepCommandTenure(input: CommandTenureInput): { world: WorldStat
       affectedRefs: [{ kind: "character", id: commander.id }, { kind: "procedure", id }, { kind: "polity", id: office.polityId }, ...armies.slice(0, 3).map((force) => ({ kind: "force" as const, id: force.id }))],
       visibility: "public", discoveryState: "public", knowableInDays: 0, significance: commander.id === input.playerCharacterId ? 70 : 40,
     });
+  }
+
+  // ── B0. The Senate assigns the provinces ───────────────────────────────────
+  // The year's new magistrates are sent to the armies that wait for them: by lot, or by decree to the abler man for the graver front (`the-provinces.ts`). A power the player rules keeps its old way.
+  const allotted = new Map<string, Allotment>();
+  for (const polityId of [...new Set(input.endedTerms.map((ended) => officeOf(ended.officeId)?.polityId).filter((id): id is string => id !== undefined))].sort()) {
+    if (!byYear(polityId) || (input.playerCharacterId != null && readDepartments(world).rulers(polityId).some((ruler) => ruler.id === input.playerCharacterId))) continue;
+    const ends = input.endedTerms.filter((ended) => officeOf(ended.officeId)?.polityId === polityId && isMagistracy(officeOf(ended.officeId)));
+    const fronts: Front[] = [];
+    for (const ended of ends) {
+      const man = world.characters.find((character) => character.id === ended.characterId && character.alive);
+      const armies = man === undefined ? [] : armiesLedBy(world, man.id, polityId);
+      // The player's own army is not allotted for him: it passes by the old rule, to the man who took his seat.
+      if (man === undefined || armies.length === 0 || holdOf(man.id) !== undefined || man.id === input.playerCharacterId || fronts.some((front) => front.outgoingId === man.id)) continue;
+      const kept = world.material.politicalProcedures.find((procedure) => procedure.id === prorogationId(man.id, ended.endedAtStep))?.outcome === "passed" && commandTenureOf(world, polityId) === "annual_prorogable";
+      if (!kept) fronts.push({ outgoingId: man.id, forces: armies });
+    }
+    if (fronts.length === 0) continue;
+    const outgoing = new Set(fronts.map((front) => front.outgoingId));
+    const spoken = new Set(world.commandHolds.filter((hold) => hold.status === "active" && hold.basis === "awaiting_successor").map((hold) => hold.successorCharacterId));
+    const offices = new Set(ends.map((ended) => ended.officeId));
+    const candidates = [...new Set(world.material.officeSeats.filter((seat) => offices.has(seat.officeId) && seat.status === "held" && seat.holderCharacterId !== null).map((seat) => seat.holderCharacterId!))]
+      .map((id) => world.characters.find((character) => character.id === id && character.alive))
+      .filter((character): character is NonNullable<typeof character> => character !== undefined && !outgoing.has(character.id) && !spoken.has(character.id) && armiesLedBy(world, character.id, polityId).length === 0);
+    const settled = allotTheProvinces(world, { polityId, fronts, candidates, day, gameId: "the-senate" });
+    for (const entry of settled) allotted.set(entry.outgoingId, entry);
+    if (settled.length > 0) {
+      tell({
+        kind: "provinces_assigned",
+        summary: `The Senate has settled the provinces of the year: ${allotmentInWords(world, settled)}.`.slice(0, 600),
+        affectedRefs: [{ kind: "polity", id: polityId }, ...settled.slice(0, 3).map((entry) => ({ kind: "character" as const, id: entry.successorId }))],
+        visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 40,
+      });
+    }
   }
 
   // ── B. The year ends ───────────────────────────────────────────────────────
@@ -366,12 +412,15 @@ export function keepCommandTenure(input: CommandTenureInput): { world: WorldStat
 
   /** The man who takes over from him: whoever now holds his office and has no army of his own, nearest first. */
   function successorFor(outgoingId: string, officeId: string): string | null {
+    // The Senate's allotment of the year, where it made one and the man still holds the office.
+    const settled = allotted.get(outgoingId);
+    if (settled !== undefined && world.material.officeSeats.some((seat) => seat.officeId === officeId && seat.status === "held" && seat.holderCharacterId === settled.successorId)) return settled.successorId;
     const holders = world.material.officeSeats
       .filter((seat) => seat.officeId === officeId && seat.status === "held" && seat.holderCharacterId !== null && seat.holderCharacterId !== outgoingId)
       .map((seat) => world.characters.find((character) => character.id === seat.holderCharacterId))
       .filter((character): character is NonNullable<typeof character> => character !== undefined && character.alive);
     // One already coming to another army is spoken for.
-    const spoken = new Set(world.commandHolds.filter((hold) => hold.status === "active" && hold.basis === "awaiting_successor" && hold.characterId !== outgoingId).map((hold) => hold.successorCharacterId));
+    const spoken = new Set([...world.commandHolds.filter((hold) => hold.status === "active" && hold.basis === "awaiting_successor" && hold.characterId !== outgoingId).map((hold) => hold.successorCharacterId), ...[...allotted.values()].map((entry) => entry.successorId)]);
     const free = holders.filter((character) => !spoken.has(character.id) && armiesLedBy(world, character.id, character.polityId).length === 0);
     return (free[0] ?? holders.find((character) => !spoken.has(character.id)) ?? null)?.id ?? null;
   }

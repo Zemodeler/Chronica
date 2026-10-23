@@ -48,7 +48,8 @@ describe("villains", () => {
     expect(laid!.deltas[0]).toMatchObject({ op: "covert_plot_open", targetCharacterRef: rulerId, sponsorCharacterRef: plotterId });
     // Nobody the model is playing is moved by the rules.
     const played = Array.from({ length: 12 }, (_, month) => decideVillainy({ world: at(world, 400 + 30 * month), gameId: "villains", playerCharacterId: null, playedByModel: new Set([plotterId]) })).flat();
-    expect(played.some((decision) => decision.act === "plot")).toBe(false);
+    // (His own plot, not another court's: some other villain of the wide world may be laying one, and it is the rules' to lay.)
+    expect(played.some((decision) => decision.act === "plot" && decision.actorCharacterId === plotterId)).toBe(false);
   });
 
   const plot = (outcome: CovertPlot["outcome"], targetCharacterId: string, sponsorCharacterId: string): CovertPlot => ({

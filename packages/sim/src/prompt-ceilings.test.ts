@@ -26,11 +26,16 @@ describe("the system prompts stay the size they are", () => {
     // a little wider than the orchestrator's for that reason, so a change
     // that pays its way there is not refused here.
     // Raised 63k -> 73k (2026-10-03), for the same schema as the orchestrator's.
-    expect(COGNITION_SYSTEM_PROMPT.length).toBeLessThan(73_000);
+    // Lowered 85k -> 74.5k (2026-10-08): the routine acts (tax, coin, estates, ventures, state loans) left the menu a person is shown
+    // (`kept-by-the-officers.ts`); it measured 73.9k with the paragraph that says so. Raise it only for a real new capability.
+    // Raised 74.5k -> 74.9k (2026-10-08): the "adopt" delta (a man takes an heir out of another gens), 260 characters of the generated schema, after trimming the prose beside it; it measures 74.7k.
+    expect(COGNITION_SYSTEM_PROMPT.length).toBeLessThan(74_900);
   });
 
   it("the historian, the repairer and the reconciler: prose only", () => {
-    expect(CHRONICLE_SYSTEM_PROMPT.length).toBeLessThan(4_500);
+    // Raised 4.5k -> 5.2k (2026-10-04) for two register exemplars (plan chronicle-and-order-truth, 3.3).
+    // Raised 5.2k -> 7k (2026-10-06): the passage is a campaign-journal paragraph, not a note, and the register exemplars are longer to show it.
+    expect(CHRONICLE_SYSTEM_PROMPT.length).toBeLessThan(7_000);
     expect(DELTA_REPAIR_SYSTEM_PROMPT.length).toBeLessThan(1_300);
     expect(FACT_RECONCILE_SYSTEM_PROMPT.length).toBeLessThan(1_400);
   });

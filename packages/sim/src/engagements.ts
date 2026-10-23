@@ -1,3 +1,4 @@
+import { isDecisiveFight } from "./decisive-fight";
 import {
   StructureSchema,
   aptitude,
@@ -19,10 +20,12 @@ import {
   type Force,
   type ScenarioWarfareRules,
   type WorldState,
+  applyForagingScar,
 } from "@chronica/shared";
 import { resolveEngagement, type BattleAccount } from "./battle";
 import { remember } from "./grievances";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Fights that last (docs/plans/battles-that-last.md, phase 1).
@@ -40,7 +43,7 @@ import type { IdFactory } from "./ports";
  *   a few dead. Accepted, it is a pitched battle, fought whole by the resolver;
  *   one that ends with neither line broken goes on the next day.
  * - It ends when one side is driven from the field, has left it, falls back
- *   outnumbered three to one, or -- the attacking side -- is put on hold.
+ *   outnumbered three to one (not a defender ordered to hold), or -- the attacking side -- is put on hold.
  *
  * Who accepts battle is decided here by rule until the commanders themselves
  * are asked at the moments that matter (phase 3): a general with an army to
@@ -247,7 +250,7 @@ export function fightRound(input: FightInput, engagementId: string, day: number,
       : candidate)),
   });
   const fact = (localId: string, kind: string, summary: string, forces: readonly Force[], significance: number): FactProposalDraft => ({
-    localId: `${localId}_${engagement.id}_${day}`.slice(0, 60),
+    localId: safeLocalId(`${localId}_${engagement.id}_${day}`).slice(0, 60),
     kind,
     summary: summary.slice(0, 600),
     affectedRefs: [{ kind: "province", id: engagement.provinceId }, ...forces.slice(0, 6).map((force) => ({ kind: "force" as const, id: force.id }))],
@@ -279,7 +282,9 @@ export function fightRound(input: FightInput, engagementId: string, day: number,
   // does not, the rule the engine plays by stands.
   const player = input.playerCharacterId ?? null;
   const his = (force: Force): boolean => player !== null && (force.commanderCharacterId === player || force.controllerCharacterId === player);
-  const playerSide = defenders.some(his) ? "defender" as const : attackersNow.some(his) ? "attacker" as const : null;
+  const sideOfPlayer = defenders.some(his) ? "defender" as const : attackersNow.some(his) ? "attacker" as const : null;
+  // Only a fight that can decide a campaign stops the turn for his word; a lesser one is the commander's own to settle, by the engine's rule.
+  const playerSide = sideOfPlayer !== null && isDecisiveFight(world, engagement.provinceId, sideOfPlayer === "defender" ? defenders : attackersNow, sideOfPlayer === "defender" ? attacking : defenders, rules) ? sideOfPlayer : null;
   const mineNow = playerSide === "defender" ? defenders : playerSide === "attacker" ? attackersNow : [];
   const theirsNow = playerSide === "defender" ? attacking : playerSide === "attacker" ? defenders : [];
   const seen = new Set(engagement.seenForceIds);
@@ -313,26 +318,36 @@ export function fightRound(input: FightInput, engagementId: string, day: number,
     record({ seenForceIds: [...new Set([...engagement.seenForceIds, ...attackersNow.map((force) => force.id), ...defenders.map((force) => force.id)])].slice(-32) });
   }
 
-  // Outnumbered three to one, a commander does not wait to be destroyed.
+  // Outnumbered three to one, a commander does not wait to be destroyed -- unless he is caught: a camp stormed or a night
+  // attack ordered for today falls on him before he can go. A legion of 2,700 slipped away from 17,000 Romans ten times in a
+  // year, because the manoeuvre that should have pinned it was tried only after it had gone (consul-run-issues H3).
+  const pinning = (world.engagements.find((candidate) => candidate.id === engagement.id) ?? engagement).manoeuvre;
+  const pinnedToday = pinning?.kind === "storm_camp" || pinning?.kind === "night_attack";
   const weakSide = attackWeight < defendWeight * WITHDRAWS_BELOW ? attacking : defendWeight < attackWeight * WITHDRAWS_BELOW ? defenders : null;
-  if (weakSide !== null) {
+  // A garrison ordered to hold stands where it is, whatever the odds: "hold the walls" means it does not fall back (a held
+  // legion left its only city eleven times in one run, losing 6 in a hundred of its men each time).
+  const standsOnHold = weakSide === defenders && defenders.length > 0 && defenders.every((force) => force.hold === true);
+  if (weakSide !== null && !(weakSide === defenders && pinnedToday) && !standsOnHold) {
     const strongSide = weakSide === attacking ? defenders : attacking;
     const to = retreatRoute(world, weakSide[0]!, engagement.provinceId, new Set(strongSide.map((force) => force.polityId)));
     if (to !== null) {
       const going = new Set(weakSide.map((force) => force.id));
+      // The pursuit takes its toll of the rear: more for the worse odds, and more where the pursuers have horse.
+      const odds = weight(strongSide) / Math.max(1, weight(weakSide));
+      const cutDown = pursuitLosses(odds, horseShare(strongSide, rules));
       world = {
         ...world,
         material: {
           ...world.material,
           forces: world.material.forces.map((force) => (going.has(force.id)
-            ? { ...force, locationId: to, positionId: null, fatigueBps: Math.min(10_000, force.fatigueBps + 1_000) }
+            ? { ...losses(force, cutDown, day, engagement.id), locationId: to, positionId: null, fatigueBps: Math.min(10_000, force.fatigueBps + 1_000), moraleBps: Math.max(0, force.moraleBps - PURSUIT_MORALE_BPS) }
             : force)),
         },
       };
-      facts.push(fact("withdrew", "force_withdrew", `${names(weakSide)}, outnumbered three to one, would not stand against ${names(strongSide)} at ${where}, and fell back into ${provinceName(world, to)}.`, [...weakSide, ...strongSide], 55));
+      facts.push(fact("withdrew", "force_withdrew", `${names(weakSide)}, outnumbered three to one, would not stand against ${names(strongSide)} at ${where}, and fell back into ${provinceName(world, to)}${cutDown > 0 ? `, losing ${Math.round(cutDown * 100)} in a hundred of its men to the pursuit` : ""}.`, [...weakSide, ...strongSide], 55));
       world = end("withdrew", weakSide === attacking ? "defender" : "attacker");
       const taken = takeTheCamp(world, strongSide, weakSide, engagement.provinceId, day);
-      facts.push(...taken.facts.map((drafted) => ({ ...drafted, localId: `${drafted.localId}_${engagement.id}`.slice(0, 60) })));
+      facts.push(...taken.facts.map((drafted) => ({ ...drafted, localId: safeLocalId(`${drafted.localId}_${engagement.id}`).slice(0, 60) })));
       return { world: taken.world, facts, battles };
     }
   }
@@ -444,16 +459,18 @@ export function fightRound(input: FightInput, engagementId: string, day: number,
   const wouldRefuse = offered && (playerSide === "defender" && refusable && engagement.playerStance !== null
     ? engagement.playerStance === "refuse"
     : !acceptsBattle(world, defenders, attackWeight, defendWeight));
-  const disheartened = wouldRefuse && defenders.reduce((sum, force) => sum + force.moraleBps, 0) / defenders.length < REFUSAL_BREAKS_BELOW;
+  // A camp being stormed today is not left by night: the stormers are already at the rampart (consul-run-issues H3).
+  const disheartened = !forcePitched && wouldRefuse && defenders.reduce((sum, force) => sum + force.moraleBps, 0) / defenders.length < REFUSAL_BREAKS_BELOW;
   if (disheartened) {
     const to = retreatRoute(world, defenders[0]!, engagement.provinceId, new Set(attacking.map((force) => force.polityId)));
     if (to !== null) {
       const going = new Set(defenders.map((force) => force.id));
-      world = { ...world, material: { ...world.material, forces: world.material.forces.map((force) => (going.has(force.id) ? { ...force, locationId: to, positionId: null, fatigueBps: Math.min(10_000, force.fatigueBps + 1_000) } : force)) } };
+      const cutDown = pursuitLosses(attackWeight / Math.max(1, defendWeight), horseShare(attacking, rules));
+      world = { ...world, material: { ...world.material, forces: world.material.forces.map((force) => (going.has(force.id) ? { ...losses(force, cutDown, day, engagement.id), locationId: to, positionId: null, fatigueBps: Math.min(10_000, force.fatigueBps + 1_000) } : force)) } };
       facts.push(fact("gave_up_the_camp", "force_withdrew", `${names(defenders)}, disheartened after refusing battle day after day, left ${defenders.length === 1 ? "its" : "their"} camp at ${where} by night and fell back into ${provinceName(world, to)}, leaving the field to ${names(attacking)}.`, [...defenders, ...attacking], 60));
       world = end("withdrew", "attacker");
       const taken = takeTheCamp(world, attacking, defenders, engagement.provinceId, day);
-      facts.push(...taken.facts.map((drafted) => ({ ...drafted, localId: `${drafted.localId}_${engagement.id}`.slice(0, 60) })));
+      facts.push(...taken.facts.map((drafted) => ({ ...drafted, localId: safeLocalId(`${drafted.localId}_${engagement.id}`).slice(0, 60) })));
       return { world: taken.world, facts, battles };
     }
   }
@@ -545,7 +562,7 @@ export function fightRound(input: FightInput, engagementId: string, day: number,
     if (winner !== null) {
       const taken = takeTheCamp(world, winner === "attacker" ? stillAttacking : stillDefending, winner === "attacker" ? defenders : attacking, engagement.provinceId, day);
       world = taken.world;
-      facts.push(...taken.facts.map((drafted) => ({ ...drafted, localId: `${drafted.localId}_${engagement.id}`.slice(0, 60) })));
+      facts.push(...taken.facts.map((drafted) => ({ ...drafted, localId: safeLocalId(`${drafted.localId}_${engagement.id}`).slice(0, 60) })));
     }
   }
 
@@ -564,7 +581,7 @@ export function fightRound(input: FightInput, engagementId: string, day: number,
       const key = `idle:${bystander.id}`.slice(0, 60);
       const now = world.engagements.find((candidate) => candidate.id === engagement.id)!;
       if (now.asked.includes(key)) continue;
-      if (his(bystander) && now.status === "open" && now.awaiting === null) {
+      if (his(bystander) && now.status === "open" && now.awaiting === null && isDecisiveFight(world, engagement.provinceId, [bystander, ...attacking], defenders, rules)) {
         world = { ...world, engagements: world.engagements.map((candidate) => (candidate.id === engagement.id
           ? { ...candidate, awaiting: { kind: "ally_fighting" as const, side: "attacker" as const, askedAtStep: day }, asked: [...candidate.asked, key].slice(-40) }
           : candidate)) };
@@ -694,6 +711,18 @@ function horseShare(side: readonly Force[], rules: ScenarioWarfareRules): number
   return horse / all;
 }
 
+/** What a withdrawal costs the morale of the men who make it, in basis points. */
+const PURSUIT_MORALE_BPS = 600;
+/**
+ * The share of a withdrawing side cut down by the pursuit: stragglers, the baggage guard, the wounded left behind. A few in a
+ * hundred at even odds, more the worse the odds and the more horse the pursuers have, never more than an eighth. A retreat
+ * that cost nothing let a small army run before a large one for a year (consul-run-issues H3).
+ */
+export function pursuitLosses(odds: number, pursuersHorse: number): number {
+  const share = 0.02 + Math.max(0, odds - 1) * 0.01 + Math.max(0, Math.min(1, pursuersHorse)) * 0.06;
+  return Math.min(0.12, Math.round(share * 1_000) / 1_000);
+}
+
 /** A share of a force's men lost, written into its history against the fight. */
 function losses(force: Force, share: number, day: number, cause: string): Force {
   if (share <= 0) return force;
@@ -717,12 +746,12 @@ function ravage(world: WorldState, provinceId: string, watchers: readonly Force[
     ...world,
     material: {
       ...world.material,
-      provinceMaterial: world.material.provinceMaterial.map((row) => (row.provinceId !== provinceId ? row : {
+      provinceMaterial: world.material.provinceMaterial.map((row) => (row.provinceId !== provinceId ? row : applyForagingScar({
         ...row,
         foodSecurityBps: Math.max(0, row.foodSecurityBps - 300),
         stabilityBps: Math.max(0, row.stabilityBps - 200),
         warDamageBps: Math.min(10_000, row.warDamageBps + 300),
-      })),
+      }, 300))),
     },
     characters: commanderId === null ? world.characters : world.characters.map((character) => (character.id === commanderId
       ? { ...character, prestigeBps: Math.max(0, character.prestigeBps - PROVOKED_STANDING_BPS) }
@@ -845,7 +874,7 @@ export function noteWhoFaces(world: WorldState, toDay: number, warfare: Scenario
         const days = toDay - record.openedAtStep;
         if (known !== undefined && days !== FACING_REMINDER_DAYS) continue;
         facts.push({
-          localId: `facing_${record.id}_${toDay}`.slice(0, 60),
+          localId: safeLocalId(`facing_${record.id}_${toDay}`).slice(0, 60),
           kind: "armies_facing",
           summary: days === 0
             ? `${a.name} and ${b.name}, whose powers are at war, stand facing each other in ${provinceName(world, provinceId)}. Neither has been ordered to attack.`

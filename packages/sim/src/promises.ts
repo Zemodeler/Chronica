@@ -1,5 +1,6 @@
 import {
   isOwedATurn,
+  goalsMet,
   breakCommitment,
   cancelCommitment,
   checkCommitmentAuthority,
@@ -13,6 +14,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { kinOf, remember, teach, type Grievance } from "./grievances";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Promises kept and broken (character-sim, commitments).
@@ -52,6 +54,7 @@ export interface PromiseInput {
 
 /** What the record shows was done for the beneficiary since the promise was made. */
 export function keptOnTheRecord(world: WorldState, commitment: Commitment): string | null {
+  if (commitment.completionGoals !== undefined) return goalsMet(world, commitment.completionGoals) === "met" ? "The treaty's recorded outcomes have been met" : null;
   const promisor = world.characters.find((character) => character.id === commitment.promisorCharacterId);
   const beneficiary = world.characters.find((character) => character.id === commitment.beneficiaryCharacterId);
   if (promisor === undefined || beneficiary === undefined) return null;
@@ -197,7 +200,7 @@ export function keepPromises(input: PromiseInput): { world: WorldState; facts: F
     const { promisorCharacterId: promisor, beneficiaryCharacterId: beneficiary } = commitment;
     const refs = [{ kind: "character" as const, id: promisor }, { kind: "character" as const, id: beneficiary }];
     const told = (kind: string, summary: string, significance: number): FactProposalDraft => ({
-      localId: `${kind}_${commitment.id}`.slice(0, 60),
+      localId: safeLocalId(`${kind}_${commitment.id}`).slice(0, 60),
       kind,
       summary: summary.slice(0, 600),
       affectedRefs: refs,
@@ -214,7 +217,8 @@ export function keepPromises(input: PromiseInput): { world: WorldState; facts: F
       continue;
     }
 
-    const deed = commitment.status === "prepared" ? `${nameOf(promisor)} did as he said` : keptOnTheRecord(world, commitment);
+    const deed = commitment.status === "prepared" && commitment.completionGoals === undefined
+      ? `${nameOf(promisor)} did as he said` : keptOnTheRecord(world, commitment);
     const due = commitment.reviewAtStep <= input.toDay;
     const paysByHand = commitment.actionKind === "payment" && commitment.requiredResource !== null && promisor !== input.playerCharacterId
       && checkCommitmentAuthority(world, promisor, commitment.requiredOfficeId, commitment.requiredResource).ok;
@@ -233,6 +237,10 @@ export function keepPromises(input: PromiseInput): { world: WorldState; facts: F
     }
     if (!due) continue;
 
+    // A guarantee upon withdrawal remains in force while withdrawal has not
+    // happened. Its deadline alone is not proof that the guarantor harmed it.
+    if (commitment.completionGoals?.some((goal) => goal.kind === "safe_passage")) continue;
+
     // A promise to hold back is kept by holding back. Its day passing is the
     // proof of it, not a breach: Fabricius was marked a traitor to his word
     // for not having written a letter he had never promised (R23).
@@ -245,7 +253,7 @@ export function keepPromises(input: PromiseInput): { world: WorldState; facts: F
       };
       world = remember(world, [{
         subjectCharacterId: beneficiary, targetCharacterId: promisor,
-        label: `Held to his word: ${commitment.description}`, score: 4, dimensions: { trust: 6 },
+        label: `Held to his word: ${commitment.description}`.slice(0, 200), score: 4, dimensions: { trust: 6 },
       }], input.toDay, `promise-held-${commitment.id}`);
       continue;
     }
@@ -273,7 +281,7 @@ export function keepPromises(input: PromiseInput): { world: WorldState; facts: F
     }
     world = settled(world, breakCommitment(world, commitment.id, input.toDay, able ? "He let its day pass twice." : "He no longer holds what he promised."));
     const wronged: Grievance[] = [
-      { subjectCharacterId: beneficiary, targetCharacterId: promisor, label: `Broke his word: ${commitment.description}`, score: -14, dimensions: { trust: -20, reputation: -8 } },
+      { subjectCharacterId: beneficiary, targetCharacterId: promisor, label: `Broke his word: ${commitment.description}`.slice(0, 200), score: -14, dimensions: { trust: -20, reputation: -8 } },
       ...kinOf(world, beneficiary).filter((kin) => kin !== promisor).map((kin): Grievance => ({
         subjectCharacterId: kin, targetCharacterId: promisor, label: `Broke his word to ${nameOf(beneficiary)}`, score: -5, dimensions: { trust: -6 },
       })),

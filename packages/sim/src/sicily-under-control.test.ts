@@ -115,7 +115,7 @@ describe("war and peace in a private man's name", () => {
     expect(letter.withoutAuthority).toBe(true);
     const carthaginian = world.characters.find((character) => character.alive && character.polityId === "carthage")!;
     const answered = applyDeltas({ ...world, diplomacy: world.diplomacy.map((message) => (message.id === letter.id ? { ...message, deliveredOnDay: 0 } : message)) },
-      [{ op: "diplomatic_message_answer", messageRef: letter.id, answer: "accepted", answerText: "Agreed.", reason: "It suits Carthage." } as WorldDelta], contextFor(carthaginian.id, "answer"));
+      [{ op: "diplomatic_message_answer", messageRef: letter.id, answer: "accepted", answerText: "Agreed.", reason: "It suits Carthage." }], contextFor(carthaginian.id, "answer"));
     const waiting = answered.world.diplomacy.find((message) => message.id === letter.id)!;
     expect(answered.world.polityAgreements.some((agreement) => agreement.kind === "alliance" && agreement.sourceMessageId === letter.id)).toBe(false);
     expect(waiting.ratification?.status).toBe("waiting");
@@ -134,7 +134,7 @@ describe("a peace that already stands", () => {
     const world = { ...base, polityAgreements: [...base.polityAgreements, { id: "agreement-peace", kind: "peace" as const, polityId: "rome", otherPolityId: "carthage", terms: "Peace.", sinceStep: 0, untilStep: null, sourceMessageId: null, status: "active" as const, endedAtStep: null, endedReason: null, visibility: "public" as const }] };
     const theirs = world.map.provinces.find((province) => province.controllerPolityId === "carthage")!;
     const more = applyDeltas(world, [{ op: "agreement_open", localId: "peace2", kind: "peace", polityId: "rome", otherPolityId: "carthage", terms: "And a province of theirs.", forDays: null, sourceMessageRef: null, visibility: "public",
-      clauses: [{ kind: "cession", provinceId: theirs.id, toPolityId: "rome" }], reason: "Further terms." } as WorldDelta], { ...contextFor(CONSUL), actsForTheWorld: true });
+      clauses: [{ kind: "cession", provinceId: theirs.id, toPolityId: "rome" }], reason: "Further terms." }], { ...contextFor(CONSUL), actsForTheWorld: true });
     expect(more.rejected).toEqual([]);
     expect(more.world.map.provinces.find((province) => province.id === theirs.id)!.controllerPolityId).toBe("rome");
     expect(more.world.polityAgreements.filter((agreement) => agreement.kind === "peace" && agreement.status === "active"
@@ -157,7 +157,7 @@ describe("an office the Senate makes for a man", () => {
       material: { ...world.material, politicalProcedures: [...world.material.politicalProcedures, procedure] },
       enactments: [...world.enactments, { procedureId: procedure.id, polityId: "rome", office: { officeId: office.id, officeLabel: office.label, termDays: 365 } }],
     });
-    const seated = seatByOutcome(withIt, procedure as never, 10, definition.government.offices);
+    const seated = seatByOutcome(withIt, procedure, 10, definition.government.offices);
     expect(seated.material.officeSeats.some((seat) => seat.officeId === office.id && seat.holderCharacterId === CONSUL && seat.status === "held")).toBe(true);
   });
 });

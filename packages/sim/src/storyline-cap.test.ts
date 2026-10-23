@@ -79,6 +79,16 @@ describe("the threads the world follows (E24)", () => {
     expect(roomy.rejected).toHaveLength(0);
   });
 
+  it("opens a seed's own thread past the cap, setting the stalest world thread aside (consul-run-issues M2)", () => {
+    // The narrator asked for the thread in the same prompt, and the cap refused what it had asked for.
+    const seeded = { ...open, localId: "seeded", seedKey: "seed-rumour", title: "Talk of the Pay Chest" };
+    const result = applyDeltas(crowded(WORLD_THREAD_CAP), [seeded], context({ actsForTheWorld: true }));
+    expect(result.rejected).toHaveLength(0);
+    expect(result.world.storylines.find((storyline) => storyline.seedKey === "seed-rumour")?.phase).toBe("brewing");
+    expect(result.world.storylines.find((storyline) => storyline.id === "world-0")!.phase).toBe("closed");
+    expect(openIn(result.world, "world")).toHaveLength(WORLD_THREAD_CAP);
+  });
+
   it("brings the world's threads back under the cap at the day's sweep, whatever path opened them", () => {
     // A covert plot, a commander cut off, an heirless estate: each opens its
     // thread without asking, and a save held twenty-six.

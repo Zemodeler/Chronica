@@ -2,9 +2,11 @@ import { currentAgeYears } from "./age";
 import { isMagistracy, type Character, type Office } from "./character";
 import { officeNamedIn } from "./player-materialization";
 import { resolveEligibility } from "./political-authority";
+import { cursusRefusal } from "./cursus";
 import { campaignsOf } from "../warfare/service";
 import type { PoliticalProcedure } from "../material-state";
 import type { WorldState } from "../world/world-state";
+import { nobilitasBps, nobilitasWeightBps, priestlyBar, priestlyTaboo, type GentesView } from "../world/gentes";
 
 /**
  * Who could hold an office: the rules an election uses to find its men, kept
@@ -26,7 +28,7 @@ const YOUTH_BPS_PER_YEAR = 50;
 /** What the office's own requirements ask, for eligibility and for standing. */
 export function officeRequirements(world: Pick<WorldState, "material">, office: Office): { readonly requirementIds: readonly string[]; readonly minStanding: number } {
   const seat = world.material.officeSeats.find((candidate) => candidate.officeId === office.id);
-  const requirementIds = seat?.eligibilityRequirementIds ?? office.eligibilityRequirementIds;
+  const requirementIds = seat !== undefined && seat.eligibilityRequirementIds.length > 0 ? seat.eligibilityRequirementIds : office.eligibilityRequirementIds;
   const minStanding = world.material.eligibilityRequirements
     .filter((requirement) => requirement.kind === "min_prestige" && requirementIds.includes(requirement.id))
     .map((requirement) => (requirement.params.minPrestigeBps as number | undefined) ?? 0)[0] ?? ELECTABLE_MIN_PRESTIGE_BPS;
@@ -77,8 +79,8 @@ export function isBeneath(world: Pick<WorldState, "material">, office: Office, o
  * so nobody could rise -- a quaestor could never become consul, nor a
  * tribune a praetor.
  */
-export function isEligibleFor(world: WorldState, office: Office, requirementIds: readonly string[], character: Character, toDay: number): boolean {
-  return admissionRefusal(world, office, requirementIds, character, toDay) === null;
+export function isEligibleFor(world: WorldState, office: Office, requirementIds: readonly string[], character: Character, toDay: number, steps = true): boolean {
+  return admissionRefusal(world, office, requirementIds, character, toDay, steps) === null;
 }
 
 /**
@@ -87,10 +89,16 @@ export function isEligibleFor(world: WorldState, office: Office, requirementIds:
  * required." Null when he may stand. A man refused used to be dropped from
  * the count without a word, and never learned he had not been on the ballot.
  */
-export function admissionRefusal(world: WorldState, office: Office, requirementIds: readonly string[], character: Character, toDay: number): string | null {
+export function admissionRefusal(world: WorldState, office: Office, requirementIds: readonly string[], character: Character, toDay: number, steps = true): string | null {
   const sitting = world.material.officeSeats.some((seat) => seat.officeId === office.id && seat.status === "held" && seat.holderCharacterId === character.id);
   if (sitting) return `${character.name} already holds it.`;
   if (!character.alive) return `${character.name} is dead.`;
+  // The old rites went to patricians by birth, whatever else the office asks.
+  const barred = priestlyBar(office, character) ?? priestlyTaboo(world, office, character);
+  if (barred !== null) return barred;
+  // The custom of the ladder, and a conviction's bar (`cursus.ts`).
+  const custom = cursusRefusal(world, office, character, toDay, requirementIds, steps);
+  if (custom !== null) return custom;
   const result = resolveEligibility({ ...world, elapsedStep: toDay }, character.id, requirementIds, office.id);
   return result.eligible ? null : result.failedReasons.join(" ");
 }
@@ -101,11 +109,14 @@ export function admissionRefusal(world: WorldState, office: Office, requirementI
  * is: the tribunes were picked from the young men of the tribes who had
  * already been under the standards.
  */
-export function candidateScore(office: Office, character: Character, toDay: number): number {
-  if (!isJuniorCollege(office)) return character.prestigeBps;
+export function candidateScore(office: Office, character: Character, toDay: number, gentes?: GentesView): number {
+  // A name weighs with the electors: a consul's descendant stood for the curule chairs on his forefathers' images,
+  // and a new man on his own deeds (`world/gentes.ts`). Only where the world keeps gentes.
+  const name = gentes === undefined ? 0 : Math.round((nobilitasBps(gentes, character) * nobilitasWeightBps(office)) / 10_000);
+  if (!isJuniorCollege(office)) return character.prestigeBps + name;
   const served = Math.min(SERVICE_CAMPAIGNS_COUNTED, campaignsOf(character)) * SERVICE_BPS_PER_CAMPAIGN;
   const youth = Math.max(0, YOUTH_AGE - currentAgeYears(character, toDay)) * YOUTH_BPS_PER_YEAR;
-  return character.prestigeBps + served + youth;
+  return character.prestigeBps + served + youth + name;
 }
 
 /** Who the electors would think of unprompted: eligible, of standing, not above it, likeliest first. */
@@ -119,7 +130,7 @@ export function electableFor(
   const { requirementIds, minStanding } = officeRequirements(world, office);
   return world.characters
     .filter((character) => character.id !== excludeId && character.prestigeBps >= minStanding && !isBeneath(world, office, officesById, character) && isEligibleFor(world, office, requirementIds, character, toDay))
-    .sort((a, b) => candidateScore(office, b, toDay) - candidateScore(office, a, toDay) || a.id.localeCompare(b.id));
+    .sort((a, b) => candidateScore(office, b, toDay, world) - candidateScore(office, a, toDay, world) || a.id.localeCompare(b.id));
 }
 
 /** The man a candidacy puts forward: the person it names, or -- for "Gaius stands for consul", written about the office -- whoever moved it. */

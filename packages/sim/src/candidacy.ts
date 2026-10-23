@@ -10,6 +10,7 @@ import {
   type SuccessionRule,
   type WorldState,
 } from "@chronica/shared";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * A man putting his name forward for an elected office is admitted or refused
@@ -44,7 +45,7 @@ export function admitCandidacy(
     : { ...procedure, eligibilityRequirementIds: [...requirementIds], stage: "resolved" as const, outcome: "failed" as const, outcomeReason: `Not admitted: ${refusal}`.slice(0, 400), resolvedAtStep: atStep };
   if (refusal !== null) {
     emitFact({
-      localId: `candidacy_refused_${procedure.id}`.replace(/[^a-z0-9_-]/g, "_").slice(0, 60),
+      localId: safeLocalId(`candidacy_refused_${procedure.id}`).replace(/[^a-z0-9_-]/g, "_").slice(0, 60),
       kind: "candidacy_refused",
       summary: `The presiding magistrate would not take ${candidate.name}'s name for ${office.label}: ${refusal}`.slice(0, 600),
       affectedRefs: [{ kind: "character", id: candidate.id }, { kind: "polity", id: office.polityId }],

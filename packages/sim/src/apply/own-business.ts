@@ -44,6 +44,9 @@ export function isOwnBusiness(
     // What he believes, and what he persuades others of.
     case "belief_set":
       return isActor(delta.holderCharacterRef) || isActor(delta.sourceCharacterRef);
+    // A house founded out of his own purse is his own business; a power's purse is not his (the act refuses it).
+    case "house_found":
+      return delta.founderRef === null || isActor(delta.founderRef);
     // Declaring for or against a motion is his voice; how much it weighs is
     // the vote's business, not his authority's.
     case "political_support_set":
@@ -79,6 +82,8 @@ export function isOwnBusiness(
       const payer = world.material.accounts.find((account) => account.id === contract.employerAccountId);
       return contract.employeeCharacterId === actorId || (payer?.owner.kind === "character" && payer.owner.id === actorId);
     }
+    // Taking an heir into his own gens, or being taken: a household's business.
+    case "adopt": return isActor(delta.adopterRef) || isActor(delta.adopteeRef);
     // Freeing, selling or indulging his own slave is his household's business.
     case "legal_status_set": {
       const person = world.characters.find((candidate) => candidate.id === id(delta.characterRef));

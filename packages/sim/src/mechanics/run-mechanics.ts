@@ -23,6 +23,7 @@ import { mechanicScale } from "./price-mechanic";
 import { firingInWords, mechanicInWords } from "./mechanic-words";
 import { readableRefsFor } from "./refs";
 import { warrantStands } from "./validate-mechanic";
+import { safeLocalId } from "../safe-local-id";
 
 /**
  * Runs every live rule against the world as the clock arrives at `toDay`.
@@ -97,7 +98,7 @@ export function runMechanics(input: RunMechanicsInput): RunMechanicsResult {
     const ownerCharacter = owner.kind === "character" ? world.characters.find((character) => character.id === owner.id) : undefined;
     const record = (kind: string, summary: string, significance: number, others: readonly OrderPartyRef[] = []): void => {
       facts.push({
-        localId: `${kind}_${entity.id}_${(count += 1)}`.slice(0, 60),
+        localId: safeLocalId(`${kind}_${entity.id}_${(count += 1)}`).slice(0, 60),
         kind,
         summary,
         affectedRefs: [owner, ...others, ...(entity.provinceId === null || entity.provinceId === undefined ? [] : [{ kind: "province" as const, id: entity.provinceId }])].slice(0, 8),
@@ -215,7 +216,7 @@ export function runMechanics(input: RunMechanicsInput): RunMechanicsResult {
               ...(to === undefined ? {} : { destinationAccountId: to.id }),
               cause: { kind: "mechanic" as const, id: entity.id, explanation: entity.label.slice(0, 200) },
               visibility: "polity" as const,
-            }].slice(-500),
+            }],
           },
         };
       }

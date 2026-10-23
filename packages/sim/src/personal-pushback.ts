@@ -9,6 +9,7 @@ import {
 import { armiesLedBy, prosecutionOf } from "./command-tenure";
 import { remember } from "./grievances";
 import type { NarratorSeed } from "./narrator";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * The world pushing back on the player as a person (play-test L11).
@@ -53,7 +54,7 @@ export function prosecutePrivateMen(world: WorldState, day: number, playerCharac
       answerable: next.answerable.filter((entry) => entry.characterId !== characterId),
       material: { ...next.material, politicalProcedures: [...next.material.politicalProcedures, brought.procedure] },
     };
-    facts.push({ localId: `prosecuted_${characterId}_${day}`.slice(0, 60), ...brought.fact });
+    facts.push({ localId: safeLocalId(`prosecuted_${characterId}_${day}`).slice(0, 60), ...brought.fact });
   }
   return { world: next, facts };
 }
@@ -76,7 +77,7 @@ export function accuseInEarnest<S extends Pick<NarratorSeed, "archetype" | "seve
   if (brought === null) return untouched;
   return {
     world: { ...world, material: { ...world.material, politicalProcedures: [...world.material.politicalProcedures, brought.procedure] } },
-    facts: [{ localId: `accused_${player.id}_${day}`.slice(0, 60), ...brought.fact }],
+    facts: [{ localId: safeLocalId(`accused_${player.id}_${day}`).slice(0, 60), ...brought.fact }],
     seed: { ...seed, brief: `${seed.brief} The charge is already before the court [${brought.procedure.id}]: decide what it is and whether it is true; do not open another.` },
   };
 }
@@ -120,7 +121,7 @@ export function answerAThreat(world: WorldState, playerCharacterId: string | nul
     next = { ...next, characters: [...pressed.characters], characterPressures: [...pressed.characterPressures] };
   }
   const facts: FactProposalDraft[] = [{
-    localId: `threat_${player.id}_${day}`.slice(0, 60), kind: "state_threatened",
+    localId: safeLocalId(`threat_${player.id}_${day}`).slice(0, 60), kind: "state_threatened",
     summary: `${player.name} has threatened ${polity}${armed ? " at the head of an army" : ""}. The city is in alarm; its government is decreed to see that the state takes no harm, and ${rulers.map((ruler) => ruler.name).join(" and ")} must answer it.`.slice(0, 600),
     affectedRefs: [{ kind: "character", id: player.id }, { kind: "polity", id: polityId }, ...rulers.slice(0, 2).map((ruler) => ({ kind: "character" as const, id: ruler.id }))],
     visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 75,
@@ -129,7 +130,7 @@ export function answerAThreat(world: WorldState, playerCharacterId: string | nul
   const brought = prosecutionOf(next, player.id, polityId, [{ label: `treason, for threatening ${polity}${armed ? " with an army" : ""}`, weight: armed ? 10 : 8 }], day, playerCharacterId, "", 1);
   if (brought !== null) {
     next = { ...next, material: { ...next.material, politicalProcedures: [...next.material.politicalProcedures, brought.procedure] } };
-    facts.push({ localId: `treason_${player.id}_${day}`.slice(0, 60), ...brought.fact });
+    facts.push({ localId: safeLocalId(`treason_${player.id}_${day}`).slice(0, 60), ...brought.fact });
   }
   return { world: next, facts };
 }

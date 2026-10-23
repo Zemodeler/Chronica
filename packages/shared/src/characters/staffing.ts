@@ -76,7 +76,7 @@ export function personFor(spec: PersonSpec, atStep: number): { character: Record
  */
 function uniqueName(polityId: string, role: string, used: ReadonlySet<string>): string {
   const plain = aNameFor(polityId, role, used);
-  if (!plain.includes(" of the ")) return plain;
+  if (!used.has(plain)) return plain;
   const { first } = POOLS[cultureOf(polityId)];
   for (let attempt = 0; attempt < 2_000; attempt += 1) {
     const son = first[stableHash([polityId, role, "son", attempt]) % first.length]!;
@@ -84,7 +84,21 @@ function uniqueName(polityId: string, role: string, used: ReadonlySet<string>): 
     const name = `${son} son of ${father}`;
     if (son !== father && !used.has(name)) return name;
   }
-  return `${plain} ${stableHash([polityId, role]).toString(36)}`;
+  // Never an id in a man's name ("Zelalsan of the mauretanian-peoples w9bv9z", consul-run-issues L1): the next of his name.
+  for (let count = 2; count < 4_000; count += 1) {
+    const name = `${plain} ${romanNumeral(count)}`;
+    if (!used.has(name)) return name;
+  }
+  return plain;
+}
+
+/** 2 -> "II", 14 -> "XIV": how a second man of the same name is told apart. */
+function romanNumeral(value: number): string {
+  const steps: readonly (readonly [number, string])[] = [[1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [90, "XC"], [50, "L"], [40, "XL"], [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]];
+  let left = value;
+  let out = "";
+  for (const [size, numeral] of steps) while (left >= size) { out += numeral; left -= size; }
+  return out;
 }
 
 export interface SeatDraft {
@@ -126,7 +140,7 @@ export function namedSeats(office: Pick<Office, "kind" | "seatCount">): number {
 const focusOf = (office: Pick<Office, "kind" | "id" | "label" | "authorisedActionIds">): Focus => {
   if (office.kind === "priesthood") return "piety";
   if (office.authorisedActionIds.includes("force_engage") || /general|hipparch|strategos|commander/i.test(office.label)) return "martial";
-  if (/treasur|account|quaestor|steward/i.test(office.label)) return "stewardship";
+  if (/treasur|account|quaestor|steward|dioiketes|oikonomos/i.test(office.label)) return "stewardship";
   if (office.kind === "membership") return "diplomacy";
   return "learning";
 };

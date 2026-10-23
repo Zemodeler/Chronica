@@ -190,7 +190,7 @@ function buildBoard(world: WorldState): Board {
   // Every border, by pair, from one pass over the edges.
   const borders = new Map<string, Map<string, { ours: Set<string>; theirs: Set<string> }>>();
   const touch = (a: string, b: string, aProvince: string, bProvince: string): void => {
-    const row = borders.get(a) ?? new Map();
+    const row = borders.get(a) ?? new Map<string, { ours: Set<string>; theirs: Set<string> }>();
     const cell = row.get(b) ?? { ours: new Set<string>(), theirs: new Set<string>() };
     cell.ours.add(aProvince);
     cell.theirs.add(bProvince);
@@ -227,6 +227,16 @@ function buildBoard(world: WorldState): Board {
       const holder = owner.get(claim.locationId);
       if (holder != null && holder !== polityId) rivals.add(holder);
     }
+    // A power whose army stands on the ground of a friend of ours (an ally, a protected people) is a rival whether or not it borders us: Carthage in
+    // Messana was Rome's to see once the Mamertines were its allies (docs/plans/war-plans.md, "War gaps closed"). Our own bloc and our friends' friends are not.
+    const friends = new Set(friendsOf(polityId));
+    const bloc = new Set(blocOf(polityId));
+    if (friends.size > 0) {
+      for (const [otherId, armies] of armiesOf) {
+        if (otherId === polityId || friends.has(otherId) || bloc.has(otherId) || !nameOf.has(otherId)) continue;
+        if (armies.some((army) => { const holder = owner.get(army.provinceId); return holder != null && friends.has(holder); })) rivals.add(otherId);
+      }
+    }
     return rivals;
   };
 
@@ -242,7 +252,7 @@ function buildBoard(world: WorldState): Board {
     if (own.length === 0) continue;
     const wars = warsOf(world.polityAgreements, polity.id);
     const ourStrength = withAllies(polity.id);
-    const bordering = borders.get(polity.id) ?? new Map();
+    const bordering = borders.get(polity.id) ?? new Map<string, { ours: Set<string>; theirs: Set<string> }>();
     const others = new Set<string>([...bordering.keys(), ...rivalsOf(polity.id)]);
 
     // How far off the rivals that do not border us are, from our armies and our capital.

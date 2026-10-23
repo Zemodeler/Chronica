@@ -6,17 +6,27 @@ import {
   kmFrom,
   COUNTRYSIDE_KM,
   REFERENCE_PROVINCE_KM,
+  drawStock,
+  ensureMarkets,
+  grainPriceFor,
+  provinceGrainPriceBps,
+  stockIn,
   sameConfederation,
   stableHash,
   warfareWith,
+  warsOf,
+  economyOf,
   type Convoy,
   type FactProposalDraft,
   type ProvinceMaterial,
   type Force,
   type ScenarioWarfareRules,
   type WorldState,
+  applyForagingScar,
 } from "@chronica/shared";
+import { voyageLossBps } from "./house-voyages";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Bread for an army beyond what it forages (docs/plans/battles-that-last.md).
@@ -41,6 +51,14 @@ const clampBps = (value: number): number => Math.max(0, Math.min(10_000, Math.ro
 
 /** Of a country's people, the share of a day's bread it can spare an army for every day asked. */
 const SPARE_SHARE = 0.05;
+/**
+ * What a market can spare an army out of its grain: a fifth of what its
+ * granaries hold. The rest is the town's own bread, and an army that takes
+ * more is not buying but looting (a sack). A man eats four modii a month
+ * (`GOODS`), a hundred and thirty-odd thousandths of a man-day's ration a modius.
+ */
+const STOCK_SPARE_SHARE = 0.2;
+const MODII_PER_MAN_DAY = 4 / 30;
 /** A requisition takes half as much again as a market would sell. */
 const REQUISITION_REACH = 1.5;
 /** A loaded wagon covers a reference province in three days. */
@@ -49,20 +67,20 @@ const CONVOY_KM_PER_DAY = REFERENCE_PROVINCE_KM / 3;
 const CARRIAGE_PER_KM = 0.1 / REFERENCE_PROVINCE_KM;
 /** How far a convoy is sent at most. */
 const CONVOY_REACH_KM = 12 * REFERENCE_PROVINCE_KM;
-/** Where no power says what its soldiers are paid, what a thousand men's pay is a month. */
-const DEFAULT_PAY_PER_THOUSAND = 30;
 
 const friendlyTo = (world: WorldState, polityId: string, other: string | null): boolean =>
   other !== null && (other === polityId || sameConfederation(world.polityAgreements, polityId, other));
 
 /**
  * What bread for a thousand men for a day costs here: half a day's pay at the
- * power's own rate, up to three times that where the country is going hungry.
+ * power's own rate, at the one price grain has (`grainPriceFor`): the price of
+ * the market the province trades in, which is what its granary holds against
+ * what its people need. Cheap where the granary is full, up to four times as
+ * dear where it is nearly bare, and dearer for every army that buys from it.
  */
 export function grainPrice(world: WorldState, polityId: string, provinceId: string): number {
-  const pay = world.map.polities.find((polity) => polity.id === polityId)?.soldierPayPerThousand ?? DEFAULT_PAY_PER_THOUSAND;
-  const food = world.material.provinceMaterial.find((row) => row.provinceId === provinceId)?.foodSecurityBps ?? 10_000;
-  return (pay / 60) * (1 + (10_000 - food) / 5_000);
+  const pay = world.map.polities.find((polity) => polity.id === polityId)?.soldierPayPerThousand ?? null;
+  return grainPriceFor(pay, provinceGrainPriceBps(world, provinceId));
 }
 
 /** The provinces round this one that feed an army standing in it: what "the country" meant when a province was a region. */
@@ -73,25 +91,40 @@ function countryAround(world: WorldState, provinceId: string): readonly Province
 
 const spareOf = (row: ProvinceMaterial): number => Math.floor(row.population * (row.foodSecurityBps / 10_000) * SPARE_SHARE * 30);
 
-/** How many man-days of bread a country can give up. */
+/**
+ * How many man-days of bread a country can give up: what its people can spare
+ * day by day (as fed as they are), and never more than a fifth of what the
+ * granary of its market holds.
+ */
 function spareManDays(world: WorldState, provinceId: string): number {
-  return countryAround(world, provinceId).reduce((sum, row) => sum + spareOf(row), 0);
+  const people = countryAround(world, provinceId).reduce((sum, row) => sum + spareOf(row), 0);
+  return Math.min(people, Math.floor((stockIn(world, provinceId, "grain") * STOCK_SPARE_SHARE) / MODII_PER_MAN_DAY));
 }
 
-/** Bread taken from the country round a province: each part of it gives, and is hungrier, in proportion to what it could spare. */
+/**
+ * Bread taken from the country round a province: the market's granary gives
+ * it up, its price answering at once, and each part of the country is angrier
+ * (and, where it was taken by force, a little scarred) in proportion to what it
+ * could spare. The land is no hungrier for it on the day: its food is read off
+ * the granary at the month's reckoning.
+ */
 function drawOn(world: WorldState, provinceId: string, manDays: number, ceiling: number, anger: number): WorldState {
   const country = countryAround(world, provinceId);
   const total = country.reduce((sum, row) => sum + spareOf(row), 0);
   const parts = new Map(country.map((row) => [row.provinceId, total === 0 ? 0 : spareOf(row) / total]));
+  const drawn = drawStock(world, provinceId, "grain", manDays * MODII_PER_MAN_DAY).world;
   return {
-    ...world,
+    ...drawn,
     material: {
-      ...world.material,
-      provinceMaterial: world.material.provinceMaterial.map((row) => {
+      ...drawn.material,
+      provinceMaterial: drawn.material.provinceMaterial.map((row) => {
         const share = parts.get(row.provinceId);
         if (share === undefined) return row;
         const eaten = Math.min(ceiling, Math.round(((manDays * share) / Math.max(1, row.population)) * 20_000 / 30));
-        return { ...row, foodSecurityBps: clampBps(row.foodSecurityBps - eaten), stabilityBps: clampBps(row.stabilityBps - anger) };
+        // A requisition strips the farms as well as the granaries: a requisitioning army leaves a
+        // little scar for what it took (the quarter of it that was not left to the farmers), a purchase none.
+        const taken = { ...row, stabilityBps: clampBps(row.stabilityBps - anger) };
+        return anger > 0 ? applyForagingScar(taken, Math.round(eaten / 4)) : taken;
       }),
     },
   };
@@ -119,7 +152,9 @@ export interface Provisioned {
 }
 
 /** Bread bought or taken where the army stands. A refusal is thrown as a string. */
-export function breadWhereItStands(world: WorldState, force: Force, how: "buy" | "requisition", daysAsked: number, day: number): Provisioned {
+export function breadWhereItStands(opened: WorldState, force: Force, how: "buy" | "requisition", daysAsked: number, day: number): Provisioned {
+  // A world nobody has reckoned yet has its markets opened here, so the army has a granary to buy from.
+  const world = ensureMarkets(opened);
   const men = fitOf(force);
   if (men === 0) throw new GrainRefused("An army with no men in it needs no bread.");
   const province = world.map.provinces.find((candidate) => candidate.id === force.locationId);
@@ -157,7 +192,7 @@ export function breadWhereItStands(world: WorldState, force: Force, how: "buy" |
   return {
     world: next,
     facts: [{
-      localId: `bread_${force.id}_${day}`.slice(0, 60),
+      localId: safeLocalId(`bread_${force.id}_${day}`).slice(0, 60),
       kind: how === "buy" ? "grain_bought" : "grain_requisitioned",
       summary,
       affectedRefs: [{ kind: "force", id: force.id }, { kind: "province", id: province.id }],
@@ -176,7 +211,8 @@ export function breadWhereItStands(world: WorldState, force: Force, how: "buy" |
  * A convoy sent: bread bought where it is sent from, at that country's price
  * and the carriage on top, on the road for as long as the road is long.
  */
-export function sendConvoy(world: WorldState, force: Force, fromProvinceId: string, days: number, day: number, ids: IdFactory): Provisioned & { readonly convoy: Convoy } {
+export function sendConvoy(opened: WorldState, force: Force, fromProvinceId: string, days: number, day: number, ids: IdFactory): Provisioned & { readonly convoy: Convoy } {
+  const world = ensureMarkets(opened);
   const from = world.map.provinces.find((candidate) => candidate.id === fromProvinceId);
   if (from === undefined) throw new GrainRefused(`No province "${fromProvinceId}" exists to send a convoy from.`);
   const home = friendlyTo(world, force.polityId, from.controllerPolityId)
@@ -200,7 +236,7 @@ export function sendConvoy(world: WorldState, force: Force, fromProvinceId: stri
       convoys: [...world.convoys.filter((candidate) => candidate.status === "on_the_road" || candidate.arrivesAtStep > day - 60), convoy],
     },
     facts: [{
-      localId: `convoy_${convoy.id}`.slice(0, 60),
+      localId: safeLocalId(`convoy_${convoy.id}`).slice(0, 60),
       kind: "convoy_sent",
       summary: `A convoy of ${days} days' bread set out from ${from.name} for ${force.name}, ${km === 0 ? "close at hand" : `${describeKm(km)} off`}.`,
       affectedRefs: [{ kind: "force", id: force.id }, { kind: "province", id: fromProvinceId }],
@@ -227,13 +263,26 @@ export function deliverConvoys(world: WorldState, toDay: number, warfare: Scenar
   const facts: FactProposalDraft[] = [];
   let forces = world.material.forces;
   const name = (id: string): string => world.map.provinces.find((province) => province.id === id)?.name ?? id;
+  // What a house's convoys came to: counted to their contracts below, for the next reckoning of the pay.
+  const counted: { readonly convoy: Convoy; readonly fed: boolean }[] = [];
   const convoys = world.convoys.map((convoy): Convoy => {
     if (convoy.status !== "on_the_road" || convoy.arrivesAtStep > toDay) return convoy;
     const army = forces.find((force) => force.id === convoy.forceId && fitOf(force) > 0);
     // Gone, or moved on: the bread goes where the army was, and is lost.
     if (army === undefined || army.locationId !== convoy.toProvinceId) {
       facts.push(said(convoy, "convoy_lost", `The convoy sent to ${army?.name ?? "an army"} reached ${name(convoy.toProvinceId)} and found nobody to feed.`, 30));
+      counted.push({ convoy, fed: false });
       return { ...convoy, status: "lost" };
+    }
+    // A house's ship is out on the sea for the days it takes, in worse water where its power is at war: the same chance of loss as any cargo of a house (`house-voyages.ts`).
+    if (convoy.contractId != null) {
+      const open = warsOf(world.polityAgreements, convoy.polityId).length > 0 ? 3_500 : 10_000;
+      const lossBps = voyageLossBps(true, convoy.arrivesAtStep - convoy.sentAtStep, open, open);
+      if (stableHash([convoy.id, "at-sea"]) % 10_000 < lossBps) {
+        facts.push(said(convoy, "convoy_lost", `The ship bringing bread to ${army.name} at ${name(convoy.toProvinceId)} was lost at sea.`, 38));
+        counted.push({ convoy, fed: false });
+        return { ...convoy, status: "lost" };
+      }
     }
     const enemies = forces.filter((force) => force.locationId === convoy.toProvinceId && fitOf(force) > 0 && !isNavalForce(force, rules)
       && force.polityId !== convoy.polityId && atWar(world.polityAgreements, force.polityId, convoy.polityId));
@@ -246,6 +295,7 @@ export function deliverConvoys(world: WorldState, toDay: number, warfare: Scenar
       const fed = Math.max(1, Math.floor((convoy.days * convoy.men) / Math.max(1, fitOf(taker))));
       forces = forces.map((force) => (force.id === taker.id ? { ...force, provisionedThroughStep: Math.max(force.provisionedThroughStep, toDay) + fed, provisionStatus: "provisioned" as const } : force));
       facts.push(said(convoy, "convoy_taken", `${taker.name} fell on the convoy bringing bread to ${army.name} at ${name(convoy.toProvinceId)}, and ate it themselves.`, 55, [taker.id, army.id]));
+      counted.push({ convoy, fed: false });
       return { ...convoy, status: "taken" };
     }
     // The bread feeds as many days as it was sent for the men it was sent for.
@@ -254,14 +304,41 @@ export function deliverConvoys(world: WorldState, toDay: number, warfare: Scenar
     facts.push(said(convoy, "convoy_arrived", penned
       ? `A convoy got through the enemy's lines at ${name(convoy.toProvinceId)} with ${fed} days' bread for ${army.name}.`
       : `A convoy reached ${army.name} at ${name(convoy.toProvinceId)} with ${fed} days' bread.`, penned ? 45 : 25, [army.id]));
+    counted.push({ convoy, fed: true });
     return { ...convoy, status: "delivered" };
   });
-  return { world: { ...world, convoys, material: { ...world.material, forces } }, facts };
+  const delivered: WorldState = { ...world, convoys, material: { ...world.material, forces } };
+  return { world: counted.reduce((next, entry) => countDelivered(next, entry.convoy, entry.fed), delivered), facts };
+}
+
+/**
+ * A house's convoy comes to its end: the bread is counted to the contract it was sent under, so that the next reckoning pays for what reached the army and
+ * for no more; what was taken, drowned or found nobody to feed is the house's loss, and the house's record of losses rises by it (`army-victualling.ts`).
+ */
+export function countDelivered(world: WorldState, convoy: Pick<Convoy, "contractId" | "days" | "men">, fed: boolean): WorldState {
+  if (convoy.contractId == null) return world;
+  const contract = world.material.contracts.find((candidate) => candidate.id === convoy.contractId);
+  if (contract?.victuals == null) return world;
+  const memory = economyOf(world);
+  return {
+    ...world,
+    economy: fed ? world.economy : { ...memory, houses: memory.houses.map((house) => (house.id === contract.victuals!.houseId ? { ...house, losses: house.losses + 1 } : house)) },
+    material: {
+      ...world.material,
+      contracts: world.material.contracts.map((candidate) => (candidate.id !== contract.id || candidate.victuals == null ? candidate : {
+        ...candidate,
+        victuals: fed
+          ? { ...candidate.victuals, deliveredManDays: candidate.victuals.deliveredManDays + convoy.days * convoy.men }
+          : { ...candidate.victuals, lostManDays: candidate.victuals.lostManDays + convoy.days * convoy.men },
+      }),
+      ),
+    },
+  };
 }
 
 function said(convoy: Convoy, kind: string, summary: string, significance: number, forceIds: readonly string[] = [convoy.forceId]): FactProposalDraft {
   return {
-    localId: `${kind}_${convoy.id}`.slice(0, 60),
+    localId: safeLocalId(`${kind}_${convoy.id}`).slice(0, 60),
     kind,
     summary: summary.slice(0, 600),
     affectedRefs: [{ kind: "province", id: convoy.toProvinceId }, ...forceIds.map((id) => ({ kind: "force" as const, id }))],

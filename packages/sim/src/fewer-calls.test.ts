@@ -123,7 +123,8 @@ describe("the narrator's arithmetic", () => {
     const food = (state: WorldState) => state.material.provinceMaterial.find((material) => material.provinceId === PUNIC_IDS.rome)!.foodSecurityBps;
     const result = await runSimulationBurst({
       world, clock, offices, warfare: definition.warfare, burstId: "harvest", gameId: "g", actorRef: { kind: "character", id: "gaius-genucius" }, actorPolityId: "rome",
-      orderText: null, spanDays: 7, knownFacts: [], queue: [], port, narratorSeeds: [harvest],
+      // A turn with an order: with none, nothing is read by the orchestrator at all (`a-wait-needs-no-orchestrator.test.ts`).
+      orderText: "Let the week pass quietly.", spanDays: 7, knownFacts: [], queue: [], port, narratorSeeds: [harvest],
     });
     expect(shown[0]).not.toContain("THE WORLD STIRS");
     expect(food(result.world)).toBeLessThan(food(world));

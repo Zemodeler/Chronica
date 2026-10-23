@@ -17,6 +17,7 @@ import {
   type UtteranceLine,
 } from "./chronicle";
 import type { SimModelPort } from "./ports";
+import { DECISION_EVENTS } from "./cognition-policy";
 import { lineOf } from "./order-outcomes";
 
 /**
@@ -36,6 +37,8 @@ import { lineOf } from "./order-outcomes";
  */
 
 export interface WindowWriterInput {
+  /** True once the turn has spent its time: the last passages are written without retries. */
+  readonly skipRetries?: (() => boolean) | undefined;
   readonly port: SimModelPort;
   readonly clock: ScenarioClock;
   readonly observer: OrderPartyRef;
@@ -53,6 +56,10 @@ export interface WindowWriterInput {
   readonly untold?: { readonly facts: readonly Fact[]; readonly significanceByFactId: ReadonlyMap<string, number> } | undefined;
   /** Called with each passage as it is written, in the order of the record. Awaited, so passages are handed out in order. */
   readonly onEntry?: ((entry: ChronicleEntry, window: number) => Promise<void>) | undefined;
+  /** Told with each window's overstatement count, always (not only for the inspector): the alarm that says whether the claim check needs tightening. */
+  readonly onOverstated?: ((overstated: number, passages: number, window: number) => void) | undefined;
+  /** Dev inspector (6.1): what each window's entries were made of, as `composeChronicle` reports it. */
+  readonly onInspection?: ((inspection: NonNullable<Awaited<ReturnType<typeof composeChronicle>>["inspection"]>, window: number) => void) | undefined;
 }
 
 export interface WindowWriter {
@@ -63,6 +70,13 @@ export interface WindowWriter {
 }
 
 const keyOf = (ref: OrderPartyRef): string => `${ref.kind}:${ref.id}`;
+
+const LEFT_OFF_THE_PAGE: ReadonlySet<string> = new Set(["senate_speech", "group_formed", "group_dissolved", "office_created", "office_lapsed", "custom_formed", "benefaction", "public_benefaction", "birth"]);
+/** Small acts of public generosity, told by what they say rather than what the world called them. */
+const GENEROSITY_TALK = /\b(grain dole|a dole of grain|public games|games at (his|her) own cost|gave the people .{0,30}games|from (his|her) own purse (on|for|to) (a |the )?(public|grain|games|building))\b/i;
+const SENATE_BUSINESS = /^(motion_|council_|senate_|senatorial_)/;
+/** A matter of the chamber put in other words ("canvassed senators for the pending motion"). */
+const SENATE_TALK = /\b(motion|senators?|senate vote|canvass(ed|ing)?)\b/i;
 
 export function createWindowWriter(input: WindowWriterInput): WindowWriter {
   const { port, clock, observer, observerPolityId, offices } = input;
@@ -131,6 +145,8 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
   const farRoom = (): number => Math.min(FAR_THREADS_PER_WINDOW, Math.max(0, FAR_THREADS_PER_BURST - farTold));
   /** Settled when the window before has chosen what to tell and what to carry. */
   let selecting: Promise<void> = Promise.resolve();
+  let pending: WindowSnapshot | null = null;
+  let lastComposedDay: number | null = null;
 
   const compose = async (window: WindowSnapshot, gate: Promise<void>, chosenBefore: Promise<void>, chosen: () => void): Promise<readonly ChronicleEntry[]> => {
     // What the window before carries is this one's to tell, and what it chose
@@ -149,7 +165,10 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
     span = { from: span?.from ?? window.from, to: window.to };
     // Routine speeches remain in the factual ledger. The chamber's opening,
     // changed positions, vetoes and final count tell the political story.
-    const facts = [...pool, ...window.facts].filter((fact) => fact.kind !== "senate_speech");
+    // The engine's own bookkeeping (a party formed, an office made, a custom set) and
+    // the Senate's votes are not the player's page: the vote that answers his own
+    // order is told by the order's line, not as a chamber's business.
+    const facts = [...pool, ...window.facts].filter((fact) => !LEFT_OFF_THE_PAGE.has(fact.kind) && !((SENATE_BUSINESS.test(fact.kind) || SENATE_TALK.test(fact.summary) || GENEROSITY_TALK.test(fact.summary)) && !orderFactIds.has(fact.id) && !fact.affectedEntities.some((entity) => entity.id === observer.id)));
     pool = [];
     try {
       const out = await composeChronicle({
@@ -173,6 +192,7 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
         recentSubjects: [...chosenSubjects, ...said.map((entry) => entry.subjects.map(keyOf)), ...input.recentSubjects],
         recentTitles: [...[...said].reverse().map((entry) => entry.title), ...input.recentTitles],
         maxFarThreads: farRoom(),
+        skipRetries: input.skipRetries,
         onSelected: (selection) => {
           pool = [...pool, ...selection.carried];
           farTold += selection.farTold;
@@ -198,6 +218,10 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
         },
       });
       calls += out.calls;
+      if (out.inspection !== undefined) {
+        input.onInspection?.(out.inspection, window.index);
+        if (out.inspection.overstated > 0) input.onOverstated?.(out.inspection.overstated, out.inspection.passages, window.index);
+      }
       return out.entries;
     } catch (error) {
       // The record is not the world. A window that could not be written is
@@ -210,19 +234,45 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
     }
   };
 
+  const enqueue = (window: WindowSnapshot): void => {
+    // This window's passages wait for the previous window's; its composing
+    // does not.
+    const gate = publishing;
+    const chosenBefore = selecting;
+    let chosen: () => void = () => undefined;
+    selecting = new Promise<void>((resolve) => { chosen = resolve; });
+    const entries = compose(window, gate, chosenBefore, () => chosen());
+    composing.push(entries);
+    publishing = entries.then(() => undefined).catch(() => undefined);
+    lastComposedDay = window.to.day;
+  };
+  const flush = (final = false): void => {
+    if (pending === null) return;
+    const window = pending;
+    pending = null;
+    enqueue(final ? { ...window, final: true } : window);
+  };
   return {
     closed: (window) => {
-      // This window's passages wait for the previous window's; its composing
-      // does not.
-      const gate = publishing;
-      const chosenBefore = selecting;
-      let chosen: () => void = () => undefined;
-      selecting = new Promise<void>((resolve) => { chosen = resolve; });
-      const entries = compose(window, gate, chosenBefore, () => chosen());
-      composing.push(entries);
-      publishing = entries.then(() => undefined).catch(() => undefined);
+      // Keep every fact and state change, but compose routine business in
+      // weekly spans. The order, important turns of fortune and final record
+      // still publish immediately, without one historian per quiet day.
+      pending = pending === null ? window : {
+        ...window, from: pending.from, worldBefore: pending.worldBefore,
+        facts: [...pending.facts, ...window.facts],
+        significanceByFactId: new Map([...pending.significanceByFactId, ...window.significanceByFactId]),
+        narrative: [...pending.narrative, ...window.narrative],
+        frictions: [...pending.frictions, ...window.frictions],
+        utterances: [...pending.utterances, ...window.utterances],
+        battleAccounts: [...pending.battleAccounts, ...window.battleAccounts],
+        orderFactIds: [...pending.orderFactIds, ...window.orderFactIds],
+      };
+      const important = window.battleAccounts.length > 0 || window.facts.some((fact) =>
+        DECISION_EVENTS.has(fact.kind) || (window.significanceByFactId.get(fact.id) ?? 0) >= 60);
+      if (window.index === 0 || window.final || important || window.to.day - (lastComposedDay ?? window.from.day) >= 7) flush();
     },
     finish: async () => {
+      flush(true);
       await Promise.all(composing);
       await publishing;
       // A record that went blank gets one last look: when nothing at all
@@ -259,6 +309,7 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
           recentTitles: [...[...said].reverse().map((entry) => entry.title), ...input.recentTitles],
           maxEntries: WINDOW_MAX_ENTRIES,
           maxFarThreads: farRoom(),
+        skipRetries: input.skipRetries,
           fallback: true,
         }).catch((error: unknown) => {
           console.error("[chronicle] the closing passage could not be written:", error);

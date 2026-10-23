@@ -84,10 +84,11 @@ describe("an army ferried over in loads", () => {
     expect(result.rejected).toEqual([]);
     // Still on the Italian shore today: a crossing in loads takes days.
     expect(forceOf(result.world, "roman-field-army").locationId).toBe(BRUTTIUM);
-    const begun = result.factProposals.find((fact) => fact.kind === "crossing_begun");
+    const begun = result.factProposals.find((fact) => fact.kind === "crossing_arranged");
     expect(begun?.summary).toMatch(/loads/);
     expect(begun?.summary).toMatch(/Campanian transports/);
-    const crossing = result.world.projects.find((project) => project.completionOutcome?.kind === "force_move");
+    const crossing = // The sailing that fetches the transports is a force_move too; the crossing is the one that lands the army.
+    result.world.projects.find((project) => project.kind === "crossing");
     const due = crossing!.milestones.at(-1)!.requiredAtElapsedOffset;
     expect(due).toBeGreaterThan(2);
 

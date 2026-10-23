@@ -1,4 +1,5 @@
 import type { FactProposalDraft, OrderPartyRef, WorldState } from "@chronica/shared";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * An army or fleet that changed hands, told to the man it was taken from.
@@ -30,7 +31,7 @@ export function commandChanges(before: WorldState, after: WorldState, exceptIds:
       ...[force.commanderCharacterId, force.controllerCharacterId].filter((id): id is string => id !== null).map((id) => ({ kind: "character" as const, id })),
     ];
     facts.push({
-      localId: `command_${force.id}_${after.elapsedStep}`.slice(0, 60),
+      localId: safeLocalId(`command_${force.id}_${after.elapsedStep}`).slice(0, 60),
       kind: "command_changed",
       summary: `${force.name} is no longer ${lost.map(name).join("'s or ")}'s to give orders to: ${now}.`.slice(0, 600),
       affectedRefs: refs.slice(0, 8),

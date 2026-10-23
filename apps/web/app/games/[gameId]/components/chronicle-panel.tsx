@@ -24,13 +24,6 @@ import type { EntityKey } from "@chronica/shared";
  * produces prose about precision it does not have.
  */
 
-const KIND_LABEL: Readonly<Record<string, string>> = {
-  polity: "power",
-  province: "place",
-  character: "person",
-  force: "army",
-};
-
 const tagKey = (tag: { readonly kind: string; readonly id: string }): string => `${tag.kind}:${tag.id}`;
 
 function LedgerBody({ body }: { readonly body: string }) {
@@ -215,7 +208,9 @@ export function ChroniclePanel({ controller, onClose, side, focus = null }: {
                   ? "Nothing in the record touches that."
                   : unreadOnly !== null
                     ? "Nothing unread."
-                    : "Nothing has been recorded yet. Give an order and the world will answer."}
+                    : controller.view.dateLabel === undefined
+                      ? "Reading the record…"
+                      : "Nothing has been recorded yet. Give an order and the world will answer."}
               </p>
             ) : (
               <div ref={list}>

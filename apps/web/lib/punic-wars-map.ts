@@ -13,6 +13,14 @@ let punicWarsMap: GeoJsonMap | undefined;
  * kept for the life of the process.
  */
 export function punicWarsGeoJson(): GeoJsonMap {
-  punicWarsMap ??= JSON.parse(readFileSync(join(process.cwd(), "public", "maps", "punic-wars-provinces.geojson"), "utf8")) as GeoJsonMap;
+  if (punicWarsMap === undefined) {
+    const parsed = JSON.parse(readFileSync(join(process.cwd(), "public", "maps", "punic-wars-provinces.geojson"), "utf8")) as GeoJsonMap;
+    // Ostia, Rome's harbour at the mouth of the Tiber, is a town of the scenario's world (`packages/db/src/punic-wars-ostia.ts`) and is drawn where the map was generated without it.
+    const hasOstia = parsed.features.some((feature) => feature.id === "settlement-ostia");
+    punicWarsMap = hasOstia ? parsed : {
+      ...parsed,
+      features: [...parsed.features, { type: "Feature", id: "settlement-ostia", geometry: { type: "Point", coordinates: [12.2889, 41.7549] }, properties: { kind: "settlement", name: "Ostia", provinceId: "it-l865w", type: "port" } }],
+    };
+  }
   return punicWarsMap;
 }

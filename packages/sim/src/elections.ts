@@ -25,6 +25,8 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { newsReach, powersNearThePlayer } from "./far-powers";
+import { summariseTheFarCalendar } from "./far-calendar";
+import { isNoted } from "./nota";
 import { remember } from "./grievances";
 import type { IdFactory } from "./ports";
 import { honourTheSitting } from "./standing-deeds";
@@ -230,7 +232,9 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
     const cycle = office.cycleDays ?? termDays ?? 0;
     const collegeDueDay = college ? (Number.isFinite(lastCalled) ? lastCalled + cycle : cycle) : null;
     const vacant = (): Place[] => (collegeDueDay !== null && input.toDay < collegeDueDay ? [] : openPlaces());
-    const requirementIds = seats()[0]?.eligibilityRequirementIds ?? office.eligibilityRequirementIds;
+    // A seat that lists no requirements of its own asks the office: an empty list is not "none" (the Campanians' assembly seated a Roman).
+    const seatRequirements = seats()[0]?.eligibilityRequirementIds ?? [];
+    const requirementIds = seatRequirements.length > 0 ? seatRequirements : office.eligibilityRequirementIds;
     // The rules for who may stand and whom the electors think of are shared
     // (`candidates.ts`), so an office's note says the election's own answer.
     const minStanding = officeRequirements(world, office).minStanding;
@@ -238,10 +242,15 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
     /** Who could hold it: eligible, alive, and not already sitting in it. */
     const eligible = (character: Character): boolean => isEligibleFor(world, office, requirementIds, character, input.toDay);
     /** Who the Senate would think of unprompted: eligible, of standing, not above it, and not the player. */
-    const electable = (): Character[] =>
-      world.characters
-        .filter((character) => character.id !== player && character.prestigeBps >= minStanding && !beneath(character) && eligible(character))
-        .sort((a, b) => candidateScore(office, b, input.toDay) - candidateScore(office, a, input.toDay) || a.id.localeCompare(b.id));
+    const electable = (): Character[] => {
+      const ranked = (steps: boolean): Character[] => world.characters
+        .filter((character) => character.id !== player && character.prestigeBps >= minStanding && !beneath(character) && isEligibleFor(world, office, requirementIds, character, input.toDay, steps))
+        .sort((a, b) => candidateScore(office, b, input.toDay, world) - candidateScore(office, a, input.toDay, world) || a.id.localeCompare(b.id));
+      // The custom of the ladder first; where it leaves nobody (the few men a world names run out of years), the likeliest men after them, who may hold only the one office.
+      const keeping = ranked(true);
+      const kept = new Set(keeping.map((character) => character.id));
+      return [...keeping, ...ranked(false).filter((character) => !kept.has(character.id))];
+    };
 
     /**
      * Custom, where it was not law: the voters preferred a man who had served
@@ -328,7 +337,7 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
           return;
         }
         refused.delete(characterId);
-        standing.set(characterId, Math.max(standing.get(characterId) ?? Number.NEGATIVE_INFINITY, candidateScore(office, character, input.toDay) + served(character) + net));
+        standing.set(characterId, Math.max(standing.get(characterId) ?? Number.NEGATIVE_INFINITY, candidateScore(office, character, input.toDay, world) + served(character) + net));
       };
       // Whoever called it stands -- unless it is beneath him, when he was only
       // presiding: a former consul calling the quaestors' election is not a
@@ -338,7 +347,7 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
       for (const candidacy of candidacies) { const candidate = candidateOf(candidacy); if (candidate !== null) stand(candidate, netSupport(world, candidacy.id), true); }
       for (const character of electable()) {
         if (standing.size >= places.length) break;
-        if (!standing.has(character.id)) standing.set(character.id, candidateScore(office, character, input.toDay) + served(character));
+        if (!standing.has(character.id)) standing.set(character.id, candidateScore(office, character, input.toDay, world) + served(character));
       }
       const nameOf = (id: string): string => world.characters.find((character) => character.id === id)?.name ?? id;
       for (const [id, refusal] of refused) {
@@ -549,6 +558,21 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
         // A date set is not news; the count, when it comes, is.
         significance: 15,
       });
+      // The man the player is hears it is open to him, by name, with the day and the words that put his name forward.
+      const you = player === null ? undefined : world.characters.find((character) => character.id === player && character.alive && character.polityId === office.polityId);
+      if (you !== undefined && !beneath(you) && admissionRefusal(world, office, requirementIds, you, input.toDay) === null) {
+        facts.push({
+          localId: nextLocalId(),
+          kind: "election_open_to_you",
+          summary: `An election is called for ${college ? `${places.length === 1 ? "one place" : `${places.length} places`} as ${office.label}` : `${places.length > 1 ? `${places.length} ${office.label}s` : `a ${office.label}`}`}, and you may stand: say "I put my name forward for ${office.label}" before day ${procedure.deadlineStep ?? input.toDay + ELECTION_POLLING_DAYS}, and ask your friends for their voices.`.slice(0, 600),
+          affectedRefs: [{ kind: "character", id: you.id }, { kind: "polity", id: office.polityId }],
+          knownToRefs: [{ kind: "character", id: you.id }],
+          visibility: "public",
+          discoveryState: "public",
+          knowableInDays: 0,
+          significance: 40,
+        });
+      }
       continue;
     }
 
@@ -586,7 +610,7 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
     if (fact.visibility !== "public" || newsReach(near, polityId) === "public") return fact;
     return { ...fact, visibility: "polity" as const, discoveryState: "polity" as const };
   });
-  return { world, facts: told };
+  return { world, facts: [...told, ...summariseTheFarCalendar(world, told, player)] };
 }
 
 /**
@@ -595,7 +619,7 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
  * a career has somewhere to arrive, and a senator is made by the ladder rather
  * than by a model deciding he is one.
  */
-function enrolFormerMagistrates(
+export function enrolFormerMagistrates(
   world: WorldState,
   offices: readonly Office[],
   toDay: number,
@@ -608,6 +632,8 @@ function enrolFormerMagistrates(
     const seated = new Set(next.material.officeSeats.filter((seat) => seat.officeId === council.id && seat.status === "held").map((seat) => seat.holderCharacterId));
     for (const character of next.characters) {
       if (!character.alive || character.polityId !== council.polityId || seated.has(character.id)) continue;
+      // The censors struck him from the roll, and the roll stays shut to him until the next lectio (`the-lectio.ts`).
+      if (isNoted(next, character.id)) continue;
       if (!character.officesHeld.some((tenure) => magistracies.has(tenure.officeId))) continue;
       if (council.seatCount !== undefined && seated.size >= council.seatCount) break;
       const vacantSeatId = next.material.officeSeats.find((seat) => seat.officeId === council.id && seat.status === "vacant")?.id ?? null;

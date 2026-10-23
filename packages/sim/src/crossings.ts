@@ -20,6 +20,7 @@ import {
 import { resolveEngagement, type BattleAccount } from "./battle";
 import { takeMen } from "./campaign";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * What the water and the mountains do to an army crossing them.
@@ -103,7 +104,7 @@ export function interceptCrossings(input: InterceptInput): { world: WorldState; 
     const fail = (why: string, significance: number): void => {
       world = { ...world, projects: world.projects.map((candidate) => (candidate.id === project.id ? { ...candidate, status: "failed" as const, completedAtStep: input.toDay } : candidate)) };
       facts.push({
-        localId: `crossing_stopped_${project.id}`.slice(0, 60),
+        localId: safeLocalId(`crossing_stopped_${project.id}`).slice(0, 60),
         kind: "crossing_stopped",
         summary: why.slice(0, 600),
         affectedRefs: [{ kind: "force", id: army.id }, { kind: "province", id: outcome.provinceId! }, ...enemies.slice(0, 3).map((fleet) => ({ kind: "force" as const, id: fleet.id }))],

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { ElapsedStepSchema, EntityIdSchema, VisibilitySchema, type MaterialWorldState } from "../material-state";
 import type { Character } from "./character";
 import { createPressure, type CharacterPressure } from "./pressures";
+import { OrderGoalSchema } from "../world/goals";
 
 // Canonical commitments (character-sim phase 3).
 //
@@ -71,6 +72,8 @@ export const CommitmentSchema = z
     beneficiaryCharacterId: EntityIdSchema,
     actionKind: CommitmentActionKindSchema,
     description: z.string().trim().min(1).max(400),
+    /** Treaty duties are fulfilled by these world outcomes, never by proximity or an assertion. */
+    completionGoals: z.array(OrderGoalSchema).min(1).max(4).optional(),
     conditions: z.string().trim().max(400).default(""),
     /**
      * A promise to do something, or to hold back from it. "I will not call you
@@ -166,8 +169,8 @@ export function createCommitment(
     promisorCharacterId: input.promisorCharacterId,
     beneficiaryCharacterId: input.beneficiaryCharacterId,
     actionKind: input.actionKind,
-    description: input.description,
-    conditions: input.conditions ?? "",
+    description: input.description.slice(0, 400),
+    conditions: (input.conditions ?? "").slice(0, 400),
     ...(input.form === undefined ? {} : { form: input.form }),
     ...(input.trigger == null ? {} : { trigger: input.trigger }),
     requiredOfficeId,
@@ -351,7 +354,7 @@ export function breakCommitment(
       characterId: commitment.promisorCharacterId,
       kind: commitment.breachPressureKind,
       intensity: 55,
-      label: `Broke a commitment to another character: ${commitment.description}`,
+      label: `Broke a commitment to another character: ${commitment.description}`.slice(0, 200),
       sourceEventId: commitment.sourceEventId,
       atStep,
       reviewInSteps: 4,

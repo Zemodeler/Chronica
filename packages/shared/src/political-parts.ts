@@ -77,15 +77,38 @@ export const GOVERNMENT_FORM_IN_WORDS: Record<GovernmentForm, string> = {
  * binds nobody.
  *
  * - `laws`: measures that go on doing something, and offices made or reformed.
- * - `war`: war and peace, treaties, and levies.
- * - `taxes`: what is raised and what is spent.
+ * - `war`: war and peace, and the armies that go with them.
+ * - `taxes`: what is raised.
  * - `elections`: it fills the offices its succession rules name it for.
  * - `constitution`: it may change the constitution itself.
  * - `judgment`: trials, removals, condemnations.
+ * - `coinage`: what silver the mint strikes the coin with.
+ * - `treaties`: pacts, embargoes, alliances and the terms of a peace.
+ * - `finance`: what is spent beyond a magistrate's allowance, what is borrowed, what the provinces' revenues are put to.
+ * - `levy`: how many men are raised.
+ *
+ * The last four were once part of `war` and `taxes`, and a chamber written before they existed still holds
+ * them by that old right (`chamberHolds`): a Senate that held `taxes` held the mint and the purse with it.
+ * Naming any of the four in a chamber's list is what takes them out of the old bundle.
  */
-export const ChamberPowerSchema = z.enum(["laws", "war", "taxes", "elections", "constitution", "judgment"]);
+export const ChamberPowerSchema = z.enum(["laws", "war", "taxes", "elections", "constitution", "judgment", "coinage", "treaties", "finance", "levy"]);
 export type ChamberPower = z.infer<typeof ChamberPowerSchema>;
 export const ALL_CHAMBER_POWERS: readonly ChamberPower[] = ChamberPowerSchema.options;
+
+/** The powers a chamber written before the economy had them holds by the old bundle: what each was a part of. */
+export const POWER_IMPLIED_BY: Readonly<Partial<Record<ChamberPower, ChamberPower>>> = { coinage: "taxes", finance: "taxes", treaties: "war", levy: "war" };
+
+/**
+ * Whether a list of powers holds one. A list that names none of the four newer powers is an old chamber's, and holds
+ * them with the power they were once part of; a chamber that lists none at all holds everything.
+ */
+export function chamberHolds(powers: readonly ChamberPower[] | undefined, power: ChamberPower): boolean {
+  if (powers === undefined || powers.includes(power)) return true;
+  const parent = POWER_IMPLIED_BY[power];
+  if (parent === undefined) return false;
+  const named = powers.some((held) => POWER_IMPLIED_BY[held] !== undefined);
+  return !named && powers.includes(parent);
+}
 
 /**
  * Who sits in a chamber, and so which of the world's groups can have a bloc
@@ -137,6 +160,7 @@ export const QuestionConcernSchema = z.enum([
   "religion",
   "levy",
   "grain",
+  "coinage",
   "widen_franchise",
   "narrow_franchise",
   "strengthen_ruler",
@@ -159,23 +183,23 @@ type Row = Partial<Record<QuestionConcern, number>>;
  * question it hates at -50 ends at -30 and votes against it.
  */
 export const INTEREST_CONCERN: Readonly<Record<BlocInterest, Row>> = {
-  nobles: { war: 10, peace: -5, taxes: -20, land: -40, debt: -30, grain: -10, widen_franchise: -40, narrow_franchise: 30, strengthen_ruler: -30, weaken_ruler: 20, new_office: 5 },
-  landed: { war: -5, peace: 10, taxes: -30, land: -60, debt: -20, levy: -15, grain: -20, widen_franchise: -20 },
-  merchants: { war: -25, peace: 25, trade: 50, taxes: -25, debt: -40, spending: 10, levy: -10, widen_franchise: 10, strengthen_ruler: -10 },
-  commons: { war: -10, peace: 10, taxes: -30, land: 50, debt: 40, grain: 50, levy: -25, religion: 10, widen_franchise: 50, narrow_franchise: -50, strengthen_ruler: 10, weaken_ruler: -5, punishment: 10 },
-  debtors: { debt: 80, land: 40, taxes: -30, grain: 30, widen_franchise: 20, war: -10 },
-  creditors: { debt: -80, trade: 20, taxes: -10 },
-  soldiers: { war: 40, peace: -20, levy: 10, spending: 30, land: 30, strengthen_ruler: 15, punishment: -10 },
+  nobles: { coinage: 10, war: 10, peace: -5, taxes: -20, land: -40, debt: -30, grain: -10, widen_franchise: -40, narrow_franchise: 30, strengthen_ruler: -30, weaken_ruler: 20, new_office: 5 },
+  landed: { coinage: 10, war: -5, peace: 10, taxes: -30, land: -60, debt: -20, levy: -15, grain: -20, widen_franchise: -20 },
+  merchants: { coinage: -45, war: -25, peace: 25, trade: 50, taxes: -25, debt: -40, spending: 10, levy: -10, widen_franchise: 10, strengthen_ruler: -10 },
+  commons: { coinage: -25, war: -10, peace: 10, taxes: -30, land: 50, debt: 40, grain: 50, levy: -25, religion: 10, widen_franchise: 50, narrow_franchise: -50, strengthen_ruler: 10, weaken_ruler: -5, punishment: 10 },
+  debtors: { coinage: 35, debt: 80, land: 40, taxes: -30, grain: 30, widen_franchise: 20, war: -10 },
+  creditors: { coinage: -70, debt: -80, trade: 20, taxes: -10 },
+  soldiers: { coinage: 15, war: 40, peace: -20, levy: 10, spending: 30, land: 30, strengthen_ruler: 15, punishment: -10 },
   veterans: { land: 60, war: 10, spending: 20, debt: 20, levy: -10, widen_franchise: 10 },
   priests: { religion: 60, war: -5, taxes: -10, strengthen_ruler: 5 },
   conquered: { taxes: -40, levy: -40, war: -20, widen_franchise: 40, narrow_franchise: -40, weaken_ruler: 20, punishment: -20 },
   regional: { taxes: -30, levy: -30, war: -10, spending: 10, strengthen_ruler: -40, weaken_ruler: 30 },
-  crown: { strengthen_ruler: 60, weaken_ruler: -60, taxes: 20, war: 10, levy: 10, narrow_franchise: 10, widen_franchise: -10 },
+  crown: { coinage: 25, strengthen_ruler: 60, weaken_ruler: -60, taxes: 20, war: 10, levy: 10, narrow_franchise: 10, widen_franchise: -10 },
   faction: {},
   clients: {},
   loyalists: { strengthen_ruler: 40, weaken_ruler: -30 },
   // A city tired of its war: for any end to it, and against whatever feeds it.
-  war_weary: { peace: 70, war: -70, levy: -30, taxes: -15, spending: -10 },
+  war_weary: { peace: 70, war: -70, levy: -30, taxes: -15, spending: -10, coinage: 10 },
 };
 
 /** Interests that lean by their leader's word rather than by the table. */
@@ -208,6 +232,7 @@ export const CONCERN_IN_WORDS: Record<QuestionConcern, string> = {
   religion: "the gods",
   levy: "the levy",
   grain: "grain for the people",
+  coinage: "the silver in the coin",
   widen_franchise: "widening who has a voice",
   narrow_franchise: "narrowing who has a voice",
   strengthen_ruler: "strengthening the ruler",

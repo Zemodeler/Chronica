@@ -33,6 +33,8 @@ export interface SchemaComplaint {
   readonly code?: string | undefined;
   readonly path: readonly PropertyKey[];
   readonly keys?: readonly string[] | undefined;
+  /** The schema's own words for it, carried into the record of what was dropped. */
+  readonly message?: string | undefined;
 }
 
 export interface Salvaged {
@@ -77,6 +79,19 @@ export function salvageAgainst(value: unknown, complaints: readonly SchemaCompla
       continue;
     }
 
+    // A field written null where the schema wants a value or nothing is a thing not said, and is left out: a ruler made with
+    // "faith": null was dropped whole, and the army that named him raised under a stand-in (consul-run-issues M3). Were the
+    // field required, the next round finds it missing and drops the line as before.
+    const last = complaint.path.at(-1);
+    if (complaint.message !== undefined && /received null/.test(complaint.message) && typeof last === "string") {
+      const parent = complaint.path.slice(0, -1);
+      const key = show(parent);
+      const existing = strips.get(key) ?? { path: parent, keys: new Set<string>() };
+      existing.keys.add(last);
+      strips.set(key, existing);
+      continue;
+    }
+
     // The innermost array this sits in. Innermost on purpose: a bad reference
     // inside a fact should cost the reference, not the fact.
     let cut = -1;
@@ -103,7 +118,19 @@ export function salvageAgainst(value: unknown, complaints: readonly SchemaCompla
     for (const index of drop.indices) removed.add(show([...drop.path, index]));
   }
 
-  const dropped = [...removed];
+  // Each lost line with what it was and why: "dropped worldDeltas.3" alone hid that a ruler was lost to a null faith, and
+  // the forces that named him were raised under a placeholder (consul-run-issues M3, L3).
+  const why = (key: string): string => {
+    const drop = [...drops.values()].find((candidate) => [...candidate.indices].some((index) => show([...candidate.path, index]) === key));
+    const index = drop === undefined ? undefined : [...drop.indices].find((candidate) => show([...drop.path, candidate]) === key);
+    const element = drop === undefined || index === undefined ? undefined : at(value, [...drop.path, index]);
+    const op = typeof element === "object" && element !== null && typeof (element as { op?: unknown }).op === "string" ? ` (${(element as { op: string }).op})` : "";
+    const said = [...new Set(complaints
+      .filter((complaint) => complaint.message !== undefined && (show(complaint.path) === key || show(complaint.path).startsWith(`${key}.`)))
+      .map((complaint) => `${show(complaint.path).slice(key.length + 1) || "it"}: ${complaint.message}`))].slice(0, 2).join("; ");
+    return `${key}${op}${said === "" ? "" : `: ${said}`}`.slice(0, 240);
+  };
+  const dropped = [...removed].map(why);
   for (const [key, strip] of strips) {
     if (removed.has(key)) continue;
     dropped.push(`${key}: ${[...strip.keys].join(", ")}`);
@@ -131,5 +158,40 @@ export function salvageAgainst(value: unknown, complaints: readonly SchemaCompla
     }
   }
 
+  const lostDeltas = drops.get("deltas");
+  if (lostDeltas !== undefined && lostDeltas.path.length === 1) followTheActsDropped(copy, lostDeltas.indices);
+
   return { value: copy, dropped };
+}
+
+/**
+ * A part names its acts by their place in `deltas`. With a delta dropped the
+ * places move, and a part whose every act went must not leave its facts behind:
+ * "Hanno put a motion to the Council" stood in the record with the motion
+ * dropped as unreadable. The part keeps the acts it still has, renumbered; the
+ * facts only a bereft part cited go with it.
+ */
+function followTheActsDropped(root: unknown, gone: ReadonlySet<number>): void {
+  if (typeof root !== "object" || root === null) return;
+  const answer = root as { intent?: { parts?: unknown }; facts?: unknown };
+  const parts = answer.intent?.parts;
+  if (!Array.isArray(parts)) return;
+  const bereft: string[] = [];
+  const kept: string[] = [];
+  for (const part of parts) {
+    if (typeof part !== "object" || part === null) continue;
+    const mine = part as { acts?: unknown; factLocalIds?: unknown; deferredActs?: unknown };
+    const ids = Array.isArray(mine.factLocalIds) ? mine.factLocalIds.filter((id): id is string => typeof id === "string") : [];
+    if (!Array.isArray(mine.acts) || mine.acts.length === 0) { kept.push(...ids); continue; }
+    const acts = mine.acts.filter((act): act is number => typeof act === "number");
+    const left = acts.filter((act) => !gone.has(act)).map((act) => act - [...gone].filter((index) => index < act).length);
+    mine.acts = left;
+    const heldOn = Array.isArray(mine.deferredActs) && mine.deferredActs.length > 0;
+    (left.length === 0 && !heldOn ? bereft : kept).push(...ids);
+  }
+  if (bereft.length === 0 || !Array.isArray(answer.facts)) return;
+  const stay = new Set(kept);
+  const go = new Set(bereft.filter((id) => !stay.has(id)));
+  if (go.size === 0) return;
+  answer.facts = answer.facts.filter((fact) => typeof fact !== "object" || fact === null || !go.has(String((fact as { localId?: unknown }).localId)));
 }

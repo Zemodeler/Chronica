@@ -27,7 +27,8 @@ refilled when its king died, and a government could not change its form.
 
 - `Polity.governmentForm`: the seed. Null infers from cohesion.
 - `GovernmentInstitution`: `powers` (laws, war, taxes, elections,
-  constitution, judgment), `advisory`, `franchise` (council, citizens,
+  constitution, judgment, and since the offices' competence (H0) coinage, treaties, finance and levy: a chamber
+  written before them holds each with the older power it was part of, `chamberHolds`), `advisory`, `franchise` (council, citizens,
   soldiers, chiefs, cities, priests), `blocSource` (authored or world),
   `refersFailuresTo` (Carthage's council sending a split to the people).
 - `VotingBloc.interests`, `VotingBloc.groupId`.

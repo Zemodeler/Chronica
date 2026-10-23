@@ -38,7 +38,7 @@ function lettersOnTheRoad(days: string[]): SimModelPort {
 }
 
 describe("word on the road", { timeout: 30_000 }, () => {
-  it("is answered the day it arrives, not when the next thing on the calendar comes round", async () => {
+  it("is answered when it calls for a decision or the world has been quiet, not on every day it arrives", async () => {
     const days: string[] = [];
     await runSimulationBurst({
       world: ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0),
@@ -50,7 +50,57 @@ describe("word on the road", { timeout: 30_000 }, () => {
       port: lettersOnTheRoad(days), narratorSeeds: [], budget: DEFAULT_BUDGET,
     });
     expect(days[0]).toBe("3 March 270 BC");
-    // Written on the 3rd, five days on the road.
-    expect(days).toContain("8 March 270 BC");
+    // Rounds are paid for by events: other powers' letters on the road are not news of weight, so they are
+    // answered when the world has been quiet for `newChainAfterDays`, not on the day they arrive (8th, 12th).
+    expect(days).not.toContain("8 March 270 BC");
+    expect(days.some((day) => /^(1[3-9]|2d) March/.test(day))).toBe(true);
+  });
+});
+
+describe("a turn that has spent its time", () => {
+  it("finishes the span on the engine alone, asking nobody after the first round", async () => {
+    const days: string[] = [];
+    let spent = false;
+    const port = lettersOnTheRoad(days);
+    const result = await runSimulationBurst({
+      world: ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0),
+      clock: definition.clock, offices: definition.government.offices, warfare: definition.warfare,
+      burstId: "rushed", gameId: "game-rushed", actorRef: { kind: "character", id: "gaius-genucius" }, actorPolityId: "rome",
+      orderText: "Let the month pass.", spanDays: 30, knownFacts: [], queue: [],
+      port: { complete: async (...args) => { const answer = await port.complete(...args); if (args[0] === "simulate_cognition") spent = true; return answer; } },
+      outOfTime: () => spent, narratorSeeds: [], budget: DEFAULT_BUDGET,
+    });
+    // The first round was asked (3 March) and no other: the days after it passed with nobody asked.
+    expect([...new Set(days)]).toEqual(["3 March 270 BC"]);
+    expect(result.world.instant.day).toBe(30);
+    expect(result.skipped.some((entry) => entry.reason.includes("time is spent"))).toBe(true);
+  });
+});
+
+describe("the order being read", () => {
+  it("does not hold up the world's own people, who are asked while it is still being read", async () => {
+    let cognitionStarted = false;
+    let releaseOrder: () => void = () => undefined;
+    const seen = new Promise<void>((resolve) => { releaseOrder = resolve; });
+    const ordered: boolean[] = [];
+    const port: SimModelPort = {
+      async complete(operation) {
+        if (operation === "simulate_orchestrate") {
+          // The order is not answered until somebody else has been asked: only an early question lets this return.
+          await Promise.race([seen, new Promise((resolve) => setTimeout(resolve, 3_000))]);
+          ordered.push(cognitionStarted);
+          return JSON.stringify({ intent: { summary: "Wait.", domains: ["administration"] }, narrativeSummary: "The consul waits.", deltas: [], facts: [], outcome: "continue" });
+        }
+        if (operation === "simulate_cognition") { cognitionStarted = true; releaseOrder(); return JSON.stringify({ actors: [] }); }
+        return "{}";
+      },
+    };
+    await runSimulationBurst({
+      world: ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0),
+      clock: definition.clock, offices: definition.government.offices, warfare: definition.warfare,
+      burstId: "early", gameId: "game-early", actorRef: { kind: "character", id: "gaius-genucius" }, actorPolityId: "rome",
+      orderText: "Start building a fleet.", spanDays: 7, knownFacts: [], queue: [], port, narratorSeeds: [], budget: DEFAULT_BUDGET, prefetch: true,
+    });
+    expect(ordered).toEqual([true]);
   });
 });

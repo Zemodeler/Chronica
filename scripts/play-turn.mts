@@ -29,7 +29,7 @@ import {
   schema,
 } from "@chronica/db";
 import { and, eq } from "drizzle-orm";
-import { prepareBurst, runBurstToCommit } from "../apps/web/lib/burst-runner";
+import { prepareBurst, runBurstWithContinuations } from "../apps/web/lib/burst-runner";
 import { chooseModel } from "./lib/model-mode.mts";
 
 const args = process.argv.slice(2);
@@ -81,16 +81,19 @@ async function playTurn(gameId: string, orderText: string | null, spanDays: numb
   const prepared = await prepareBurst(db, { gameId, userId: player.userId, playerId: player.id, characterId: player.characterId, orderText, spanDays });
   if (prepared.status === "error") throw new Error(prepared.message);
   const startedAt = performance.now();
-  await runBurstToCommit(db, prepared.job, {
+  const legs = await runBurstWithContinuations(db, prepared.job, {
     onProgress: (line) => console.log(`[${((performance.now() - startedAt) / 1000).toFixed(1).padStart(6)}s] ${line.stage}: ${line.line}`),
   });
+  console.log(`
+${legs.length} stretch(es), ${((performance.now() - startedAt) / 1000).toFixed(0)}s in all`);
 
   const [burst] = await db.select({ status: schema.simulationBursts.status, error: schema.simulationBursts.error }).from(schema.simulationBursts).where(eq(schema.simulationBursts.id, prepared.job.burstId)).limit(1);
   if (burst?.status !== "committed") throw new Error(`the burst ${burst?.status ?? "vanished"}: ${burst?.error ?? "no reason recorded"}`);
   const view = await getWorldView(db, gameId);
   console.log(`\nday ${prepared.job.view.world.instant.day} → ${view?.world.instant.day} · burst ${prepared.job.burstId}`);
-  const entries = await listChronicle(db, gameId, 20);
-  for (const entry of entries.filter((row) => row.burstId === prepared.job.burstId)) console.log(`\n## ${entry.title}\n${entry.body}`);
+  const entries = await listChronicle(db, gameId, 60);
+  const burstIds = new Set(legs.map((leg) => leg.burstId));
+  for (const entry of entries.filter((row) => row.burstId !== null && burstIds.has(row.burstId))) console.log(`\n## ${entry.title}\n${entry.body}`);
 }
 
 try {
@@ -101,7 +104,7 @@ try {
     if (second === "--chronicles") await chronicles(gameId);
     else if (second === "--repin" || second.startsWith("--repin=")) await repin(gameId, second === "--repin" ? undefined : Number(second.slice("--repin=".length)));
     else if (second === "--wait") await playTurn(gameId, null, Number(flag("--wait")));
-    else await playTurn(gameId, second, undefined);
+    else await playTurn(gameId, second, flag("--span") === undefined ? undefined : Number(flag("--span")));
   }
 } finally {
   await close();

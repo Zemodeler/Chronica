@@ -1,7 +1,10 @@
 import {
+  allianceBetween,
   computeOpinion,
   currentAgeYears,
   familyLinksOf,
+  feudBetween,
+  gensById,
   isDelivered,
   marriageBar,
   MARRIAGE_AGE,
@@ -12,7 +15,9 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { remember } from "./grievances";
+import { bindGentes } from "./gentes";
 import type { IdFactory } from "./ports";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Marrying into a house (play-test L10).
@@ -119,6 +124,20 @@ export function willingnessToWed(world: WorldState, match: Match): { readonly sc
   if (wealth >= 5) reasons.push(`${suitor.name} is rich`);
   else if (wealth <= -5) reasons.push(`${suitor.name} has little`);
   if (suitor.polityId !== decider.polityId) { score -= 30; reasons.push("he is a foreigner"); }
+  // The families weigh it as well: a grudge between the gentes counts against him, an old marriage between them for him,
+  // and the name's own weight (the consuls in it) by the difference.
+  const feud = feudBetween(world, suitor.dynastyId, decider.dynastyId);
+  if (feud > 0) { score -= Math.min(40, Math.round(feud / 150)); reasons.push("their gentes are at feud"); }
+  const bound = allianceBetween(world, suitor.dynastyId, decider.dynastyId);
+  if (bound > 0) { score += Math.min(15, Math.round(bound / 600)); reasons.push("their gentes are bound by an old marriage"); }
+  const suitorGens = gensById(world, suitor.dynastyId);
+  const deciderGens = gensById(world, decider.dynastyId);
+  if (suitorGens !== undefined && deciderGens !== undefined && suitorGens.id !== deciderGens.id) {
+    const name = Math.max(-8, Math.min(8, Math.round((suitorGens.dignitasBps - deciderGens.dignitasBps) / 400)));
+    score += name;
+    if (name <= -4) reasons.push(`${suitorGens.plural} are of lesser name`);
+    else if (name >= 4) reasons.push(`${suitorGens.plural} are of the greater name`);
+  }
   const shared = [...groupsOf(world, suitor.id)].some((group) => groupsOf(world, decider.id).has(group));
   if (shared) { score += 10; reasons.push("they stand together in politics"); }
   const opinion = computeOpinion(decider, suitor.id);
@@ -153,7 +172,7 @@ export function answerMarriageOffers(world: WorldState, ids: IdFactory, toDay: n
     if (match === null || barred !== null) {
       next = answerOf("refused", `No marriage can come of it: ${barred}.`);
       facts.push({
-        localId: `marriage_refused_${message.id}`.slice(0, 60), kind: "marriage_refused",
+        localId: safeLocalId(`marriage_refused_${message.id}`).slice(0, 60), kind: "marriage_refused",
         summary: `${recipient} answers ${sender}'s offer of marriage: no marriage can come of it, for ${barred}.`.slice(0, 600),
         affectedRefs: [{ kind: "character", id: message.fromCharacterId }, { kind: "character", id: message.toCharacterId! }],
         visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 20,
@@ -165,7 +184,7 @@ export function answerMarriageOffers(world: WorldState, ids: IdFactory, toDay: n
     if (verdict.score < WILLING_AT) {
       next = answerOf("refused", `${recipient} will not give ${match.bride.name} to ${match.groom.name}${why}.`);
       facts.push({
-        localId: `marriage_refused_${message.id}`.slice(0, 60), kind: "marriage_refused",
+        localId: safeLocalId(`marriage_refused_${message.id}`).slice(0, 60), kind: "marriage_refused",
         summary: `${recipient} has refused the match between ${match.groom.name} and ${match.bride.name}${why}.`.slice(0, 600),
         affectedRefs: [{ kind: "character", id: match.groom.id }, { kind: "character", id: match.bride.id }, { kind: "character", id: match.giver.id }],
         visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 25,
@@ -209,6 +228,10 @@ function wed(world: WorldState, match: Match, ids: IdFactory, atStep: number, fa
       }],
     },
   };
+  // And the two gentes are bound by it, for as long as the marriage's generation lasts.
+  next = bindGentes(next, groom, bride, atStep);
+  const groomGens = gensById(next, groom.dynastyId);
+  const brideGens = gensById(next, bride.dynastyId);
   // The heads of the two houses are kin now, and think the better of each other for it.
   const groomHead = fatherOf(next, groom) ?? groom;
   if (groomHead.id !== giver.id) {
@@ -219,8 +242,8 @@ function wed(world: WorldState, match: Match, ids: IdFactory, atStep: number, fa
   }
   const riser = next.characters.find((character) => character.id === risesId)?.name ?? "the lesser house";
   facts.push({
-    localId: `marriage_${groom.id}_${bride.id}`.slice(0, 60), kind: "marriage",
-    summary: `${groom.name} has married ${bride.name}, given by ${giver.id === bride.id ? "herself" : giver.name}${dowry > 0 ? `, with a dowry of ${dowry}` : ""}.${gain > 0 ? ` ${riser} stands the higher for the match.` : ""}`.slice(0, 600),
+    localId: safeLocalId(`marriage_${groom.id}_${bride.id}`).slice(0, 60), kind: "marriage",
+    summary: `${groom.name} has married ${bride.name}, given by ${giver.id === bride.id ? "herself" : giver.name}${dowry > 0 ? `, with a dowry of ${dowry}` : ""}.${gain > 0 ? ` ${riser} stands the higher for the match.` : ""}${groomGens !== undefined && brideGens !== undefined && groomGens.id !== brideGens.id ? ` ${groomGens.plural.replace(/^the /, "The ")} and ${brideGens.plural} are bound by it.` : ""}`.slice(0, 600),
     affectedRefs: [{ kind: "character", id: groom.id }, { kind: "character", id: bride.id }, ...(giver.id === bride.id ? [] : [{ kind: "character" as const, id: giver.id }]), ...(groom.polityId === null ? [] : [{ kind: "polity" as const, id: groom.polityId }])],
     visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 45,
   });

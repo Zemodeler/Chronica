@@ -70,7 +70,7 @@ function aClumsyModel(): SimModelPort & { calls: SimOperation[]; cognitionDays: 
   };
 }
 
-async function aMonth(budget: SimulationBudget = DEFAULT_BUDGET): Promise<{ result: BurstResult; port: ReturnType<typeof aClumsyModel>; lastDay: number }> {
+async function aMonth(budget: SimulationBudget = DEFAULT_BUDGET): Promise<{ result: BurstResult; port: ReturnType<typeof aClumsyModel>; lastDay: number; daysAsked: number[] }> {
   const port = aClumsyModel();
   const world = opening();
   const result = await runSimulationBurst({
@@ -81,25 +81,26 @@ async function aMonth(budget: SimulationBudget = DEFAULT_BUDGET): Promise<{ resu
   });
   const dayOf = new Map(Array.from({ length: 40 }, (_, offset) => [formatWorldDate({ ...world.instant, day: world.instant.day + offset }, definition.clock), offset] as const));
   const lastDay = Math.max(0, ...port.cognitionDays.map((date) => dayOf.get(date) ?? 0));
-  return { result, port, lastDay };
+  const daysAsked = [...new Set(port.cognitionDays.map((date) => dayOf.get(date) ?? 0))].sort((x, y) => x - y);
+  return { result, port, lastDay, daysAsked };
 }
 
 describe("a month thought about", { timeout: 300_000 }, () => {
   it("asks somebody in the month's last week, within the budget, though every answer needs correcting", async () => {
-    const { result, port, lastDay } = await aMonth();
+    const { result, port, lastDay, daysAsked } = await aMonth();
     // Measured on this model before the change: twenty calls -- one order, three
     // cognition, eight repairs and eight reconciliations -- every person asked
     // once on the month's second day, and the burst stopped on its fifth with
     // the budget spent. After: seventeen -- one, eight, four, four -- with
     // people asked on the second, fifth, eighth and thirtieth days.
-    expect(result.modelCalls).toBeLessThanOrEqual(callCapFor(DEFAULT_BUDGET, 30));
+    expect(result.modelWorkCalls).toBeLessThanOrEqual(callCapFor(DEFAULT_BUDGET, 30));
     expect(lastDay).toBeGreaterThanOrEqual(21);
     // One correction and one reconciliation a round at most, never one a person.
     const rounds = new Set(port.cognitionDays).size;
     expect(port.calls.filter((call) => call === "repair_deltas").length).toBeLessThanOrEqual(rounds);
     expect(port.calls.filter((call) => call === "reconcile_facts").length).toBeLessThanOrEqual(rounds);
-    // A round of ten is two calls, not three.
-    expect(port.calls.filter((call) => call === "simulate_cognition").length).toBeLessThanOrEqual(2 * rounds);
+    // Extra parallel requests preserve the same work allowance.
+    expect(port.calls.filter((call) => call === "simulate_cognition").length).toBeLessThanOrEqual(3 * rounds);
     // What named the legion that is not there is never the event: withdrawn
     // by the round's reconciliation, or -- for the world riding along, which
     // nobody pays to correct -- kept as somebody's report of it.
@@ -107,6 +108,8 @@ describe("a month thought about", { timeout: 300_000 }, () => {
     expect(phantom.every((fact) => fact.kind.startsWith("claim_"))).toBe(true);
     // And every skip says why: nobody is asked again with nothing new to answer.
     for (const skip of result.skipped.filter((entry) => entry.stage === "cognition")) expect(skip.reason.length).toBeGreaterThan(10);
-    expect(result.skipped.some((entry) => entry.stage === "cognition" && entry.reason.includes("nothing new"))).toBe(true);
+    // Rounds are no closer than the budget's minimum hop once the first is answered, so the days between them are not paid for twice.
+    const days = daysAsked;
+    for (let at = 2; at < days.length; at += 1) expect(days[at]! - days[at - 1]!).toBeGreaterThanOrEqual(DEFAULT_BUDGET.minHopDays ?? 3);
   });
 });

@@ -15,6 +15,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { remember, teach, type Grievance } from "./grievances";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * Whether a man handed an order will carry it out (docs/plans/departments.md
@@ -140,7 +141,7 @@ export function answerByTemper(world: WorldState, playerIds: readonly string[]):
     const who = (id: string): string => next.characters.find((character) => character.id === id)?.name ?? id;
     const subverted = decided.status === "subverted";
     facts.push({
-      localId: `temper_${attempt.id}`.slice(0, 60),
+      localId: safeLocalId(`temper_${attempt.id}`).slice(0, 60),
       kind: `order_${decided.status}`,
       summary: `${who(attempt.recipientRef.id)} ${VERB[defiance.answer]} ${who(attempt.issuerRef.id)} asked (${attempt.instruction.slice(0, 200)}): ${defiance.why}.`,
       affectedRefs: [attempt.issuerRef, attempt.recipientRef],

@@ -1,23 +1,33 @@
 import {
   FactProposalSchema,
   PEACE_AT,
-  TRUCE_AT,
   WorldDeltaSchema,
   agreementsBetween,
+  aptitude,
+  campaignLine,
+  campaignOf,
+  computeOpinion,
   enemiesOf,
   fitStrengthOf,
   isDelivered,
+  isOwnToDo,
+  mayAct,
   isNavalForce,
   kmFromAny,
   readDepartments,
   stableHash,
   warStanding,
+  warPlanLine,
+  warPlanOf,
   warWeariness,
-  warsOf,
   type Character,
   type DiplomaticMessage,
   type FactProposal,
+  type Office,
+  type PoliticalProcedure,
+  type QuestionConcern,
   type ScenarioHistoricalPressure,
+  type ScenarioClock,
   type ScenarioWarfareRules,
   type StatecraftAct,
   type StatecraftEntry,
@@ -28,6 +38,21 @@ import { readBoard, roughMen, type NeighbourReading, type PowerReading } from ".
 import { pressureHolds } from "./narrator";
 import { SIEGE_NEEDED_AT } from "./occupation";
 import { alarmOf } from "./pushback";
+import { appetiteOf, dispositionOf, leastOdds, natureInWords, peaceReluctance, tilt, type Disposition } from "./disposition";
+import { plainName, writeLetter } from "./letter-craft";
+import { favouredNeighbour } from "./quirks";
+import { decideFiscal, motionsByPower, weigh, type Asked } from "./fiscal-officers";
+import { consultTheFriends, decideCouncils } from "./bodies";
+import { decideMagistrates, type Skim } from "./magistrates";
+import { decideAudits } from "./close-of-office";
+import { perceivedRatio } from "./perceive";
+import { directTheWar } from "./war-direction";
+import { peaceFromTheAims } from "./a-war-ends-for-what-it-was-for";
+import { decideDatedEvents } from "./a-dated-war";
+import { STEP_DAYS, letterVerdict } from "./letter-verdict";
+import { safeLocalId } from "./safe-local-id";
+import { decideCallsForHelp, decideTheAppealWar, theAppealBehind } from "./the-appeal-goes-to-the-people";
+import { decideAFleet } from "./a-fleet-by-decree";
 
 /**
  * The world AI: every power's big moves, by rule (docs/plans/a-living-world.md §2).
@@ -100,7 +125,7 @@ const RAID_EVERY_DAYS = 120;
 export interface StatecraftInput {
   readonly world: WorldState;
   readonly gameId: string;
-  /** Powers the rules never act for: the player's own, and any power the player rules. */
+  /** Powers the rules never act for: those the player rules (alone or as one of a college). Not the one he merely lives in. */
   readonly excludedPolityIds: ReadonlySet<string>;
   /** People the model is playing now: their armies and their letters are theirs, not the rules'. */
   readonly playedByModel: ReadonlySet<string>;
@@ -112,6 +137,10 @@ export interface StatecraftInput {
   readonly warfare?: ScenarioWarfareRules | undefined;
   /** Raises or lowers every power's appetite against the player's (difficulty, §5). Zero by default. */
   readonly appetiteAgainstPlayer?: number | undefined;
+  /** The scenario's offices, so that what an officer may do (his competence, `mayAct`) is read for the offices the scenario wrote by hand. */
+  readonly offices?: readonly Office[] | undefined;
+  /** The scenario clock, so that the season is known to the armies (`war-direction.ts`). */
+  readonly clock?: ScenarioClock | undefined;
 }
 
 export interface StatecraftDecision {
@@ -122,6 +151,8 @@ export interface StatecraftDecision {
   readonly why: string;
   readonly deltas: readonly WorldDelta[];
   readonly facts: readonly FactProposal[];
+  /** What the man's own hand keeps of what he handled, taken after the act (`skimTheHand`). */
+  readonly skim?: Skim | undefined;
 }
 
 const delta = (raw: Record<string, unknown>): WorldDelta => WorldDeltaSchema.parse(raw);
@@ -133,8 +164,40 @@ const fact = (raw: Record<string, unknown>): FactProposal => FactProposalSchema.
 const roll = (gameId: string, day: number, ...keys: string[]): ((span: number) => number) =>
   (span) => (span <= 0 ? 0 : stableHash([gameId, "statecraft", String(Math.floor(day / 30)), ...keys]) % span);
 
+/** What a ruler's move comes to when the constitution may make it the chamber's: his own, asked of the chamber (the motion is his decision), or waiting on one that is not his to put. */
+export type Passage =
+  | { readonly how: "own"; readonly decreed: boolean }
+  | { readonly how: "asked"; readonly decision: StatecraftDecision }
+  | { readonly how: "wait" };
+const OWN: Passage = { how: "own", decreed: false };
+
+/**
+ * Weighs an act of the state's own against the ruler's competence (`mayAct`), as the man at the books weighs his (`weigh`): his own where it is his, or where the chamber has
+ * decreed it and he is carrying it out; laid before the chamber (once, and not again while it waits or for a season after it failed) where it is the chamber's; left where it
+ * is none of his. A power with no constitution on record or no offices to read it from acts as it always did.
+ */
+export function passage(world: WorldState, input: StatecraftInput, motions: ReadonlyMap<string, readonly PoliticalProcedure[]>, ruler: Character, polity: { readonly id: string; readonly name: string }, act: "war" | "peace" | "pacts", label: string, concerns: readonly QuestionConcern[]): Passage {
+  const offices = input.offices;
+  if (offices === undefined) return OWN;
+  const may = mayAct(world, ruler.id, act, { offices });
+  if (may === null || isOwnToDo(may.grade)) return OWN;
+  if (may.grade !== "by_the_body" || may.body === null) return { how: "wait" };
+  const day = world.instant.day;
+  const weighed: "own" | Asked | null = weigh(world, ruler, polity, { kind: act, act, concerns, label, deltas: [], text: label, why: label }, {
+    offices, mine: motions.get(polity.id) ?? [], day, month: String(Math.floor(day / 30)), carriedDay: undefined, asked: [],
+  });
+  if (weighed === "own") return { how: "own", decreed: true };
+  if (weighed === null) return { how: "wait" };
+  return {
+    how: "asked",
+    decision: { polityId: polity.id, actorCharacterId: ruler.id, act: "magistrate", targetPolityId: null, why: weighed.why.slice(0, 400), deltas: [weighed.delta], facts: [] },
+  };
+}
+
 export function decideStatecraft(input: StatecraftInput): StatecraftDecision[] {
   const { world } = input;
+  let motionIndex: Map<string, PoliticalProcedure[]> | undefined;
+  const motionsOf = (): Map<string, PoliticalProcedure[]> => (motionIndex ??= motionsByPower(world));
   const board = readBoard(world);
   const rulers = readDepartments(world);
   const day = world.instant.day;
@@ -144,6 +207,9 @@ export function decideStatecraft(input: StatecraftInput): StatecraftDecision[] {
 
   const rulerOf = (polityId: string): Character | undefined => rulers.rulers(polityId).find((ruler) => ruler.alive && ruler.id !== input.playerCharacterId);
   const actsFor = (polityId: string): boolean => !input.excludedPolityIds.has(polityId) && rulerOf(polityId) !== undefined;
+
+  // ── 0. What the age dates, done (a-dated-war.ts) ───────────────────────
+  decisions.push(...decideDatedEvents(input, rulerOf));
 
   // ── 1. Letters to powers the model is not playing ──────────────────────
   for (const message of world.diplomacy) {
@@ -162,15 +228,47 @@ export function decideStatecraft(input: StatecraftInput): StatecraftDecision[] {
     if (day < QUIET_OPENING_DAYS) break;
     if (moved.has(candidate.polityId) || moved.has(candidate.neighbour.polityId)) continue;
     const at = candidate.act === "revolt" ? REVOLT_AT : WAR_AT;
-    if (wars < NEW_WARS_PER_MONTH && comes(candidate.score, at, candidate.polityId, candidate.neighbour.polityId, candidate.act)) {
-      decisions.push(openTheWar(world, candidate.polityId, candidate.ruler, candidate.neighbour, candidate.act === "revolt" ? "revolt" : "declare_war", candidate.why, nameOf));
+    const rolled = comes(candidate.score, at, candidate.polityId, candidate.neighbour.polityId, candidate.act);
+    // A power writes before it fights, unless its ruler is not a man who does (`roadToWar`).
+    const road = candidate.act === "declare_war" ? roadToWar(world, candidate, rolled) : ({ step: "war" } as const);
+    if (road.step === "letter") {
+      if (!moved.has(candidate.polityId) && !moved.has(candidate.neighbour.polityId)) {
+        decisions.push(road.decision);
+        moved.add(candidate.polityId);
+      }
+      continue;
+    }
+    if (road.step === "wait") continue;
+    // A war is the chamber's where the constitution says so (the Senate's, in Rome; the Elders', in Carthage): the ruler lays it before the chamber, and makes it
+    // the month after it carries (`passage`). A king who has friends to ask asks them, and pays if he goes against them (`consultTheFriends`).
+    const way = candidate.act === "declare_war" && wars < NEW_WARS_PER_MONTH && (rolled || input.offices !== undefined)
+      ? passage(world, input, motionsOf(), candidate.ruler, { id: candidate.polityId, name: candidate.reading.name }, "war", `war be made on ${candidate.neighbour.name}`, ["war"])
+      : OWN;
+    if (way.how === "asked" && rolled) {
+      decisions.push(way.decision);
+      moved.add(candidate.polityId);
+      continue;
+    }
+    if (wars < NEW_WARS_PER_MONTH && way.how === "own" && (rolled || way.decreed)) {
+      let opened = openTheWar(world, candidate.polityId, candidate.ruler, candidate.neighbour, candidate.act === "revolt" ? "revolt" : "declare_war", candidate.why, nameOf);
+      if (candidate.act === "declare_war" && input.offices !== undefined) {
+        const friends = consultTheFriends(world, candidate.polityId, candidate.ruler, { label: `war be made on ${candidate.neighbour.name}`, concerns: ["war"] }, input.gameId);
+        if (friends?.against === true && friends.heeds) continue;
+        if (friends?.cost != null) opened = { ...opened, deltas: [...opened.deltas, friends.cost], why: `${opened.why.slice(0, 340)}; against the advice of the ${friends.council.name}`.slice(0, 400) };
+      }
+      decisions.push(opened);
       moved.add(candidate.polityId);
       moved.add(candidate.neighbour.polityId);
       wars += 1;
       continue;
     }
-    const raidedLately = world.statecraft.log.some((entry) => entry.act === "raid" && entry.polityId === candidate.polityId && entry.targetPolityId === candidate.neighbour.polityId && day - entry.day < RAID_EVERY_DAYS);
-    if (candidate.act === "declare_war" && candidate.neighbour.bordering && !raidedLately && comes(candidate.score, RAID_AT, candidate.polityId, candidate.neighbour.polityId, "raid")) {
+    // A raid is short of war, and who sends one is as personal as who declares one: the greedy and the cruel raid for the taking,
+    // the vengeful raid to hurt, the honourable do not raid a power they have sworn peace with, and an impulsive man raids oftener.
+    const d = dispositionOf(candidate.ruler, day);
+    const raidScore = candidate.score + (d.greed - 0.5) * 14 + (d.cruelty - 0.5) * 10 + (d.grudge - 0.5) * 8 - (candidate.neighbour.relation === "peace" ? d.honour * 16 : 0);
+    const raidEvery = RAID_EVERY_DAYS * (1 + (d.steadiness - 0.5) * 0.7);
+    const raidedLately = world.statecraft.log.some((entry) => entry.act === "raid" && entry.polityId === candidate.polityId && entry.targetPolityId === candidate.neighbour.polityId && day - entry.day < raidEvery);
+    if (candidate.act === "declare_war" && candidate.neighbour.bordering && !raidedLately && comes(raidScore, RAID_AT, candidate.polityId, candidate.neighbour.polityId, "raid")) {
       const raid = raidAcross(world, candidate.polityId, candidate.ruler, candidate.neighbour, candidate.why, input.playedByModel);
       if (raid !== null) {
         decisions.push(raid);
@@ -180,10 +278,24 @@ export function decideStatecraft(input: StatecraftInput): StatecraftDecision[] {
   }
 
   // Wars that have done what they were for, or exhausted both sides, end.
-  decisions.push(...peacesByRule(world, input, rulerOf, moved));
+  decisions.push(...peacesByRule(world, input, rulerOf, moved, motionsOf));
+
+  // A people hard pressed in its war writes to the strong powers near it for help (`the-appeal-goes-to-the-people.ts`).
+  decisions.push(...decideCallsForHelp(world, input.excludedPolityIds, input.playedByModel, rulerOf, day));
+
+  // A power at war with a sea power and with no ships of its own moves a fleet; with ships, the boarding-bridge (`a-fleet-by-decree.ts`).
+  decisions.push(...decideAFleet(input, rulerOf));
+
+  // A war the people voted on an appeal, when the Senate would not, is made by the consul (`the-appeal-goes-to-the-people.ts`).
+  for (const war of decideTheAppealWar(world, input.excludedPolityIds, rulerOf, day)) {
+    if (moved.has(war.polityId) || (war.targetPolityId !== null && moved.has(war.targetPolityId))) continue;
+    decisions.push(war);
+    moved.add(war.polityId);
+    if (war.targetPolityId !== null) moved.add(war.targetPolityId);
+  }
 
   // Alliances against a common threat, for powers that did not just go to war.
-  decisions.push(...allianceAgainstThreats(world, board, input, rulerOf, moved));
+  decisions.push(...allianceAgainstThreats(world, board, input, rulerOf, moved, motionsOf));
 
   // ── 3. Armies at war ───────────────────────────────────────────────────
   // Not for a power making peace this month: its armies' orders would be
@@ -209,27 +321,37 @@ export function decideStatecraft(input: StatecraftInput): StatecraftDecision[] {
       const levy = raiseLevy(world, reading, ruler, [...enemies].map(nameOf).join(" and "));
       if (levy !== null) decisions.push(levy);
     }
-    for (const force of world.material.forces) {
-      // Fleets keep the sea by their own rules; this is the land war.
-      if (force.polityId !== reading.polityId || force.outlaw === true || fitStrengthOf(force) <= 0 || isNavalForce(force, input.warfare)) continue;
-      if (force.commanderCharacterId === input.playerCharacterId || input.playedByModel.has(force.commanderCharacterId) || input.playedByModel.has(force.controllerCharacterId ?? "")) continue;
-      if (marching.has(force.id) || fighting.has(force.id) || besieging.has(force.id) || force.hold === true) continue;
-      const order = conductOfWar(world, force, enemies, reading.polityId, nameOf, input.warfare);
-      if (order !== null) decisions.push(order);
-    }
+    // The war is directed by its plan (`war-direction.ts`): the head's plan, each army's orders, the fleets; the old rules lead what has no orders.
+    decisions.push(...directTheWar({
+      world, gameId: input.gameId, polityId: reading.polityId, ruler, enemies, warfare: input.warfare, clock: input.clock, playedByModel: input.playedByModel,
+      playerCharacterId: input.playerCharacterId, sets: { marching, fighting, besieging },
+      legacy: (force) => conductOfWar(world, force, enemies, reading.polityId, nameOf, input.warfare),
+    }));
   }
+
+  // ── 4. The books ───────────────────────────────────────────────────────
+  // Each power nobody plays has a man who keeps them: tax, customs, credit, coin, pacts (`fiscal-officers.ts`).
+  const fiscal = decideFiscal(input);
+  decisions.push(...fiscal);
+  // And the magistrates at their charges: the bread, the levy, the cases, the rites, the census, the mint, the envoys (`magistrates.ts`).
+  decisions.push(...decideMagistrates(input, fiscal));
+  // And the audits: the censors at the lustrum, a king's dioiketes in the year, anybody's on suspicion (`close-of-office.ts`).
+  decisions.push(...decideAudits(input));
+  // And the king takes the advice of his friends, or overrules it (`bodies.ts`).
+  const reader = readDepartments(world);
+  decisions.push(...decideCouncils({ world, gameId: input.gameId, excludedPolityIds: input.excludedPolityIds, playedByModel: input.playedByModel, playerCharacterId: input.playerCharacterId, rulers: (polityId) => reader.rulers(polityId) }));
   return decisions;
 }
 
 /** A big move a power could make this month, with how strong its case is and why. */
-export interface MoveCandidate { readonly polityId: string; readonly ruler: Character; readonly reading: PowerReading; readonly neighbour: NeighbourReading; readonly act: "declare_war" | "revolt"; readonly score: number; readonly why: string[] }
+export interface MoveCandidate { readonly perceived: number; readonly casus: { readonly matter: string; readonly ask: string }; readonly polityId: string; readonly ruler: Character; readonly reading: PowerReading; readonly neighbour: NeighbourReading; readonly act: "declare_war" | "revolt"; readonly score: number; readonly why: string[] }
 
 /**
  * Every war and rising each power could start this month, scored. The rules
  * act on the best of them by chance (`decideStatecraft`); a ruler in the
  * cast is shown his own best few instead, and decides (`rulerOptions`).
  */
-function bigMoveCandidates(
+export function bigMoveCandidates(
   input: StatecraftInput,
   board: ReturnType<typeof readBoard>,
   rulerOf: (polityId: string) => Character | undefined,
@@ -249,18 +371,26 @@ function bigMoveCandidates(
   for (const reading of board.values()) {
     if (!actsFor(reading.polityId)) continue;
     const ruler = rulerOf(reading.polityId)!;
-    const temperament = ruler.mind.temperament;
+    const d = dispositionOf(ruler, day);
     const traits = new Set(ruler.traits);
     const outlookRisk = world.polityOutlooks.find((outlook) => outlook.polityId === reading.polityId)?.riskTolerance ?? ruler.mind.riskTolerance;
-    const appetite = (temperament.boldness - 50) / 2 + (outlookRisk - 50) / 3
-      + (traits.has("ambitious") ? 8 : 0) + (traits.has("bold") ? 6 : 0) - (traits.has("cautious") ? 10 : 0) - (traits.has("content") ? 8 : 0)
-      + (traits.has("wrathful") ? 6 : 0) + (traits.has("cruel") ? 3 : 0) - (traits.has("cowardly") ? 12 : 0);
-    const busy = reading.wars.length * 35 + (day - lastWarEnded(reading.polityId) < REST_AFTER_WAR_DAYS ? 15 : 0);
+    // What the whole of him inclines to; the named traits only nudge it, since the mind already holds what they name.
+    const appetite = appetiteOf(d) + (outlookRisk - 50) / 4
+      + (traits.has("ambitious") ? 4 : 0) + (traits.has("bold") ? 3 : 0) - (traits.has("cautious") ? 5 : 0) - (traits.has("content") ? 6 : 0)
+      + (traits.has("wrathful") ? 3 : 0) - (traits.has("cowardly") ? 8 : 0);
+    // Each war already on his hands weighs on him as his nerve lets it.
+    const busy = reading.wars.length * (55 - 30 * d.nerve) + (day - lastWarEnded(reading.polityId) < REST_AFTER_WAR_DAYS ? 15 * tilt(d.fear, 0.5) : 0);
     const broke = (world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === reading.polityId)?.balance ?? 0) < 0;
+    const nature = natureInWords(d);
+    // Reasons are weighed by the part of him that answers to them, so two rulers on the same board score the same neighbour differently.
+    const swing = 7 * (1.6 - d.steadiness);
 
     for (const neighbour of reading.neighbours) {
       if (neighbour.relation === "war" || neighbour.relation === "ally" || neighbour.relation === "protects_us" || neighbour.relation === "we_protect" || neighbour.relation === "truce" || neighbour.relation === "follows_us") continue;
       const why: string[] = [];
+      // What the quarrel is about, for the letters that go before a war: the strongest reason wins.
+      let perceived = neighbour.ratio;
+      let casus = { matter: `the quarrel between ${plainName(reading.name)} and ${plainName(neighbour.name)}`, ask: "that you give us satisfaction" };
       let score = appetite - busy - (broke ? 10 : 0);
       const leaning = leaningOf(reading.polityId, neighbour.polityId);
       if (leaning !== undefined) {
@@ -271,14 +401,26 @@ function bigMoveCandidates(
       }
       // Fear of a power that grows too fast is a reason to strike while it can still be beaten (`pushback.ts`).
       const fear = alarmOf(world, reading.polityId, neighbour.polityId);
-      if (fear >= 25) { score += Math.round(fear / 3); why.push(`fear of ${possessive(neighbour.name)} growing power`); }
-      if (neighbour.trust <= -60) { score += 25; why.push(`an old enmity with ${neighbour.name}`); }
-      else if (neighbour.trust <= -30) { score += 12; why.push(`bad blood with ${neighbour.name}`); }
-      if (neighbour.claimed.length > 0) { score += 20; why.push(`${neighbour.name} holds ground it claims`); }
-      if (neighbour.grievances.some((grievance) => grievance.includes("taken from us"))) { score += 25; why.push(`${neighbour.name} holds ground taken from it`); }
-      score += Math.min(25, 10 * neighbour.distractions.length);
+      if (fear >= 25) { casus = { matter: `${possessive(plainName(neighbour.name))} growing power`, ask: "that you stand your armies down and give us surety" }; score += Math.round((fear / 3) * tilt(d.fear, 0.9)); why.push(d.fear >= 0.6 ? `dread of ${possessive(neighbour.name)} growing power` : `fear of ${possessive(neighbour.name)} growing power`); }
+      // An old hatred is a reason to a man who keeps his grudges and hardly one to a man who lets them go.
+      if (neighbour.trust <= -60) { casus = { matter: `${possessive(plainName(neighbour.name))} old ill-will toward us`, ask: "that you make amends" }; score += Math.round(25 * tilt(d.grudge, 0.8)); why.push(d.grudge >= 0.6 ? `he has never forgiven ${neighbour.name}` : `an old enmity with ${neighbour.name}`); }
+      else if (neighbour.trust <= -30) { score += Math.round(12 * tilt(d.grudge, 0.8)); why.push(`bad blood with ${neighbour.name}`); }
+      // A claim is a matter of right to the honourable and of opportunity to the greedy; ground taken from us is a debt of honour and of grudge.
+      if (neighbour.claimed.length > 0) { casus = { matter: `the ground ${plainName(neighbour.name)} holds that is ours by right`, ask: "that you restore it" }; score += Math.round(20 * (0.4 + d.honour * 0.6 + d.greed * 0.5)); why.push(`${neighbour.name} holds ground it claims`); }
+      if (neighbour.grievances.some((grievance) => grievance.includes("taken from us"))) { casus = { matter: `the ground ${plainName(neighbour.name)} holds that was taken from us`, ask: "that you give the ground back" }; score += Math.round(25 * (0.4 + d.honour * 0.5 + d.grudge * 0.6)); why.push(`${neighbour.name} holds ground taken from it`); }
+      // A people that has asked for help against him, or an ally of ours at war with him, is a cause that does not wait on the odds (`the-appeal-goes-to-the-people.ts`).
+      const appeal = theAppealBehind(world, reading.polityId, neighbour.polityId);
+      if (appeal !== null) { casus = { matter: `the appeal of ${plainName(appeal.name)} against ${plainName(neighbour.name)}`, ask: "that you leave them be" }; score += Math.round(18 + 22 * d.honour); why.push(`${appeal.name} has asked for help against ${neighbour.name}`); }
+      // A neighbour with its hands full is a chance to the greedy and a risk to the fearful.
+      score += Math.min(30, Math.round(10 * neighbour.distractions.length * (0.4 + d.greed * 1.1 - d.fear * 0.2)));
       if (neighbour.distractions.length > 0) why.push(`${neighbour.name}: ${neighbour.distractions.join("; ")}`);
       if (input.appetiteAgainstPlayer !== undefined && neighbour.polityId === playerPolity) score += input.appetiteAgainstPlayer;
+      // What he thinks of the man who rules them, as a man, and the one neighbour he has never forgiven or is fond of (quirks.ts).
+      const theirRuler = rulerOf(neighbour.polityId);
+      const regard = theirRuler === undefined ? 0 : computeOpinion(ruler, theirRuler.id);
+      if (regard <= -40) score += 10; else if (regard >= 40) score -= 12;
+      if (favouredNeighbour(ruler, reading.neighbours.map((n) => n.polityId), "grudge_bearer") === neighbour.polityId) score += 12;
+      if (favouredNeighbour(ruler, reading.neighbours.map((n) => n.polityId), "loyal_friend") === neighbour.polityId) score -= 14;
 
       if (neighbour.relation === "leads_us") {
         // A people bound by foedus does not make war; it rises. Only when the
@@ -288,7 +430,7 @@ function bigMoveCandidates(
         if (!leaderBusy) continue;
         score += 15 + (neighbour.trust <= -50 ? 10 : 0) - 10;
         why.push(`${possessive(neighbour.name)} armies are away at war`);
-        candidates.push({ polityId: reading.polityId, ruler, reading, neighbour, act: "revolt", score: score + roll(input.gameId, day, reading.polityId, neighbour.polityId, "revolt")(15) - 7, why });
+        candidates.push({ casus, perceived, polityId: reading.polityId, ruler, reading, neighbour, act: "revolt", score: score + roll(input.gameId, day, reading.polityId, neighbour.polityId, "revolt")(15) * (swing / 7) - swing, why });
         continue;
       }
       // The odds. A power that cannot win does not start it, whatever it
@@ -296,20 +438,106 @@ function bigMoveCandidates(
       // Athens rose against Macedon in 268 because Sparta and Egypt stood
       // behind it, not because Athens alone could win.
       const friends = world.polityAgreements.some((agreement) => agreement.status === "active" && agreement.kind === "alliance" && (agreement.polityId === reading.polityId || agreement.otherPolityId === reading.polityId));
-      if (neighbour.ratio < (leaning !== undefined && friends ? 0.15 : 0.8)) continue;
-      score += neighbour.ratio >= 2 ? 30 : neighbour.ratio >= 1.5 ? 20 : neighbour.ratio >= 1.2 ? 10 : -10;
-      why.push(neighbour.ratio < 0.8
+      // What he believes of their strength, which is not what it is (`perceive.ts`).
+      const ratio = perceivedRatio(world, ruler, neighbour);
+      perceived = ratio;
+      if (ratio < (leaning !== undefined && friends ? 0.15 : leastOdds(d))) continue;
+      score += ratio >= 2 ? 30 : ratio >= 1.5 ? 20 : ratio >= 1.2 ? 10 : -10;
+      why.push(ratio < leastOdds(d)
         ? `${neighbour.name} is far the stronger, and it counts on its friends`
-        : `its strength against ${possessive(neighbour.name)} is ${neighbour.ratio >= 2 ? "more than double" : neighbour.ratio >= 1.5 ? "half again" : neighbour.ratio >= 1.2 ? "a little better" : "about even"}`);
+        : `its strength against ${possessive(neighbour.name)} is ${ratio >= 2 ? "more than double" : ratio >= 1.5 ? "half again" : ratio >= 1.2 ? "a little better" : "about even"}`);
       // Breaking a treaty is a thing a faithless ruler does more easily.
-      if (neighbour.relation === "peace") score -= traits.has("deceitful") || traits.has("treacherous") ? 5 : 20;
+      // Breaking a sworn peace costs the honest dear and the faithless almost nothing.
+      if (neighbour.relation === "peace") score -= intendsToBreak(world, ruler, neighbour.polityId) ? 0 : Math.round(traits.has("deceitful") || traits.has("treacherous") ? 4 : 6 + 28 * d.honour);
       if (!neighbour.bordering && leaning === undefined) score -= 15;
-      const jitter = roll(input.gameId, day, reading.polityId, neighbour.polityId, "war")(15) - 7;
-      candidates.push({ polityId: reading.polityId, ruler, reading, neighbour, act: "declare_war", score: score + jitter, why });
+      // A steady ruler moves on his reasons; an impulsive one on his mood too.
+      const jitter = roll(input.gameId, day, reading.polityId, neighbour.polityId, "war")(15) * (swing / 7) - swing;
+      if (nature.length > 0) why.push(`${ruler.name} is ${nature.slice(0, 2).join(" and ")}`);
+      candidates.push({ casus, perceived, polityId: reading.polityId, ruler, reading, neighbour, act: "declare_war", score: score + jitter, why });
     }
   }
 
   return candidates;
+}
+
+/** How long a letter on the road to war is given before the next, from the sender's own patience. */
+const patienceDays = (d: Disposition): number => STEP_DAYS + STEP_DAYS * Math.round(d.steadiness * d.honour * 2);
+/** A quarrel that was answered well is let alone for this long. */
+const QUARREL_SETTLED_DAYS = 240;
+
+type Road = { readonly step: "war" } | { readonly step: "wait" } | { readonly step: "letter"; readonly decision: StatecraftDecision };
+
+/**
+ * The road to a war: complaint, demand, ultimatum, war.
+ *
+ * Powers used to open a war with a bare declaration and nothing said. Now a
+ * ruler who is the sort to give warning writes first -- a complaint of the
+ * wrong, a demand for its redress with a term, an ultimatum that says it is
+ * war if refused -- and the war opens by the ultimatum's own threat when it is
+ * refused or goes unanswered (`tick.ts`, `carryOutTheThreat`). Each letter is
+ * worded by the writer's own mind (`letter-craft.ts`) and the rule only
+ * decides when the next is sent: a patient, honest man waits two months
+ * between rungs; a hot-tempered one starts at the ultimatum; a bold, proud one
+ * leaves out the complaint. A man of no honour, and one who will strike on a
+ * whim, gives no warning at all -- but the world sees what he did.
+ */
+export function roadToWar(world: WorldState, candidate: MoveCandidate, rolled: boolean): Road {
+  const { ruler, neighbour, polityId } = candidate;
+  const day = world.instant.day;
+  const d = dispositionOf(ruler, day);
+  const warns = d.honour >= 0.3 && stableHash([ruler.id, neighbour.polityId, "warns"]) % 100 < 35 + 60 * d.honour;
+  if (!warns) return { step: "war" };
+  const sent = world.diplomacy
+    .filter((message) => message.fromPolityId === polityId && message.toPolityId === neighbour.polityId && message.fromCharacterId === ruler.id && day - message.sentAtStep <= 400
+      && (message.kind === "protest" || message.kind === "warning" || message.kind === "ultimatum"))
+    .sort((a, b) => b.sentAtStep - a.sentAtStep);
+  const last = sent[0];
+  const gap = patienceDays(d);
+  const ready = (message: DiplomaticMessage): boolean => day - (message.answeredAtStep ?? message.sentAtStep) >= gap;
+  if (last !== undefined) {
+    if (last.status === "awaiting_reply") return { step: "wait" };
+    // Answered well, and the quarrel is let alone a while; answered ill, and the next rung is climbed.
+    if (last.answer === "accepted") return day - (last.answeredAtStep ?? day) < QUARREL_SETTLED_DAYS ? { step: "wait" } : startOfRoad(candidate, d, rolled, day);
+    if (last.kind === "ultimatum") return { step: "wait" };
+    // The score must still be near what began it, or the quarrel has gone cold.
+    if (candidate.score < WAR_AT - 12 || !ready(last)) return { step: "wait" };
+    return climb(candidate, d, last.kind === "protest" ? "demand" : "ultimatum", day);
+  }
+  return startOfRoad(candidate, d, rolled, day);
+}
+
+function startOfRoad(candidate: MoveCandidate, d: Disposition, rolled: boolean, day: number): Road {
+  if (!rolled) return { step: "wait" };
+  // The hot-tempered begin with the ultimatum, the bold and proud with the demand, the rest with a complaint.
+  const first: "complaint" | "demand" | "ultimatum" = d.steadiness <= 0.25 && d.nerve >= 0.6 ? "ultimatum" : d.nerve * d.pride >= 0.45 ? "demand" : "complaint";
+  return climb(candidate, d, first, day);
+}
+
+function climb(candidate: MoveCandidate, d: Disposition, rung: "complaint" | "demand" | "ultimatum", day: number): Road {
+  const { ruler, neighbour, polityId, reading, casus } = candidate;
+  const us = reading.name;
+  const them = neighbour.name;
+  const days = rung === "ultimatum" ? 30 : rung === "demand" ? 40 : 45;
+  // The weaker hand cannot afford to threaten, and says so in its tone.
+  const weak = candidate.perceived < 0.8;
+  const letter = writeLetter(ruler, day, rung === "complaint" ? "complaint" : rung === "demand" ? "demand" : "ultimatum",
+    { us, them, matter: casus.matter, ask: casus.ask, days }, rung === "complaint" ? `${us} complains to ${them}` : rung === "demand" ? `${us} demands satisfaction of ${them}` : `${us} to ${them}: an ultimatum`, weak);
+  const kind = rung === "complaint" ? "protest" : rung === "demand" ? "warning" : "ultimatum";
+  return {
+    step: "letter",
+    decision: {
+      polityId, actorCharacterId: ruler.id, act: "letter", targetPolityId: neighbour.polityId,
+      why: `wrote to ${them} (${rung}): ${casus.matter}`.slice(0, 400),
+      deltas: [delta({
+        op: "diplomatic_message_send", localId: safeLocalId(`${kind}_${polityId}_${neighbour.polityId}`).slice(0, 60), kind,
+        fromPolityId: polityId, fromCharacterRef: ruler.id, toPolityId: neighbour.polityId, toCharacterRef: null,
+        subject: letter.subject, terms: letter.body, replyWithinDays: days, inReplyToRef: null, visibility: "polity",
+        ...(rung === "ultimatum" ? { onRefusal: "war" } : {}),
+        reason: `${casus.matter}`.slice(0, 240),
+      })],
+      facts: [],
+    },
+  };
 }
 
 /** The war, opened: a declaration, its fact, and the ruler's levy if he has no army. */
@@ -320,7 +548,7 @@ function openTheWar(world: WorldState, polityId: string, ruler: Character, neigh
     ? `${us} throws off the foedus with ${neighbour.name} and takes up arms.`
     : `${us} is at war with ${neighbour.name}.`;
   const deltas: WorldDelta[] = [delta({
-    op: "agreement_open", localId: `war_${polityId}_${neighbour.polityId}`.slice(0, 60), kind: "war",
+    op: "agreement_open", localId: safeLocalId(`war_${polityId}_${neighbour.polityId}`).slice(0, 60), kind: "war",
     polityId, otherPolityId: neighbour.polityId, terms, forDays: null, sourceMessageRef: null, visibility: "public",
     reason: `${ruler.name} chose war: ${reasons}`.slice(0, 240),
   })];
@@ -329,7 +557,7 @@ function openTheWar(world: WorldState, polityId: string, ruler: Character, neigh
     why: reasons.slice(0, 400) || "the odds were good",
     deltas,
     facts: [fact({
-      localId: `why_war_${polityId}_${neighbour.polityId}`.slice(0, 60),
+      localId: safeLocalId(`why_war_${polityId}_${neighbour.polityId}`).slice(0, 60),
       kind: act === "revolt" ? "revolt" : "war_cause",
       summary: (act === "revolt"
         ? `${us} rose against ${neighbour.name} under ${ruler.name}: ${reasons}.`
@@ -377,7 +605,9 @@ function raidAcross(world: WorldState, polityId: string, ruler: Character, neigh
 
 /** The levy of a power at war, called out under its ruler at its capital. */
 function raiseLevy(world: WorldState, reading: PowerReading, ruler: Character, against: string): StatecraftDecision | null {
-  const men = Math.min(LEVY_CAP, reading.levy);
+  // The frightened and the bold call out more of what they have than the easy-going do.
+  const call = dispositionOf(ruler, world.instant.day);
+  const men = Math.min(LEVY_CAP, Math.round(reading.levy * (0.6 + 0.3 * call.fear + 0.3 * call.nerve + 0.2 * (call.steadiness - 0.5))));
   if (men < LEVY_FLOOR) return null;
   const capital = world.map.polities.find((polity) => polity.id === reading.polityId)?.capitalSettlementId ?? null;
   const at = (capital === null ? undefined : world.map.provinces.find((province) => province.settlements.some((settlement) => settlement.id === capital))?.id)
@@ -387,7 +617,7 @@ function raiseLevy(world: WorldState, reading: PowerReading, ruler: Character, a
     polityId: reading.polityId, actorCharacterId: ruler.id, act: "raise_levy", targetPolityId: null,
     why: `at war with ${against} and no army in the field`.slice(0, 400),
     deltas: [delta({
-      op: "force_create", localId: `levy_${reading.polityId}`.slice(0, 60), name: `Levy of ${reading.name}`.slice(0, 120), polityId: reading.polityId,
+      op: "force_create", localId: safeLocalId(`levy_${reading.polityId}`).slice(0, 60), name: `Levy of ${reading.name}`.slice(0, 120), polityId: reading.polityId,
       commanderCharacterRef: ruler.id, controllerCharacterRef: ruler.id, locationId: at, authorizedStrength: men, payObligationRef: null,
       reason: `${reading.name} calls out its men for the war with ${against}.`.slice(0, 240),
     })],
@@ -421,13 +651,14 @@ function conductOfWar(world: WorldState, force: WorldState["material"]["forces"]
     const province = world.map.provinces.find((candidate) => candidate.id === provinceId);
     return province !== undefined && (province.ownerPolityId ?? province.controllerPolityId) === polityId;
   };
-  const oddsFor = (provinceId: string): number => (ownGround(provinceId) ? DEFEND_ODDS : ATTACK_ODDS);
+  const temper = commandersTemper(world.characters.find((character) => character.id === commander));
+  const oddsFor = (provinceId: string): number => (ownGround(provinceId) ? DEFEND_ODDS : ATTACK_ODDS) * temper.wants;
   if (facing.length > 0) {
     const theirs = menAt(force.locationId);
     if (men >= oddsFor(force.locationId) * theirs) {
       return decide("attack", facing[0]!.polityId, `${roughMen(men)} against ${roughMen(theirs)}: the odds are ours`, [delta({ op: "force_engage", forceRef: force.id, targetForceRef: facing[0]!.id, posture: "offer_battle", tactic: null, reason: `${force.name} offers battle: the odds are good.` })]);
     }
-    if (theirs >= RETREAT_ODDS * men) {
+    if (theirs >= RETREAT_ODDS * temper.flees * men) {
       const home = nearestOwn(world, force.locationId, polityId, byLand);
       if (home !== null) return decide("fall_back", facing[0]!.polityId, `${roughMen(theirs)} against our ${roughMen(men)}: too many`, [delta({ op: "force_modify", forceRef: force.id, locationId: home, reason: `${force.name} falls back before a stronger army.` })]);
     }
@@ -438,7 +669,7 @@ function conductOfWar(world: WorldState, force: WorldState["material"]["forces"]
   // town with none, is occupied by standing in it (`occupation.ts`).
   if (here.controllerPolityId !== null && enemies.has(here.controllerPolityId) && here.settlements.some((settlement) => settlement.fortificationLevel >= SIEGE_NEEDED_AT && (settlement.controllerPolityId === null || enemies.has(settlement.controllerPolityId)))) {
     const already = world.sieges.some((siege) => siege.status === "active" && siege.provinceId === here.id);
-    if (!already) return decide("besiege", here.controllerPolityId, `before ${here.name}, held by ${nameOf(here.controllerPolityId)}, with no army to stop us`, [delta({ op: "siege_lay", localId: `siege_${force.id}`.slice(0, 60), forceRef: force.id, settlementId: null, reason: `${force.name} lays siege.` })]);
+    if (!already) return decide("besiege", here.controllerPolityId, `before ${here.name}, held by ${nameOf(here.controllerPolityId)}, with no army to stop us`, [delta({ op: "siege_lay", localId: safeLocalId(`siege_${force.id}`).slice(0, 60), forceRef: force.id, settlementId: null, reason: `${force.name} lays siege.` })]);
     return null;
   }
 
@@ -464,7 +695,7 @@ function conductOfWar(world: WorldState, force: WorldState["material"]["forces"]
     if (km === 0) continue;
     const province = world.map.provinces.find((candidate) => candidate.id === provinceId);
     if (province === undefined || province.controllerPolityId === null || !enemies.has(province.controllerPolityId)) continue;
-    if (menAt(provinceId) * ATTACK_ODDS > men) continue;
+    if (menAt(provinceId) * ATTACK_ODDS * temper.wants > men) continue;
     const capital = world.map.polities.find((polity) => polity.id === province.controllerPolityId)?.capitalSettlementId ?? null;
     const ours = province.ownerPolityId === polityId;
     const worth = (province.settlements.length > 0 ? 20 : 5) + (province.settlements.some((settlement) => settlement.id === capital) ? 30 : 0) + (ours ? 40 : 0);
@@ -498,6 +729,7 @@ function allianceAgainstThreats(
   input: StatecraftInput,
   rulerOf: (polityId: string) => Character | undefined,
   moved: Set<string>,
+  motionsOf: () => ReadonlyMap<string, readonly PoliticalProcedure[]>,
 ): StatecraftDecision[] {
   const decisions: StatecraftDecision[] = [];
   const allied = (polityId: string): boolean => world.polityAgreements.some((agreement) => agreement.status === "active" && agreement.kind === "alliance" && (agreement.polityId === polityId || agreement.otherPolityId === polityId));
@@ -521,19 +753,29 @@ function allianceAgainstThreats(
         // The friendliest first: Athens looks to Sparta before Epirus.
         .sort((x, y) => (trust(reading.polityId, y.polityId) + trust(y.polityId, reading.polityId)) - (trust(reading.polityId, x.polityId) + trust(x.polityId, reading.polityId)) || x.polityId.localeCompare(y.polityId))[0];
       if (partner === undefined) continue;
-      const score = 30 + Math.min(20, -threat.trust / 3) + (threat.relation === "war" ? 15 : 0);
+      const seeker = dispositionOf(ruler, world.instant.day);
+      const score = 30 + Math.min(20, -threat.trust / 3) + (threat.relation === "war" ? 15 : 0) + Math.round(20 * (seeker.fear - 0.5) + 14 * (seeker.sociability - 0.5));
       // A chance a month, like a war: an embassy takes a season to agree.
       if (score < ALLIANCE_AT || roll(input.gameId, world.instant.day, reading.polityId, partner.polityId, "ally")(12) >= Math.min(3, Math.floor((score - ALLIANCE_AT) / 5))) continue;
       const why = `${threat.name} is stronger than either, and both distrust it`;
+      // An alliance is a treaty: the Senate's to make where the constitution says so.
+      const way = passage(world, input, motionsOf(), ruler, { id: reading.polityId, name: reading.name }, "pacts", `an alliance be made with ${partner.name}`, ["peace", "war"]);
+      if (way.how === "asked") {
+        decisions.push(way.decision);
+        moved.add(reading.polityId);
+        moved.add(partner.polityId);
+        break;
+      }
+      if (way.how === "wait") continue;
       decisions.push({
         polityId: reading.polityId, actorCharacterId: ruler.id, act: "alliance", targetPolityId: partner.polityId, why,
         deltas: [delta({
-          op: "agreement_open", localId: `alliance_${reading.polityId}_${partner.polityId}`.slice(0, 60), kind: "alliance",
+          op: "agreement_open", localId: safeLocalId(`alliance_${reading.polityId}_${partner.polityId}`).slice(0, 60), kind: "alliance",
           polityId: reading.polityId, otherPolityId: partner.polityId, terms: `${reading.name} and ${partner.name} stand together against ${threat.name}.`.slice(0, 600),
           forDays: null, sourceMessageRef: null, visibility: "public", reason: why.slice(0, 240),
         })],
         facts: [fact({
-          localId: `ally_${reading.polityId}_${partner.polityId}`.slice(0, 60), kind: "alliance_made",
+          localId: safeLocalId(`ally_${reading.polityId}_${partner.polityId}`).slice(0, 60), kind: "alliance_made",
           summary: `${reading.name} and ${partner.name} made an alliance against ${threat.name}.`.slice(0, 400),
           affectedRefs: [{ kind: "polity", id: reading.polityId }, { kind: "polity", id: partner.polityId }, { kind: "polity", id: threat.polityId }],
           visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 60,
@@ -548,56 +790,66 @@ function allianceAgainstThreats(
 }
 
 /**
- * A letter to a power the model is not playing, answered the way that power's
- * situation answers it: peace when it is tired of the war or losing it, an
- * alliance with a friend who fears the same enemy, help for a friend it trusts
- * and is not at war itself. Anything else is left for its people to answer.
+ * What a ruler will say to a letter, by rule, and in his own voice.
+ *
+ * Every power the model is not playing answers its letters here, and what it
+ * answers is the answerer's own: a proud man will not talk of peace while he is
+ * not beaten, a frightened one gives way to an ultimatum from a stronger
+ * neighbour, a plain one says no plainly, a cautious one takes his time, and a
+ * man whose word is worth nothing may say yes and mean otherwise
+ * (`intendsToBreak`). The words are written from what moved him
+ * (`letter-craft.ts`), in a tone the writer's mind picks.
  */
-function answerByRule(world: WorldState, message: DiplomaticMessage, input: StatecraftInput, rulerOf: (polityId: string) => Character | undefined): StatecraftDecision | null {
-  if (message.status !== "awaiting_reply" || !isDelivered(message, world.instant.day)) return null;
+export function answerByRule(world: WorldState, message: DiplomaticMessage, input: StatecraftInput, rulerOf: (polityId: string) => Character | undefined): StatecraftDecision | null {
+  if (message.status !== "awaiting_reply" || !isDelivered(message, world.instant.day) || message.heldAnswer !== undefined) return null;
   if (input.excludedPolityIds.has(message.toPolityId) || message.fromCharacterId === input.playerCharacterId) return null;
-  if (input.nearPlayer !== null && (input.nearPlayer.has(message.toPolityId) || input.nearPlayer.has(message.fromPolityId))) return null;
+  // Letters between powers are the rules' and are basic; a letter to the player himself is the model's (`letter-voice.ts`, `cognition.ts`),
+  // as is one to a power he rules (excluded above). A letter to a power he only lives in goes to its ruler, who answers it as any other does.
+  if (message.toCharacterId === input.playerCharacterId && input.playerCharacterId !== null) return null;
   const answerer = message.toCharacterId === null ? rulerOf(message.toPolityId) : world.characters.find((character) => character.id === message.toCharacterId && character.alive);
   if (answerer === undefined || input.playedByModel.has(answerer.id)) return null;
-  const trust = world.polityStances.find((stance) => stance.polityId === message.toPolityId && stance.towardPolityId === message.fromPolityId)?.trustScore ?? 0;
-  const proposes = new Set(message.proposes ?? []);
-  if (message.kind === "peace_talks") {
-    // Talking costs nothing a tired or losing power, or one six months into its war, will not give.
-    const tired = warWeariness(world, message.toPolityId, message.fromPolityId).score;
-    const losing = warStanding(world, message.toPolityId, message.fromPolityId).score <= -20;
-    const long = world.polityAgreements.some((agreement) => agreement.status === "active" && agreement.kind === "war" && [agreement.polityId, agreement.otherPolityId].includes(message.toPolityId) && [agreement.polityId, agreement.otherPolityId].includes(message.fromPolityId) && world.instant.day - agreement.sinceStep >= 180);
-    const accepted = losing || long || tired >= TRUCE_AT - 10;
-    const words = accepted ? "Our envoys will come to the table." : "There is nothing yet to talk about.";
-    return {
-      polityId: message.toPolityId, actorCharacterId: answerer.id, act: "answer_letter", targetPolityId: message.fromPolityId,
-      why: `${accepted ? "agreed to talk" : "would not talk"}: "${message.subject}"`.slice(0, 400),
-      deltas: [delta({ op: "diplomatic_message_answer", messageRef: message.id, answer: accepted ? "accepted" : "refused", answerText: words, agreementKind: null, reason: words })],
-      facts: [],
-    };
-  }
-  const aboutPeace = message.kind === "peace_offer" || proposes.has("peace") || proposes.has("truce");
-  let accepted: boolean | null = null;
-  let words = "";
-  if (aboutPeace) {
-    const tired = warWeariness(world, message.toPolityId, message.fromPolityId).score;
-    const losing = warStanding(world, message.toPolityId, message.fromPolityId).score <= -30;
-    accepted = losing || tired >= (proposes.has("truce") && !proposes.has("peace") ? TRUCE_AT : PEACE_AT - 10);
-    words = accepted ? "The war has cost enough. We accept." : "We are not beaten, and the war goes on.";
-  } else if (proposes.has("alliance")) {
-    const sharedEnemy = warsOf(world.polityAgreements, message.toPolityId).some((enemy) => warsOf(world.polityAgreements, message.fromPolityId).includes(enemy));
-    accepted = trust >= 20 || (trust >= 0 && sharedEnemy);
-    words = accepted ? "We will stand with you." : "We have no quarrel that makes us yours.";
-  } else if (message.kind === "military_aid_request") {
-    accepted = trust >= 40 && warsOf(world.polityAgreements, message.toPolityId).length === 0;
-    words = accepted ? "Our men will come." : "We cannot spare men for your war.";
-  }
-  if (accepted === null) return null;
+  const verdict = letterVerdict(world, message, answerer);
+  if (verdict === null) return null;
+  const day = world.instant.day;
+  const nameOf = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
+
+  // A man does not always answer the day it comes: the cautious and the frightened take counsel first,
+  // so long as that does not run out the term the sender gave.
+  const arrived = message.deliveredOnDay ?? message.sentAtStep;
+  const fitsTheTerm = message.replyDueByStep === null || arrived + verdict.slowness + STEP_DAYS <= message.replyDueByStep;
+  if (verdict.slowness > 0 && fitsTheTerm && day < arrived + verdict.slowness) return null;
+
+  const letter = writeLetter(answerer, day, verdict.intent, { us: nameOf(message.toPolityId), them: nameOf(message.fromPolityId), reason: verdict.reason, ...verdict.extra }, "{us} answers {them}", verdict.weak);
+  // A man of no honour may say yes and mean no: nothing here, and nothing in the world, shows it (`intendsToBreak`).
+  // An offer of trade he would take on other terms, or one written to somebody who does not decide it, is answered "countered":
+  // the first sends his terms back as an offer of his own, the second only says who does decide (`trade-verdict.ts`).
+  const answer = verdict.counter !== undefined || verdict.redirect !== undefined ? "countered" : verdict.accepted ? "accepted" : "refused";
   return {
     polityId: message.toPolityId, actorCharacterId: answerer.id, act: "answer_letter", targetPolityId: message.fromPolityId,
-    why: `${accepted ? "accepted" : "refused"} "${message.subject}"`.slice(0, 400),
-    deltas: [delta({ op: "diplomatic_message_answer", messageRef: message.id, answer: accepted ? "accepted" : "refused", answerText: words, agreementKind: null, reason: words })],
+    why: `${answer} "${message.subject}": ${verdict.why}`.slice(0, 400),
+    deltas: [delta({ op: "diplomatic_message_answer", messageRef: message.id, answer, answerText: letter.body, agreementKind: null, ...(verdict.counter === undefined ? {} : { counterTrade: verdict.counter }), reason: letter.body.slice(0, 240) })],
     facts: [],
   };
+}
+
+
+/**
+ * Whether this man said yes to a letter and never meant to keep it.
+ *
+ * Nothing records it: it is the same hash of the man and the letter every time
+ * it is asked, so the world acts on it later and the player is never shown it.
+ * Only a man of weak honesty can, and the weaker, the likelier.
+ */
+export function intendsToBreak(world: WorldState, ruler: Character, otherPolityId: string): boolean {
+  const honesty = ruler.mind.temperament.honesty;
+  if (honesty > 40) return false;
+  const open = world.polityAgreements.find((agreement) => agreement.status === "active" && (agreement.kind === "peace" || agreement.kind === "truce" || agreement.kind === "alliance")
+    && ((agreement.polityId === ruler.polityId && agreement.otherPolityId === otherPolityId) || (agreement.otherPolityId === ruler.polityId && agreement.polityId === otherPolityId))
+    && agreement.sourceMessageId !== null);
+  if (open === undefined || open.sourceMessageId === null) return false;
+  const message = world.diplomacy.find((candidate) => candidate.id === open.sourceMessageId);
+  if (message === undefined || message.toCharacterId !== ruler.id && message.toPolityId !== ruler.polityId) return false;
+  return stableHash([ruler.id, open.sourceMessageId, "false-faith"]) % 100 < (40 - honesty) * 1.5;
 }
 
 /**
@@ -607,7 +859,7 @@ function answerByRule(world: WorldState, message: DiplomaticMessage, input: Stat
  * the war left each side holding. Neither side's war may be the player's, and
  * a war either side is still fighting with the model is left to the model.
  */
-function peacesByRule(world: WorldState, input: StatecraftInput, rulerOf: (polityId: string) => Character | undefined, moved: Set<string>): StatecraftDecision[] {
+function peacesByRule(world: WorldState, input: StatecraftInput, rulerOf: (polityId: string) => Character | undefined, moved: Set<string>, motionsOf: () => ReadonlyMap<string, readonly PoliticalProcedure[]>): StatecraftDecision[] {
   const decisions: StatecraftDecision[] = [];
   const nameOf = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
   const ground = (polityId: string): number => world.map.provinces.filter((province) => province.controllerPolityId === polityId).length;
@@ -629,6 +881,10 @@ function peacesByRule(world: WorldState, input: StatecraftInput, rulerOf: (polit
     const played = (ruler: Character | undefined): boolean => ruler !== undefined && input.playedByModel.has(ruler.id);
     const winnerRuler = winner === a ? rulerA : winner === b ? rulerB : undefined;
     if (winner !== null ? played(winnerRuler) || winnerRuler === undefined : played(rulerA) || played(rulerB)) continue;
+    const today = world.instant.day;
+    const reluctA = rulerA === undefined ? 0 : peaceReluctance(dispositionOf(rulerA, today));
+    const reluctB = rulerB === undefined ? 0 : peaceReluctance(dispositionOf(rulerB, today));
+    const proudest = Math.max(rulerA === undefined ? 0.5 : dispositionOf(rulerA, today).pride, rulerB === undefined ? 0.5 : dispositionOf(rulerB, today).pride);
     const tiredA = warWeariness(world, a, b).score;
     const tiredB = warWeariness(world, b, a).score;
     const claimsHeld = (claimant: string, holder: string): boolean => {
@@ -637,36 +893,51 @@ function peacesByRule(world: WorldState, input: StatecraftInput, rulerOf: (polit
         && !claims.some((claim) => world.map.provinces.find((province) => province.id === claim.locationId)?.controllerPolityId === holder);
     };
     const satisfied = days >= 180 && (claimsHeld(war.polityId, war.otherPolityId));
-    const spent = tiredA >= PEACE_AT && tiredB >= PEACE_AT;
+    const spent = tiredA >= PEACE_AT + reluctA && tiredB >= PEACE_AT + reluctB;
     // A war a year old with one side clearly ahead ends on what it holds; one
     // eighteen months old that has gone nowhere ends as things stand.
     const ahead = days >= AHEAD_PEACE_DAYS && Math.max(standingA.score, standingB.score) >= AHEAD_SCORE;
-    const stale = days >= STALEMATE_DAYS;
-    if (winner === null && !spent && !satisfied && !ahead && !stale) continue;
-    const victor = winner ?? (satisfied ? war.polityId : standingA.score >= standingB.score ? a : b);
+    // Two proud men let a war go nowhere for longer than two sensible ones.
+    const stale = days >= STALEMATE_DAYS * (1 + (proudest - 0.5) * 0.8);
+    // A war plan with the aim of peace is an asking, and the terms are what the war was for (a-war-ends-for-what-it-was-for.ts).
+    const aimed = winner === null ? peaceFromTheAims(world, war) : null;
+    if (winner === null && aimed === null && !spent && !satisfied && !ahead && !stale) continue;
+    const victor = winner ?? aimed?.victor ?? (satisfied ? war.polityId : standingA.score >= standingB.score ? a : b);
     const loser = victor === a ? b : a;
     const speaker = (victor === a ? rulerA : rulerB) ?? (victor === a ? rulerB : rulerA);
     if (speaker === undefined) continue;
     const surrender = winner !== null && (victor === a ? standingA : standingB).totalDefeat && ground(loser) <= 3;
-    const why = winner !== null
+    const why = aimed !== null && !spent && !satisfied
+      ? aimed.why
+      : winner !== null
       ? `${nameOf(loser)} is beaten`
       : satisfied ? `${nameOf(victor)} holds the ground it went to war for`
         : spent ? "both sides are spent"
           : ahead ? `${nameOf(victor)} has the better of a long war`
             : "the war has gone nowhere for a year and a half";
+    // Peace is the chamber's where the constitution says so, as war is: the speaker lays it before the Senate and makes it the month after it carries.
+    const way = passage(world, input, motionsOf(), speaker, { id: speaker.polityId ?? victor, name: nameOf(speaker.polityId ?? victor) }, "peace", `peace be made with ${nameOf(loser)}`, ["peace"]);
+    if (way.how === "asked") {
+      decisions.push(way.decision);
+      moved.add(a);
+      moved.add(b);
+      continue;
+    }
+    if (way.how === "wait") continue;
+    const byTheAims = aimed !== null && !surrender && !spent && !satisfied;
     const terms = surrender
       ? `${nameOf(loser)} gives itself up to ${nameOf(victor)}.`
-      : `Peace between ${nameOf(victor)} and ${nameOf(loser)}, each keeping the ground it holds.`;
+      : byTheAims ? aimed.terms : `Peace between ${nameOf(victor)} and ${nameOf(loser)}, each keeping the ground it holds.`;
     decisions.push({
       polityId: victor, actorCharacterId: speaker.id, act: "make_peace", targetPolityId: loser, why,
       deltas: [delta({
-        op: "agreement_open", localId: `peace_${victor}_${loser}`.slice(0, 60), kind: "peace",
+        op: "agreement_open", localId: safeLocalId(`peace_${victor}_${loser}`).slice(0, 60), kind: "peace",
         polityId: victor, otherPolityId: loser, terms,
-        ...(surrender ? { clauses: [{ kind: "submission", polityId: loser, toPolityId: victor }] } : {}),
+        ...(surrender ? { clauses: [{ kind: "submission", polityId: loser, toPolityId: victor }] } : byTheAims && aimed.clauses.length > 0 ? { clauses: aimed.clauses } : {}),
         forDays: null, sourceMessageRef: null, visibility: "public", reason: `${why}.`.slice(0, 240),
       })],
       facts: [fact({
-        localId: `why_peace_${victor}_${loser}`.slice(0, 60), kind: "peace_made",
+        localId: safeLocalId(`why_peace_${victor}_${loser}`).slice(0, 60), kind: "peace_made",
         summary: `${nameOf(victor)} and ${nameOf(loser)} made peace after ${Math.round(days / 30)} months of war: ${why}. ${terms}`.slice(0, 400),
         affectedRefs: [{ kind: "polity", id: victor }, { kind: "polity", id: loser }, { kind: "character", id: speaker.id }],
         visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 75,
@@ -695,8 +966,10 @@ export function rulerOptions(input: StatecraftInput, characterId: string, max = 
   const board = readBoard(world);
   const rulers = readDepartments(world);
   const polityId = world.characters.find((character) => character.id === characterId)?.polityId ?? null;
-  if (polityId === null || !rulers.rulers(polityId).some((ruler) => ruler.id === characterId)) return [];
   const nameOf = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
+  // A general who is not the ruler sees his orders, and the plan of the war they come from, in one line (`war-plan.ts`).
+  if (polityId !== null && !rulers.rulers(polityId).some((ruler) => ruler.id === characterId)) return generalsLine(world, characterId, nameOf);
+  if (polityId === null) return [];
   const rulerOf = (id: string): Character | undefined => rulers.rulers(id).find((ruler) => ruler.alive);
   const playerPolity = input.playerCharacterId === null ? null : world.characters.find((character) => character.id === input.playerCharacterId)?.polityId ?? null;
   const strength = (score: number, bar: number): string => (score >= bar + 15 ? "a strong case" : score >= bar ? "a fair case" : score >= bar - 15 ? "a thin case" : "a poor case");
@@ -713,10 +986,49 @@ export function rulerOptions(input: StatecraftInput, characterId: string, max = 
   }
   if (reading !== undefined && reading.wars.length > 0) {
     const enemies = new Set(enemiesOf(world.polityAgreements, polityId));
+    for (const enemy of reading.wars.slice(0, 1)) {
+      const plan = warPlanOf(world, polityId, enemy);
+      if (plan !== undefined) options.push(warPlanLine(plan, nameOf));
+    }
     for (const force of world.material.forces.filter((candidate) => candidate.polityId === polityId && fitStrengthOf(candidate) > 0 && !isNavalForce(candidate, input.warfare)).slice(0, 2)) {
+      const orders = campaignOf(world, force.id);
+      if (orders !== undefined) { options.push(`${force.name}: ${campaignLine(orders, (id) => world.map.provinces.find((province) => province.id === id)?.name ?? id, (id) => world.material.forces.find((other) => other.id === id)?.name ?? id)}`); continue; }
       const order = conductOfWar(world, force, enemies, polityId, nameOf, input.warfare);
       if (order !== null) options.push(`${force.name}: ${order.act === "march" ? "march" : order.act === "attack" ? "give battle" : order.act === "besiege" ? "lay siege" : "fall back"} -- ${order.why}`);
     }
   }
   return options.map((line) => line.slice(0, 300));
+}
+
+/**
+ * What the man at the head of an army makes of the odds. A seasoned general
+ * (high martial) will take a fight a plain one would refuse, because he knows
+ * what his men can do; a poor one wants far more men before he offers battle.
+ * Boldness shifts both ends: a bold man wants lower odds and holds when he
+ * should fall back, a cautious one wants more and leaves sooner. So a reckless
+ * beginner walks into fights he should not take, and a cautious incompetent
+ * lets chances go by -- neither is the veteran who takes the right ones.
+ * Absent or unskilled commanders read as middling.
+ */
+export function commandersTemper(commander: Character | undefined): { readonly wants: number; readonly flees: number } {
+  if (commander === undefined) return { wants: 1, flees: 1 };
+  const skill = (commander.skills.martial + aptitude(commander, "strategist")) / 2;
+  const bold = commander.mind.temperament.boldness;
+  const wants = (1 + (50 - skill) / 100) * (1 - (bold - 50) / 200);
+  const flees = 1 + (bold - 50) / 100;
+  return { wants: Math.max(0.6, Math.min(1.5, wants)), flees: Math.max(0.6, Math.min(1.5, flees)) };
+}
+
+/** What a general who is not a ruler is shown of the war: his own orders and the head's plan, in one line. */
+function generalsLine(world: WorldState, characterId: string, _nameOf: (id: string) => string): string[] {
+  const force = world.material.forces.find((candidate) => (candidate.commanderCharacterId === characterId || candidate.controllerCharacterId === characterId) && fitStrengthOf(candidate) > 0);
+  if (force === undefined) return [];
+  const orders = campaignOf(world, force.id);
+  const plan = (world.warPlans ?? []).find((candidate) => candidate.polityId === force.polityId);
+  const province = (id: string): string => world.map.provinces.find((candidate) => candidate.id === id)?.name ?? id;
+  const mode = orders === undefined ? "" : campaignLine(orders, province, (id) => world.material.forces.find((other) => other.id === id)?.name ?? id);
+  const main = plan?.theatres.find((theatre) => theatre.mainEffort);
+  const stance = plan === undefined ? "" : ` The war: ${plan.posture === "decisive" ? "to fight it out" : plan.posture === "defend" ? "to stand" : "to wear them down"}${main === undefined ? "" : `, main effort at ${province(main.provinceIds[0] ?? "")}`}.`;
+  if (orders === undefined && plan === undefined) return [];
+  return [`${force.name}: ${mode || "no orders given"}${stance}`.slice(0, 300)];
 }

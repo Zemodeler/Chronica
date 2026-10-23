@@ -1,3 +1,4 @@
+import { feel } from "./moods";
 import {
   applySocialEvents,
   boundedId,
@@ -96,7 +97,8 @@ export function remember(world: WorldState, grievances: readonly Grievance[], at
 /** A lesson written on a man, for his next life review to move him by. */
 export function teach(world: WorldState, characterId: string, kind: LessonKind, atStep: number): WorldState {
   if (!world.characters.some((character) => character.id === characterId && character.alive)) return world;
-  return { ...world, characters: world.characters.map((character) => (character.id === characterId ? withLesson(character, kind, atStep) : character)) };
+  // Learned for good, and felt for a few weeks (`moods.ts`).
+  return feel({ ...world, characters: world.characters.map((character) => (character.id === characterId ? withLesson(character, kind, atStep) : character)) }, characterId, kind, atStep);
 }
 
 /** His living blood and marriage: who takes what is done to him personally. */

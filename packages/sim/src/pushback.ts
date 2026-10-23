@@ -18,6 +18,7 @@ import {
 } from "@chronica/shared";
 import { readBoard } from "./board";
 import type { StatecraftDecision } from "./statecraft";
+import { safeLocalId } from "./safe-local-id";
 
 /**
  * The world pushes back (docs/plans/a-living-world.md §5).
@@ -135,7 +136,7 @@ export function reviewPushback(world: WorldState, playerPolityId: string | null,
       alarm.push({ polityId: reading.polityId, towardPolityId: them, level, why: why.slice(0, 240), updatedAtStep: day });
       if (level >= FEAR_AT && (before?.level ?? 0) < FEAR_AT) {
         facts.push({
-          localId: `fear_${reading.polityId}_${them}`.slice(0, 60),
+          localId: safeLocalId(`fear_${reading.polityId}_${them}`).slice(0, 60),
           kind: "rumour",
           summary: `In ${reading.name} they speak of ${nameOf(them)}'s growing power with dread: ${why}.`.slice(0, 400),
           affectedRefs: [{ kind: "polity", id: reading.polityId }, { kind: "polity", id: them }],
@@ -144,7 +145,6 @@ export function reviewPushback(world: WorldState, playerPolityId: string | null,
       }
     }
   }
-  const alarmOf = (from: string, toward: string): number => alarm.find((entry) => entry.polityId === from && entry.towardPolityId === toward)?.level ?? 0;
 
   // ── Reputation: a broken peace costs trust all round ───────────────────
   let stances: PolityStance[] = [...world.polityStances];
@@ -159,7 +159,7 @@ export function reviewPushback(world: WorldState, playerPolityId: string | null,
     for (const reading of around) shift(reading.polityId, breaker, -BROKEN_PEACE_TRUST, `${nameOf(breaker)} broke its peace with ${nameOf(victim)}.`);
     if (around.length > 0) {
       facts.push({
-        localId: `faithless_${breaker}_${victim}`.slice(0, 60), kind: "reputation",
+        localId: safeLocalId(`faithless_${breaker}_${victim}`).slice(0, 60), kind: "reputation",
         summary: `${nameOf(breaker)} broke its peace with ${nameOf(victim)}, and its neighbours will remember what its word is worth.`.slice(0, 400),
         affectedRefs: [{ kind: "polity", id: breaker }, { kind: "polity", id: victim }],
         visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 45,
@@ -206,12 +206,12 @@ export function reviewPushback(world: WorldState, playerPolityId: string | null,
     decisions.push({
       polityId: head, actorCharacterId: ruler.id, act: "alliance", targetPolityId: target, why: why.slice(0, 400),
       deltas: joining.map((id) => delta({
-        op: "agreement_open", localId: `league_${head}_${id}`.slice(0, 60), kind: "alliance", polityId: head, otherPolityId: id,
+        op: "agreement_open", localId: safeLocalId(`league_${head}_${id}`).slice(0, 60), kind: "alliance", polityId: head, otherPolityId: id,
         terms: `${nameOf(head)} and ${nameOf(id)} league together against ${nameOf(target)}: a war on one is a war on all.`.slice(0, 600),
         forDays: null, sourceMessageRef: null, visibility: "public", reason: why.slice(0, 240),
       })),
       facts: [fact({
-        localId: `league_against_${target}`.slice(0, 60), kind: "alliance_made",
+        localId: safeLocalId(`league_against_${target}`).slice(0, 60), kind: "alliance_made",
         summary: `${[head, ...joining].map(nameOf).join(", ")} ${leagued(head) ? "widened their league" : "leagued together"} against ${nameOf(target)}: a war on one is a war on all.`.slice(0, 400),
         affectedRefs: [...[head, ...joining].map((id) => ({ kind: "polity" as const, id })), { kind: "polity" as const, id: target }].slice(0, 16),
         visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 70,
@@ -232,7 +232,7 @@ export function reviewPushback(world: WorldState, playerPolityId: string | null,
       decisions.push({
         polityId: member, actorCharacterId: ruler.id, act: "declare_war", targetPolityId: target,
         why: `called to arms by ${nameOf(partner)}, its partner in the league against ${nameOf(target)}`.slice(0, 400),
-        deltas: [delta({ op: "agreement_open", localId: `call_${member}_${target}`.slice(0, 60), kind: "war", polityId: member, otherPolityId: target, terms: `${nameOf(member)} keeps faith with ${nameOf(partner)} and goes to war with ${nameOf(target)}.`.slice(0, 600), forDays: null, sourceMessageRef: null, visibility: "public", reason: "The league's oath." })],
+        deltas: [delta({ op: "agreement_open", localId: safeLocalId(`call_${member}_${target}`).slice(0, 60), kind: "war", polityId: member, otherPolityId: target, terms: `${nameOf(member)} keeps faith with ${nameOf(partner)} and goes to war with ${nameOf(target)}.`.slice(0, 600), forDays: null, sourceMessageRef: null, visibility: "public", reason: "The league's oath." })],
         facts: [],
       });
     }
@@ -258,7 +258,7 @@ export function reviewPushback(world: WorldState, playerPolityId: string | null,
       why: `pays ${nameOf(enemy)} to keep ${nameOf(fearedMost.towardPolityId)} busy`.slice(0, 400),
       deltas: [delta({ op: "money_transfer", fromAccountRef: chest.id, toAccountRef: theirChest.id, amount, reason: `${reading.name}'s gold for the war against ${nameOf(fearedMost.towardPolityId)}.`.slice(0, 240) })],
       facts: [fact({
-        localId: `subsidy_${reading.polityId}_${enemy}`.slice(0, 60), kind: "subsidy",
+        localId: safeLocalId(`subsidy_${reading.polityId}_${enemy}`).slice(0, 60), kind: "subsidy",
         summary: `${reading.name}'s gold reached ${nameOf(enemy)}, for its war against ${nameOf(fearedMost.towardPolityId)}.`.slice(0, 400),
         affectedRefs: [{ kind: "polity", id: reading.polityId }, { kind: "polity", id: enemy }, { kind: "polity", id: fearedMost.towardPolityId }],
         visibility: "public", discoveryState: "rumoured", knowableInDays: 10, significance: 45,

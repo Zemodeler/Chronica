@@ -1,6 +1,7 @@
 import type { MoneyTransaction, ProvinceMaterial } from "../material-state";
 import type { WorldState } from "../world/world-state";
-import { applyWarDamage, deriveDefaultProvinceMaterial, findProvinceMaterial } from "./province-material";
+import { sackTheMarket } from "../world/markets";
+import { applyWarDamage, deriveDefaultProvinceMaterial, findProvinceMaterial, scarredBy } from "./province-material";
 
 /**
  * What an army takes, and what taking it costs the place.
@@ -28,14 +29,22 @@ import { applyWarDamage, deriveDefaultProvinceMaterial, findProvinceMaterial } f
  * phase 2 with no caller anywhere in the engine; this is its first one.
  */
 
-/** Coin a settlement of one size unit is worth to whoever sacks it. */
-const SPOILS_PER_SETTLEMENT_SIZE = 45;
+/**
+ * Coin a settlement of one size unit is worth to whoever sacks it: four months
+ * of what its four thousand people can be made to pay (`reckonTaxCapacity`),
+ * as a besieged city's loot is counted (`sim/sieges.ts`). A city of ten units
+ * stripped of half of it is some 70 talents, as Carthago Nova's silver was
+ * counted in hundreds.
+ */
+const SPOILS_PER_SETTLEMENT_SIZE = 80_000;
 
 /** A sack takes this share of what is left, never the last of it. */
 const SACK_SHARE = 0.5;
 
 /** How hard a full sack is on the province, in basis points of severity. */
 const SACK_SEVERITY_BPS = 4_000;
+/** The severity (0 to 1) of the sack-specific blow to development and the scar, over and above `applyWarDamage`'s. */
+const SACK_DEVELOPMENT_SEVERITY = 0.2;
 
 export interface Seizure {
   readonly world: WorldState;
@@ -88,7 +97,7 @@ function credit(world: WorldState, accountId: string, amount: number, transactio
       ...world.material,
       accounts: world.material.accounts.map((account) =>
         account.id === accountId ? { ...account, balance: account.balance + amount } : account),
-      transactions: [...world.material.transactions, transaction].slice(-512),
+      transactions: [...world.material.transactions, transaction],
     },
   };
 }
@@ -144,6 +153,7 @@ export function sackTheProvince(world: WorldState, input: SackInput): Seizure {
     id: input.transactionId,
     atStep: input.atStep,
     kind: "spoils",
+    external: "plunder",
     amount: taken,
     destinationAccountId: destination,
     cause: input.cause,
@@ -174,13 +184,22 @@ export function sackTheProvince(world: WorldState, input: SackInput): Seizure {
 
   const material = findProvinceMaterial(withMoney, input.provinceId)
     ?? deriveDefaultProvinceMaterial(province, input.atStep);
-  const damaged = applyWarDamage(material, { severityBps: severity }, input.atStep);
+  const struck = applyWarDamage(material, { severityBps: severity }, input.atStep);
+  // A sack is what leaves a place behind for a generation: its development takes
+  // a second, sack-sized blow on top of the common one for war, in proportion to
+  // how much of the province's worth was carried off, so that a full sack
+  // (half of what is there) costs about a fifth of what the province had and
+  // scars it by a seventh, and a token levy next to nothing.
+  const sackShare = remaining <= 0 ? 0 : taken / remaining / SACK_SHARE;
+  const damaged = { ...struck, ...scarredBy(struck, SACK_DEVELOPMENT_SEVERITY * sackShare) };
   const provinceMaterial = withMoney.material.provinceMaterial.some((row) => row.provinceId === input.provinceId)
     ? withMoney.material.provinceMaterial.map((row) => (row.provinceId === input.provinceId ? damaged : row))
     : [...withMoney.material.provinceMaterial, damaged];
 
+  // And the market it belonged to: a share of its stock plundered, and some of the people put to the sword or sold, sold.
+  const sacked: WorldState = { ...withMoney, material: { ...withMoney.material, capturableValues, provinceMaterial } };
   return {
-    world: { ...withMoney, material: { ...withMoney.material, capturableValues, provinceMaterial } },
+    world: sackTheMarket(sacked, input.provinceId, material.population - damaged.population, Math.min(1, sackShare), input.takerPolityId),
     taken,
     intoAccountId: destination,
   };
@@ -249,7 +268,7 @@ export function takeTheChest(world: WorldState, input: ChestCaptureInput): Seizu
         destinationAccountId: destination,
         cause: input.cause,
         visibility: "public" as const,
-      }].slice(-512),
+      }],
     },
   };
   return { world: moved, taken, intoAccountId: destination };
