@@ -86,3 +86,30 @@ describe("keeping the answer and losing the bad line", () => {
     expect(answer).toEqual(before);
   });
 });
+
+describe("a delta dropped and the parts that named it", () => {
+  const answer = () => ({
+    intent: { parts: [
+      { said: "put the motion", acts: [0], factLocalIds: ["motion"] },
+      { said: "write to the king", acts: [1, 2], factLocalIds: ["letter", "shared"] },
+      { said: "and note it", acts: [], factLocalIds: ["shared"] },
+    ] },
+    deltas: [{ op: "bad" }, { op: "letter" }, { op: "pay" }],
+    facts: [{ localId: "motion" }, { localId: "letter" }, { localId: "shared" }],
+  });
+
+  it("renumbers the acts a part still has, and takes the facts only a bereft part cited", () => {
+    const rescued = salvageAgainst(answer(), [{ path: ["deltas", 0, "reason"], message: "Invalid input: expected string" }])!;
+    const value = rescued.value as ReturnType<typeof answer>;
+    expect(value.deltas).toHaveLength(2);
+    expect(value.intent.parts.map((part) => part.acts)).toEqual([[], [0, 1], []]);
+    expect(value.facts.map((fact) => fact.localId)).toEqual(["letter", "shared"]);
+  });
+
+  it("keeps the facts of a part that held its acts for later", () => {
+    const held = answer();
+    (held.intent.parts[0] as { deferredActs?: unknown[] }).deferredActs = [{ op: "later" }];
+    const value = salvageAgainst(held, [{ path: ["deltas", 0, "reason"], message: "Invalid input" }])!.value as ReturnType<typeof answer>;
+    expect(value.facts.map((fact) => fact.localId)).toContain("motion");
+  });
+});

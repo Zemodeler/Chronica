@@ -158,5 +158,40 @@ export function salvageAgainst(value: unknown, complaints: readonly SchemaCompla
     }
   }
 
+  const lostDeltas = drops.get("deltas");
+  if (lostDeltas !== undefined && lostDeltas.path.length === 1) followTheActsDropped(copy, lostDeltas.indices);
+
   return { value: copy, dropped };
+}
+
+/**
+ * A part names its acts by their place in `deltas`. With a delta dropped the
+ * places move, and a part whose every act went must not leave its facts behind:
+ * "Hanno put a motion to the Council" stood in the record with the motion
+ * dropped as unreadable. The part keeps the acts it still has, renumbered; the
+ * facts only a bereft part cited go with it.
+ */
+function followTheActsDropped(root: unknown, gone: ReadonlySet<number>): void {
+  if (typeof root !== "object" || root === null) return;
+  const answer = root as { intent?: { parts?: unknown }; facts?: unknown };
+  const parts = answer.intent?.parts;
+  if (!Array.isArray(parts)) return;
+  const bereft: string[] = [];
+  const kept: string[] = [];
+  for (const part of parts) {
+    if (typeof part !== "object" || part === null) continue;
+    const mine = part as { acts?: unknown; factLocalIds?: unknown; deferredActs?: unknown };
+    const ids = Array.isArray(mine.factLocalIds) ? mine.factLocalIds.filter((id): id is string => typeof id === "string") : [];
+    if (!Array.isArray(mine.acts) || mine.acts.length === 0) { kept.push(...ids); continue; }
+    const acts = mine.acts.filter((act): act is number => typeof act === "number");
+    const left = acts.filter((act) => !gone.has(act)).map((act) => act - [...gone].filter((index) => index < act).length);
+    mine.acts = left;
+    const heldOn = Array.isArray(mine.deferredActs) && mine.deferredActs.length > 0;
+    (left.length === 0 && !heldOn ? bereft : kept).push(...ids);
+  }
+  if (bereft.length === 0 || !Array.isArray(answer.facts)) return;
+  const stay = new Set(kept);
+  const go = new Set(bereft.filter((id) => !stay.has(id)));
+  if (go.size === 0) return;
+  answer.facts = answer.facts.filter((fact) => typeof fact !== "object" || fact === null || !go.has(String((fact as { localId?: unknown }).localId)));
 }

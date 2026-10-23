@@ -3340,6 +3340,12 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       if (/^(once|after)\b/i.test(part.said) && dependencies.length === 0) dependencies.push(...own.flatMap((act) => act.goals ?? []).filter((goal): goal is Extract<OrderGoal, { kind: "force_at" }> => goal.kind === "force_at" && goalMet(world, goal) === "not_yet").slice(0, 1));
       const futureName = part.whenForceExists ?? (/when.*punitive.*(raised|ready)/i.test(part.said) ? "punitive" : null);
       if (futureName !== null && actorPolityId !== null) dependencies.push({ kind: "force_named", name: futureName, polityId: actorPolityId });
+      // A part held until another is done cannot wait for what that part was
+      // refused: the siege after a refused declaration sat "waiting" ninety
+      // days. It is told, the day of the order, that it was not done and why.
+      const refusedEarlier = (part.afterParts ?? []).filter((at) => at !== index)
+        .find((at) => { const theirs = own.filter((act) => act.part === at); return theirs.length > 0 && theirs.every((act) => !act.carried && act.refusal !== null); });
+      if (refusedEarlier !== undefined) dependencies.length = 0;
       if (dependencies.length > 0) {
         const deferred = part.deferredActs ?? [];
         if (deferred.length > 0) stages.push(...deferred.map((delta) => hold(delta, dependencies.slice(0, 4))));
@@ -3350,7 +3356,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       // letters went although one of them could not. What could not is said
       // beside it, never as its answer (E4).
       const carried = mine.filter((act) => act.carried);
-      const refusal = stages.length > 0 || carried.length > 0 ? null : refused[0]?.refusal?.slice(0, 600) ?? null;
+      const refusal = stages.length > 0 || carried.length > 0 ? null
+        : refusedEarlier !== undefined ? `It could not go ahead: "${parts[refusedEarlier]!.said}" was refused.`.slice(0, 600) : refused[0]?.refusal?.slice(0, 600) ?? null;
       // Acts of another kind than the words ask for are said beside the part, never refused (1.1).
       const substituted = verifyPart({ said: part.said, ops: [...mine.flatMap((act) => act.delta === undefined ? [] : [act.delta.op]), ...(part.deferredActs ?? []).map((delta) => delta.op)], handedOn: handedOn.length > 0 });
       const firstAct = mine.find((act) => act.delta !== undefined)?.delta;

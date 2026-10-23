@@ -107,8 +107,13 @@ export function readStandingOrders(
   // Waiting first; then the most recently dealt with. Ids carry no date, so
   // the creation order of the list stands in for it and newest are last.
   const rank: Record<StandingOrderStatus, number> = { waiting: 0, triggered: 1, completed: 2, cancelled: 3 };
+  // One order recorded twice (an order split in several calls, each keeping
+  // the held part) is one line, not two: the newest record stands.
+  const told = new Map<string, number>();
+  rows.forEach((row, index) => row.kind === "held" && told.set(`${row.kind}|${row.status}|${row.summary}`, index));
   const ordered = rows
     .map((row, index) => ({ row, index }))
+    .filter(({ row, index }) => row.kind !== "held" || told.get(`${row.kind}|${row.status}|${row.summary}`) === index)
     .sort((a, b) => rank[a.row.status] - rank[b.row.status] || b.index - a.index)
     .map(({ row }) => row)
     .slice(0, KEPT);
